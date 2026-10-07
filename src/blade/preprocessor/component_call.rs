@@ -100,7 +100,12 @@ impl ComponentTag {
             literals,
             arguments: Vec::new(),
         };
-        (String::new(), Some(call))
+        // The name still lowers to a column of its own: with none, the
+        // start of the tag would share its virtual column with the text
+        // after the name, and an edit planned before the tag (the import a
+        // template opening with one takes at its top) would map back into
+        // the middle of it.
+        (" ".to_string(), Some(call))
     }
 
     /// Whether the tag name is one Blade's compiler claims for itself

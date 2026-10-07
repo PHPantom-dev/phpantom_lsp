@@ -42,7 +42,7 @@ impl Backend {
         let symbol = self.lookup_symbol_at_position(uri, content, position)?;
         let offset = symbol.start;
 
-        let ctx = self.file_context(uri);
+        let ctx = self.file_context_at(uri, offset);
         let current_class = find_class_at_offset(&ctx.classes, offset);
         let class_loader = self.class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);

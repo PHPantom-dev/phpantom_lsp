@@ -5,8 +5,8 @@
 mod tests {
     use crate::common::{
         BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
-        complete_labels_at_opened_with_trigger, create_psr4_workspace, markup_hover_at,
-        open_document, workspace_path, workspace_uri,
+        complete_labels_at_opened_with_trigger, create_psr4_workspace, hover_text_at,
+        markup_hover_at, open_document, template_diagnostics, workspace_path, workspace_uri,
     };
     use tower_lsp::lsp_types::*;
 
@@ -145,6 +145,35 @@ mod tests {
         );
     }
 
+    /// The tag's name lowers to generated PHP of its own, and whatever the
+    /// tag emits next (a bound attribute's call or assignment) starts right
+    /// behind it, so hovering the name must not describe any of that.
+    #[tokio::test]
+    async fn hovering_a_tag_name_does_not_describe_the_php_generated_for_it() {
+        for template in [
+            // No index knows the tag, so its first bound attribute becomes a
+            // `blade_bound_attr_directive(` call.
+            "<x-panel :author=\"$author\" heading=\"Latest\">\n",
+            // A class-backed tag whose first bound attribute is an argument,
+            // bound to a variable of the preprocessor's own.
+            "<x-alert :type=\"$kind\">\n",
+            // A class-backed tag whose first attribute is plain.
+            "<x-alert type=\"danger\">\n",
+        ] {
+            let (backend, _dir, uri) = workspace(template);
+            open_document(&backend, &uri, "blade", template).await;
+
+            let name_len = template.find(' ').expect("the tag has attributes");
+            for column in 0..name_len {
+                let hover = hover_text_at(&backend, &uri, 0, column as u32).await;
+                assert_eq!(
+                    hover, None,
+                    "column {column} of {template:?} is the tag's name, which has nothing to hover"
+                );
+            }
+        }
+    }
+
     /// The deliverable: `$component->` after a component tag completes
     /// from the class the tag names.
     #[tokio::test]
@@ -275,20 +304,6 @@ mod tests {
         );
     }
 
-    /// Every diagnostic the whole pipeline reports on a template, so a
-    /// component tag can be held to the same standard as the rest of the
-    /// file: nothing extra, and nothing missing.
-    fn diagnostics(backend: &phpantom_lsp::Backend, uri: &Url) -> Vec<String> {
-        let virtual_php = backend
-            .blade_virtual_php(uri.as_str())
-            .expect("blade virtual content");
-        let mut diags = Vec::new();
-        backend.collect_syntax_error_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-        backend.collect_argument_count_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-        backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-        diags.into_iter().map(|d| d.message).collect()
-    }
-
     /// Laravel partitions a tag's attributes by the constructor it is
     /// about to call: the ones naming a parameter are its arguments and
     /// the rest go to the component's attribute bag. An attribute meant
@@ -302,9 +317,9 @@ mod tests {
         open_document(&backend, &uri, "blade", template).await;
 
         assert!(
-            diagnostics(&backend, &uri).is_empty(),
+            template_diagnostics(&backend, &uri).is_empty(),
             "only `type` is an argument: {:?}",
-            diagnostics(&backend, &uri)
+            template_diagnostics(&backend, &uri)
         );
     }
 
@@ -317,7 +332,7 @@ mod tests {
         let (backend, _dir, uri) = workspace(template);
         open_document(&backend, &uri, "blade", template).await;
 
-        let diags = diagnostics(&backend, &uri);
+        let diags = template_diagnostics(&backend, &uri);
         assert!(
             diags
                 .iter()
@@ -334,7 +349,7 @@ mod tests {
         let (backend, _dir, uri) = workspace(template);
         open_document(&backend, &uri, "blade", template).await;
 
-        let diags = diagnostics(&backend, &uri);
+        let diags = template_diagnostics(&backend, &uri);
         assert!(
             diags.iter().any(|d| d.contains("argument")),
             "a component missing its required attribute: {diags:?}"
@@ -349,7 +364,7 @@ mod tests {
         let (backend, _dir, uri) = workspace(template);
         open_document(&backend, &uri, "blade", template).await;
 
-        let diags = diagnostics(&backend, &uri);
+        let diags = template_diagnostics(&backend, &uri);
         assert!(
             diags
                 .iter()
@@ -397,9 +412,9 @@ mod tests {
         open_document(&backend, &uri, "blade", template).await;
 
         assert!(
-            diagnostics(&backend, &uri).is_empty(),
+            template_diagnostics(&backend, &uri).is_empty(),
             "the container fills these: {:?}",
-            diagnostics(&backend, &uri)
+            template_diagnostics(&backend, &uri)
         );
     }
 }

@@ -18,7 +18,7 @@ use crate::util::build_fqn;
 
 use super::RenameOutcome;
 use super::namespace::find_namespace_segment_at_offset;
-use super::validate::span_spells_its_name;
+use super::validate::{is_valid_new_name, range_text, span_spells_its_name};
 
 /// The text a single function or constant reference should be replaced
 /// with, or `None` when it must be left exactly as it is.
@@ -134,12 +134,39 @@ impl Backend {
         // user can change the namespace to move the class.
         let placeholder = if let SymbolKind::ClassDeclaration { ref name } = span.kind {
             let ctx = self.file_context(uri);
-            build_fqn(name, ctx.namespace.as_deref())
+            build_fqn(name, ctx.namespace_at(span.start).as_deref())
         } else {
             name
         };
 
         Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder })
+    }
+
+    /// Whether this rename can reach a file that is not open.
+    ///
+    /// A variable and `$this` are scoped to the current file, so the
+    /// refresh that discovers a file created without a watcher event has
+    /// nothing to find for them. A property declaration is stored as a
+    /// variable span, and that one does cross files.
+    pub(crate) fn rename_needs_workspace_refresh(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> bool {
+        let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
+            return false;
+        };
+        match &span.kind {
+            SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
+                matches!(
+                    self.lookup_var_def_kind_at(uri, name, span.start),
+                    Some(crate::symbol_map::VarDefKind::Property)
+                ) || self.is_promoted_property_param(uri, span.start)
+            }
+            SymbolKind::SelfStaticParent(crate::symbol_map::SelfStaticParentKind::This) => false,
+            _ => true,
+        }
     }
 
     /// Handle `textDocument/rename`.
@@ -190,6 +217,10 @@ impl Backend {
             return Ok(None);
         }
 
+        if !is_valid_new_name(&span.kind, new_name) {
+            return Err(format!("`{new_name}` is not a valid PHP name"));
+        }
+
         if let SymbolKind::NamespaceDeclaration { ref name } = span.kind {
             if new_name.contains('\\') {
                 return self.build_namespace_prefix_rename_edit(name, new_name);
@@ -208,6 +239,14 @@ impl Backend {
 
         let class_rename_fqn = self.resolve_class_rename_fqn(&span.kind, uri, span.start);
 
+        // Direct resource APIs spell only the child name while generic config
+        // calls spell its full dotted key. Until Laravel string-key rename is
+        // implemented, applying one replacement to their shared reference set
+        // would corrupt one representation.
+        if is_config_resource_identity(&span.kind) {
+            return Ok(None);
+        }
+
         // Find all references (including the declaration).
         let Some(locations) = self.find_references_for_rename(uri, content, position, true) else {
             return Ok(None);
@@ -217,10 +256,29 @@ impl Backend {
             return Ok(None);
         }
 
+        // A scope or an accessor is also used under a name the model derives
+        // from the method's (`active` for `scopeActive`), and those uses
+        // have to follow the rename.
+        let magic_rename = match &span.kind {
+            SymbolKind::MemberDeclaration { name, .. } => self
+                .eloquent_magic_member_at(uri, span.start, name)
+                .map(|magic| match magic.kind.use_name(new_name) {
+                    Some(new_use) => Ok((magic.use_name, new_use)),
+                    None => Err(format!(
+                        "`{new_name}` does not follow the naming convention that makes \
+                         `{name}` usable as `{}`, so its uses could not be renamed",
+                        magic.use_name
+                    )),
+                })
+                .transpose()?,
+            _ => None,
+        };
+
         // The reference finders read one symbol map per file, so each
         // location has to be checked against *that* file's text, not the
         // buffer this request arrived on.
-        if !self.rename_locations_verified(&span.kind, &locations) {
+        let magic_use = magic_rename.as_ref().map(|(old_use, _)| old_use.as_str());
+        if !self.rename_locations_verified(&span.kind, magic_use, &locations) {
             return Ok(None);
         }
 
@@ -334,6 +392,13 @@ impl Backend {
                 } else {
                     bare_name.to_string()
                 }
+            } else if let Some((old_use, new_use)) = &magic_rename
+                && loc_content
+                    .as_deref()
+                    .and_then(|c| range_text(c, location.range))
+                    .is_some_and(|text| text == old_use.as_str())
+            {
+                new_use.clone()
             } else {
                 new_name.to_string()
             };
@@ -465,5 +530,54 @@ impl Backend {
             SymbolKind::CompactVariable { .. } => false,
             _ => false,
         }
+    }
+}
+
+fn is_config_resource_identity(kind: &SymbolKind) -> bool {
+    let SymbolKind::LaravelStringKey { kind, key, .. } = kind else {
+        return false;
+    };
+    match kind {
+        crate::symbol_map::LaravelStringKind::ConfigResource(_) => true,
+        crate::symbol_map::LaravelStringKind::Config => {
+            crate::symbol_map::laravel_resources::resource_from_config_key(key).is_some()
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod config_resource_identity_tests {
+    use super::*;
+    use crate::symbol_map::{LaravelConfigResource, LaravelStringKind};
+
+    fn string_kind(kind: LaravelStringKind, key: &str) -> SymbolKind {
+        SymbolKind::LaravelStringKey {
+            kind,
+            key: key.to_string(),
+            is_write: false,
+            is_optional: false,
+        }
+    }
+
+    #[test]
+    fn only_config_resource_identities_are_held_for_laravel_string_rename() {
+        assert!(is_config_resource_identity(&string_kind(
+            LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+            "redis",
+        )));
+        assert!(is_config_resource_identity(&string_kind(
+            LaravelStringKind::Config,
+            "cache.stores.redis",
+        )));
+        assert!(!is_config_resource_identity(&string_kind(
+            LaravelStringKind::Config,
+            "app.name",
+        )));
+        assert!(!is_config_resource_identity(&string_kind(
+            LaravelStringKind::View,
+            "dashboard",
+        )));
+        assert!(!is_config_resource_identity(&SymbolKind::Keyword));
     }
 }

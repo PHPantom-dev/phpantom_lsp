@@ -84,25 +84,13 @@ impl Backend {
 
         let symbol_map = &ctx.symbol_map;
         let file_resolved_names = &ctx.file.resolved_names;
-        let file_use_map = &ctx.file.use_map;
-        let file_namespace = &ctx.file.namespace;
         let local_classes = &ctx.file.classes;
 
-        let class_loader = self.class_loader_with(local_classes, file_use_map, file_namespace);
-        let function_loader =
-            self.function_loader_with(file_resolved_names.as_deref(), file_use_map, file_namespace);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let class_loaders = self.class_loaders(&ctx.file);
+        let function_loaders = self.function_loaders(&ctx.file);
+        let laravel_macro_this_resolvers =
+            class_loaders.map(|class_loader| self.laravel_macro_this_resolver(class_loader));
         let cache = &self.resolved_class_cache;
-
-        let subject_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
-            local_classes,
-            use_map: file_use_map,
-            namespace: file_namespace,
-            content,
-            class_loader: &class_loader,
-            backend: Some(self),
-            function_loader: &function_loader,
-        };
 
         // A map extracted from different text than `content` describes a
         // file this pass cannot report on: every offset it holds would
@@ -113,6 +101,9 @@ impl Backend {
 
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
+            let file_use_map = ctx.file.use_map_at(span.start);
+            let file_namespace = ctx.file.namespace_at(span.start);
+            let class_loader = class_loaders.at(span.start);
             match &span.kind {
                 // ── Class references (type hints, new Foo, extends, etc.) ─
                 SymbolKind::ClassReference {
@@ -147,7 +138,7 @@ impl Backend {
                         && !is_within_deprecated_scope(
                             self,
                             local_classes,
-                            &class_loader,
+                            class_loader,
                             cache,
                             content,
                             span.start,
@@ -178,6 +169,18 @@ impl Backend {
                     is_method_call,
                     ..
                 } => {
+                    let function_loader = function_loaders.at(span.start);
+                    let subject_ctx =
+                        crate::type_engine::subject_resolution::SubjectResolutionCtx {
+                            local_classes,
+                            use_map: file_use_map,
+                            namespace: file_namespace,
+                            content,
+                            class_loader,
+                            backend: Some(self),
+                            function_loader,
+                        };
+
                     // Resolve the subject type to a class.
                     let subject_str = subject_text.as_str(source);
                     let base_class = resolve_subject_to_class_name(
@@ -221,9 +224,9 @@ impl Backend {
                                         content,
                                         span.start,
                                         CtxLoaders::new(
-                                            &class_loader,
-                                            &function_loader,
-                                            &laravel_macro_this_resolver,
+                                            class_loader,
+                                            function_loader,
+                                            laravel_macro_this_resolvers.at(span.start),
                                         ),
                                     )
                                 };
@@ -249,7 +252,7 @@ impl Backend {
                     // Builder<Model>).  The FQN-keyed cache cannot
                     // distinguish between generic instantiations, so a
                     // cached entry may lack these members.
-                    let resolved = resolve_class_fully_cached(&base_class, &class_loader, cache);
+                    let resolved = resolve_class_fully_cached(&base_class, class_loader, cache);
 
                     if *is_method_call {
                         // Check method deprecation — try base_class first
@@ -261,7 +264,7 @@ impl Backend {
                             && !is_within_deprecated_scope(
                                 self,
                                 local_classes,
-                                &class_loader,
+                                class_loader,
                                 cache,
                                 content,
                                 span.start,
@@ -295,7 +298,7 @@ impl Backend {
                             && !is_within_deprecated_scope(
                                 self,
                                 local_classes,
-                                &class_loader,
+                                class_loader,
                                 cache,
                                 content,
                                 span.start,
@@ -326,7 +329,7 @@ impl Backend {
                             && !is_within_deprecated_scope(
                                 self,
                                 local_classes,
-                                &class_loader,
+                                class_loader,
                                 cache,
                                 content,
                                 span.start,
@@ -365,12 +368,12 @@ impl Backend {
                         file_resolved_names.as_deref(),
                         span.start,
                         file_use_map,
-                        ctx.file.namespace_at(span.start),
+                        file_namespace,
                     ) && let Some(msg) = &func_info.deprecation_message
                         && !is_within_deprecated_scope(
                             self,
                             local_classes,
-                            &class_loader,
+                            class_loader,
                             cache,
                             content,
                             span.start,

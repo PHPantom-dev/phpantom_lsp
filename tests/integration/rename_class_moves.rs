@@ -3,10 +3,9 @@
 
 use crate::common::{
     apply_edits, create_test_backend, doc_change_edits_for_uri, edits_for_uri, extract_rename_file,
-    initialize_with_resource_operations, open_php, rename, rename_result,
+    initialize_with_resource_operations, open_document, open_php, rename, rename_result,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── File Rename on Class Rename ────────────────────────────────────────────
@@ -689,16 +688,7 @@ async fn blade_move_workspace(files: &[(&str, &str)]) -> (Backend, tempfile::Tem
         } else {
             "php"
         };
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: language_id.to_string(),
-                    version: 1,
-                    text: content.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &uri, language_id, content).await;
     }
 
     (backend, dir)

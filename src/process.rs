@@ -57,17 +57,17 @@ pub fn run_command_with_timeout(
     // Drain stdout/stderr concurrently so the child can never block
     // writing to a full pipe while we wait for it to exit.
     let stdout_reader = child.stdout.take().map(|mut s| {
-        std::thread::spawn(move || {
+        std::thread::spawn(move || -> std::io::Result<String> {
             let mut buf = String::new();
-            let _ = s.read_to_string(&mut buf);
-            buf
+            s.read_to_string(&mut buf)?;
+            Ok(buf)
         })
     });
     let stderr_reader = child.stderr.take().map(|mut s| {
-        std::thread::spawn(move || {
+        std::thread::spawn(move || -> std::io::Result<String> {
             let mut buf = String::new();
-            let _ = s.read_to_string(&mut buf);
-            buf
+            s.read_to_string(&mut buf)?;
+            Ok(buf)
         })
     });
 
@@ -107,13 +107,23 @@ pub fn run_command_with_timeout(
     };
 
     // The child has exited, so its pipe write ends are closed and the
-    // reader threads will reach EOF; join them to collect the output.
-    let stdout = stdout_reader
-        .and_then(|h| h.join().ok())
-        .unwrap_or_default();
-    let stderr = stderr_reader
-        .and_then(|h| h.join().ok())
-        .unwrap_or_default();
+    // reader threads will reach EOF; join them to collect the output. A
+    // read failure (e.g. non-UTF-8 output) or a panicking reader thread
+    // must surface as an error rather than silently becoming an empty
+    // string, since callers (formatters in particular) can mistake empty
+    // output for "the tool ran and produced nothing".
+    let stdout = match stdout_reader.map(|h| h.join()) {
+        Some(Ok(Ok(buf))) => buf,
+        Some(Ok(Err(e))) => return Err(format!("Failed to read {} stdout: {}", tool_name, e)),
+        Some(Err(_)) => return Err(format!("{} stdout reader thread panicked", tool_name)),
+        None => String::new(),
+    };
+    let stderr = match stderr_reader.map(|h| h.join()) {
+        Some(Ok(Ok(buf))) => buf,
+        Some(Ok(Err(e))) => return Err(format!("Failed to read {} stderr: {}", tool_name, e)),
+        Some(Err(_)) => return Err(format!("{} stderr reader thread panicked", tool_name)),
+        None => String::new(),
+    };
 
     Ok(CommandOutput {
         code: status.code().unwrap_or(-1),

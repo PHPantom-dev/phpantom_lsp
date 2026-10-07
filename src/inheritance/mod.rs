@@ -18,8 +18,9 @@
 //! concrete types.
 
 mod ancestor;
-pub(crate) use ancestor::extract_generic_arg_from_ancestor;
+pub(crate) use ancestor::{extract_generic_arg_from_ancestor, extract_generic_args_from_ancestor};
 
+pub mod ancestry;
 pub mod enrichment;
 pub mod generics;
 pub mod traits;
@@ -35,6 +36,7 @@ use crate::virtual_members::{
 };
 
 // Re-export functions that are used internally
+pub(crate) use ancestry::{ancestors, find_declaring_ancestor, find_declaring_trait};
 pub(crate) use enrichment::enrich_method_arc_from_ancestor;
 pub(crate) use enrichment::enrich_property_arc_from_ancestor;
 
@@ -42,9 +44,11 @@ pub(crate) use enrichment::enrich_property_arc_from_ancestor;
 pub(crate) use generics::apply_substitution;
 pub(crate) use generics::{
     apply_generic_args, apply_substitution_to_conditional, apply_substitution_to_method,
-    apply_substitution_to_property, bind_inherited_class_keywords, build_generic_subs,
-    build_substitution_map, class_scoped_template_values, default_type_args, fill_template_bounds,
-    method_has_inherited_class_keyword, method_references_params, property_references_params,
+    apply_substitution_to_property, bind_inherited_class_keywords,
+    bind_inherited_class_keywords_in_property, build_generic_subs, build_substitution_map,
+    class_scoped_template_values, default_type_args, extends_type_args, fill_template_bounds,
+    generic_arg_offset, method_has_inherited_class_keyword, method_references_params,
+    property_has_inherited_class_keyword, property_references_params,
     template_values_with_defaults,
 };
 
@@ -144,7 +148,10 @@ impl MergeDedup {
     }
 }
 
-use crate::virtual_members::laravel::{factory_model_type, is_factory_class};
+use crate::virtual_members::laravel::{
+    ELOQUENT_MODEL_FQN, factory_model_type, has_inheritable_model_metadata, inherit_model_metadata,
+    is_factory_class,
+};
 
 /// Resolve a class together with all inherited members from its parent
 /// chain.
@@ -241,6 +248,18 @@ pub(crate) fn resolve_class_with_inheritance(
         // readonly whether or not it repeats the keyword, and the
         // properties it inherits are readonly as well.
         merged.is_readonly |= parent.is_readonly;
+
+        // Eloquent model configuration (`$fillable`, `$casts`,
+        // `$primaryKey`, …) comes from the nearest class that declares it.
+        // The framework's own `Model` is skipped: its declarations are the
+        // defaults (`$guarded = ['*']`, `$primaryKey = 'id'`, …) that an
+        // undeclared setting already stands for.
+        if let Some(parent_meta) = parent.laravel()
+            && has_inheritable_model_metadata(parent_meta)
+            && !parent.fqn().eq_ignore_ascii_case(ELOQUENT_MODEL_FQN)
+        {
+            inherit_model_metadata(merged.laravel_mut(), parent_meta);
+        }
 
         // Build the substitution map for this parent level.
         //
@@ -368,9 +387,9 @@ pub(crate) fn resolve_class_with_inheritance(
                             apply_substitution_to_method(&mut m, &level_subs);
                             m
                         });
-                        enrich_method_arc_from_ancestor(existing, &ancestor_method);
+                        enrich_method_arc_from_ancestor(existing, &ancestor_method, class_loader);
                     } else {
-                        enrich_method_arc_from_ancestor(existing, method);
+                        enrich_method_arc_from_ancestor(existing, method, class_loader);
                     }
                 }
                 continue;
@@ -419,6 +438,35 @@ pub(crate) fn resolve_class_with_inheritance(
                 continue;
             }
             let needs_sub = property_references_params(property, &sub_keys);
+            // A bare `self` / `parent` in the type names the declaring
+            // class and its parent, not the class the property is read
+            // through, exactly as for an inherited method.
+            let needs_keywords =
+                property_has_inherited_class_keyword(property, declaring_parent.as_deref());
+            let transformed = if !needs_sub && !needs_keywords {
+                // Neither transform applies: keep the shared `Arc`.
+                Arc::clone(property)
+            } else {
+                let fp = match (needs_sub, needs_keywords) {
+                    (true, false) => fp_sub,
+                    (false, true) => fp_self,
+                    _ => fp_both,
+                };
+                intern_transformed_property(property, fp, || {
+                    let mut p = (**property).clone();
+                    if needs_sub {
+                        apply_substitution_to_property(&mut p, &level_subs);
+                    }
+                    if needs_keywords {
+                        bind_inherited_class_keywords_in_property(
+                            &mut p,
+                            &parent_fqn,
+                            declaring_parent.as_deref(),
+                        );
+                    }
+                    p
+                })
+            };
             if !dedup.properties.insert(property.name) {
                 // Child already has this property — enrich it from parent.
                 if let Some(existing) = merged
@@ -427,30 +475,10 @@ pub(crate) fn resolve_class_with_inheritance(
                     .iter_mut()
                     .find(|p| p.name == property.name)
                 {
-                    if needs_sub {
-                        let ancestor_property =
-                            intern_transformed_property(property, fp_sub, || {
-                                let mut p = (**property).clone();
-                                apply_substitution_to_property(&mut p, &level_subs);
-                                p
-                            });
-                        enrich_property_arc_from_ancestor(existing, &ancestor_property);
-                    } else {
-                        enrich_property_arc_from_ancestor(existing, property);
-                    }
+                    enrich_property_arc_from_ancestor(existing, &transformed);
                 }
                 continue;
             }
-            if !needs_sub {
-                // Substitution is a no-op: keep the shared `Arc`.
-                merged.properties.push(Arc::clone(property));
-                continue;
-            }
-            let transformed = intern_transformed_property(property, fp_sub, || {
-                let mut p = (**property).clone();
-                apply_substitution_to_property(&mut p, &level_subs);
-                p
-            });
             merged.properties.push(transformed);
         }
 
@@ -520,9 +548,9 @@ pub(crate) fn resolve_class_with_inheritance(
                         apply_substitution_to_method(&mut m, &iface_subs);
                         m
                     });
-                    enrich_method_arc_from_ancestor(existing, &ancestor_method);
+                    enrich_method_arc_from_ancestor(existing, &ancestor_method, class_loader);
                 } else {
-                    enrich_method_arc_from_ancestor(existing, method);
+                    enrich_method_arc_from_ancestor(existing, method, class_loader);
                 }
             }
         }

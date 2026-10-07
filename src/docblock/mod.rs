@@ -64,9 +64,12 @@ pub use tags::{
     find_enclosing_return_type, find_inline_var_docblock, find_iterable_raw_type_in_source,
     find_var_raw_type_in_source, get_docblock_info_for_node, get_docblock_text_for_node,
     has_deprecated_tag, has_deprecated_tag_from_info, resolve_effective_type_typed,
-    sanitise_and_parse_docblock_type, should_override_type_typed,
+    resolve_effective_type_with_template_bounds, sanitise_and_parse_docblock_type,
+    should_override_type_typed,
 };
-pub(crate) use tags::{is_compatible_refinement_typed, merge_param_docblock_into_parameters};
+pub(crate) use tags::{
+    find_var_tag, is_compatible_refinement_typed, merge_param_docblock_into_parameters,
+};
 
 // Template / generics / type alias tags
 pub use templates::{

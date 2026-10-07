@@ -1,10 +1,9 @@
-use crate::common::{create_test_backend, create_test_backend_with_full_stubs, open_php};
+use crate::common::{
+    create_test_backend, create_test_backend_with_full_stubs, find_references, open_php,
+};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::{
-    Location, PartialResultParams, Position, ReferenceContext, ReferenceParams,
-    TextDocumentIdentifier, TextDocumentPositionParams, Url, WorkDoneProgressParams,
-};
+use tower_lsp::lsp_types::{Location, Position, Url};
 
 use std::sync::Arc;
 
@@ -16,23 +15,13 @@ async fn references_at(
     character: u32,
     include_declaration: bool,
 ) -> Vec<Location> {
-    let params = ReferenceParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: ReferenceContext {
-            include_declaration,
-        },
-    };
-
-    backend
-        .references(params)
-        .await
-        .unwrap()
-        .unwrap_or_default()
+    find_references(
+        backend,
+        uri,
+        Position { line, character },
+        include_declaration,
+    )
+    .await
 }
 
 /// Verify that `format!("file://{}", path.display())` and
@@ -2019,8 +2008,8 @@ class Cart {
     assert_no_duplicates(&results, "one_file_method_refs");
 }
 
-#[test]
-fn workspace_index_refreshes_after_new_file_is_added() {
+#[tokio::test]
+async fn workspace_index_refreshes_after_new_file_is_added() {
     let (backend, dir) = crate::common::create_psr4_workspace(
         r#"{
             "autoload": {
@@ -2045,9 +2034,12 @@ class Item {}
 
     open_file(&backend, &item_uri, &item_content);
 
-    let initial_results = backend
-        .find_references(&item_uri, &item_content, Position::new(3, 6), true)
-        .expect("should find initial class references");
+    let item_url = Url::parse(&item_uri).unwrap();
+    let initial_results = references_at(&backend, &item_url, 3, 6, true).await;
+    assert!(
+        !initial_results.is_empty(),
+        "should find initial class references"
+    );
 
     assert_no_duplicates(&initial_results, "workspace_refresh_initial_refs");
 
@@ -2069,9 +2061,7 @@ class Service {
     .expect("failed to write newly added PHP file");
 
     let service_uri = format!("file://{}", service_path.display());
-    let refreshed_results = backend
-        .find_references(&item_uri, &item_content, Position::new(3, 6), true)
-        .expect("should find refreshed class references");
+    let refreshed_results = references_at(&backend, &item_url, 3, 6, true).await;
 
     assert_no_duplicates(&refreshed_results, "workspace_refresh_refs");
     assert!(
@@ -3171,6 +3161,39 @@ async fn test_namespaced_class_references() {
     );
 }
 
+#[tokio::test]
+async fn test_braced_namespace_resolves_receiver_against_its_own_block() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///multi_ns.php").unwrap();
+
+    let text = concat!(
+        "<?php\n",                                    // L0
+        "namespace Other {\n",                        // L1
+        "    class Author {}\n",                      // L2
+        "}\n",                                        // L3
+        "namespace App {\n",                          // L4
+        "    class Author {\n",                       // L5
+        "        public static function make() {}\n", // L6
+        "    }\n",                                    // L7
+        "    function show() {\n",                    // L8
+        "        Author::make();\n",                  // L9
+        "    }\n",                                    // L10
+        "}\n",                                        // L11
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    // `make` at L6 is declared on `App\Author`; the call at L9 sits in the
+    // same `App` block, so it must be found even though `Other\Author` is
+    // declared first in the file.
+    let locs = references_at(&backend, &uri, 6, 31, false).await;
+    assert!(
+        locs.iter().any(|l| l.range.start.line == 9),
+        "Expected a reference at L9 (Author::make() in the `App` namespace), got {:?}",
+        locs
+    );
+}
+
 // ─── Edge Cases ─────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -3186,24 +3209,8 @@ async fn test_no_references_on_whitespace() {
     open_php(&backend, &uri, text).await;
 
     // Click on empty line — should return None / empty.
-    let params = ReferenceParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 1,
-                character: 0,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: ReferenceContext {
-            include_declaration: true,
-        },
-    };
-
-    let result = backend.references(params).await.unwrap();
     assert!(
-        result.is_none() || result.as_ref().unwrap().is_empty(),
+        references_at(&backend, &uri, 1, 0, true).await.is_empty(),
         "Expected no references on whitespace"
     );
 }
@@ -3757,6 +3764,74 @@ async fn test_unrelated_class_same_method_excluded_cross_file() {
         !a_lines.contains(&5),
         "Should NOT include OtherClass::save() declaration on L5 of a.php; got: {:?}",
         a_lines
+    );
+}
+
+#[tokio::test]
+async fn method_references_type_receivers_without_walking_unrelated_bodies() {
+    // A candidate file holds the searched access in one body among
+    // several.  Only that body gets its variable scopes built, so the
+    // bodies around it must neither contribute their own `$item` to the
+    // answer nor be needed for it.
+    let backend = create_test_backend();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",                               // L0
+        "class Target {\n",                      // L1
+        "    public function save(): void {}\n", // L2
+        "}\n",                                   // L3
+        "class Decoy {\n",                       // L4
+        "    public function save(): void {}\n", // L5
+        "    public function run(): void {}\n",  // L6
+        "}\n",                                   // L7
+    );
+    let text_b = concat!(
+        "<?php\n",                          // L0
+        "class Holder {\n",                 // L1
+        "    public function before() {\n", // L2
+        "        $item = new Decoy();\n",   // L3
+        "        $item->run();\n",          // L4
+        "    }\n",                          // L5
+        "    public function middle() {\n", // L6
+        "        $item = new Target();\n",  // L7
+        "        $item->save();\n",         // L8
+        "        $item->save();\n",         // L9
+        "    }\n",                          // L10
+        "    public function after() {\n",  // L11
+        "        $item = new Decoy();\n",   // L12
+        "        $item->run();\n",          // L13
+        "    }\n",                          // L14
+        "}\n",                              // L15
+    );
+
+    open_php(&backend, &uri_a, text_a).await;
+    open_php(&backend, &uri_b, text_b).await;
+
+    // Find references to Target::save() from its declaration.
+    let locs = references_at(&backend, &uri_a, 2, 21, false).await;
+
+    let b_lines: Vec<u32> = locs
+        .iter()
+        .filter(|l| l.uri == uri_b)
+        .map(|l| l.range.start.line)
+        .collect();
+    assert_eq!(
+        b_lines,
+        vec![8, 9],
+        "Both `save()` calls in middle() should resolve to Target; got: {:?}",
+        b_lines
+    );
+
+    // The same search for Decoy::save() finds nothing in b.php: the
+    // `$item` the skipped bodies hold is a Decoy, but neither body
+    // calls `save()` on it.
+    let decoy_locs = references_at(&backend, &uri_a, 5, 21, false).await;
+    assert!(
+        !decoy_locs.iter().any(|l| l.uri == uri_b),
+        "Decoy::save() has no call sites; got: {:?}",
+        decoy_locs
     );
 }
 
@@ -4755,5 +4830,215 @@ async fn function_references_from_a_use_function_import_reach_its_call_sites() {
         locs.iter()
             .any(|l| l.uri == uri_b && l.range.start.line == 4),
         "expected the shout() call site, got {locs:?}"
+    );
+}
+
+/// A package class that implements the interface is absent from the reverse
+/// inheritance index until something parses its file, so a search scoped to
+/// that index alone drops every access on it.  The scope has to settle a
+/// receiver by walking up from the receiver's own class, so the search
+/// answers the same whether or not the session happened to load the package
+/// before it ran.
+#[tokio::test]
+async fn member_references_reach_an_implementor_nothing_has_parsed() {
+    let installed_json = r#"{"packages": [{
+        "name": "acme/services",
+        "version": "1.0.0",
+        "install-path": "../acme/services",
+        "autoload": {"psr-4": {"Acme\\": ""}}
+    }]}"#;
+
+    let (backend, dir) = crate::common::create_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[
+            ("vendor/composer/installed.json", installed_json),
+            (
+                "vendor/acme/services/ServiceInterface.php",
+                r#"<?php
+
+namespace Acme;
+
+interface ServiceInterface
+{
+    public function handle(): void;
+}
+"#,
+            ),
+            (
+                "vendor/acme/services/PackageService.php",
+                r#"<?php
+
+namespace Acme;
+
+class PackageService implements ServiceInterface
+{
+    public function handle(): void {}
+}
+"#,
+            ),
+            (
+                "src/AppService.php",
+                r#"<?php
+
+namespace App;
+
+use Acme\ServiceInterface;
+
+class AppService implements ServiceInterface
+{
+    public function handle(): void {}
+}
+"#,
+            ),
+            (
+                "src/Consumer.php",
+                r#"<?php
+
+namespace App;
+
+use Acme\PackageService;
+
+class Consumer
+{
+    public function run(PackageService $service): void
+    {
+        $service->handle();
+    }
+}
+"#,
+            ),
+        ],
+    );
+
+    // The vendor scan files the package's classes under their paths without
+    // parsing them, the way a dependency is known before anything needs it.
+    backend
+        .initialized(tower_lsp::lsp_types::InitializedParams {})
+        .await;
+
+    let declaration_path = dir.path().join("src/AppService.php");
+    let declaration_uri = Url::from_file_path(&declaration_path).unwrap().to_string();
+    let declaration_content = std::fs::read_to_string(&declaration_path).unwrap();
+    open_file(&backend, &declaration_uri, &declaration_content);
+
+    let consumer_uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+
+    // `handle` in `public function handle(): void {}`.
+    let results = backend
+        .find_references(
+            &declaration_uri,
+            &declaration_content,
+            Position::new(8, 20),
+            true,
+        )
+        .expect("should find method references");
+
+    assert!(
+        results
+            .iter()
+            .any(|loc| loc.uri == consumer_uri && loc.range.start.line == 10),
+        "expected the call on the package implementor, got {results:?}"
+    );
+}
+
+// ─── Find References from an enum case's own declaration ────────────────────
+
+#[test]
+fn enum_case_references_from_the_declaration() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_enum_case_decl.php";
+    let content = r#"<?php
+enum Suit {
+    case Hearts;
+    case Spades;
+}
+function f(Suit $s): int {
+    $a = Suit::Hearts;
+    return match ($s) {
+        Suit::Hearts => 1,
+        Suit::Spades => 2,
+    };
+}
+"#;
+    open_file(&backend, uri, content);
+
+    // Cursor on `Hearts` in `case Hearts;`.
+    let results = backend
+        .find_references(uri, content, Position::new(2, 10), false)
+        .expect("should find references");
+    let mut lines: Vec<u32> = results.iter().map(|l| l.range.start.line).collect();
+    lines.sort_unstable();
+    assert_eq!(
+        lines,
+        vec![6, 8],
+        "both uses of Suit::Hearts, got: {results:#?}"
+    );
+}
+
+// ─── `parent::CONST` resolves to the parent class ───────────────────────────
+
+/// `parent::LIMIT` is matched against the class `parent` resolves to, so it
+/// is found from `Base::LIMIT`, while an unrelated class's `LIMIT` is not.
+/// (A redeclaring child is part of the same member family, as an override
+/// is for a method, so its `self::LIMIT` is found too.)
+#[test]
+fn parent_constant_reference_resolves_to_the_parent_class() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_parent_const.php";
+    let content = r#"<?php
+class Base {
+    const LIMIT = 1;
+}
+class Other {
+    const LIMIT = 3;
+}
+class Child extends Base {
+    public function f(): int {
+        return parent::LIMIT + Other::LIMIT;
+    }
+}
+"#;
+    open_file(&backend, uri, content);
+
+    let base = backend
+        .find_references(uri, content, Position::new(2, 11), false)
+        .expect("should find references");
+    assert_eq!(
+        base.iter()
+            .map(|l| (l.range.start.line, l.range.start.character))
+            .collect::<Vec<_>>(),
+        vec![(9, 23)],
+        "Base::LIMIT is used via parent:: and not via Other::, got: {base:#?}"
+    );
+}
+
+// ─── CRLF line endings and multi-byte characters keep UTF-16 columns ────────
+
+#[test]
+fn references_on_crlf_file_with_multibyte_prefix_use_utf16_columns() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_crlf_utf16.php";
+    let usage_prefix = "$s = '😀é'; $f->";
+    let content = format!(
+        "<?php\r\nclass Foo {{\r\n    public function bar(): void {{}}\r\n}}\r\n$f = new Foo();\r\n{usage_prefix}bar();\r\n"
+    );
+    open_file(&backend, uri, &content);
+
+    let expected_column = usage_prefix.encode_utf16().count() as u32;
+    // Cursor on `bar` in the declaration.
+    let results = backend
+        .find_references(uri, &content, Position::new(2, 21), false)
+        .expect("should find references");
+    assert_eq!(
+        results
+            .iter()
+            .map(|l| (
+                l.range.start.line,
+                l.range.start.character,
+                l.range.end.character
+            ))
+            .collect::<Vec<_>>(),
+        vec![(5, expected_column, expected_column + 3)],
+        "the usage range must be in UTF-16 units on its own line, got: {results:#?}"
     );
 }

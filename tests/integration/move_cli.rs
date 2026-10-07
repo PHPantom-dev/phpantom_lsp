@@ -282,9 +282,11 @@ async fn imports_the_sibling_functions_and_constants_too() {
 
 #[tokio::test]
 async fn a_name_the_moved_file_declares_itself_is_not_imported() {
+    // The class names itself, and the move takes that name along, so it is
+    // not imported from the namespace it left.
     let dir = project(&[(
         "src/Old/Widget.php",
-        "<?php\nnamespace App\\Old;\n\nclass Widget\n{\n    public function make(): Helper\n    {\n        return new Helper();\n    }\n}\n\nclass Helper {}\n",
+        "<?php\nnamespace App\\Old;\n\nclass Widget\n{\n    public function make(): Widget\n    {\n        return new Widget();\n    }\n}\n",
     )]);
     let options = MoveOptions {
         from: "App\\Old\\Widget".into(),
@@ -298,8 +300,32 @@ async fn a_name_the_moved_file_declares_itself_is_not_imported() {
 
     execute(&options).await.expect("move");
     let moved = std::fs::read_to_string(dir.path().join("src/Domain/Widget.php")).expect("moved");
-    assert!(!moved.contains("use App\\Old\\Helper;"), "{moved}");
     assert!(!moved.contains("use App\\Old\\Widget;"), "{moved}");
+}
+
+#[tokio::test]
+async fn refuses_a_class_that_shares_its_namespace_with_another_declaration() {
+    // `Helper` would end up in `App\Domain` with `Widget`, while everything
+    // that names `App\Old\Helper` stayed as it was.
+    let old = "<?php\nnamespace App\\Old;\n\nclass Widget {}\n\nclass Helper {}\n";
+    let dir = project(&[("src/Old/Widget.php", old)]);
+    let options = MoveOptions {
+        from: "App\\Old\\Widget".into(),
+        to: "App\\Domain\\Widget".into(),
+        workspace_root: dir.path().to_path_buf(),
+        dry_run: false,
+        use_colour: false,
+        output_format: OutputFormat::Table,
+        global_config: None,
+    };
+
+    let error = execute(&options).await.expect_err("shared section");
+    assert!(error.contains("`Helper`"), "{error}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("src/Old/Widget.php")).expect("old"),
+        old
+    );
+    assert!(!dir.path().join("src/Domain/Widget.php").exists());
 }
 
 #[tokio::test]

@@ -171,7 +171,7 @@ class Tag {}
     assert_marked_types(
         content,
         &[
-            ("SHAPE", "list<string>"),
+            ("SHAPE", "array{'alpha', 'beta'}"),
             ("DIM", "list<string>"),
             ("FILLED", "list<string>"),
             // `array<T>` says nothing about its keys, so the only honest
@@ -226,7 +226,7 @@ function probe(): void
     }
 }
 "#;
-    assert_marked_types(content, &[("KEY", "string"), ("DECODED", "int")]);
+    assert_marked_types(content, &[("KEY", r"'~\\n~'|'~\\r~'"), ("DECODED", "8")]);
 }
 
 /// A key type nobody wrote down is benevolent: `int|string` here is PHP's
@@ -324,7 +324,7 @@ function probe(
             ("SHORTHAND", "int|string"),
             ("OPEN", "int|string"),
             ("FILLED", "int|string"),
-            ("LIST", "int"),
+            ("LIST", "int<0, max>"),
             ("NAMED", "string"),
         ],
     );
@@ -665,5 +665,130 @@ class Helper {
     assert!(
         unresolved.is_empty(),
         "the guarded offset resolves to Ty: {unresolved:?}"
+    );
+}
+
+/// A loop over an array's own keys that writes the element at each key
+/// rewrites every element, whether the loop ran or not: an empty array
+/// has no elements left behind to contradict the claim. The walker used
+/// to join the post-loop element type with the pre-loop one instead, as
+/// it would for a loop that might skip some keys. Writing entries the
+/// array already has does not make it non-empty, since the loop may not
+/// have run at all.
+#[test]
+fn foreach_over_array_keys_rewrites_every_element() {
+    let content = r#"<?php
+/**
+ * @param array<string, array{string, bool, string}> $pairs
+ */
+function add_flag(array $pairs): void {
+    foreach (array_keys($pairs) as $cn) {
+        $pairs[$cn][3] = ['I'];
+    }
+    echo /*PAIRS*/$pairs;
+}
+"#;
+    assert_marked_types(
+        content,
+        &[(
+            "PAIRS",
+            "array<string, array{string, bool, string, array{'I'}}>",
+        )],
+    );
+}
+
+/// Same as above, iterating the array's keys via `$key => $_` instead of
+/// `array_keys()`.
+#[test]
+fn foreach_key_value_rewrites_every_element() {
+    let content = r#"<?php
+/**
+ * @param array<string, array{string, bool, string}> $pairs
+ */
+function add_flag(array $pairs): void {
+    foreach ($pairs as $cn => $_) {
+        $pairs[$cn][3] = ['I'];
+    }
+    echo /*PAIRS*/$pairs;
+}
+"#;
+    assert_marked_types(
+        content,
+        &[(
+            "PAIRS",
+            "array<string, array{string, bool, string, array{'I'}}>",
+        )],
+    );
+}
+
+/// A write through the key a `foreach` bound lands on an entry the array
+/// already has, so a list stays a list. Reassigning the key, or letting the
+/// value variable the nested loop walks gain a key of its own, ends that
+/// promise, and the write goes back to possibly adding an entry.
+#[test]
+fn writes_through_a_foreach_key_keep_a_list() {
+    let content = r#"<?php
+/**
+ * @param list<int> $list
+ * @param list<int> $moved
+ * @param array<string, list<int>> $grown
+ */
+function f(array $list, array $moved, array $grown): void {
+    foreach ($list as $k => $v) {
+        $list[$k] = $v + 1;
+    }
+    echo /*KEPT*/$list;
+
+    foreach ($moved as $k => $v) {
+        $k = $k + 10;
+        $moved[$k] = $v;
+    }
+    echo /*MOVED*/$moved;
+
+    foreach ($grown as $outer => $inner) {
+        $inner[] = 1;
+        foreach ($inner as $i => $_) {
+            $grown[$outer][$i] = 2;
+        }
+    }
+    echo /*GROWN*/$grown;
+}
+"#;
+    assert_marked_types(
+        content,
+        &[
+            ("KEPT", "list<int>"),
+            // The join of the loop not running with it having added a key.
+            ("MOVED", "list<int>|non-empty-array<int, int>"),
+            (
+                "GROWN",
+                "array<string, list<int>>|array<string, non-empty-array<int, int>>",
+            ),
+        ],
+    );
+}
+
+/// Removing an entry from a list leaves a gap in its keys, while removing
+/// something inside an entry leaves the list's own keys alone.
+#[test]
+fn unset_of_a_list_entry_drops_the_list_promise() {
+    let content = r#"<?php
+/**
+ * @param list<array<string, string>> $inside
+ * @param list<string> $entries
+ */
+function f(array $inside, array $entries, int $i): void {
+    unset($inside[$i]['abc']);
+    echo /*INSIDE*/$inside;
+    unset($entries[$i]);
+    echo /*ENTRIES*/$entries;
+}
+"#;
+    assert_marked_types(
+        content,
+        &[
+            ("INSIDE", "list<array<string, string>>"),
+            ("ENTRIES", "array<int, string>"),
+        ],
     );
 }

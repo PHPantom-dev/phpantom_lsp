@@ -35,7 +35,7 @@ impl Backend {
             .write()
             .set_schema_index(index.clone());
         *self.schema_index.write() = index;
-        self.resolved_class_cache.write().clear();
+        self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();
     }
 
@@ -67,7 +67,7 @@ impl Backend {
             self.resolved_class_cache
                 .write()
                 .set_schema_index(index.clone());
-            self.resolved_class_cache.write().clear();
+            self.clear_resolved_class_cache();
             self.member_completion_cache.lock().clear();
         }
     }

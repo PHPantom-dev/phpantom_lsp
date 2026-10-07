@@ -9903,3 +9903,41 @@ function demonstrate(ValueBox $box): void { BODY }
         }
     }
 }
+
+/// A template the constructor never names directly still binds through
+/// the bound of one it does: `TIterator of Iterator<TKey, TValue>` handed
+/// an `Iterator<int, Engine>` makes `TValue` `Engine`, for an object built
+/// inline in a chain as much as for one assigned first.
+#[tokio::test]
+async fn test_inline_new_binds_templates_through_another_templates_bound() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///bound_args_inline_new.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class Engine {\n",                                      // 1
+        "    public function start(): void {}\n",                // 2
+        "}\n",                                                   // 3
+        "/**\n",                                                 // 4
+        " * @template TKey\n",                                   // 5
+        " * @template TValue\n",                                 // 6
+        " * @template TIterator of Iterator<TKey, TValue>\n",    // 7
+        " */\n",                                                 // 8
+        "class Wrap {\n",                                        // 9
+        "    /** @param TIterator $it */\n",                     // 10
+        "    public function __construct(Iterator $it) {}\n",    // 11
+        "    /** @return TValue */\n",                           // 12
+        "    public function first(): mixed { return null; }\n", // 13
+        "}\n",                                                   // 14
+        "/** @param Iterator<int, Engine> $it */\n",             // 15
+        "function test(Iterator $it): void {\n",                 // 16
+        "    (new Wrap($it))->first()->\n",                      // 17
+        "}\n",                                                   // 18
+    );
+
+    let labels = crate::common::complete_labels_at(&backend, &uri, text, 17, 32).await;
+    assert!(
+        labels.iter().any(|l| l.starts_with("start")),
+        "expected Engine::start() through TIterator's bound, got {labels:?}"
+    );
+}

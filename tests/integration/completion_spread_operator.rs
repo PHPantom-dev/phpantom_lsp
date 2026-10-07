@@ -206,9 +206,8 @@ async fn test_spread_type_array_shorthand() {
 
 // ─── Spread mixed with keyed entries ────────────────────────────────────────
 
-/// `$all = [...$users, 'extra' => new AdminUser()]` — keyed entries take
-/// priority (existing behaviour), but spread still works for key completion.
-/// The array shape wins when string keys are present.
+/// `['admin' => new AdminUser(), ...$guests]` — a spread of a known shape
+/// keeps its string keys beside the literal's own.
 #[tokio::test]
 async fn test_spread_with_keyed_entries() {
     let backend = create_test_backend();
@@ -222,9 +221,8 @@ async fn test_spread_with_keyed_entries() {
         "class AdminUser {\n",
         "    public string $role;\n",
         "}\n",
-        "/** @var list<User> $users */\n",
-        "$users = [];\n",
-        "$config = ['admin' => new AdminUser(), ...$users];\n",
+        "$guests = ['guest' => new User()];\n",
+        "$config = ['admin' => new AdminUser(), ...$guests];\n",
         "$config['\n",
     );
 
@@ -238,12 +236,16 @@ async fn test_spread_with_keyed_entries() {
     };
     backend.did_open(open_params).await;
 
-    // Key completion — 'admin' should be available from the keyed entry.
-    let items = complete_at_opened(&backend, &uri, 10, 9).await;
+    let items = complete_at_opened(&backend, &uri, 9, 9).await;
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(
         labels.contains(&"admin"),
         "Should suggest 'admin' key, got {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&"guest"),
+        "Should suggest the spread's 'guest' key, got {:?}",
         labels
     );
 }

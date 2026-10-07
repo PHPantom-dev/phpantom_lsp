@@ -86,7 +86,25 @@ impl PhpType {
 
         match self.raw_kind() {
             TypeKind::Benevolent(inner) => PhpType::benevolent(map(inner)),
+            // Resolving the name leaves it the name of one class, and
+            // anything else a map makes of it is no longer one.
+            TypeKind::ClassNameLiteral(inner) => {
+                let mapped = map(inner);
+                match mapped.kind() {
+                    TypeKind::ClassString(Some(class)) => match class.kind() {
+                        TypeKind::Named(name) => PhpType::class_name_literal(*name),
+                        _ => mapped,
+                    },
+                    _ => mapped,
+                }
+            }
             TypeKind::ListShape(inner) => PhpType::as_list_shape(map(inner)),
+            TypeKind::TemplateParam(name, bound) => PhpType::template_param(*name, map(bound)),
+            TypeKind::UnsealedShape(unsealed) => PhpType::unsealed_shape(
+                map(&unsealed.shape),
+                map(&unsealed.key),
+                map(&unsealed.value),
+            ),
             TypeKind::Nullable(inner) => PhpType::nullable(map(inner)),
             TypeKind::Union(types) => PhpType::union(types.iter().map(&map).collect()),
             TypeKind::Intersection(types) => {
@@ -130,6 +148,29 @@ impl PhpType {
             | TypeKind::IntRange(..)
             | TypeKind::Literal(_)
             | TypeKind::Raw(_) => self.clone(),
+        }
+    }
+
+    /// Rename the `$parameter` subjects of every conditional in this type
+    /// through `rename`, which answers `None` for a name it keeps.
+    ///
+    /// An override inherits its ancestor's docblock but may call the
+    /// parameters something else, and a conditional names its subject by
+    /// the ancestor's spelling.
+    pub fn rename_conditional_params(&self, rename: &dyn Fn(&str) -> Option<Atom>) -> PhpType {
+        if !self.contains_conditional() {
+            return self.clone();
+        }
+        let renamed = self.map_children(&|child| child.rename_conditional_params(rename));
+        match renamed.raw_kind() {
+            TypeKind::Conditional(c) => match rename(&c.param) {
+                Some(param) => PhpType::conditional_type(ConditionalType {
+                    param,
+                    ..(**c).clone()
+                }),
+                None => renamed,
+            },
+            _ => renamed,
         }
     }
 
@@ -184,6 +225,30 @@ impl PhpType {
             // maybe-a-keyword, so both go to the resolver unconditionally.
             TypeKind::StaticType(s) => PhpType::static_type(atom(&resolver(s))),
             TypeKind::ThisType(s) => PhpType::this_type(atom(&resolver(s))),
+            // A class-constant key names its class the way the docblock was
+            // written, and has to be resolved like any other name to be
+            // compared with a key spelled somewhere else.
+            TypeKind::ArrayShape(entries)
+                if entries
+                    .iter()
+                    .any(|e| e.key.as_deref().and_then(class_constant_key).is_some()) =>
+            {
+                PhpType::array_shape(
+                    entries
+                        .iter()
+                        .map(|e| ShapeEntry {
+                            key: e.key.as_deref().map(|key| match class_constant_key(key) {
+                                Some((class, constant)) => {
+                                    format!("{}::{constant}", resolve(&atom(class)))
+                                }
+                                None => key.to_string(),
+                            }),
+                            value_type: e.value_type.resolve_names(resolver),
+                            optional: e.optional,
+                        })
+                        .collect(),
+                )
+            }
             _ => self.map_children(&|t| t.resolve_names(resolver)),
         }
     }
@@ -326,50 +391,18 @@ impl PhpType {
     }
 
     fn replace_bare_keyword(&self, keyword: &str, class_name: &str) -> PhpType {
-        if let TypeKind::Benevolent(inner) = self.raw_kind() {
-            return PhpType::benevolent(inner.replace_bare_keyword(keyword, class_name));
-        }
-        if let TypeKind::ListShape(inner) = self.raw_kind() {
-            return PhpType::as_list_shape(inner.replace_bare_keyword(keyword, class_name));
-        }
-        match self.kind() {
+        match self.raw_kind() {
             TypeKind::Named(s) if s.eq_ignore_ascii_case(keyword) => {
                 PhpType::named(atom(class_name))
             }
-            TypeKind::Named(_) | TypeKind::Literal(_) | TypeKind::Raw(_) => self.clone(),
-            TypeKind::Nullable(inner) => {
-                PhpType::nullable(inner.replace_bare_keyword(keyword, class_name))
-            }
-            TypeKind::Union(types) => PhpType::union(
-                types
+            TypeKind::Generic(g) if g.name.eq_ignore_ascii_case(keyword) => PhpType::generic_atom(
+                atom(class_name),
+                g.args
                     .iter()
-                    .map(|t| t.replace_bare_keyword(keyword, class_name))
+                    .map(|a| a.replace_bare_keyword(keyword, class_name))
                     .collect(),
             ),
-            TypeKind::Intersection(types) => PhpType::intersection(
-                types
-                    .iter()
-                    .map(|t| t.replace_bare_keyword(keyword, class_name))
-                    .collect(),
-            ),
-            TypeKind::Generic(g) => {
-                let resolved_name = if g.name.eq_ignore_ascii_case(keyword) {
-                    atom(class_name)
-                } else {
-                    g.name
-                };
-                PhpType::generic_atom(
-                    resolved_name,
-                    g.args
-                        .iter()
-                        .map(|a| a.replace_bare_keyword(keyword, class_name))
-                        .collect(),
-                )
-            }
-            TypeKind::Array(inner) => {
-                PhpType::array_of(inner.replace_bare_keyword(keyword, class_name))
-            }
-            _ => self.clone(),
+            _ => self.map_children(&|t| t.replace_bare_keyword(keyword, class_name)),
         }
     }
 
@@ -385,26 +418,47 @@ impl PhpType {
     }
 
     fn contains_bare_keyword(&self, keyword: &str) -> bool {
-        match self.kind() {
-            TypeKind::Named(s) => s.eq_ignore_ascii_case(keyword),
-            TypeKind::Nullable(inner) => inner.contains_bare_keyword(keyword),
-            TypeKind::Union(types) | TypeKind::Intersection(types) => {
-                types.iter().any(|t| t.contains_bare_keyword(keyword))
-            }
-            TypeKind::Generic(g) => {
-                g.name.eq_ignore_ascii_case(keyword)
-                    || g.args.iter().any(|a| a.contains_bare_keyword(keyword))
-            }
-            TypeKind::Array(inner) => inner.contains_bare_keyword(keyword),
-            _ => false,
-        }
+        self.contains_name_matching(&|name| name.eq_ignore_ascii_case(keyword))
     }
 
     /// Check whether this type tree contains any `self`, `static`, or
     /// `$this` references that [`replace_self`] / [`replace_self_with_type`]
     /// would replace.
     pub fn contains_self_ref(&self) -> bool {
-        self.contains_name_matching(&is_self_ref_name)
+        self.contains_name_matching(&is_self_ref_name) || self.contains_self_constant()
+    }
+
+    /// Whether a `self::NAME` constant reference appears anywhere in this
+    /// type tree.  The PHPDoc parser keeps a member reference as raw text,
+    /// so it is not a name [`contains_name_matching`](Self::contains_name_matching)
+    /// would see.
+    fn contains_self_constant(&self) -> bool {
+        match self.raw_kind() {
+            TypeKind::Named(s) => self_constant_name(s).is_some(),
+            TypeKind::Raw(s) => self_constant_name(s).is_some(),
+            TypeKind::Benevolent(inner)
+            | TypeKind::ListShape(inner)
+            | TypeKind::TemplateParam(_, inner)
+            | TypeKind::ClassNameLiteral(inner)
+            | TypeKind::Nullable(inner)
+            | TypeKind::Array(inner)
+            | TypeKind::KeyOf(inner)
+            | TypeKind::ValueOf(inner)
+            | TypeKind::ClassString(Some(inner))
+            | TypeKind::InterfaceString(Some(inner)) => inner.contains_self_constant(),
+            TypeKind::UnsealedShape(unsealed) => unsealed.widened.contains_self_constant(),
+            TypeKind::Union(types) | TypeKind::Intersection(types) => {
+                types.iter().any(PhpType::contains_self_constant)
+            }
+            TypeKind::Generic(g) => g.args.iter().any(PhpType::contains_self_constant),
+            TypeKind::IndexAccess(target, index) => {
+                target.contains_self_constant() || index.contains_self_constant()
+            }
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => entries
+                .iter()
+                .any(|e| e.value_type.contains_self_constant()),
+            _ => false,
+        }
     }
 
     /// Check whether this type tree names any of `names`.
@@ -462,10 +516,7 @@ impl PhpType {
                         }
                     }
                 }
-                match members.len() {
-                    1 => members.into_iter().next().expect("checked length"),
-                    _ => PhpType::union(members),
-                }
+                PhpType::union(members)
             }
             _ => self.map_children(&recurse),
         }
@@ -499,10 +550,15 @@ impl PhpType {
     /// `pred`.
     fn contains_name_matching(&self, pred: &dyn Fn(&str) -> bool) -> bool {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
-                inner.contains_name_matching(pred)
-            }
+            TypeKind::Benevolent(inner)
+            | TypeKind::ListShape(inner)
+            | TypeKind::ClassNameLiteral(inner) => inner.contains_name_matching(pred),
             TypeKind::Named(s) => pred(s),
+            // The widened form names every type the parts do.
+            TypeKind::UnsealedShape(unsealed) => unsealed.widened.contains_name_matching(pred),
+            TypeKind::TemplateParam(name, bound) => {
+                pred(name) || bound.contains_name_matching(pred)
+            }
             TypeKind::Nullable(inner) => inner.contains_name_matching(pred),
             TypeKind::Union(types) | TypeKind::Intersection(types) => {
                 types.iter().any(|t| t.contains_name_matching(pred))
@@ -555,6 +611,14 @@ impl PhpType {
     /// are kept (they override the receiver's args).
     pub fn replace_self_with_type(&self, replacement: &PhpType) -> PhpType {
         self.replace_self_inner(replacement, LsbBinding::Inherit)
+    }
+
+    /// Like [`replace_self_with_type`](Self::replace_self_with_type), but for
+    /// a call whose target class is statically fixed, so `static` / `$this`
+    /// collapse to `replacement` instead of staying bounded over it.  See
+    /// [`replace_self_bound`](Self::replace_self_bound) for when that holds.
+    pub fn replace_self_fixed(&self, replacement: &PhpType) -> PhpType {
+        self.replace_self_inner(replacement, LsbBinding::Fixed)
     }
 
     /// Replace `self` / `static` / `$this` throughout this type tree, with
@@ -633,6 +697,22 @@ impl PhpType {
                 )
             }
 
+            // `self::FOO` names a constant of the class the annotation was
+            // read from, so it stays readable once the type leaves that
+            // class (`key-of<self::TABLE>` returned to a caller elsewhere).
+            // `static::FOO` is left alone: which class it reads is only
+            // known at the call.
+            TypeKind::Named(s) if let Some(constant) = self_constant_name(s) => {
+                qualify_self_constant(replacement, constant)
+                    .map(|reference| PhpType::named(atom(&reference)))
+                    .unwrap_or_else(|| self.clone())
+            }
+            TypeKind::Raw(s) if let Some(constant) = self_constant_name(s) => {
+                qualify_self_constant(replacement, constant)
+                    .map(PhpType::raw)
+                    .unwrap_or_else(|| self.clone())
+            }
+
             // A bound already applied by an earlier hop still answers to a
             // fixed call target: `A::create()` pins whatever `create()` left
             // open.
@@ -677,6 +757,13 @@ impl PhpType {
                 None => self.clone(),
             },
 
+            // A template seen from inside its declaration is still that
+            // template, so it answers to its name.
+            TypeKind::TemplateParam(name, bound) => match subs.get(name.as_str()) {
+                Some(replacement) => replacement.clone(),
+                None => PhpType::template_param(*name, bound.substitute(subs)),
+            },
+
             // A `Raw` node is text no type syntax covers, so it is only
             // opaque because nothing has said what it means; when `subs`
             // does, that reading wins.
@@ -714,10 +801,7 @@ impl PhpType {
                         _ => flat.push(t),
                     }
                 }
-                match flat.len() {
-                    1 => flat.into_iter().next().expect("checked length"),
-                    _ => PhpType::union(flat),
-                }
+                PhpType::union(flat)
             }
 
             TypeKind::Intersection(types) => {
@@ -806,8 +890,14 @@ impl PhpType {
     /// Recursive helper for [`extract_class_names`].
     fn collect_class_names(&self, names: &mut Vec<String>) {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
-                inner.collect_class_names(names)
+            TypeKind::Benevolent(inner)
+            | TypeKind::ListShape(inner)
+            | TypeKind::TemplateParam(_, inner)
+            | TypeKind::ClassNameLiteral(inner) => inner.collect_class_names(names),
+            TypeKind::UnsealedShape(unsealed) => {
+                unsealed.shape.collect_class_names(names);
+                unsealed.key.collect_class_names(names);
+                unsealed.value.collect_class_names(names);
             }
             TypeKind::Named(s) => {
                 if !is_keyword_type(s) && !s.is_empty() && !names.iter().any(|n| n == s.as_str()) {
@@ -937,4 +1027,25 @@ impl PhpType {
             _ => {}
         }
     }
+}
+
+/// The constant half of a `self::NAME` reference, or `None` for any other
+/// name.
+fn self_constant_name(name: &str) -> Option<&str> {
+    let prefix = name.get(..6)?;
+    prefix
+        .eq_ignore_ascii_case("self::")
+        .then(|| &name[6..])
+        .filter(|constant| !constant.is_empty())
+}
+
+/// `Class::NAME` for the class a `self` replacement names, or `None` when
+/// the replacement is not a class.
+fn qualify_self_constant(replacement: &PhpType, constant: &str) -> Option<String> {
+    let class = match replacement.kind() {
+        TypeKind::Named(n) | TypeKind::StaticType(n) | TypeKind::ThisType(n) => *n,
+        TypeKind::Generic(g) => g.name,
+        _ => return None,
+    };
+    Some(format!("{class}::{constant}"))
 }

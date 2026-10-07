@@ -3,7 +3,7 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_closure_stub,
     create_test_backend_with_full_stubs, create_test_backend_with_function_stubs,
-    create_test_backend_with_stdclass_stub, hover_at, hover_text,
+    create_test_backend_with_stdclass_stub, hover_at, hover_text, markup_hover_at, open_php,
 };
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
@@ -127,6 +127,189 @@ class Service {
     let text = hover_text(&hover);
     assert!(text.contains("$order"), "should mention $order: {}", text);
     assert!(text.contains("Order"), "should resolve to Order: {}", text);
+}
+
+/// An untyped method's return type is read from its own body, however
+/// its declaration is laid out: several methods sharing the class's line,
+/// or a signature spread over lines with the name below its attribute.
+#[tokio::test]
+async fn hover_variable_from_untyped_method_reads_that_methods_body() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let content = r#"<?php
+class Pen { public function first() { return 1; } public function second() { return new Pen(); } }
+class Ink {
+    #[Deprecated]
+    public
+    function
+    colour(
+    ) {
+        return new Pen();
+    }
+}
+function run(Pen $pen, Ink $ink): void {
+    $second = $pen->second();
+    $colour = $ink->colour();
+}
+"#;
+    open_php(&backend, &uri, content).await;
+
+    let text = markup_hover_at(&backend, &uri, 12, 6).await;
+    assert!(text.contains("Pen"), "should resolve to Pen: {text}");
+
+    let text = markup_hover_at(&backend, &uri, 13, 6).await;
+    assert!(text.contains("Pen"), "should resolve to Pen: {text}");
+}
+
+/// An arrow function's body writes what `return <expr>;` would, so a
+/// variable assigned there is in the arrow's scope, and reads the scope
+/// `Closure::call()` binds rather than the lexical `$this`.
+#[test]
+fn hover_variable_assigned_inside_arrow_function_body() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Target { public function ok(): bool { return true; } }
+class Service {
+    public function run(Target $t): void {
+        (fn () => $bound = $this)->call($t);
+        $f = fn () => ($made = new Target()) && $made->ok();
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 4, 20).expect("expected hover on $bound");
+    let text = hover_text(&hover);
+    assert!(text.contains("Target"), "should resolve to Target: {text}");
+    assert!(
+        !text.contains("Service"),
+        "should not see the lexical $this: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 5, 50).expect("expected hover on $made");
+    let text = hover_text(&hover);
+    assert!(text.contains("Target"), "should resolve to Target: {text}");
+}
+
+/// The body of an immediately invoked closure is walked like any other
+/// closure body, so its own variables and `$this` resolve inside it.
+#[test]
+fn hover_variable_inside_immediately_invoked_closure() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Target { public function ok(): bool { return true; } }
+class Service {
+    public function run(): void {
+        (function () {
+            $made = new Target();
+            $made;
+            $this;
+        })();
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 6, 13).expect("expected hover on $made");
+    let text = hover_text(&hover);
+    assert!(text.contains("Target"), "should resolve to Target: {text}");
+
+    let hover = hover_at(&backend, uri, content, 7, 13).expect("expected hover on $this");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Service"),
+        "should resolve to Service: {text}"
+    );
+}
+
+/// A readonly property holds what the constructor assigned it in every
+/// other method, when that is narrower than the declared type.  An
+/// assignment the constructor only makes on one path, or a property that
+/// is not readonly, keeps the declared type.
+#[test]
+fn hover_readonly_property_narrowed_by_constructor() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Cat {}
+class Dog {}
+class Pets {
+    private readonly Cat|Dog $always;
+    private readonly Cat|Dog $sometimes;
+    private Cat|Dog $mutable;
+    public function __construct(bool $flag) {
+        $this->always = new Cat();
+        if ($flag) { $this->sometimes = new Cat(); }
+        $this->mutable = new Cat();
+    }
+    public function read(): void {
+        $a = $this->always;
+        $s = $this->sometimes;
+        $m = $this->mutable;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 13, 9).expect("expected hover on $a");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Cat") && !text.contains("Dog"),
+        "$a should be Cat: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 14, 9).expect("expected hover on $s");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Dog"),
+        "$s should keep the declared Cat|Dog: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 15, 9).expect("expected hover on $m");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Dog"),
+        "$m should keep the declared Cat|Dog: {text}"
+    );
+}
+
+/// A variable read from `$this` inside a closure handed to a
+/// `@param-closure-this` parameter gets the bound type, not the lexical
+/// class.
+#[test]
+fn hover_variable_assigned_from_param_closure_this() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Target {}
+class Reg {
+    /** @param-closure-this Target $cb */
+    public static function on(\Closure $cb): void {}
+}
+class Service {
+    public function run(): void {
+        Reg::on(function () {
+            $t = $this;
+        });
+        Reg::on(fn () => $u = $this);
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 9, 13).expect("expected hover on $t");
+    let text = hover_text(&hover);
+    assert!(text.contains("Target"), "should resolve to Target: {text}");
+    assert!(
+        !text.contains("Service"),
+        "should not see the lexical $this: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 11, 26).expect("expected hover on $u");
+    let text = hover_text(&hover);
+    assert!(text.contains("Target"), "should resolve to Target: {text}");
+    assert!(
+        !text.contains("Service"),
+        "should not see the lexical $this: {text}"
+    );
 }
 
 #[test]
@@ -382,7 +565,7 @@ function test() {
 }
 
 #[test]
-fn hover_preserves_scalar_literals_through_a_collection_but_widens_a_push() {
+fn hover_preserves_scalar_literals_through_a_collection_and_a_straight_line_push() {
     let backend = create_test_backend();
     let uri = "file:///literal-hover.php";
     let content = r#"<?php
@@ -419,8 +602,34 @@ function test(bool $flag): void {
 
     let pushed = hover_at(&backend, uri, content, 7, 42).expect("hover on $pushed");
     assert!(
-        hover_text(&pushed).contains("$pushed = non-empty-list<string>"),
-        "a push after construction should widen the stored values: {}",
+        hover_text(&pushed).contains("$pushed = array{'draft', 'asc'|'desc'}"),
+        "a straight-line push runs exactly once, so it keeps the shape's arity and the value it wrote: {}",
+        hover_text(&pushed)
+    );
+}
+
+/// A loop cannot know how many times it actually runs, so a push inside one
+/// widens straight to the list it is building instead of growing a shape by
+/// one entry per re-walk of the fixed point.
+#[test]
+fn hover_widens_a_push_inside_a_loop() {
+    let backend = create_test_backend();
+    let uri = "file:///loop-push.php";
+    let content = r#"<?php
+/** @param list<string> $words */
+function test(array $words): void {
+    $pushed = [];
+    foreach ($words as $word) {
+        $pushed[] = $word;
+    }
+    echo $pushed;
+}
+"#;
+
+    let pushed = hover_at(&backend, uri, content, 7, 10).expect("hover on $pushed");
+    assert!(
+        hover_text(&pushed).contains("$pushed = list<string>"),
+        "a push inside a loop should widen to the list it accumulates, not grow a shape: {}",
         hover_text(&pushed)
     );
 }
@@ -487,15 +696,15 @@ function test(string $key): void {
 
     let groups = hover_at(&backend, uri, content, 12, 16).expect("hover on $groups");
     assert!(
-        hover_text(&groups).contains("$groups = array{pens: non-empty-list<Pen>}"),
-        "an append below a key refines what that key holds instead of \
-         leaving the literal it was initialised with: {}",
+        hover_text(&groups).contains("$groups = array{pens: array{Pen, Pen}}"),
+        "an append below a key refines what that key holds, and outside a \
+         loop it keeps that entry's arity rather than widening to a list: {}",
         hover_text(&groups)
     );
 
     let slots = hover_at(&backend, uri, content, 12, 26).expect("hover on $slots");
     assert!(
-        hover_text(&slots).contains("$slots = non-empty-array<string, int>"),
+        hover_text(&slots).contains("$slots = non-empty-array<string, 1|2>"),
         "a dynamic key may land on any entry, so the shape widens: {}",
         hover_text(&slots)
     );
@@ -5551,6 +5760,59 @@ echo PHP_INT_MAX;
     );
 }
 
+/// The stubs record the PHP build they were generated on; the version
+/// constants describe the configured version instead.
+#[test]
+fn hover_php_version_constants_follow_the_configured_version() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///php_version.php";
+    let content = r#"<?php
+function probe(): void {
+    $major = PHP_MAJOR_VERSION;
+    $id = PHP_VERSION_ID;
+    $major;
+    $id;
+}
+"#;
+    let version = backend.php_version();
+    let major =
+        hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover $major")).to_string();
+    assert!(
+        major.contains(&version.major.to_string()) && !major.contains('5'),
+        "PHP_MAJOR_VERSION is the configured major version: {major}"
+    );
+    let id = hover_text(&hover_at(&backend, uri, content, 5, 6).expect("hover $id")).to_string();
+    assert!(
+        id.contains("int") && !id.contains("50306"),
+        "PHP_VERSION_ID depends on the patch release, so it is only an int: {id}"
+    );
+}
+
+/// A parameter typed by a `@phpstan-type` alias is seeded with what the
+/// alias stands for, so narrowing sees its members.
+#[test]
+fn hover_alias_typed_parameter_narrows() {
+    let backend = create_test_backend();
+    let uri = "file:///alias_param.php";
+    let content = r#"<?php
+class Foo {}
+/** @phpstan-type MaybeFoo Foo|null */
+class Svc {
+    /** @param MaybeFoo $a */
+    public function run($a): void {
+        if ($a !== null) {
+            $a;
+        }
+    }
+}
+"#;
+    let text = hover_text(&hover_at(&backend, uri, content, 7, 13).expect("hover $a")).to_string();
+    assert!(
+        text.contains("Foo") && !text.contains("null") && !text.contains("MaybeFoo"),
+        "the alias is expanded and null is narrowed away: {text}"
+    );
+}
+
 #[test]
 fn hover_stub_constant_php_eol_shows_value() {
     let backend = create_test_backend_with_function_stubs();
@@ -8006,6 +8268,66 @@ namespace {
     );
 }
 
+/// Hovering the method name of a facade call shows the method the facade
+/// forwards to, not `__callStatic`.
+///
+/// Case adapted from laravel-lsp's MIT-licensed test suite.
+#[test]
+fn hover_on_a_facade_method_name_shows_the_forwarded_method() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+
+namespace Illuminate\Support\Facades {
+    abstract class Facade
+    {
+        public static function __callStatic(string $method, array $args): mixed
+        {
+            return false;
+        }
+    }
+}
+
+namespace {
+    use Illuminate\Support\Facades\Facade;
+
+    final class DriverDetails {}
+
+    final class DriverProvider
+    {
+        /** Get the driver details. */
+        public function details(string $driver): DriverDetails
+        {
+            return new DriverDetails();
+        }
+    }
+
+    final class Driver extends Facade
+    {
+        protected static function getFacadeAccessor(): string
+        {
+            return DriverProvider::class;
+        }
+    }
+
+    Driver::details('reverb');
+}
+"#;
+
+    let (line, character) = crate::common::line_char_of(content, "details('reverb')");
+    let hover = hover_at(&backend, uri, content, line, character + 2)
+        .expect("hover on the facade method name should resolve");
+    let text = hover_text(&hover);
+    for expected in [
+        "details(string $driver)",
+        "DriverDetails",
+        "Get the driver details.",
+    ] {
+        assert!(text.contains(expected), "expected {expected:?} in: {text}");
+    }
+    assert!(!text.contains("__callStatic"), "{text}");
+}
+
 #[test]
 fn hover_facade_concrete_target_scoped_to_own_class() {
     // Two facades declared in the same file: resolving a call on `Second`
@@ -9413,6 +9735,37 @@ class Test {
 }
 
 #[test]
+fn hover_inline_var_cast_applies_to_array_element_assignment() {
+    let backend = create_test_backend();
+    let uri = "file:///b534_hover_array_element.php";
+    let content = r#"<?php
+class Test {
+    public function run(): void {
+        /** @var string */
+        $GLOBALS['sql_query'] = rand(0, 1) ? 'asd' : null;
+        echo $GLOBALS;
+    }
+}
+"#;
+
+    // Hover on `$GLOBALS` after the annotated array-element assignment —
+    // the @var override should type the element as `string`, not the
+    // RHS's own `'asd'|null`.
+    let hover = hover_at(&backend, uri, content, 5, 14).expect("expected hover on $GLOBALS");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("sql_query: string"),
+        "@var override should apply to an array-element assignment target, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("'asd'"),
+        "the @var override should replace the RHS's own inferred type, got: {}",
+        text
+    );
+}
+
+#[test]
 fn hover_standalone_var_annotation_still_applies() {
     let backend = create_test_backend();
     let uri = "file:///b15_hover_standalone.php";
@@ -9550,6 +9903,53 @@ function test(string $role): void {
     assert!(
         !text.contains("null"),
         "hover should not include null inside truthy if-body, got: {}",
+        text
+    );
+}
+
+// ── Assignment inside match arm / ternary branch ───────────────────────
+
+#[test]
+fn hover_variable_assigned_in_match_arm() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let php = r#"<?php
+function test(int $k, ?string $n): void {
+    $r = match ($k) {
+        1 => $x = $n,
+        default => null,
+    };
+    $x;
+}
+"#;
+    // Hover on `$x` at line 6 (the bare `$x;` usage after the match).
+    let hover = hover_at(&backend, uri, php, 6, 4);
+    assert!(hover.is_some(), "should produce hover for $x");
+    let text = hover_text(hover.as_ref().unwrap());
+    assert!(
+        text.contains("string"),
+        "hover should resolve $x from the assignment inside the match arm, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_variable_assigned_in_ternary_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let php = r#"<?php
+function test(bool $flag, ?string $n): void {
+    $r = $flag ? $x = $n : null;
+    $x;
+}
+"#;
+    // Hover on `$x` at line 3 (the bare `$x;` usage after the ternary).
+    let hover = hover_at(&backend, uri, php, 3, 4);
+    assert!(hover.is_some(), "should produce hover for $x");
+    let text = hover_text(hover.as_ref().unwrap());
+    assert!(
+        text.contains("string"),
+        "hover should resolve $x from the assignment inside the ternary branch, got: {}",
         text
     );
 }
@@ -10307,7 +10707,7 @@ function run(bool $c): void {
 }
 
 #[test]
-fn hover_push_style_produces_list() {
+fn hover_push_style_keeps_shape_outside_a_loop() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let content = r#"<?php
@@ -10321,12 +10721,13 @@ function run(): void {
 }
 "#;
 
-    // Hover on `$items` at line 7. Push-style should produce list<Pen>.
+    // Hover on `$items` at line 7. A straight-line push runs exactly once,
+    // so it keeps the shape's arity instead of widening to `list<Pen>`.
     let hover = hover_at(&backend, uri, content, 7, 5).expect("expected hover on $items");
     let text = hover_text(&hover);
     assert!(
-        text.contains("list<Pen>"),
-        "Push-style assignment should produce list<Pen>, got: {}",
+        text.contains("array{Pen}"),
+        "Push-style assignment outside a loop should produce array{{Pen}}, got: {}",
         text
     );
 }
@@ -10818,8 +11219,8 @@ function test(FormItem $item): void {
     let hover = hover_at(&backend, uri, content, 12, 4).expect("expected hover");
     let text = hover_text(&hover);
     assert!(
-        text.contains("string"),
-        "should contain string, got: {}",
+        text.contains("?string") || text.contains("string|null"),
+        "should be a nullable string, got: {}",
         text
     );
 }
@@ -12449,6 +12850,32 @@ for ($i = 0, $x = new Outer(); $i < 10; $i++, $x = $x->next()) {
     );
 }
 
+/// The counter starts at a literal, but the `$i++` the loop runs before every
+/// later iteration widens it, so the body reads it as `int`.
+#[test]
+fn hover_for_loop_counter_is_widened_by_increment() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+for ($i = 0; $i < 10; $i++) {
+    echo $i;
+}
+"#;
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("echo $i"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let hover = hover_at(&backend, uri, content, target_line, 10).expect("expected hover on $i");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "In the body, $i should be int, got: {}",
+        text
+    );
+}
+
 // ─── __get magic method template resolution ─────────────────────────────────
 
 #[test]
@@ -13561,7 +13988,9 @@ function test(): void {
     );
 }
 
-/// Numeric `+=` should still infer `int|float` (regression guard).
+/// Numeric `+=` should still infer a number, not the array overload
+/// (regression guard). Two literal operands fold to the exact value PHP
+/// computes, so the number here is the literal `3`, not the bare `int`.
 #[test]
 fn hover_numeric_plus_assign_still_infers_numeric() {
     let backend = create_test_backend();
@@ -13576,8 +14005,8 @@ function test(): void {
 
     let result = hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover $n")).to_string();
     assert!(
-        result.contains("int"),
-        "$n after numeric += should contain int, got: {result}"
+        result.contains('3'),
+        "$n after numeric += should fold to the literal 3, got: {result}"
     );
     assert!(
         !result.contains("array"),
@@ -13631,6 +14060,65 @@ function test(ReflectionMethod $ref): void {
             || result.contains("[]")
             || result.contains("array"),
         "$attrs should not be a bare ReflectionAttribute without array wrapper: {result}"
+    );
+}
+
+/// A method-level `@template T` that shadows its class's own `@template T`
+/// binds from the call's argument, not from the class's (erased) template.
+///
+/// `ReflectionClassStub<T of object>` declares a class-level `T`, and its
+/// `getAttributes()` declares a method-level `T` of its own, bound by
+/// `class-string<T>` and returned as `ReflectionAttribute<T>[]`. On an
+/// unparameterised receiver the class-level `T` erases to its `object`
+/// bound; the method's own `T` must still bind from the `Ref::class`
+/// argument instead of inheriting that erasure.
+#[test]
+fn hover_method_template_shadows_class_template() {
+    let backend = create_test_backend();
+    let uri = "file:///method_template_shadow.php";
+
+    let stub_uri = "file:///method_template_shadow_stub.php";
+    let stub = r#"<?php
+/**
+ * @template T of object
+ */
+class ReflectionClassStub {
+    /**
+     * @template T
+     * @param class-string<T>|null $name
+     * @return ReflectionAttribute<T>[]
+     */
+    public function getAttributes(?string $name = null): array {}
+}
+
+/**
+ * @template T
+ */
+class ReflectionAttribute {
+    /** @return T */
+    public function newInstance() {}
+}
+
+class Ref {}
+"#;
+    backend.update_ast(stub_uri, stub);
+
+    let content = r#"<?php
+function test(ReflectionClassStub $reflection): void {
+    foreach ($reflection->getAttributes(Ref::class) as $attr) {
+        $x = $attr->newInstance();
+        $x;
+    }
+}
+"#;
+
+    let result =
+        hover_text(&hover_at(&backend, uri, content, 4, 10).expect("hover $x")).to_string();
+    assert!(
+        result.contains("Ref") && !result.contains("object"),
+        "$x from newInstance() should bind the method's own T to Ref via \
+         the class-string<T> argument, not erase to the class's object \
+         bound, got: {result}"
     );
 }
 
@@ -14029,6 +14517,32 @@ fn hover_class_constant_resolves_to_class_string() {
     );
 }
 
+/// A class constant array keyed by `Foo::class` keeps its keys, qualified
+/// against the file's namespace, and its values.
+#[test]
+fn hover_class_constant_array_keyed_by_class_constant() {
+    let backend = create_test_backend();
+    let uri = "file:///classconst_keys.php";
+    let content = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class Widget {}\n",
+        "class C {\n",
+        "    private const B = [Widget::class => 'X', \\stdClass::class => 'Y'];\n",
+        "    public function f(): void {\n",
+        "        $b = self::B;\n",
+        "        $b;\n",
+        "    }\n",
+        "}\n",
+    );
+    let hover = hover_at(&backend, uri, content, 7, 10).expect("hover $b");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains(r"array{'App\\Widget': 'X', stdClass: 'Y'}"),
+        "the constant should keep its class-name keys, got: {text}"
+    );
+}
+
 /// A heterogeneous array literal used as a fixed tuple resolves its
 /// foreach element to a union of positional shapes. Indexing a position
 /// that only exists on one arm, combined with a `??` class-string
@@ -14206,6 +14720,28 @@ fn hover_object_cast_of_an_empty_array_is_stdclass() {
     );
 }
 
+/// A cast to `object` always instantiates `stdClass`, so a non-empty
+/// array's cast keeps `stdClass`'s class identity alongside the known
+/// keys rather than reporting only the shape.
+#[test]
+fn hover_object_cast_of_a_non_empty_array_keeps_stdclass() {
+    let backend = create_test_backend();
+    let uri = "file:///object_cast_shape.php";
+    let content = concat!(
+        "<?php\n",
+        "function demo(): void {\n",
+        "    $obj = (object) ['foo' => 1];\n",
+        "    $obj;\n",
+        "}\n",
+    );
+    let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $obj");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("object{foo: int}") && text.contains("stdClass"),
+        "a non-empty array cast to object should keep stdClass alongside the shape, got: {text}"
+    );
+}
+
 /// PHP's array union keeps the left side's keys and adds the right side's,
 /// so `+` between two literals merges their shapes the same way `+=` does.
 #[test]
@@ -14263,6 +14799,41 @@ fn hover_template_array_bound_identity_generic_resolves_inside_body() {
     assert!(
         text.contains("int"),
         "Should resolve T to its bound (Token[]) and show Token::$type as int, got: {text}"
+    );
+}
+
+/// A value typed by a bounded method template is still that template inside
+/// the method: hover names `T`, with its bound on the template line, rather
+/// than showing the bound as if it were the type.
+#[test]
+fn hover_bounded_method_template_value_shows_template_name() {
+    let backend = create_test_backend();
+    let uri = "file:///bounded_method_template.php";
+    let content = concat!(
+        "<?php\n",                                    // 0
+        "class Animal {}\n",                          // 1
+        "class Plant {}\n",                           // 2
+        "class Garden {\n",                           // 3
+        "    /**\n",                                  // 4
+        "     * @template T of Animal|Plant\n",       // 5
+        "     * @param iterable<T> $items\n",         // 6
+        "     */\n",                                  // 7
+        "    public function tend($items): void {\n", // 8
+        "        foreach ($items as $item) {\n",      // 9
+        "            $item;\n",                       // 10
+        "        }\n",                                // 11
+        "    }\n",                                    // 12
+        "}\n",                                        // 13
+    );
+    let hover = hover_at(&backend, uri, content, 10, 13).expect("hover $item");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$item = T\n"),
+        "Should show the template name rather than its bound, got: {text}"
+    );
+    assert!(
+        !text.contains("$item = Animal"),
+        "Should not split the template into its bound's alternatives, got: {text}"
     );
 }
 
@@ -14617,9 +15188,9 @@ function run(): void {
 }
 
 /// A callable whose return type *is* the template binds the whole return
-/// type, so a closure annotated `: array` still binds a bare `array` there.
-/// Decomposition must not reach into a return type that has nothing to
-/// decompose.
+/// type: the `array<int, string>` the closure's body returns (narrowing its
+/// `: array` annotation), not that array's key or value.  Decomposition must
+/// not reach into a return type that has nothing to decompose.
 #[test]
 fn hover_bare_template_callable_return_binds_whole_type() {
     let backend = create_test_backend();
@@ -14651,9 +15222,52 @@ function run(): void {
     let hover = hover_at(&backend, uri, content, 20, 5).expect("expected hover on $flat");
     let text = hover_text(&hover);
     assert!(
-        text.contains("Coll<array-key, array>"),
+        text.contains("Coll<array-key, array<int, string>>"),
         "a bare template return should bind the whole annotated type, got: {text}"
     );
+}
+
+/// A closure passed to a user-defined generic function returns what its body
+/// produces, with its parameters typed from the callable hint.  The typed
+/// closure's `: Box` annotation is narrowed by the `Box<stdClass>` its body
+/// returns, and the untyped one's `$b` receives that same element type.  The
+/// callback is written before the array it maps, so the binding cannot rely
+/// on `@param` order.
+#[test]
+fn hover_generic_callable_return_reads_closure_body() {
+    let backend = create_test_backend();
+    let uri = "file:///generic_map_body.php";
+    let content = r#"<?php
+/** @template T */
+final class Box {}
+
+/**
+ * @template T
+ * @template U
+ * @param callable(T): U $fn
+ * @param array<int, T> $a
+ * @return array<int, U>
+ */
+function mapAll(callable $fn, array $a): array { return []; }
+
+function run(): void {
+    /** @var array<int, Box<stdClass>> $boxes */
+    $boxes = [];
+    $typed = mapAll(fn (Box $b): Box => $b, $boxes);
+    $untyped = mapAll(fn ($b) => $b, $boxes);
+    $typed;
+    $untyped;
+}
+"#;
+
+    for (line, name) in [(18, "$typed"), (19, "$untyped")] {
+        let hover = hover_at(&backend, uri, content, line, 5).expect("expected hover");
+        let text = hover_text(&hover);
+        assert!(
+            text.contains("array<int, Box<stdClass>>"),
+            "{name} should keep the element's generic argument, got: {text}"
+        );
+    }
 }
 
 /// A subject that names a generic class without arguments must read its
@@ -14950,9 +15564,12 @@ fn hover_namespaced_constant_through_every_spelling() {
     }
 }
 
-/// `__LINE__` is the only magic constant PHP gives a number; the rest are
-/// strings, and `__CLASS__` keeps the class identity the way `Foo::class`
-/// does so `new $class` and `class-string` parameters still work.
+/// Every magic constant's value is known at the point it is written, so
+/// each carries its exact literal rather than its base type: `__LINE__`
+/// the literal line number, `__NAMESPACE__`/`__FUNCTION__`/`__METHOD__`
+/// the literal string PHP would substitute there. `__CLASS__` keeps the
+/// class identity the way `Foo::class` does so `new $class` and
+/// `class-string` parameters still work.
 #[test]
 fn hover_magic_constants_carry_their_own_types() {
     let backend = create_test_backend();
@@ -14963,6 +15580,7 @@ namespace App;
 trait Probe {
     public function inTrait(): void {
         $traitClass = __CLASS__;
+        $traitTrait = __TRAIT__;
     }
 }
 
@@ -14984,15 +15602,16 @@ $outsideAnyClass = __CLASS__;
 "#;
     for (var, want) in [
         ("$traitClass", "class-string"),
-        ("$line", "int"),
+        ("$traitTrait", "'App\\\\Probe'"),
+        ("$line", "13"),
         ("$file", "string"),
         ("$dir", "string"),
         ("$class", "class-string<Widget>"),
-        ("$trait", "string"),
-        ("$namespace", "string"),
-        ("$method", "string"),
-        ("$function", "string"),
-        ("$sum", "int"),
+        ("$trait", "''"),
+        ("$namespace", "'App'"),
+        ("$method", "'App\\\\Widget::probe'"),
+        ("$function", "'probe'"),
+        ("$sum", "24"),
         ("$outsideAnyClass", "string"),
     ] {
         let needle = format!("{var} = ");
@@ -15002,6 +15621,162 @@ $outsideAnyClass = __CLASS__;
             .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"))
             as u32;
         let hover = hover_at(&backend, uri, content, line, 9)
+            .unwrap_or_else(|| panic!("no hover for {var}"));
+        assert!(
+            hover_text(&hover).contains(&format!("{var} = {want}")),
+            "{var} should be {want}, got: {}",
+            hover_text(&hover)
+        );
+    }
+}
+
+/// `__FUNCTION__` inside a closure or arrow function names it `{closure}`,
+/// matching PHP, not the enclosing named function it sits in.
+#[test]
+fn hover_magic_constants_inside_closures_report_closure() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function outer(): void {
+    $fn = function () {
+        $inner = __FUNCTION__;
+    };
+    $arrow = fn() => __FUNCTION__;
+    $arrowResult = $arrow();
+}
+"#;
+    // `$inner` inside the closure body.
+    let hover = hover_at(&backend, uri, content, 3, 9).expect("no hover for $inner");
+    assert!(
+        hover_text(&hover).contains("$inner = '{closure}'"),
+        "__FUNCTION__ inside a closure should be '{{closure}}', got: {}",
+        hover_text(&hover)
+    );
+
+    // The value the arrow function returns.
+    let hover = hover_at(&backend, uri, content, 6, 6).expect("no hover for $arrowResult");
+    assert!(
+        hover_text(&hover).contains("$arrowResult = '{closure}'"),
+        "__FUNCTION__ inside an arrow function should be '{{closure}}', got: {}",
+        hover_text(&hover)
+    );
+}
+
+/// `__PROPERTY__` (PHP 8.4) inside a property hook's `get`/`set` body
+/// resolves to the property's bare name, the way `__FUNCTION__` resolves
+/// to the enclosing function's name, not to the property's declared
+/// type. Outside any property hook it is the empty string.
+#[test]
+fn hover_magic_constant_property_inside_hooks() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class User {
+    public string $name {
+        get {
+            $inGet = __PROPERTY__;
+            return $this->name;
+        }
+        set(string $value) {
+            $inSet = __PROPERTY__;
+            $this->name = $value;
+        }
+    }
+
+    public function outsideAnyHook(): void {
+        $outside = __PROPERTY__;
+    }
+}
+"#;
+    for (var, want) in [
+        ("$inGet", "'name'"),
+        ("$inSet", "'name'"),
+        ("$outside", "''"),
+    ] {
+        let needle = format!("{var} = ");
+        let (line, line_text) = content
+            .lines()
+            .enumerate()
+            .find(|(_, l)| l.trim_start().starts_with(&needle))
+            .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"));
+        let column = line_text.find(&needle).unwrap() as u32 + 1;
+        let hover = hover_at(&backend, uri, content, line as u32, column)
+            .unwrap_or_else(|| panic!("no hover for {var}"));
+        assert!(
+            hover_text(&hover).contains(&format!("{var} = {want}")),
+            "{var} should be {want}, got: {}",
+            hover_text(&hover)
+        );
+    }
+}
+
+/// PHP names a property hook's implicit function `$name::get`/`$name::set`,
+/// so `__FUNCTION__` inside a hook body resolves to that, and `__METHOD__`
+/// prefixes it with the enclosing class, not to the empty string a hook
+/// falling off the enclosing-function stack would produce.
+#[test]
+fn hover_magic_constants_function_and_method_inside_hooks() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class User {
+    public string $name {
+        get {
+            $inGetFunction = __FUNCTION__;
+            $inGetMethod = __METHOD__;
+            return $this->name;
+        }
+        set(string $value) {
+            $inSetFunction = __FUNCTION__;
+            $inSetMethod = __METHOD__;
+            $this->name = $value;
+        }
+    }
+}
+"#;
+    for (var, want) in [
+        ("$inGetFunction", "'$name::get'"),
+        ("$inGetMethod", "'User::$name::get'"),
+        ("$inSetFunction", "'$name::set'"),
+        ("$inSetMethod", "'User::$name::set'"),
+    ] {
+        let needle = format!("{var} = ");
+        let (line, line_text) = content
+            .lines()
+            .enumerate()
+            .find(|(_, l)| l.trim_start().starts_with(&needle))
+            .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"));
+        let column = line_text.find(&needle).unwrap() as u32 + 1;
+        let hover = hover_at(&backend, uri, content, line as u32, column)
+            .unwrap_or_else(|| panic!("no hover for {var}"));
+        assert!(
+            hover_text(&hover).contains(&format!("{var} = {want}")),
+            "{var} should be {want}, got: {}",
+            hover_text(&hover)
+        );
+    }
+}
+
+/// Outside any namespace or function-like construct, `__NAMESPACE__`,
+/// `__FUNCTION__`, and `__METHOD__` are all the empty string, matching
+/// PHP's top-level-code behaviour.
+#[test]
+fn hover_magic_constants_at_top_level_are_empty_strings() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+$namespace = __NAMESPACE__;
+$function = __FUNCTION__;
+$method = __METHOD__;
+"#;
+    for (var, want) in [("$namespace", "''"), ("$function", "''"), ("$method", "''")] {
+        let needle = format!("{var} = ");
+        let line = content
+            .lines()
+            .position(|l| l.trim_start().starts_with(&needle))
+            .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"))
+            as u32;
+        let hover = hover_at(&backend, uri, content, line, 3)
             .unwrap_or_else(|| panic!("no hover for {var}"));
         assert!(
             hover_text(&hover).contains(&format!("{var} = {want}")),
@@ -15065,5 +15840,197 @@ function tick(): void
     assert!(
         text.contains('0'),
         "a static local's initialiser should type it, got: {text}"
+    );
+}
+
+// ─── Semi-reserved keywords used as member names ────────────────────────────
+
+#[test]
+fn hover_member_named_like_a_keyword() {
+    let backend = create_test_backend();
+    let uri = "file:///hover_keyword_members.php";
+    let content = concat!(
+        "<?php\n",
+        "class Node {\n",
+        "    public string $class = '';\n",
+        "    public function default(): int { return 1; }\n",
+        "}\n",
+        "function test(Node $n): void {\n",
+        "    $n->class;\n",
+        "    $n->default();\n",
+        "}\n",
+    );
+
+    let class_hover = hover_at(&backend, uri, content, 6, 9).expect("hover on ->class");
+    assert!(
+        hover_text(&class_hover).contains("string $class"),
+        "got: {}",
+        hover_text(&class_hover)
+    );
+    let default_hover = hover_at(&backend, uri, content, 7, 9).expect("hover on ->default()");
+    assert!(
+        hover_text(&default_hover).contains("function default(): int"),
+        "got: {}",
+        hover_text(&default_hover)
+    );
+}
+
+// ─── `parent::CONST` reads the parent's declaration ─────────────────────────
+
+#[test]
+fn hover_parent_constant_shows_the_parents_value() {
+    let backend = create_test_backend();
+    let uri = "file:///hover_parent_const.php";
+    let content = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    const LIMIT = 1;\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    const LIMIT = 2;\n",
+        "    public function f(): int {\n",
+        "        return parent::LIMIT;\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let hover = hover_at(&backend, uri, content, 7, 25).expect("hover on parent::LIMIT");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("LIMIT = 1"),
+        "should show Base's value, got: {text}"
+    );
+    assert!(
+        !text.contains("LIMIT = 2"),
+        "must not show Child's value, got: {text}"
+    );
+}
+
+// ─── PHPDoc-only tokens do not resolve to unrelated symbols ─────────────────
+
+/// A tag name, a `@template` parameter, and the `$name` half of a `@param`
+/// are docblock syntax, not references to the same-named class, function,
+/// or variable elsewhere in the file.
+#[test]
+fn hover_on_docblock_only_tokens_does_not_pick_up_same_named_symbols() {
+    let backend = create_test_backend();
+    let uri = "file:///hover_docblock_tokens.php";
+    let content = concat!(
+        "<?php\n",
+        "/** Unrelated class that shares a tag's name. */\n",
+        "class param {}\n",
+        "/** Unrelated class that shares the template's name. */\n",
+        "class T {}\n",
+        "/**\n",
+        " * @template T\n",
+        " * @param T $item\n",
+        " * @return T\n",
+        " */\n",
+        "function identity($item) { return $item; }\n",
+        "$item = new param();\n",
+    );
+
+    // The `param` of `@param`.
+    let on_tag = hover_at(&backend, uri, content, 7, 5);
+    assert!(
+        on_tag
+            .as_ref()
+            .is_none_or(|h| !hover_text(h).contains("Unrelated class")),
+        "hover on the tag name must not show class `param`, got: {:?}",
+        on_tag.as_ref().map(hover_text)
+    );
+    // The `T` of `@template T`.
+    let on_template = hover_at(&backend, uri, content, 6, 14);
+    assert!(
+        on_template
+            .as_ref()
+            .is_none_or(|h| !hover_text(h).contains("Unrelated class")),
+        "hover on the template declaration must not show class `T`, got: {:?}",
+        on_template.as_ref().map(hover_text)
+    );
+    // The `T` of `@param T $item`, which names the template.
+    let on_template_use = hover_at(&backend, uri, content, 7, 10);
+    assert!(
+        on_template_use
+            .as_ref()
+            .is_none_or(|h| !hover_text(h).contains("Unrelated class")),
+        "hover on a use of the template must not show class `T`, got: {:?}",
+        on_template_use.as_ref().map(hover_text)
+    );
+    // The `$item` of `@param T $item` is the parameter, not the
+    // top-level `$item` holding a `param`.
+    let on_param_var = hover_at(&backend, uri, content, 7, 14);
+    assert!(
+        on_param_var
+            .as_ref()
+            .is_none_or(|h| hover_text(h).contains("T $item") || !hover_text(h).contains("param")),
+        "hover on the @param variable must not show the top-level `$item`, got: {:?}",
+        on_param_var.as_ref().map(hover_text)
+    );
+}
+
+/// Hovering a class name in one `namespace` block ignores an import that
+/// only a sibling block declares.
+#[test]
+fn hover_class_name_ignores_an_import_from_another_namespace_block() {
+    let backend = create_test_backend();
+    let uri = "file:///blocks.php";
+    let content = r#"<?php
+namespace X {
+    class Foo { public function fromX(): void {} }
+}
+namespace Y {
+    class Foo { public function fromY(): void {} }
+}
+namespace A {
+    use X\Foo;
+    function a(): void { new Foo(); }
+}
+namespace B {
+    use Y\Foo;
+    function b(): void { new Foo(); }
+}
+"#;
+
+    let hover_a =
+        crate::common::hover_at(&backend, uri, content, 9, 30).expect("hover on `Foo` in block A");
+    assert!(
+        crate::common::hover_text(&hover_a).contains("namespace X;"),
+        "block A imports `X\\Foo`, got: {}",
+        crate::common::hover_text(&hover_a)
+    );
+    let hover_b =
+        crate::common::hover_at(&backend, uri, content, 13, 30).expect("hover on `Foo` in block B");
+    assert!(
+        crate::common::hover_text(&hover_b).contains("namespace Y;"),
+        "block B imports `Y\\Foo`, got: {}",
+        crate::common::hover_text(&hover_b)
+    );
+}
+
+/// A name a block neither imports nor declares is its own namespace's
+/// class, not a same-named class another block imports.
+#[test]
+fn hover_class_name_not_imported_in_its_block_is_not_resolved_elsewhere() {
+    let backend = create_test_backend();
+    let uri = "file:///blocks.php";
+    let content = r#"<?php
+namespace X {
+    class Foo {}
+}
+namespace A {
+    use X\Foo;
+    function a(): void { new Foo(); }
+}
+namespace B {
+    function b(): void { new Foo(); }
+}
+"#;
+
+    let hover = crate::common::hover_at(&backend, uri, content, 9, 30);
+    let text = hover.as_ref().map(crate::common::hover_text).unwrap_or("");
+    assert!(
+        !text.contains("namespace X;"),
+        "`Foo` in block B is `B\\Foo`, got: {text}"
     );
 }

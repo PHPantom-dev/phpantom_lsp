@@ -4,25 +4,157 @@ use super::*;
 /// record each exclusion so a later check knows the branch ruled it out.
 ///
 /// A negated `instanceof` does not eliminate `null`: `!$x instanceof Foo`
-/// is true when `$x` is null, so `null` stays in the union. A subject the
-/// exclusions empty is left as it was, since an operand that proves
-/// nothing must not erase what the scope already knew.
-fn exclude_classes_in_scope(
+/// is true when `$x` is null, so `null` stays in the union.
+///
+/// A subject the exclusions empty is [exhausted](mark_exhausted): every
+/// alternative it could hold was ruled out, as in the else of
+/// `if ($v instanceof AbstractNode)` on a `$v` that was already an
+/// `AbstractNode`, so the path cannot run.
+pub(super) fn exclude_classes_in_scope(
     var_name: &str,
     classes: &[PhpType],
     var_ctx: &VarResolutionCtx<'_>,
     scope: &mut ScopeState,
 ) {
-    let mut results = scope.get(var_name).to_vec();
+    let had_types = !scope.get(var_name).is_empty();
+    let resolve = |hint: PhpType| {
+        crate::type_engine::type_resolution::resolved_types_for_hint(
+            hint,
+            &var_ctx.current_class.name,
+            var_ctx.all_classes,
+            var_ctx.class_loader,
+        )
+    };
+    let mut results = split_iterable_alternatives(scope.get(var_name), resolve)
+        .unwrap_or_else(|| scope.get(var_name).to_vec());
+    if let Some(named) = resolve_class_naming_alternatives(&results, resolve) {
+        results = named;
+    }
     for cls in classes {
-        ResolvedType::apply_narrowing(&mut results, |class_list| {
-            narrowing::apply_instanceof_exclusion(cls, var_ctx, class_list)
-        });
+        narrowing::exclude_instance_of(cls, var_ctx, &mut results);
         scope.record_exclusion(var_name, cls);
     }
     if !results.is_empty() {
         scope.set(var_name, results);
+    } else if had_types {
+        mark_exhausted(var_name, scope);
     }
+}
+
+/// `types` with every alternative that names a class only in its type
+/// string replaced by the class it names, or `None` when none does.
+///
+/// An `instanceof` check filters a subject by the classes its entries
+/// carry, so an alternative naming one only in its type string is
+/// invisible to it: the check can neither keep it nor rule it out.
+///
+/// A `@template T of Foo` that nothing binds arrives exactly like that.
+/// Resolution erases it to its bound for the class dimension — every
+/// value of the parameter is a `Foo`, which is what the bound says — but
+/// the type string keeps the parameter's own name, and the name is what
+/// decides whether the alternative is carried beside the class or by it.
+/// So `! $x instanceof Foo` left the parameter standing, and the value
+/// kept an alternative the guard had ruled out.
+///
+/// An alternative that names no class at all (`int`, `null`, a class the
+/// project does not ship) is left exactly as it was: an `instanceof`
+/// check proves nothing about it, and replacing it with nothing would
+/// erase what the scope already knew.
+fn resolve_class_naming_alternatives(
+    types: &[ResolvedType],
+    resolve: impl Fn(PhpType) -> Vec<ResolvedType>,
+) -> Option<Vec<ResolvedType>> {
+    let named: Vec<Option<Vec<ResolvedType>>> = types
+        .iter()
+        .map(|rt| {
+            if rt.class_info.is_some() {
+                return None;
+            }
+            let resolved: Vec<ResolvedType> = resolve(rt.type_string.clone())
+                .into_iter()
+                .filter(|r| r.class_info.is_some())
+                .collect();
+            (!resolved.is_empty()).then_some(resolved)
+        })
+        .collect();
+    if named.iter().all(Option::is_none) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(types.len());
+    for (rt, named) in types.iter().zip(named) {
+        match named {
+            Some(resolved) => ResolvedType::extend_unique(&mut out, resolved),
+            None => out.push(rt.clone()),
+        }
+    }
+    Some(out)
+}
+
+/// The named alternatives of `types` when every non-null one names a type
+/// no class can be loaded for (an unbound template parameter, or a class
+/// the project does not ship), or `None` when any alternative is anything
+/// else.
+fn opaque_named_alternatives(
+    types: &[ResolvedType],
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<Vec<PhpType>> {
+    let mut names: Vec<PhpType> = Vec::new();
+    for rt in types {
+        if rt.class_info.is_some() {
+            return None;
+        }
+        for member in rt.type_string.union_members() {
+            if member.is_null() {
+                continue;
+            }
+            let TypeKind::Named(name) = member.kind() else {
+                return None;
+            };
+            if crate::php_type::is_keyword_type(name) || (ctx.class_loader)(name).is_some() {
+                return None;
+            }
+            if !names.contains(member) {
+                names.push(member.clone());
+            }
+        }
+    }
+    (!names.is_empty()).then_some(names)
+}
+
+/// `types` with each `iterable` alternative spelled out as the
+/// `array|Traversable` it stands for, or `None` when it holds none.
+///
+/// An `instanceof` check filters a subject by the classes its entries
+/// name, and an `iterable` names none, so the check could neither keep its
+/// `Traversable` half (with the type arguments) nor rule it out.
+/// `resolve` turns the split type back into entries that carry their
+/// classes.  `is_array()` and `is_object()` split the same way, so the
+/// `Traversable` half they leave behind is one a later `instanceof` can
+/// filter.
+pub(super) fn split_iterable_alternatives(
+    types: &[ResolvedType],
+    resolve: impl Fn(PhpType) -> Vec<ResolvedType>,
+) -> Option<Vec<ResolvedType>> {
+    let split: Vec<Option<PhpType>> = types
+        .iter()
+        .map(|rt| {
+            rt.class_info
+                .is_none()
+                .then(|| rt.type_string.split_iterable())
+                .flatten()
+        })
+        .collect();
+    if split.iter().all(Option::is_none) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(types.len() + 1);
+    for (rt, split) in types.iter().zip(split) {
+        match split {
+            Some(ty) => ResolvedType::extend_unique(&mut out, resolve(ty)),
+            None => out.push(rt.clone()),
+        }
+    }
+    Some(out)
 }
 
 /// Narrow every subject the `&&` chain's operands prove an
@@ -113,9 +245,9 @@ pub(super) fn commit_chain_instanceof<'b>(
                 let targets = dynamic_instanceof_targets(rhs, scope, ctx);
                 if !targets.is_empty() {
                     let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-                    if negated {
-                        exclude_classes_in_scope(var_name, &targets, &var_ctx, scope);
-                    } else {
+                    // The value may name a subclass of the class its type
+                    // spells, so failing the check rules nothing out.
+                    if !negated {
                         let mut resolved = Vec::new();
                         for target in &targets {
                             let mut single = Vec::new();
@@ -175,25 +307,27 @@ pub(super) fn commit_chain_instanceof<'b>(
                     // produces `[Foo]`; for `&& instanceof Bar` it
                     // accumulates `[Foo, Bar]`.
                     let mut single = Vec::new();
-                    ResolvedType::apply_narrowing(&mut single, |classes| {
-                        narrowing::apply_instanceof_inclusion(
+                    narrowing::include_instance_of(
+                        &extraction.class_type,
+                        extraction.exact,
+                        &var_ctx,
+                        &mut single,
+                    );
+                    if narrowed_to_unloadable_class(&single) {
+                        include_unloadable_class_in_scope(
+                            var_name,
                             &extraction.class_type,
-                            extraction.exact,
                             &var_ctx,
-                            classes,
-                        )
-                    });
-                    if !single.is_empty() {
+                            scope,
+                        );
+                        conjuncts.entry(var_name.clone()).or_default().operands += 1;
+                    } else if !single.is_empty() {
                         let entry = instanceof_results.entry(var_name.clone()).or_default();
                         ResolvedType::extend_unique(entry, single);
                         let c = conjuncts.entry(var_name.clone()).or_default();
                         c.operands += 1;
                         c.allow_string |= extraction.allow_string;
                         c.exact |= extraction.exact;
-                    } else {
-                        // Target class is unresolvable — mark variable
-                        // as empty so diagnostics suppress false positives.
-                        instanceof_results.entry(var_name.clone()).or_default();
                     }
                 }
             }
@@ -228,6 +362,29 @@ pub(super) fn commit_chain_instanceof<'b>(
     }
 
     conjuncts.into_keys().collect()
+}
+
+/// Whether an inclusion came back as a class that could not be loaded:
+/// entries that carry a name but no `ClassInfo`.
+pub(super) fn narrowed_to_unloadable_class(narrowed: &[ResolvedType]) -> bool {
+    !narrowed.is_empty() && narrowed.iter().all(|rt| rt.class_info.is_none())
+}
+
+/// Narrow `var_name` in the scope by a successful check against a class
+/// that cannot be loaded.
+///
+/// With no `ClassInfo` there is no hierarchy for
+/// [`commit_instanceof_narrowing`] to filter by, so the subject keeps the
+/// alternatives that name the class, or becomes the class when none does.
+pub(super) fn include_unloadable_class_in_scope(
+    var_name: &str,
+    class_type: &PhpType,
+    var_ctx: &VarResolutionCtx<'_>,
+    scope: &mut ScopeState,
+) {
+    let mut results = scope.get(var_name).to_vec();
+    narrowing::include_instance_of(class_type, false, var_ctx, &mut results);
+    scope.set(var_name, results);
 }
 
 /// Write the outcome of a *successful* `instanceof` check on `var_name`
@@ -303,7 +460,11 @@ pub(super) fn commit_instanceof_narrowing(
         return;
     }
 
-    let existing = scope.get(var_name);
+    let split_existing =
+        split_iterable_alternatives(scope.get(var_name), |hint| ctx.resolved_types_for(hint));
+    let existing = split_existing
+        .as_deref()
+        .unwrap_or_else(|| scope.get(var_name));
     if existing.is_empty() {
         // Untyped variable — instanceof provides the type.
         scope.set(var_name, narrowed);
@@ -324,12 +485,19 @@ pub(super) fn commit_instanceof_narrowing(
             .iter()
             .filter(|rt| rt.class_info.is_none())
             .filter_map(|rt| {
+                // A `mixed` value may be a class name as much as an object,
+                // so it keeps a string half for the class-string pass too.
                 let stringy: Vec<PhpType> = rt
                     .type_string
                     .union_members()
                     .into_iter()
-                    .filter(|m| m.is_subtype_of(&PhpType::string()))
-                    .cloned()
+                    .filter_map(|m| {
+                        if m.is_mixed() {
+                            Some(PhpType::string())
+                        } else {
+                            m.is_subtype_of(&PhpType::string()).then(|| m.clone())
+                        }
+                    })
                     .collect();
                 match stringy.len() {
                     0 => None,
@@ -442,24 +610,74 @@ pub(super) fn commit_instanceof_narrowing(
                 .is_some_and(|c| c.name == name || c.fqn() == name)
         }) || passes_check(name)
     };
-    let filtered: Vec<ResolvedType> = existing
-        .iter()
-        .filter(|rt| {
-            rt.class_info
-                .as_ref()
-                .is_some_and(|c| passes_check(&c.fqn()))
-        })
-        .map(|rt| {
-            let mut rt = rt.clone();
+    //
+    // An alternative that fails the check can still pass it through a
+    // subclass: on `SomeClass|SomeInterface`, `instanceof SomeInterface`
+    // also admits a `SomeClass` subclass implementing the interface.  That
+    // half becomes the intersection, carried by one entry per class so
+    // member lookup sees both, and is judged beside the alternatives that
+    // passed outright (`SomeClass&SomeInterface|SomeInterface`).  When no
+    // alternative passes outright, `apply_instanceof_inclusion` below
+    // decides instead.
+    let mut filtered: Vec<ResolvedType> = Vec::with_capacity(existing.len());
+    let mut any_passed = false;
+    for rt in existing {
+        let Some(cls) = rt.class_info.as_ref() else {
+            continue;
+        };
+        let fqn = cls.fqn();
+        let mut rt = rt.clone();
+        if passes_check(&fqn) {
             rt.restrict_type_string_to_classes(&survives);
-            if let Some(non_null) = rt.type_string.non_null_type() {
-                rt.type_string = non_null;
+        } else if !exact && !intersected {
+            rt.restrict_type_string_to_classes(&|name: &str| name == cls.name || name == fqn);
+        } else {
+            continue;
+        }
+        if let Some(non_null) = rt.type_string.non_null_type() {
+            rt.type_string = non_null;
+        }
+        if passes_check(&fqn) {
+            any_passed = true;
+            filtered.push(rt);
+            continue;
+        }
+        for checked in &narrowed {
+            let Some(checked_cls) = checked.class_info.as_ref() else {
+                continue;
+            };
+            // A checked class below this alternative is what that half
+            // narrows to: `Animal&Dog` is just `Dog`.
+            if crate::class_lookup::is_subtype_of_names(&checked_cls.fqn(), &fqn, ctx.class_loader)
+            {
+                if !filtered.iter().any(|f| {
+                    f.class_info
+                        .as_ref()
+                        .is_some_and(|c| c.fqn() == checked_cls.fqn())
+                }) {
+                    filtered.push(checked.clone());
+                }
+                continue;
             }
-            rt
-        })
-        .collect();
+            if !narrowing::can_share_instance(cls, checked_cls) {
+                continue;
+            }
+            let both = narrowing::class_first_intersection(
+                (rt.type_string.clone(), cls),
+                (checked.type_string.clone(), checked_cls),
+            );
+            filtered.push(ResolvedType {
+                type_string: both.clone(),
+                ..rt.clone()
+            });
+            filtered.push(ResolvedType {
+                type_string: both,
+                ..checked.clone()
+            });
+        }
+    }
 
-    if !filtered.is_empty() {
+    if any_passed && !filtered.is_empty() {
         // Filter matched — use the filtered results (preserves richer type
         // info from original resolution).  Also strip bare `null` entries:
         // a successful instanceof check guarantees non-null, so `null`
@@ -476,6 +694,31 @@ pub(super) fn commit_instanceof_narrowing(
         } else {
             scope.set(var_name, with_string_alt(filtered));
         }
+        return;
+    }
+
+    // A template parameter nothing binds (`@template T`) names no class
+    // the check could filter by, and neither does a class the project does
+    // not ship.  A value that passes the check is both at once, `A&T`,
+    // which is also what lets the join after the `if` fold it back into
+    // the bare `T` rather than leave `T|A` behind.
+    if let Some(opaque) = opaque_named_alternatives(existing, ctx) {
+        let mut intersected: Vec<ResolvedType> = Vec::with_capacity(narrowed.len());
+        for checked in &narrowed {
+            for name in &opaque {
+                ResolvedType::extend_unique(
+                    &mut intersected,
+                    vec![ResolvedType {
+                        type_string: PhpType::intersection(vec![
+                            checked.type_string.clone(),
+                            name.clone(),
+                        ]),
+                        ..checked.clone()
+                    }],
+                );
+            }
+        }
+        scope.set(var_name, with_string_alt(intersected));
         return;
     }
 

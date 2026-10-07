@@ -76,7 +76,9 @@
 //! - **Implicit primary key.** Every model exposes a primary key column
 //!   (`id` by default, respecting `$primaryKey`/`$keyType` overrides)
 //!   even when no schema or cast entry describes it, unless the model
-//!   overrides `getKeyName()`.
+//!   overrides `getKeyName()`. `HasUuids` and `HasUlids` make the key a
+//!   string, including when inherited or composed through other traits,
+//!   unless a `uniqueIds()` override leaves the key out.
 //!
 //! - **Timestamp properties.** `created_at`/`updated_at` (or their
 //!   configured names) are added as the configured Laravel date class,
@@ -101,6 +103,7 @@
 
 mod accessors;
 mod aliases;
+pub(crate) mod array_file;
 mod auth;
 mod builder;
 mod builder_injection;
@@ -121,6 +124,7 @@ pub(crate) mod gates;
 pub(crate) mod helpers;
 mod higher_order_proxy;
 mod macros;
+mod magic_uses;
 mod model_extraction;
 pub(crate) mod morph_map;
 pub(crate) mod patches;
@@ -134,7 +138,10 @@ mod route_names;
 mod scopes;
 mod storage;
 mod string_keys;
+mod trans_catalog;
+mod trans_json;
 mod trans_keys;
+mod unique_ids;
 pub(crate) mod validated_shape;
 pub(crate) mod validation_rules;
 mod view_data;
@@ -144,15 +151,14 @@ pub(crate) mod where_property;
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
 pub(crate) use commands::{
-    LaravelCommandIndex, command_signature_at_offset, is_command_accessor,
-    is_command_directory_uri, resolve_accessor_type as resolve_command_accessor_type,
-    scan_command_file,
+    EnclosingCommand, LaravelCommandIndex, command_enclosing_signature,
+    command_signature_at_offset, is_command_accessor, is_command_directory_uri,
+    resolve_accessor_type as resolve_command_accessor_type, scan_command_file,
 };
 pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{
-    collect_laravel_config_declarations, find_all_config_references,
-    laravel_config_prefix_from_uri, resolve_config_key_declaration,
-    resolve_config_key_definition_fallback,
+    find_all_config_references, resolve_config_key_declaration,
+    resolve_config_key_declaration_exact, resolve_config_key_definition_fallback,
 };
 pub(crate) use const_eval::ClassContext;
 pub(crate) use env_vars::{enumerate_env_keys, env_declaration, env_name_is_sensitive};
@@ -166,29 +172,34 @@ pub(crate) use macros::{
     synthesize_mixin_macros,
 };
 pub(crate) use model_extraction::{
-    extract_laravel_metadata, has_scope_attribute, infer_relationship_from_method,
+    extract_laravel_metadata, has_inheritable_model_metadata, has_scope_attribute,
+    inherit_model_metadata, relationship_return_type,
 };
 pub(crate) use morph_map::{LaravelMorphMapIndex, MorphMapEntry, MorphMapScan, scan_morph_map};
 pub(crate) use patches::STORAGE_FACADE_FQN;
 pub(crate) use path_helpers::{
     collect_path_helper_links, is_path_helper, path_helper_base, resolve_path_helper_definition,
 };
+#[cfg(test)]
+pub(crate) use provider_resources::ProviderResource;
 pub(crate) use provider_resources::{
     ProviderIdentity, ProviderOrigin, ProviderResources, ProviderScan, ProviderScans,
     extract_provider_resources,
 };
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
 pub(crate) use route_names::{
-    RouteDiscovery, enumerate_all_routes, route_name_matches, route_uri_parameters,
+    RouteDiscovery, enumerate_all_routes, find_route_registration_references, route_name_matches,
+    route_uri_parameters,
 };
 pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
-    extract_storage_driver_registrations, is_storage_facade_name, patch_storage_disk_type,
-    storage_facade_local_names,
+    extract_storage_driver_registrations, patch_storage_disk_type,
 };
-pub(crate) use trans_keys::{collect_trans_declarations, trans_line, unresolved_trans_type};
+pub(crate) use trans_catalog::TranslationCatalog;
+pub(crate) use trans_json::find_json_trans_references;
+pub(crate) use trans_keys::unresolved_trans_type;
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
-pub(crate) use view_data::{SharedViewVar, composer_class_vars};
+pub(crate) use view_data::{SharedViewVar, composer_class_vars, is_view_facade};
 pub(crate) use view_names::canonical_view_name;
 
 pub(crate) use builder_injection::{try_inject_builder_scopes, try_inject_mixin_builder_scopes};
@@ -207,6 +218,7 @@ use accessors::{
     extract_modern_accessor_type, is_legacy_accessor, is_legacy_mutator, is_modern_accessor,
     legacy_accessor_property_name, legacy_mutator_property_name,
 };
+pub(crate) use magic_uses::{MagicMemberKind, declaring_method_names};
 pub(crate) use where_property::where_property_method_to_column;
 
 pub(crate) use pivots::{LaravelPivotIndex, build_pivot_index, inject_pivot};
@@ -216,7 +228,7 @@ pub(crate) use relationships::count_property_to_relationship_method;
 pub use relationships::infer_relationship_from_body;
 pub(crate) use relationships::{
     RELATION_QUERY_METHODS, related_model_type, resolve_relation_chain,
-    resolve_relation_chain_details,
+    resolve_relation_chain_details, resolve_relation_type,
 };
 use relationships::{
     RelationshipKind, build_property_type, count_property_name, extract_pivot_accessor_typed,
@@ -224,7 +236,7 @@ use relationships::{
 };
 pub(crate) use relationships::{
     class_declares_pivot_relationship, extract_pivot_accessor, extract_pivot_using,
-    extract_with_pivot_columns,
+    extract_with_pivot_columns, source_may_declare_pivot_relationship,
 };
 
 pub use scopes::build_scope_methods_for_builder;
@@ -234,10 +246,13 @@ use where_property::{build_where_property_methods_for_class, lowercase_method_na
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::inheritance::ancestors;
 use builder::build_builder_forwarded_methods;
-pub(crate) use builder::model_builder_type;
+pub(crate) use builder::{custom_builder_fqn, model_builder_type};
 use casts::cast_type_to_php_type;
+pub(crate) use casts::qualify_cast_type;
 pub use facade::LaravelFacadeProvider;
+pub(crate) use facade::facade_concrete_class;
 pub use factory::LaravelFactoryProvider;
 pub(crate) use factory::{
     factory_model_type, is_factory_class, is_has_factory_trait, model_to_factory_fqn,
@@ -251,7 +266,7 @@ use crate::atom::{AtomSet, ascii_lowercase_atom};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     AttributeDefaultSource, ClassInfo, DatabaseColumnSource, ELOQUENT_COLLECTION_FQN,
-    MAX_INHERITANCE_DEPTH, PivotAccessor, PropertyInfo, PropertySource,
+    PivotAccessor, PropertyInfo, PropertySource,
 };
 
 use super::resolve::resolve_class_base_cached;
@@ -261,8 +276,25 @@ use database_schema::SchemaTable;
 /// The fully-qualified name of the Eloquent base model.
 pub(crate) const ELOQUENT_MODEL_FQN: &str = "Illuminate\\Database\\Eloquent\\Model";
 
+/// The fully-qualified name of Laravel's `SoftDeletes` trait.
+const SOFT_DELETES_FQN: &str = "Illuminate\\Database\\Eloquent\\SoftDeletes";
+
+/// Whether a `used_traits` entry names Laravel's `SoftDeletes` trait.
+///
+/// `used_traits` may hold the FQN or the imported short name, so all three
+/// forms match, mirroring the established `class_uses_conditionable`
+/// detector.
+pub(crate) fn is_soft_deletes_trait(name: &str) -> bool {
+    name == SOFT_DELETES_FQN || name == "SoftDeletes" || name.ends_with("\\SoftDeletes")
+}
+
 /// The fully-qualified name of the Eloquent Builder class.
 pub const ELOQUENT_BUILDER_FQN: &str = "Illuminate\\Database\\Eloquent\\Builder";
+
+/// The fully-qualified name of the Eloquent relation base class, which
+/// every relationship the framework ships extends.
+pub(crate) const ELOQUENT_RELATION_FQN: &str =
+    "Illuminate\\Database\\Eloquent\\Relations\\Relation";
 
 /// The fully-qualified name of Laravel's concrete Carbon subclass, which
 /// the `now()` and `today()` helpers actually instantiate.
@@ -311,12 +343,11 @@ pub(super) fn self_ref_subs(ty: PhpType) -> HashMap<String, PhpType> {
 
 // ─── Type-resolution helpers ────────────────────────────────────────────────
 //
-// Called from `type_engine/types/resolution.rs`
-// (`type_hint_to_classes_typed_depth`) and the call/return-type resolvers
-// under `type_engine/` to apply Eloquent-specific post-processing after a
-// class has been resolved and generic substitution applied.  Keeping the
-// framework logic here rather than inline in the generic resolver avoids
-// coupling the type engine to Laravel conventions.
+// Called from the call/return-type resolvers under `type_engine/` to apply
+// Eloquent-specific post-processing after a class has been resolved and
+// generic substitution applied.  Keeping the framework logic here rather
+// than inline in the generic resolver avoids coupling the type engine to
+// Laravel conventions.
 
 /// Swap a resolved Eloquent Collection to a model's custom collection.
 ///
@@ -333,7 +364,14 @@ pub(super) fn self_ref_subs(ty: PhpType) -> HashMap<String, PhpType> {
 /// where `TModel` has been substituted to the concrete model and the
 /// model declares a custom collection like `ProductCollection`.
 ///
-/// Returns `None` when the class is not the Eloquent Collection, has no
+/// Only called for a *returned* type hint (a method's return type, never
+/// a parameter/property/`@var` hint): a value the caller merely declares
+/// as the base collection may be one it built itself, so treating it as
+/// the custom subclass there would be an over-claim.  A collection is
+/// only known to be the custom one when Eloquent actually produced it,
+/// which is what a return position proves.
+///
+/// Returns `cls` unchanged when it is not the Eloquent Collection, has no
 /// generic args, or the model does not declare a custom collection.
 pub(crate) fn try_swap_custom_collection(
     cls: ClassInfo,
@@ -388,6 +426,12 @@ pub(crate) fn try_swap_custom_collection(
 /// keeps `<model>`, and a non-generic subclass (the common
 /// `@extends Collection<int, Model>` shape) becomes a bare class name.
 ///
+/// Only a collection Laravel *produces* is rewritten: the type itself when
+/// it is a return, and the parameters of a callback it hands one to.  A
+/// callback's own return is something the caller has to produce, so the
+/// declared base type stands there, as it does for a parameter (see
+/// [`replace_eloquent_collections_in_param_type`]).
+///
 /// Returns `None` when nothing was rewritten, so callers on the hot path
 /// keep their existing type without allocating a copy.
 pub(crate) fn replace_eloquent_collections_in_type(
@@ -397,7 +441,24 @@ pub(crate) fn replace_eloquent_collections_in_type(
     if !mentions_eloquent_collection(ty) {
         return None;
     }
-    rewrite_eloquent_collections(ty, class_loader)
+    rewrite_eloquent_collections(ty, true, class_loader)
+}
+
+/// [`replace_eloquent_collections_in_type`] for a parameter type.
+///
+/// A parameter is a demand on the caller, and narrowing it to the custom
+/// collection would reject a plain `Collection<int, Customer>` the code
+/// built itself.  What the callee hands back through it is produced, so
+/// only a callback's parameters are rewritten:
+/// `chunk(100, fn (CustomerCollection $c) => …)`.
+pub(crate) fn replace_eloquent_collections_in_param_type(
+    ty: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    if !mentions_eloquent_collection(ty) {
+        return None;
+    }
+    rewrite_eloquent_collections(ty, false, class_loader)
 }
 
 /// Cheap pre-check for [`replace_eloquent_collections_in_type`].
@@ -405,7 +466,7 @@ pub(crate) fn replace_eloquent_collections_in_type(
 /// Walking the tree twice is still cheaper than cloning it: the vast
 /// majority of return types never name the Eloquent collection, and this
 /// pass allocates nothing.
-fn mentions_eloquent_collection(ty: &PhpType) -> bool {
+pub(super) fn mentions_eloquent_collection(ty: &PhpType) -> bool {
     match ty.kind() {
         TypeKind::Generic(g) => {
             is_eloquent_collection_name(&g.name) || g.args.iter().any(mentions_eloquent_collection)
@@ -414,6 +475,16 @@ fn mentions_eloquent_collection(ty: &PhpType) -> bool {
             members.iter().any(mentions_eloquent_collection)
         }
         TypeKind::Nullable(inner) | TypeKind::Array(inner) => mentions_eloquent_collection(inner),
+        TypeKind::Callable(callable) => {
+            callable
+                .params
+                .iter()
+                .any(|p| mentions_eloquent_collection(&p.type_hint))
+                || callable
+                    .return_type
+                    .as_ref()
+                    .is_some_and(mentions_eloquent_collection)
+        }
         _ => false,
     }
 }
@@ -422,33 +493,66 @@ fn is_eloquent_collection_name(name: &str) -> bool {
     name.trim_start_matches('\\') == ELOQUENT_COLLECTION_FQN
 }
 
+/// Rewrite the Eloquent collections in `ty`, swapping only those in a
+/// produced position.  `produced` flips at each callable's parameter list,
+/// since a callback's parameters are produced by whoever calls it.
 fn rewrite_eloquent_collections(
     ty: &PhpType,
+    produced: bool,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
     match ty.kind() {
         TypeKind::Generic(g) if is_eloquent_collection_name(&g.name) => {
+            if !produced {
+                return None;
+            }
             let model = g.args.last()?.base_name()?;
             let collection = custom_collection_for_model(model, class_loader)?;
             Some(collection_type_for(&collection, &g.args, class_loader))
         }
         TypeKind::Generic(g) => {
-            let args = rewrite_members(&g.args, class_loader)?;
+            let args = rewrite_members(&g.args, produced, class_loader)?;
             Some(PhpType::generic_atom(g.name, args))
         }
-        TypeKind::Union(members) => Some(PhpType::union(rewrite_members(members, class_loader)?)),
+        TypeKind::Union(members) => Some(PhpType::union(rewrite_members(
+            members,
+            produced,
+            class_loader,
+        )?)),
         TypeKind::Intersection(members) => Some(PhpType::intersection(rewrite_members(
             members,
+            produced,
             class_loader,
         )?)),
         TypeKind::Nullable(inner) => Some(PhpType::nullable(rewrite_eloquent_collections(
             inner,
+            produced,
             class_loader,
         )?)),
         TypeKind::Array(inner) => Some(PhpType::array_of(rewrite_eloquent_collections(
             inner,
+            produced,
             class_loader,
         )?)),
+        TypeKind::Callable(callable) => {
+            let mut rewritten = (**callable).clone();
+            let mut changed = false;
+            for param in &mut rewritten.params {
+                if let Some(new) =
+                    rewrite_eloquent_collections(&param.type_hint, !produced, class_loader)
+                {
+                    param.type_hint = new;
+                    changed = true;
+                }
+            }
+            if let Some(ret) = &rewritten.return_type
+                && let Some(new) = rewrite_eloquent_collections(ret, produced, class_loader)
+            {
+                rewritten.return_type = Some(new);
+                changed = true;
+            }
+            changed.then(|| TypeKind::Callable(Box::new(rewritten)).into())
+        }
         _ => None,
     }
 }
@@ -456,18 +560,21 @@ fn rewrite_eloquent_collections(
 /// Rewrite a list of type members, returning `None` when none changed.
 fn rewrite_members(
     members: &[PhpType],
+    produced: bool,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Vec<PhpType>> {
     let mut changed = false;
     let rewritten: Vec<PhpType> = members
         .iter()
-        .map(|m| match rewrite_eloquent_collections(m, class_loader) {
-            Some(new) => {
-                changed = true;
-                new
-            }
-            None => m.clone(),
-        })
+        .map(
+            |m| match rewrite_eloquent_collections(m, produced, class_loader) {
+                Some(new) => {
+                    changed = true;
+                    new
+                }
+                None => m.clone(),
+            },
+        )
         .collect();
     changed.then_some(rewritten)
 }
@@ -482,14 +589,16 @@ fn custom_collection_for_model(
     model: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
-    let mut current = class_loader(model)?;
-    for _ in 0..MAX_INHERITANCE_DEPTH {
-        if let Some(collection) = current.laravel().and_then(|l| l.custom_collection.as_ref()) {
-            return collection.base_name().map(str::to_owned);
-        }
-        current = class_loader(current.parent_class.as_ref()?)?;
-    }
-    None
+    let declared = |candidate: &ClassInfo| {
+        candidate
+            .laravel()
+            .and_then(|l| l.custom_collection.as_ref())
+            .and_then(|collection| collection.base_name())
+            .map(str::to_owned)
+    };
+    let model_class = class_loader(model)?;
+    declared(&model_class)
+        .or_else(|| ancestors(&model_class, class_loader).find_map(|(_, parent)| declared(&parent)))
 }
 
 /// Build the replacement type for a custom collection class, matching its
@@ -513,6 +622,258 @@ fn collection_type_for(
     }
 }
 
+/// Replace every model operator in `ty` — `builder-of<Model>`,
+/// `collection-of<Model>`, `factory-of<Model>`, `relation-of<Model, 'path'>`
+/// — with the class it names, wherever in the type it appears.
+///
+/// Each operator is resolved as far as the project allows: a model's own
+/// builder, collection, or factory when it declares one, the model a
+/// relation path ends on, and the framework's base class otherwise (see
+/// [`model_type_fallback`]).  A union of models becomes a union of their
+/// classes, resolved model by model, so one member falling back never costs
+/// the others their concrete class.
+///
+/// Types holding no operator are returned as they were, which
+/// [`has_model_type_operator`] makes cheap enough to ask on every type.
+pub(crate) fn expand_model_type(
+    ty: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> PhpType {
+    if !has_model_type_operator(ty) {
+        return ty.clone();
+    }
+    if let TypeKind::Generic(g) = ty.kind()
+        && matches!(
+            g.name.as_str(),
+            "builder-of" | "collection-of" | "factory-of" | "relation-of"
+        )
+    {
+        let (model, key) = if g.name == "collection-of" && g.args.len() == 2 {
+            (&g.args[1], Some(&g.args[0]))
+        } else if let Some(model) = g.args.first() {
+            (model, None)
+        } else {
+            return model_type_fallback(&g.name, None, None);
+        };
+        if g.name == "relation-of" && g.args.len() != 2 {
+            return model_type_fallback(&g.name, None, None);
+        }
+        let models: &[PhpType] = match model.kind() {
+            TypeKind::Union(members) => members,
+            _ => std::slice::from_ref(model),
+        };
+        let mut resolved = Vec::with_capacity(models.len());
+        for model in models {
+            let model_name = model.base_name().or_else(|| match model.kind() {
+                TypeKind::Intersection(members) => members.iter().find_map(|member| {
+                    let name = member.base_name()?;
+                    let cls = class_loader(name)?;
+                    extends_eloquent_model(&cls, class_loader).then_some(name)
+                }),
+                _ => None,
+            });
+            let model_class = model_name.and_then(class_loader).filter(|class| {
+                crate::virtual_members::laravel::extends_eloquent_model(class, class_loader)
+            });
+            let Some(model_class) = model_class else {
+                resolved.push(model_type_fallback(&g.name, None, key));
+                continue;
+            };
+            let concrete = match g.name.as_str() {
+                "builder-of" => {
+                    let relations: &[PhpType] = match g.args.get(1).map(PhpType::kind) {
+                        Some(TypeKind::Union(names)) => names,
+                        _ => g.args.get(1).map(std::slice::from_ref).unwrap_or(&[]),
+                    };
+                    let targets: Vec<_> = relations
+                        .iter()
+                        .filter_map(|relation| {
+                            let path = relation.as_literal()?.string_content()?;
+                            let fqn = resolve_relation_chain(
+                                &model_class,
+                                &path,
+                                class_loader,
+                                crate::virtual_members::active_resolved_class_cache(),
+                            )?;
+                            class_loader(&fqn)
+                        })
+                        .collect();
+                    let targets: Vec<_> = if targets.is_empty() {
+                        vec![Arc::clone(&model_class)]
+                    } else {
+                        targets
+                    };
+                    PhpType::union(
+                        targets
+                            .iter()
+                            .map(|target| {
+                                let builder = custom_builder_fqn(target, class_loader)
+                                    .filter(|name| class_loader(name).is_some())
+                                    .unwrap_or_else(|| ELOQUENT_BUILDER_FQN.to_string());
+                                let target_model = if target.fqn() == model_class.fqn() {
+                                    model.clone()
+                                } else {
+                                    PhpType::named(atom(&target.fqn()))
+                                };
+                                PhpType::generic(builder, vec![target_model])
+                            })
+                            .collect(),
+                    )
+                }
+                "collection-of" => {
+                    let args = [
+                        key.cloned().unwrap_or_else(|| {
+                            PhpType::union(vec![PhpType::int(), PhpType::string()])
+                        }),
+                        model.clone(),
+                    ];
+                    if let Some(collection) =
+                        custom_collection_for_model(&model_class.fqn(), class_loader)
+                            .filter(|name| class_loader(name).is_some())
+                    {
+                        collection_type_for(&collection, &args, class_loader)
+                    } else {
+                        PhpType::generic(ELOQUENT_COLLECTION_FQN, args.to_vec())
+                    }
+                }
+                "factory-of" => factory::factory_for_model(&model_class, class_loader),
+                "relation-of" => {
+                    let relations: &[PhpType] = match g.args[1].kind() {
+                        TypeKind::Union(names) => names,
+                        _ => std::slice::from_ref(&g.args[1]),
+                    };
+                    let resolved: Vec<PhpType> = relations
+                        .iter()
+                        .filter_map(|relation| {
+                            let path = relation.as_literal()?.string_content()?;
+                            resolve_relation_type(
+                                &model_class,
+                                &path,
+                                class_loader,
+                                crate::virtual_members::active_resolved_class_cache(),
+                            )
+                        })
+                        .collect();
+                    if resolved.is_empty() {
+                        model_type_fallback(&g.name, Some(model), key)
+                    } else {
+                        PhpType::union(resolved)
+                    }
+                }
+                _ => unreachable!(),
+            };
+            resolved.push(concrete);
+        }
+        return PhpType::union(resolved);
+    }
+    match ty.kind() {
+        TypeKind::Generic(_)
+        | TypeKind::Union(_)
+        | TypeKind::Intersection(_)
+        | TypeKind::Nullable(_)
+        | TypeKind::Array(_)
+        | TypeKind::ArrayShape(_)
+        | TypeKind::ObjectShape(_)
+        | TypeKind::Callable(_)
+        | TypeKind::Conditional(_)
+        | TypeKind::ClassString(_)
+        | TypeKind::InterfaceString(_)
+        | TypeKind::KeyOf(_)
+        | TypeKind::ValueOf(_)
+        | TypeKind::IndexAccess(..) => {
+            ty.map_children(&|child| expand_model_type(child, class_loader))
+        }
+        _ => ty.clone(),
+    }
+}
+
+/// The framework's own class for a model operator whose subject could not
+/// be pinned down: the model does not resolve, does not extend Eloquent's
+/// `Model`, or the relation path names nothing.
+///
+/// Answering with the base class rather than leaving the pseudo-type
+/// standing is what keeps such a value usable: `builder-of<Whatever>` that
+/// resolves to nothing types the subject as nothing at all, where
+/// `Builder<Model>` still carries every method the framework declares.  It
+/// is also the same answer Laravel's own annotations give where they cannot
+/// be more specific.
+///
+/// `model` is the model the operator named, when that much is known — a
+/// relation path that fails to resolve still leaves the declaring model
+/// settled — and `key` the key type a `collection-of` was written with.
+fn model_type_fallback(kind: &str, model: Option<&PhpType>, key: Option<&PhpType>) -> PhpType {
+    let model = model
+        .cloned()
+        .unwrap_or_else(|| PhpType::named(atom(ELOQUENT_MODEL_FQN)));
+    match kind {
+        "builder-of" => PhpType::generic(ELOQUENT_BUILDER_FQN, vec![model]),
+        "collection-of" => PhpType::generic(
+            ELOQUENT_COLLECTION_FQN,
+            vec![
+                key.cloned()
+                    .unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::string()])),
+                model,
+            ],
+        ),
+        "factory-of" => PhpType::generic(factory::FACTORY_FQN, vec![model]),
+        // `Relation<TRelatedModel, TDeclaringModel, TResult>`: the related
+        // model is what a failed path lost, so only the declaring one is
+        // filled in.
+        "relation-of" => PhpType::generic(
+            ELOQUENT_RELATION_FQN,
+            vec![
+                PhpType::named(atom(ELOQUENT_MODEL_FQN)),
+                model,
+                PhpType::mixed(),
+            ],
+        ),
+        _ => unreachable!("every model operator has a base class"),
+    }
+}
+
+/// Whether a model operator appears anywhere in `ty`.
+///
+/// Allocation-free guard for [`expand_model_type`], which clones as it
+/// rewrites: almost no type names one of these operators, and walking the
+/// tree twice is far cheaper than copying it once.
+pub(crate) fn has_model_type_operator(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Generic(g) => {
+            matches!(
+                g.name.as_str(),
+                "builder-of" | "collection-of" | "factory-of" | "relation-of"
+            ) || g.args.iter().any(has_model_type_operator)
+        }
+        TypeKind::Union(members) | TypeKind::Intersection(members) => {
+            members.iter().any(has_model_type_operator)
+        }
+        TypeKind::Nullable(inner)
+        | TypeKind::Array(inner)
+        | TypeKind::ClassString(Some(inner))
+        | TypeKind::InterfaceString(Some(inner))
+        | TypeKind::KeyOf(inner)
+        | TypeKind::ValueOf(inner) => has_model_type_operator(inner),
+        TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => entries
+            .iter()
+            .any(|entry| has_model_type_operator(&entry.value_type)),
+        TypeKind::Callable(c) => {
+            c.params
+                .iter()
+                .any(|p| has_model_type_operator(&p.type_hint))
+                || c.return_type.as_ref().is_some_and(has_model_type_operator)
+        }
+        TypeKind::Conditional(c) => {
+            has_model_type_operator(&c.condition)
+                || has_model_type_operator(&c.then_type)
+                || has_model_type_operator(&c.else_type)
+        }
+        TypeKind::IndexAccess(base, key) => {
+            has_model_type_operator(base) || has_model_type_operator(key)
+        }
+        _ => false,
+    }
+}
+
 /// Virtual member provider for Laravel Eloquent models.
 ///
 /// When a class extends `Illuminate\Database\Eloquent\Model` (directly
@@ -530,6 +891,14 @@ pub struct LaravelModelProvider;
 /// Laravel date type used for date-related virtual properties.
 fn carbon_type() -> PhpType {
     PhpType::named(atom(CONFIGURED_DATE_CLASS_FQN))
+}
+
+/// The column `SoftDeletes` casts to a date, when the model uses the trait:
+/// `DELETED_AT`, defaulting to `deleted_at`.
+pub(crate) fn soft_delete_column(laravel: &crate::types::LaravelMetadata) -> Option<&str> {
+    laravel
+        .soft_deletes
+        .then(|| laravel.deleted_at_name.as_deref().unwrap_or("deleted_at"))
 }
 
 fn timestamp_columns(laravel: &crate::types::LaravelMetadata) -> Vec<String> {
@@ -790,6 +1159,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
             }
 
             let timestamp_columns = timestamp_columns(laravel);
+            let soft_delete_column = soft_delete_column(laravel);
 
             if let Some(schema_table) = &schema_table {
                 for column in &schema_table.columns {
@@ -798,6 +1168,8 @@ impl VirtualMemberProvider for LaravelModelProvider {
                     }
                     let php_type = if timestamp_columns.contains(&column.name) {
                         carbon_type()
+                    } else if soft_delete_column == Some(column.name.as_str()) {
+                        PhpType::nullable(carbon_type())
                     } else {
                         column.php_type.clone()
                     };
@@ -831,7 +1203,10 @@ impl VirtualMemberProvider for LaravelModelProvider {
             if !laravel.has_get_key_name_method {
                 let primary_key = laravel.primary_key.as_deref().unwrap_or("id");
                 if seen_props.insert(primary_key.to_string()) {
-                    let php_type = if laravel.key_type.as_deref() == Some("string") {
+                    let php_type = if laravel.key_type.as_deref() == Some("string")
+                        || (unique_ids::uses_unique_string_ids(class, class_loader)
+                            && unique_ids::unique_ids_include(class, primary_key, class_loader))
+                    {
                         PhpType::string()
                     } else {
                         PhpType::int()
@@ -855,6 +1230,18 @@ impl VirtualMemberProvider for LaravelModelProvider {
                         Some(&carbon_type()),
                     ));
                 }
+            }
+
+            // ── Soft-delete column ──────────────────────────────────
+            // `SoftDeletes` casts its column to a date, which is null
+            // until the model is trashed.
+            if let Some(column) = soft_delete_column
+                && seen_props.insert(column.to_string())
+            {
+                properties.push(PropertyInfo::virtual_property_typed(
+                    column,
+                    Some(&PhpType::nullable(carbon_type())),
+                ));
             }
 
             // ── Column name properties (last-resort fallback) ───────
@@ -909,6 +1296,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                     &mut properties,
                     PropertyInfo {
                         deprecation_message: method.deprecation_message.clone(),
+                        description: method.description.clone(),
                         source: Some(source),
                         ..PropertyInfo::virtual_property_typed(
                             &prop_name,
@@ -940,6 +1328,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                     &mut properties,
                     PropertyInfo {
                         deprecation_message: method.deprecation_message.clone(),
+                        description: method.description.clone(),
                         source: Some(source),
                         ..PropertyInfo::virtual_property_typed(&prop_name, Some(&accessor_type))
                     },
@@ -1015,6 +1404,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                         pivot_using,
                         pivot_columns,
                     }),
+                    description: method.description.clone(),
                     ..PropertyInfo::virtual_property_typed(&method.name, Some(th))
                 });
             }

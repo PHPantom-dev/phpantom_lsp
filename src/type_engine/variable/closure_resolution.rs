@@ -100,6 +100,19 @@ use crate::types::{AccessKind, ClassInfo, FunctionInfo, MethodInfo, ResolvedType
 /// `@param-closure-this` PHPDoc tag declares what `$this` should
 /// resolve to.
 pub(crate) fn find_closure_this_override(ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
+    find_closure_this_types(ctx)?
+        .into_iter()
+        .find_map(|rt| rt.class_info)
+        .map(Arc::unwrap_or_clone)
+}
+
+/// What `$this` is bound to inside the closure at the cursor, when a call
+/// rebinds it: a `@param-closure-this` parameter the closure is passed to,
+/// or `Closure::call()` invoked on the closure itself.
+///
+/// Unlike [`find_closure_this_override`] this keeps the whole type, so an
+/// object narrowed to an intersection before `->call($obj)` stays one.
+pub(crate) fn find_closure_this_types(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>> {
     let _guard = ClosureThisGuard::enter(ctx)?;
 
     with_parsed_program(ctx.content, "find_closure_this_override", |program, _| {
@@ -115,7 +128,10 @@ pub(crate) fn find_closure_this_override(ctx: &ResolutionCtx<'_>) -> Option<Clas
 /// Recursively walk a statement looking for a closure argument that
 /// contains the cursor and whose receiving parameter has
 /// `closure_this_type`.
-fn walk_stmt_for_closure_this(stmt: &Statement<'_>, ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
+fn walk_stmt_for_closure_this(
+    stmt: &Statement<'_>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
     let sp = stmt.span();
     if ctx.cursor_offset < sp.start.offset || ctx.cursor_offset > sp.end.offset {
         return None;
@@ -250,7 +266,10 @@ fn walk_stmt_for_closure_this(stmt: &Statement<'_>, ctx: &ResolutionCtx<'_>) -> 
 
 /// Walk an expression looking for a call whose closure argument
 /// contains the cursor and whose parameter has `closure_this_type`.
-fn walk_expr_for_closure_this(expr: &Expression<'_>, ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
+fn walk_expr_for_closure_this(
+    expr: &Expression<'_>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
     let sp = expr.span();
     if ctx.cursor_offset < sp.start.offset || ctx.cursor_offset > sp.end.offset {
         return None;
@@ -351,20 +370,14 @@ fn walk_expr_for_closure_this(expr: &Expression<'_>, ctx: &ResolutionCtx<'_>) ->
 /// Walk a call expression, checking each closure/arrow-function argument
 /// to see if the cursor is inside it and the target parameter has
 /// `closure_this_type`.
-fn walk_call_for_closure_this(call: &Call<'_>, ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
+fn walk_call_for_closure_this(
+    call: &Call<'_>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
     match call {
         Call::Function(fc) => {
-            let func_name = match fc.function {
-                Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-                _ => None,
-            };
-            let func_name_offset = fc.function.span().start.offset;
             let result = walk_args_for_closure_this(&fc.argument_list.arguments, ctx, &|arg_idx| {
-                let name = func_name.as_deref()?;
-                let fi = ctx
-                    .function_loader
-                    .and_then(|fl| fl(name, func_name_offset))?;
-                closure_this_from_function_params(&fi, arg_idx, ctx)
+                closure_this_for_argument(call, arg_idx, ctx)
             });
             if result.is_some() {
                 return result;
@@ -381,25 +394,17 @@ fn walk_call_for_closure_this(call: &Call<'_>, ctx: &ResolutionCtx<'_>) -> Optio
             None
         }
         Call::Method(mc) => {
+            if let Some(r) = closure_call_this(mc, ctx) {
+                return Some(r);
+            }
             if let Some(r) = walk_expr_for_closure_this(mc.object, ctx) {
                 return Some(r);
             }
-            if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
-                let method_name = bytes_to_str(ident.value).to_string();
-                let obj_span = mc.object.span();
-                let result =
-                    walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
-                        closure_this_from_receiver(
-                            obj_span.start.offset,
-                            obj_span.end.offset,
-                            &method_name,
-                            arg_idx,
-                            ctx,
-                        )
-                    });
-                if result.is_some() {
-                    return result;
-                }
+            let result = walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
+                closure_this_for_argument(call, arg_idx, ctx)
+            });
+            if result.is_some() {
+                return result;
             }
             for arg in mc.argument_list.arguments.iter() {
                 let arg_expr = arg.value();
@@ -415,22 +420,11 @@ fn walk_call_for_closure_this(call: &Call<'_>, ctx: &ResolutionCtx<'_>) -> Optio
             if let Some(r) = walk_expr_for_closure_this(mc.object, ctx) {
                 return Some(r);
             }
-            if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
-                let method_name = bytes_to_str(ident.value).to_string();
-                let obj_span = mc.object.span();
-                let result =
-                    walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
-                        closure_this_from_receiver(
-                            obj_span.start.offset,
-                            obj_span.end.offset,
-                            &method_name,
-                            arg_idx,
-                            ctx,
-                        )
-                    });
-                if result.is_some() {
-                    return result;
-                }
+            let result = walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
+                closure_this_for_argument(call, arg_idx, ctx)
+            });
+            if result.is_some() {
+                return result;
             }
             for arg in mc.argument_list.arguments.iter() {
                 let arg_expr = arg.value();
@@ -446,15 +440,11 @@ fn walk_call_for_closure_this(call: &Call<'_>, ctx: &ResolutionCtx<'_>) -> Optio
             if let Some(r) = walk_expr_for_closure_this(sc.class, ctx) {
                 return Some(r);
             }
-            if let ClassLikeMemberSelector::Identifier(ident) = &sc.method {
-                let method_name = bytes_to_str(ident.value).to_string();
-                let result =
-                    walk_args_for_closure_this(&sc.argument_list.arguments, ctx, &|arg_idx| {
-                        closure_this_from_static_receiver(sc.class, &method_name, arg_idx, ctx)
-                    });
-                if result.is_some() {
-                    return result;
-                }
+            let result = walk_args_for_closure_this(&sc.argument_list.arguments, ctx, &|arg_idx| {
+                closure_this_for_argument(call, arg_idx, ctx)
+            });
+            if result.is_some() {
+                return result;
             }
             for arg in sc.argument_list.arguments.iter() {
                 let arg_expr = arg.value();
@@ -467,6 +457,91 @@ fn walk_call_for_closure_this(call: &Call<'_>, ctx: &ResolutionCtx<'_>) -> Optio
             None
         }
     }
+}
+
+/// What `$this` is bound to inside a closure passed as argument `arg_idx`
+/// of `call`, when the parameter receiving it carries
+/// `@param-closure-this`.
+pub(crate) fn closure_this_for_argument(
+    call: &Call<'_>,
+    arg_idx: usize,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    fn method_name<'a>(selector: &ClassLikeMemberSelector<'a>) -> Option<&'a str> {
+        match selector {
+            ClassLikeMemberSelector::Identifier(ident) => Some(bytes_to_str(ident.value)),
+            _ => None,
+        }
+    }
+    let bound = match call {
+        Call::Function(fc) => {
+            let Expression::Identifier(ident) = fc.function else {
+                return None;
+            };
+            let fi = ctx
+                .function_loader
+                .and_then(|fl| fl(bytes_to_str(ident.value()), fc.function.span().start.offset))?;
+            closure_this_from_function_params(&fi, arg_idx, ctx)
+        }
+        Call::Method(MethodCall { object, method, .. })
+        | Call::NullSafeMethod(NullSafeMethodCall { object, method, .. }) => {
+            let obj_span = object.span();
+            closure_this_from_receiver(
+                obj_span.start.offset,
+                obj_span.end.offset,
+                method_name(method)?,
+                arg_idx,
+                ctx,
+            )
+        }
+        Call::StaticMethod(sc) => {
+            closure_this_from_static_receiver(sc.class, method_name(&sc.method)?, arg_idx, ctx)
+        }
+    }?;
+    Some(bound_this(bound))
+}
+
+/// `(function () { … })->call($obj)` runs the closure with `$this` bound
+/// to `$obj`.
+fn closure_call_this(mc: &MethodCall<'_>, ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>> {
+    let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
+        return None;
+    };
+    if !bytes_to_str(ident.value).eq_ignore_ascii_case("call") {
+        return None;
+    }
+    let closure = crate::parser::unwrap_parens(mc.object);
+    if !cursor_inside_closure_body(closure, ctx) {
+        return None;
+    }
+    if let Some(nested) = walk_closure_body_for_closure_this(closure, ctx) {
+        return Some(nested);
+    }
+    let new_this = mc.argument_list.arguments.first()?.value().span();
+    let types = resolve_receiver_types(new_this.start.offset, new_this.end.offset, ctx);
+    (!types.is_empty()).then_some(types)
+}
+
+/// Whether the cursor is inside the body of `expr`, a closure or arrow
+/// function literal.
+fn cursor_inside_closure_body(expr: &Expression<'_>, ctx: &ResolutionCtx<'_>) -> bool {
+    match expr {
+        Expression::Closure(closure) => {
+            let body_start = closure.body.left_brace.start.offset;
+            let body_end = closure.body.right_brace.end.offset;
+            ctx.cursor_offset >= body_start && ctx.cursor_offset <= body_end
+        }
+        Expression::ArrowFunction(arrow) => {
+            let arrow_body_span = arrow.expression.span();
+            ctx.cursor_offset >= arrow.arrow.start.offset
+                && ctx.cursor_offset <= arrow_body_span.end.offset
+        }
+        _ => false,
+    }
+}
+
+fn bound_this(cls: ClassInfo) -> Vec<ResolvedType> {
+    vec![ResolvedType::from_class(cls)]
 }
 
 fn is_closure_like(expr: &Expression<'_>) -> bool {
@@ -483,9 +558,9 @@ fn walk_args_for_closure_this<F>(
     arguments: &TokenSeparatedSequence<'_, Argument<'_>>,
     ctx: &ResolutionCtx<'_>,
     lookup_fn: &F,
-) -> Option<ClassInfo>
+) -> Option<Vec<ResolvedType>>
 where
-    F: Fn(usize) -> Option<ClassInfo>,
+    F: Fn(usize) -> Option<Vec<ResolvedType>>,
 {
     for (arg_idx, arg) in arguments.iter().enumerate() {
         let arg_expr = arg.value();
@@ -494,21 +569,7 @@ where
             continue;
         }
 
-        let cursor_inside_body = match arg_expr {
-            Expression::Closure(closure) => {
-                let body_start = closure.body.left_brace.start.offset;
-                let body_end = closure.body.right_brace.end.offset;
-                ctx.cursor_offset >= body_start && ctx.cursor_offset <= body_end
-            }
-            Expression::ArrowFunction(arrow) => {
-                let arrow_body_span = arrow.expression.span();
-                ctx.cursor_offset >= arrow.arrow.start.offset
-                    && ctx.cursor_offset <= arrow_body_span.end.offset
-            }
-            _ => false,
-        };
-
-        if cursor_inside_body {
+        if cursor_inside_closure_body(arg_expr, ctx) {
             if let Some(nested) = walk_closure_body_for_closure_this(arg_expr, ctx) {
                 return Some(nested);
             }
@@ -528,7 +589,7 @@ where
 fn walk_closure_body_for_closure_this(
     arg_expr: &Expression<'_>,
     ctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Vec<ResolvedType>> {
     match arg_expr {
         Expression::Closure(closure) => {
             for stmt in closure.body.statements.iter() {

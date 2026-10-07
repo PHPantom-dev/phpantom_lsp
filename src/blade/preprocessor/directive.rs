@@ -1,13 +1,11 @@
 use super::shared::{LineOut, Lowering, closes_args, flush_buffer};
 use super::{CapturedDirective, Mode};
-use crate::blade::directives::{
-    CUSTOM_MARKER, CustomDirectives, CustomForm, match_directive, translate_directive,
-};
+use crate::blade::directives::{BladeDirectives, CUSTOM_MARKER, CustomForm, translate_directive};
 
 /// An `@name` directive opening at the cursor.
 pub(super) fn open(
     remaining: &[char],
-    custom_directives: &CustomDirectives,
+    directives: &BladeDirectives,
     paren_depth: &mut i32,
     in_php_directive_block: &mut bool,
 ) -> Option<Lowering> {
@@ -17,7 +15,7 @@ pub(super) fn open(
 
     if remaining.starts_with(&['@']) {
         let rest_str: String = remaining[1..].iter().collect();
-        if let Some(directive) = match_directive(&rest_str) {
+        if let Some(directive) = directives.builtin(&rest_str) {
             match_len = 1 + directive.len();
             if directive == "php" {
                 let after_php = rest_str[3..].trim_start();
@@ -34,7 +32,11 @@ pub(super) fn open(
                 replacement = "".to_string();
                 next_mode = Mode::Html;
             } else if directive == "verbatim" {
-                replacement = "".to_string();
+                // Nothing in the block lowers to anything, so the directive
+                // keeps a column of its own: otherwise the start of its
+                // line would map back past it, into the block, and an
+                // import planned before it would land where it is inert.
+                replacement = " ".to_string();
                 next_mode = Mode::Verbatim;
             } else if directive == "empty" {
                 // @empty with parens = if(empty(...)):, without parens = forelse separator
@@ -76,9 +78,27 @@ pub(super) fn open(
             } else if matches!(directive, "foreach" | "forelse") {
                 replacement = format!(" {} ", translate_directive(directive));
                 next_mode = Mode::DirectiveArgs(
-                    ": /** @var object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object} $loop */ $loop = (object)[];",
+                    ": /** @var object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object}} $loop */ $loop = (object)[];",
                 );
                 *paren_depth = 0;
+            } else if matches!(directive, "break" | "continue") {
+                // Blade compiles `@break($cond)` to `if ($cond) break;`.
+                // Dropping the condition would make the jump read as
+                // unconditional, and everything after it in the loop
+                // body as dead.
+                let after_dir: String = rest_str[directive.len()..].chars().collect();
+                if after_dir.trim_start().starts_with('(') {
+                    replacement = " if ".to_string();
+                    next_mode = Mode::DirectiveArgs(if directive == "break" {
+                        " break;"
+                    } else {
+                        " continue;"
+                    });
+                    *paren_depth = 0;
+                } else {
+                    replacement = format!(" {directive}; ");
+                    next_mode = Mode::Html;
+                }
             } else if matches!(
                 directive,
                 "if" | "elseif" | "for" | "while" | "switch" | "case"
@@ -206,7 +226,6 @@ pub(super) fn open(
                     | "overwrite"
                     | "else"
                     | "default"
-                    | "break"
                     | "endauth"
                     | "endguest"
                     | "endproduction"
@@ -221,7 +240,6 @@ pub(super) fn open(
                     | "endPrependOnce"
                     | "csrf"
                     | "parent"
-                    | "continue"
                     | "endcan"
                     | "endcannot"
                     | "endcanany"
@@ -254,7 +272,7 @@ pub(super) fn open(
                 replacement = format!(" {}; ", translate_directive(directive));
                 next_mode = Mode::Php(false);
             }
-        } else if let Some((name, form)) = custom_directives.match_directive(&rest_str) {
+        } else if let Some((name, form)) = directives.custom(&rest_str) {
             // A directive one of the project's service providers
             // registered. Blade's own compiler checks its custom
             // table *before* its built-in directives, but a

@@ -573,6 +573,72 @@ async fn goto_definition_on_a_core_alias_offers_the_class_alone() {
     );
 }
 
+/// Two requests that arrive together must both resolve the key.
+///
+/// The alias tables are built on first use, and in a real session the
+/// requests that need them overlap constantly: the diagnostic pass walks the
+/// open file on the blocking pool while the editor's own hover and
+/// go-to-definition requests are in flight.  Whichever of them gets there
+/// first has to finish building before any of the others reads the tables,
+/// or the losers see a table that is still empty and report a bound key as
+/// bound to nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_requests_all_resolve_the_same_key() {
+    use std::sync::Arc;
+
+    let source = consumer_class("app('app')");
+    let mut files = base_files();
+    files.push(("src/Consumer.php", &source));
+
+    // A fresh workspace per round: the race is over the *first* build, so
+    // each round needs alias tables nothing has built yet.
+    for round in 0..8 {
+        let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+        let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+
+        backend.initialized(InitializedParams {}).await;
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: source.clone(),
+                },
+            })
+            .await;
+
+        let backend = Arc::new(backend);
+        let position = position_of(&source, "app');");
+        let request = || {
+            let backend = Arc::clone(&backend);
+            let uri = uri.clone();
+            async move {
+                backend
+                    .goto_definition(GotoDefinitionParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri },
+                            position,
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+
+        let (first, second, third) = tokio::join!(request(), request(), request());
+        for (index, response) in [first, second, third].into_iter().enumerate() {
+            assert!(
+                response.is_some(),
+                "round {round}, request {index}: the core alias should navigate \
+                 however many requests are in flight"
+            );
+        }
+    }
+}
+
 /// A key bound to a class the project does not actually have still navigates
 /// to the registration: that is where the mistake is.
 #[tokio::test]

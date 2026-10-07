@@ -150,14 +150,35 @@ impl Backend {
             .map(|classes| classes.iter().map(|c| ClassInfo::clone(c)).collect())
     }
 
-    /// The short names of the classes `uri` declares, for asking whether a
-    /// name is one of the file's own classes without cloning their bodies.
-    pub(crate) fn local_class_names(&self, uri: &str) -> HashSet<String> {
+    /// The classes `uri` declares, sharing the index's `Arc`s instead of
+    /// copying each body the way [`get_classes_for_uri`](Self::get_classes_for_uri)
+    /// does.  For the scanners that ask this of every candidate file.
+    pub(crate) fn shared_classes_for_uri(&self, uri: &str) -> Option<Vec<Arc<ClassInfo>>> {
+        self.symbols.uri_classes_index.read().get(uri).cloned()
+    }
+
+    /// The short names of the classes `uri` declares in `namespace`, for
+    /// asking whether a name written there is one of the file's own
+    /// classes without cloning their bodies.
+    ///
+    /// A file with several `namespace` blocks can declare a class in one
+    /// that a bare name in another does not reach, so the classes are
+    /// filtered to the namespace the name is written in.
+    pub(crate) fn local_class_names(&self, uri: &str, namespace: Option<&str>) -> HashSet<String> {
         self.symbols
             .uri_classes_index
             .read()
             .get(uri)
-            .map(|classes| classes.iter().map(|c| c.name.to_string()).collect())
+            .map(|classes| {
+                classes
+                    .iter()
+                    .filter(|c| match (c.file_namespace.as_deref(), namespace) {
+                        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                        (a, b) => a.is_none() && b.is_none(),
+                    })
+                    .map(|c| c.name.to_string())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -206,19 +227,19 @@ impl Backend {
     }
 
     /// Like [`file_context`](Self::file_context) but resolves the namespace
-    /// for the namespace block that contains `byte_offset`.
+    /// and imports of the namespace block that contains `byte_offset`.
     ///
     /// In single-namespace files this returns the same result as
     /// `file_context`.  In multi-namespace files it picks the correct
     /// namespace block for the cursor position.
     pub(crate) fn file_context_at(&self, uri: &str, byte_offset: u32) -> FileContext {
-        let mut ctx = self.file_context(uri);
+        let ctx = self.file_context(uri);
         // A file with only one namespace has nothing to pick between, so
-        // the namespace `file_context` already found stands.
-        if ctx.namespace_spans.is_some() {
-            ctx.namespace = self.namespace_at_offset(uri, byte_offset);
+        // the namespace and imports `file_context` already found stand.
+        if ctx.namespace_spans.is_none() {
+            return ctx;
         }
-        ctx
+        ctx.at(byte_offset)
     }
 
     /// Subset of [`file_context_at`](Self::file_context_at) for callers
@@ -249,6 +270,15 @@ impl Backend {
         uri: &str,
         byte_offset: u32,
     ) -> (HashMap<String, String>, Option<String>) {
+        {
+            let nmap = self.file_namespaces.read();
+            if let Some(spans) = nmap.get(uri)
+                && spans.len() > 1
+                && let Some(span) = NamespaceSpan::containing(spans, byte_offset)
+            {
+                return (span.use_map.clone(), span.namespace.clone());
+            }
+        }
         let use_map = self
             .file_imports
             .read()
@@ -315,6 +345,54 @@ impl Backend {
             .and_then(|s| s.namespace.clone())
     }
 
+    /// Each `namespace` block of a file with the imports it declares, for
+    /// consumers that read or write a file's `use` statements.
+    ///
+    /// PHP scopes an import to its block, so an edit that adds, checks,
+    /// or rewrites one has to work against the block the code it serves
+    /// is written in.  A file with a single block yields one entry with
+    /// the file-wide import table and no range.
+    pub(crate) fn import_blocks(&self, uri: &str) -> Vec<ImportBlock> {
+        {
+            let nmap = self.file_namespaces.read();
+            if let Some(spans) = nmap.get(uri)
+                && spans.len() > 1
+            {
+                return spans
+                    .iter()
+                    .map(|span| ImportBlock {
+                        namespace: span.namespace.clone(),
+                        use_map: span.use_map.clone(),
+                        range: Some((span.start as usize, span.end as usize)),
+                    })
+                    .collect();
+            }
+        }
+        vec![ImportBlock {
+            namespace: self.first_file_namespace(uri),
+            use_map: self.file_use_map(uri),
+            range: None,
+        }]
+    }
+
+    /// The [`import_blocks`](Self::import_blocks) entry for the block
+    /// containing `offset`.
+    pub(crate) fn import_block_at(&self, uri: &str, offset: usize) -> ImportBlock {
+        let mut blocks = self.import_blocks(uri);
+        let index = ImportBlock::index_at(&blocks, offset);
+        blocks.swap_remove(index)
+    }
+
+    /// The byte range of the block containing `offset`, as
+    /// [`import_block_at`](Self::import_block_at) would report it, without
+    /// copying any import table.
+    pub(crate) fn import_block_range_at(&self, uri: &str, offset: usize) -> Option<(usize, usize)> {
+        let nmap = self.file_namespaces.read();
+        let spans = nmap.get(uri).filter(|spans| spans.len() > 1)?;
+        NamespaceSpan::containing(spans, offset as u32)
+            .map(|span| (span.start as usize, span.end as usize))
+    }
+
     /// Return the import table (short name → FQN) for a file.
     ///
     /// Returns the legacy `use_map` which contains all *declared*
@@ -363,8 +441,12 @@ impl Backend {
     /// `resolved_names`, `file_namespaces`, `parse_errors`), plus the
     /// reference index.
     ///
-    /// Called from `did_close` to clean up state when a file is closed.
+    /// Called from `did_close` to clean up state when a file the workspace
+    /// index does not cover is closed.
     pub(crate) fn clear_file_maps(&self, uri: &str) {
+        self.laravel_string_key_cache
+            .write()
+            .invalidate_for_uri(uri, "");
         // uri_classes_index is redundant with fqn_class_index once indexing
         // is complete — GTD falls back to fqn_uri_index + parse_and_cache_file
         // when the uri_classes_index entry is missing.
@@ -389,11 +471,42 @@ impl Backend {
         self.blade_source_maps.write().remove(uri);
         self.blade_uris.write().remove(uri);
         self.blade_injected_vars.write().remove(uri);
+        // The config keys a file declares at runtime (`Config::set(...)`)
+        // are otherwise only refreshed when the file is re-parsed, which a
+        // deleted file never is.
+        self.laravel_runtime_config_keys.write().remove(uri);
         // NOTE: We intentionally keep fqn_uri_index and fqn_class_index intact.
         // fqn_uri_index maps FQN → URI so GTD can locate the file, and
         // fqn_class_index keeps the full ClassInfo for cross-file resolution.
         // The file will be re-parsed from disk on next access via
         // parse_and_cache_file when needed (issue #99).
+    }
+
+    /// The on-disk path of `uri` when it is a PHP file the workspace index
+    /// covers: inside the workspace root, outside the vendor directories,
+    /// not excluded by `[indexing] exclude`, and with a PHP extension.
+    ///
+    /// Such a file has to stay indexed after the editor closes it, since
+    /// the reference index and the reference-count lenses read it whether
+    /// or not it is open, and the completed workspace index is never walked
+    /// again to put it back.
+    pub(crate) fn workspace_index_path(&self, uri: &str) -> Option<std::path::PathBuf> {
+        let path = Url::parse(uri).ok()?.to_file_path().ok()?;
+        let root = self.workspace.workspace_root.read().clone()?;
+        if !path.starts_with(&root) {
+            return None;
+        }
+        if self
+            .workspace
+            .vendor_uri_prefixes
+            .lock()
+            .iter()
+            .any(|prefix| uri.starts_with(prefix.as_str()))
+        {
+            return None;
+        }
+        let filters = self.index_filters();
+        (filters.is_php_file(&path) && !filters.is_excluded_path(&path, false)).then_some(path)
     }
 }
 
@@ -425,10 +538,27 @@ impl std::ops::Deref for AnalysableContent<'_> {
 /// An offset past every block (code after the last closing brace) belongs
 /// to the last one.
 pub(crate) fn namespace_in_spans(spans: &[NamespaceSpan], byte_offset: u32) -> Option<&str> {
-    for span in spans {
-        if byte_offset >= span.start && byte_offset <= span.end {
-            return span.namespace.as_deref();
-        }
+    NamespaceSpan::containing(spans, byte_offset).and_then(|s| s.namespace.as_deref())
+}
+
+/// One `namespace` block's imports, from [`Backend::import_blocks`].
+pub(crate) struct ImportBlock {
+    /// The block's namespace, or `None` for the global namespace.
+    pub(crate) namespace: Option<String>,
+    /// The imports the block declares (alias → FQN).
+    pub(crate) use_map: HashMap<String, String>,
+    /// The block's byte range, or `None` when the file has only one
+    /// block and its imports apply to the whole file.
+    pub(crate) range: Option<(usize, usize)>,
+}
+
+impl ImportBlock {
+    /// The index of the block containing `offset`, or of the last block
+    /// for an offset past every block (e.g. code after its closing brace).
+    pub(crate) fn index_at(blocks: &[ImportBlock], offset: usize) -> usize {
+        blocks
+            .iter()
+            .position(|block| block.range.is_none_or(|(s, e)| offset >= s && offset <= e))
+            .unwrap_or(blocks.len().saturating_sub(1))
     }
-    spans.last().and_then(|s| s.namespace.as_deref())
 }

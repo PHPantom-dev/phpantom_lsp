@@ -30,6 +30,58 @@ pub(crate) fn extract_generic_arg_from_ancestor(
             .collect();
         return (!args.is_empty()).then(|| PhpType::union(args).simplified());
     }
+    project_generic_args_from_ancestor(arg_type, wrapper_name, class_loader, &|args, subs| {
+        args.get(tpl_position).map(|arg| {
+            if subs.is_empty() {
+                arg.clone()
+            } else {
+                arg.substitute(subs)
+            }
+        })
+    })
+}
+
+/// Every generic argument `arg_type` hands its `wrapper_name` ancestor, for
+/// a caller that picks the position itself (a single-argument hint names
+/// the last of several).
+pub(crate) fn extract_generic_args_from_ancestor(
+    arg_type: &PhpType,
+    wrapper_name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<Vec<PhpType>> {
+    if let TypeKind::Union(parts) = arg_type.kind() {
+        let mut alternatives = parts.iter().filter_map(|part| {
+            extract_generic_args_from_ancestor(part, wrapper_name, class_loader)
+        });
+        let mut args = alternatives.next()?;
+        for alternative in alternatives {
+            for (position, arg) in alternative.into_iter().enumerate() {
+                if let Some(existing) = args.get_mut(position) {
+                    if *existing != arg {
+                        *existing = PhpType::union(vec![existing.clone(), arg]).simplified();
+                    }
+                } else {
+                    args.push(arg);
+                }
+            }
+        }
+        return Some(args);
+    }
+    project_generic_args_from_ancestor(arg_type, wrapper_name, class_loader, &|args, subs| {
+        Some(if subs.is_empty() {
+            args.to_vec()
+        } else {
+            args.iter().map(|arg| arg.substitute(subs)).collect()
+        })
+    })
+}
+
+fn project_generic_args_from_ancestor<T>(
+    arg_type: &PhpType,
+    wrapper_name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    project: &impl Fn(&[PhpType], &HashMap<String, PhpType>) -> Option<T>,
+) -> Option<T> {
     let class_name = match arg_type.kind() {
         TypeKind::Named(n) => n.as_str(),
         TypeKind::Generic(g) => g.name.as_str(),
@@ -41,7 +93,7 @@ pub(crate) fn extract_generic_arg_from_ancestor(
     if let TypeKind::Generic(g) = arg_type.kind()
         && ancestor_name_matches(&g.name, wrapper_name)
     {
-        return g.args.get(tpl_position).cloned();
+        return project(&g.args, &HashMap::new());
     }
 
     let cls = class_loader(class_name)?;
@@ -51,13 +103,13 @@ pub(crate) fn extract_generic_arg_from_ancestor(
         _ => HashMap::new(),
     };
     let mut visited = Vec::new();
-    ancestor_generic_arg(
+    ancestor_generic_args(
         &cls,
         wrapper_name,
-        tpl_position,
         &subs,
         &mut visited,
         class_loader,
+        project,
     )
 }
 
@@ -66,8 +118,7 @@ pub(crate) fn extract_generic_arg_from_ancestor(
 /// loader hands back; the `visited` set is what actually bounds the work.
 const MAX_ANCESTOR_GENERIC_DEPTH: usize = 15;
 
-/// The type argument `target_name` receives at `position`, as seen from
-/// `cls`.
+/// Project the type arguments `target_name` receives, as seen from `cls`.
 ///
 /// Walks the parent chain **and** the interface list, threading each
 /// level's `@extends`/`@implements` arguments into the next, so a class
@@ -76,14 +127,14 @@ const MAX_ANCESTOR_GENERIC_DEPTH: usize = 15;
 /// `X implements CollectorWithPaths<never, array{…}>` together with
 /// `CollectorWithPaths extends Collector<TNodeType, TValue>` is what says
 /// `Collector`'s value argument is that `array{…}`.
-fn ancestor_generic_arg(
+fn ancestor_generic_args<T>(
     cls: &ClassInfo,
     target_name: &str,
-    position: usize,
     subs: &HashMap<String, PhpType>,
     visited: &mut Vec<crate::atom::Atom>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<PhpType> {
+    project: &impl Fn(&[PhpType], &HashMap<String, PhpType>) -> Option<T>,
+) -> Option<T> {
     if visited.len() > MAX_ANCESTOR_GENERIC_DEPTH {
         return None;
     }
@@ -93,12 +144,10 @@ fn ancestor_generic_arg(
     }
     visited.push(fqn);
 
-    if let Some(arg) = find_extends_generic_arg(cls, target_name, position) {
-        return Some(if subs.is_empty() {
-            arg
-        } else {
-            arg.substitute(subs)
-        });
+    if let Some(args) = find_extends_generic_args(cls, target_name)
+        && let Some(projected) = project(args, subs)
+    {
+        return Some(projected);
     }
 
     for ancestor_name in cls.parent_class.iter().chain(cls.interfaces.iter()) {
@@ -110,35 +159,31 @@ fn ancestor_generic_arg(
             &ancestor,
             subs,
         );
-        if let Some(arg) = ancestor_generic_arg(
+        if let Some(projected) = ancestor_generic_args(
             &ancestor,
             target_name,
-            position,
             &next_subs,
             visited,
             class_loader,
+            project,
         ) {
-            return Some(arg);
+            return Some(projected);
         }
     }
 
     None
 }
 
-/// Find a generic arg at `position` from a class's `@extends` generics
+/// Find the generic args from a class's `@extends`/`@implements` generics
 /// matching a qualified or unqualified ancestor name.
-fn find_extends_generic_arg(
-    cls: &ClassInfo,
-    target_name: &str,
-    position: usize,
-) -> Option<PhpType> {
+fn find_extends_generic_args<'c>(cls: &'c ClassInfo, target_name: &str) -> Option<&'c [PhpType]> {
     for (name, args) in cls
         .extends_generics
         .iter()
         .chain(cls.implements_generics.iter())
     {
         if ancestor_name_matches(name, target_name) {
-            return args.get(position).cloned();
+            return Some(args);
         }
     }
     None
@@ -186,6 +231,44 @@ mod tests {
                 &no_loader
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn projection_preserves_all_positions_and_qualified_names() {
+        assert_eq!(
+            extract_generic_args_from_ancestor(
+                &PhpType::parse(
+                    "Expected\\Container<int, Left>|expected\\Container<string, Right>|Other\\Container<bool, Ignored>|int",
+                ),
+                "\\Expected\\Container",
+                &no_loader,
+            ),
+            Some(vec![
+                PhpType::parse("int|string"),
+                PhpType::parse("Left|Right")
+            ]),
+        );
+
+        let mut child = make_class("Child");
+        child.template_params = vec![atom("T")];
+        child.interfaces = vec![atom("Values")];
+        child.implements_generics = vec![("Values".into(), vec![PhpType::parse("T")])];
+        let mut values = make_class("Values");
+        values.template_params = vec![atom("V")];
+        values.extends_generics = vec![(
+            "Expected\\Container".into(),
+            vec![PhpType::parse("int"), PhpType::parse("V")],
+        )];
+        let classes = [Arc::new(child), Arc::new(values)];
+        let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+        assert_eq!(
+            extract_generic_args_from_ancestor(
+                &PhpType::parse("Child<Item>"),
+                "Expected\\Container",
+                &loader,
+            ),
+            Some(vec![PhpType::parse("int"), PhpType::parse("Item")]),
         );
     }
 

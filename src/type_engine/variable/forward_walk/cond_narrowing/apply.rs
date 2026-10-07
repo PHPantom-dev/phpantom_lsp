@@ -7,6 +7,8 @@
 
 use super::*;
 
+use mago_syntax::cst::unary::UnaryPrefixOperator;
+
 /// Narrow a `match ($x::class)` subject to the classes one arm names.
 ///
 /// `match ($node::class) { ASTClass::class, ASTEnum::class => … }` proves
@@ -19,11 +21,16 @@ pub(crate) fn apply_class_match_arm_narrowing<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let classes: Vec<PhpType> = expr_arm
+    // The arm runs when any one condition matches, so a condition that
+    // names no class lets the subject in whatever its class.
+    let Some(classes) = expr_arm
         .conditions
         .iter()
-        .filter_map(|c| narrowing::class_match_condition_class(c))
-        .collect();
+        .map(|c| narrowing::class_match_condition_class(c))
+        .collect::<Option<Vec<PhpType>>>()
+    else {
+        return;
+    };
     if classes.is_empty() {
         return;
     }
@@ -80,6 +87,22 @@ impl Conjuncts {
     }
 }
 
+/// The operand of a `(bool)` cast, which a condition tests exactly as it
+/// would test the operand itself.
+fn bool_cast_operand<'b>(condition: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
+    match unwrap_parens(condition) {
+        Expression::UnaryPrefix(prefix)
+            if matches!(
+                prefix.operator,
+                UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..)
+            ) =>
+        {
+            Some(prefix.operand)
+        }
+        _ => None,
+    }
+}
+
 /// Apply condition-based narrowing (instanceof, null check, type guard)
 /// to the scope.  This narrows types for the "truthy" branch.
 pub(crate) fn apply_condition_narrowing<'b>(
@@ -91,6 +114,10 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // extractor looks at it.  The chain collectors fold each operand of an
     // `&&` / `||` the same way.
     let condition = narrowing::fold_negation_pairs(condition);
+    if let Some(operand) = bool_cast_operand(condition) {
+        apply_condition_narrowing(operand, scope, ctx);
+        return;
+    }
 
     // A `!` over a logical chain proves what the *inverse* pass proves
     // about the chain itself.
@@ -98,6 +125,8 @@ pub(crate) fn apply_condition_narrowing<'b>(
         apply_condition_narrowing_inverse(inner, scope, ctx);
         return;
     }
+
+    let entry_locals = scope.locals.clone();
 
     // Seed property access keys from conditions into the scope so that
     // narrowing functions can find and narrow them.
@@ -118,7 +147,15 @@ pub(crate) fn apply_condition_narrowing<'b>(
         .into_iter()
         .partition(|operand| collect_or_chain_operands(unwrap_parens(operand)).len() > 1);
 
-    let mut var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
+    // `check() === true` proves what `check()` does.
+    for operand in &operands {
+        apply_bool_comparison_narrowing(operand, true, scope, ctx);
+    }
+
+    let mut var_names: Vec<String> = scope_keys_named_by(condition, scope)
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
     // Include variables from instanceof conditions that may not be in
     // scope yet (e.g. undeclared variables used in instanceof checks).
     for name in collect_condition_var_names(condition) {
@@ -208,12 +245,17 @@ pub(crate) fn apply_condition_narrowing<'b>(
 
     // in_array($var, $haystack, true) narrowing.
     apply_in_array_narrowing(condition, scope, ctx, false);
+    apply_loose_in_array_narrowing(condition, scope, ctx, false);
 
     // property_exists($var, 'name') / method_exists($var, 'name') narrowing.
     apply_member_exists_narrowing(condition, scope, false);
 
     // array_key_exists('k', $arr) narrowing on an optional shape key.
     apply_array_key_exists_narrowing(condition, scope, ctx, false);
+
+    // `isset($arr[$k])` / `array_key_exists($k, $arr)` narrowing of `$k`
+    // to the keys the array holds.
+    apply_key_domain_narrowing(condition, scope, ctx);
 
     // `if (preg_match(…, $matches))` — the body runs on a successful match,
     // so `$matches` has the keys the pattern describes.
@@ -225,10 +267,17 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // which leg proved what.
     apply_disjunct_operand_narrowing(&disjunctions, &pinned, scope, ctx);
 
+    // A proof about `$x['k']` is a proof about the entry `$x` holds there.
+    write_offset_narrowing_into_shapes(condition, scope);
+
+    // An impure call's result is not a fact past the evaluation that
+    // produced it.
+    super::super::receiver_mutation::forget_impure_call_results(condition, scope, ctx);
+
     // Whatever the passes above proved about one value's null, they
     // proved about every value whose null it stands for.  Last, so it
     // sees the narrowed state rather than the state on the way in.
-    apply_non_null_implication_narrowing(scope, ctx);
+    apply_non_null_implication_narrowing(scope, &entry_locals, ctx);
 }
 
 /// Apply inverse narrowing for a single condition expression (not
@@ -249,7 +298,10 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
     // scope yet (e.g. `if (!$foobar instanceof Foobar) { break; }`
     // where `$foobar` was never assigned).  After the guard clause,
     // `$foobar` must be `Foobar`.
-    let mut var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
+    let mut var_names: Vec<String> = scope_keys_named_by(condition, scope)
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
     for name in collect_condition_var_names(condition) {
         if !var_names.contains(&name) {
             var_names.push(name);
@@ -280,19 +332,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             .find(|a| a.subject == *var_name && !a.alternatives.is_empty());
         if let Some(alias) = alias_or.filter(|a| !a.extraction.negated) {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-            let had_types = !scope.get(var_name).is_empty();
-            let mut results = scope.get(var_name).to_vec();
-            for cls in alias_classes(alias) {
-                ResolvedType::apply_narrowing(&mut results, |class_list| {
-                    narrowing::apply_instanceof_exclusion(&cls, &var_ctx, class_list)
-                });
-                scope.record_exclusion(var_name, &cls);
-            }
-            if !results.is_empty() {
-                scope.set(var_name, results);
-            } else if had_types {
-                scope.unreachable = true;
-            }
+            exclude_classes_in_scope(var_name, &alias_classes(alias), &var_ctx, scope);
             continue;
         }
         // The inverse of `!$isNode`: the chain did hold, so the subject
@@ -317,19 +357,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             && !classes.is_empty()
         {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-            let had_types = !scope.get(var_name).is_empty();
-            let mut results = scope.get(var_name).to_vec();
-            for cls_type in &classes {
-                ResolvedType::apply_narrowing(&mut results, |class_list| {
-                    narrowing::apply_instanceof_exclusion(cls_type, &var_ctx, class_list)
-                });
-                scope.record_exclusion(var_name, cls_type);
-            }
-            if !results.is_empty() {
-                scope.set(var_name, results);
-            } else if had_types {
-                scope.unreachable = true;
-            }
+            exclude_classes_in_scope(var_name, &classes, &var_ctx, scope);
             continue;
         }
 
@@ -362,21 +390,9 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                             &scope_resolver,
                         );
                     }
-                } else {
-                    let had_types = !scope.get(var_name).is_empty();
-                    let mut results = scope.get(var_name).to_vec();
-                    for target in &targets {
-                        ResolvedType::apply_narrowing(&mut results, |classes| {
-                            narrowing::apply_instanceof_exclusion(target, &var_ctx, classes)
-                        });
-                        scope.record_exclusion(var_name, target);
-                    }
-                    if !results.is_empty() {
-                        scope.set(var_name, results);
-                    } else if had_types {
-                        scope.unreachable = true;
-                    }
                 }
+                // The value may name a subclass of the class its type
+                // spells, so the check failing rules nothing out.
                 continue;
             }
         }
@@ -398,14 +414,21 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                 // existing union is *filtered* down to them rather than
                 // extended with them.
                 let mut narrowed = Vec::new();
-                ResolvedType::apply_narrowing(&mut narrowed, |classes| {
-                    narrowing::apply_instanceof_inclusion(
+                narrowing::include_instance_of(
+                    &extraction.class_type,
+                    extraction.exact,
+                    &var_ctx,
+                    &mut narrowed,
+                );
+                if narrowed_to_unloadable_class(&narrowed) {
+                    include_unloadable_class_in_scope(
+                        var_name,
                         &extraction.class_type,
-                        extraction.exact,
                         &var_ctx,
-                        classes,
-                    )
-                });
+                        scope,
+                    );
+                    continue;
+                }
                 commit_instanceof_narrowing(
                     var_name,
                     narrowed,
@@ -422,21 +445,12 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                 // Inverse of positive instanceof → exclusion.
                 // Exclusion does NOT strip null (`!instanceof` is
                 // true for null values).
-                let had_types = !scope.get(var_name).is_empty();
-                let mut results = scope.get(var_name).to_vec();
-                ResolvedType::apply_narrowing(&mut results, |classes| {
-                    narrowing::apply_instanceof_exclusion(&extraction.class_type, &var_ctx, classes)
-                });
-                scope.record_exclusion(var_name, &extraction.class_type);
-                if !results.is_empty() {
-                    scope.set(var_name, results);
-                } else if had_types {
-                    // Every alternative the variable had was excluded, so
-                    // nothing can reach this path: `$v` was already an
-                    // `AbstractNode` and this is the else of
-                    // `if ($v instanceof AbstractNode)`.
-                    scope.unreachable = true;
-                }
+                exclude_classes_in_scope(
+                    var_name,
+                    std::slice::from_ref(&extraction.class_type),
+                    &var_ctx,
+                    scope,
+                );
             }
         }
     }
@@ -465,6 +479,10 @@ pub(crate) fn apply_condition_narrowing_inverse<'b>(
 ) {
     // As in the truthy pass: `!(!$x)` is `$x`, so cancel the pair first.
     let condition = narrowing::fold_negation_pairs(condition);
+    if let Some(operand) = bool_cast_operand(condition) {
+        apply_condition_narrowing_inverse(operand, scope, ctx);
+        return;
+    }
 
     // The mirror of the truthy pass: the fall-through of
     // `if (!($t instanceof CallableType || $t instanceof ClosureType)) { return; }`
@@ -520,6 +538,88 @@ pub(crate) fn apply_condition_narrowing_inverse<'b>(
     }
 
     apply_condition_narrowing_inverse_operand(condition, scope, ctx);
+}
+
+/// Whether a `match (true)` arm failing on `condition` proves the condition
+/// was falsy, so its inverse narrowing can be applied below the arm.
+///
+/// The arm compares with `===`, so it fails on every value except `true`.
+/// That is the same as "falsy" only when `true` is the condition's sole
+/// truthy value: `$count => …` failing says nothing about `$count`, and
+/// treating it as falsy would narrow an `int` to `0` or a `?Foo` to `null`.
+/// `resolve` is only called when the expression's shape does not already
+/// settle the question.
+pub(crate) fn match_true_condition_is_boolean(
+    condition: &Expression<'_>,
+    resolve: impl FnOnce() -> Vec<ResolvedType>,
+) -> bool {
+    match unwrap_parens(condition) {
+        Expression::Binary(bin) if bin.operator.is_instanceof() || bin.operator.is_logical() => {
+            return true;
+        }
+        Expression::UnaryPrefix(prefix)
+            if prefix.operator.is_not()
+                || matches!(
+                    prefix.operator,
+                    UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..)
+                ) =>
+        {
+            return true;
+        }
+        Expression::Construct(Construct::Isset(_) | Construct::Empty(_)) => return true,
+        _ => {}
+    }
+    let types = resolve();
+    !types.is_empty()
+        && types.iter().all(|resolved| {
+            resolved
+                .type_string
+                .union_members()
+                .into_iter()
+                .all(|t| t.is_bool() || t.is_true() || t.is_false() || t.is_null())
+        })
+}
+
+/// Narrow `scope` to what the body of a `match (true)` arm sees.
+///
+/// The body runs when any one of the arm's conditions is `true`, so it sees
+/// what `a || b` proves rather than what `a && b` would: each condition
+/// narrows its own copy of the scope, and the copies are joined.
+pub(crate) fn apply_match_arm_narrowing<'b>(
+    expr_arm: &'b MatchExpressionArm<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let conditions: Vec<&'b Expression<'b>> = expr_arm.conditions.iter().copied().collect();
+    if let [condition] = conditions.as_slice() {
+        apply_condition_narrowing(condition, scope, ctx);
+        return;
+    }
+    // Seeded before the legs split, as the `||` pass does, so that what a
+    // leg concludes about a member path is checked against what the scope
+    // already knew about it.
+    for condition in &conditions {
+        seed_property_keys_into_scope(condition, scope, ctx);
+    }
+    apply_any_leg_narrowing(&conditions, &[], scope, ctx);
+}
+
+/// Narrow `scope` by one `match (true)` arm condition that was tested and
+/// was not `true`.
+///
+/// That is what the conditions after it are evaluated under, and once every
+/// condition of an arm has failed, what the arms below it run under: none
+/// of the conditions held, so each inverse holds at once.
+pub(crate) fn apply_failed_match_condition_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    if match_true_condition_is_boolean(condition, || {
+        super::super::resolve_rhs_with_scope(condition, scope, ctx)
+    }) {
+        apply_condition_narrowing_inverse(condition, scope, ctx);
+    }
 }
 
 /// The variable overrides a condition establishes for one polarity, ready to
@@ -581,7 +681,11 @@ pub(crate) fn condition_arm_narrowing<'b>(
         }
     }
     for subject in &subjects {
-        let types = resolver(subject);
+        // An enclosing arm's narrowing is what the subject holds here.
+        let types = match ctx.match_arm_narrowing.get(subject) {
+            Some(narrowed) => narrowed.clone(),
+            None => resolver(subject),
+        };
         if !types.is_empty() {
             scope.set(subject, types);
         }
@@ -597,6 +701,10 @@ pub(crate) fn condition_arm_narrowing<'b>(
     } else {
         apply_condition_narrowing_inverse(condition, &mut scope, &walk_ctx);
     }
+    // The holders were seeded above rather than narrowed by the condition,
+    // so the pass that re-applies their proofs has to count every one of
+    // them as new.
+    apply_non_null_implication_narrowing(&mut scope, &Locals::default(), &walk_ctx);
 
     let impossible = scope.unreachable;
     let overrides = scope
@@ -624,7 +732,12 @@ fn apply_condition_narrowing_inverse_operand<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    let entry_locals = scope.locals.clone();
+
     apply_condition_narrowing_inverse_single(condition, scope, ctx);
+
+    // `check() === true` failing proves what `!check()` does.
+    apply_bool_comparison_narrowing(condition, false, scope, ctx);
 
     // Inverse type guard narrowing: `if (is_object($x))` in else → exclude object.
     apply_type_guard_narrowing_inverse(condition, scope, ctx);
@@ -644,16 +757,21 @@ fn apply_condition_narrowing_inverse_operand<'b>(
 
     // Inverse in_array narrowing: exclude the element type in the else branch.
     apply_in_array_narrowing(condition, scope, ctx, true);
+    apply_loose_in_array_narrowing(condition, scope, ctx, true);
 
     // Inverse `preg_match` narrowing: the else branch (and the fall-through of
     // an `if (!preg_match(…, $matches)) { return; }` guard) knows the opposite
     // outcome of the one the condition tests for.
     apply_preg_match_narrowing(condition, scope, ctx, false);
 
+    write_offset_narrowing_into_shapes(condition, scope);
+
+    super::super::receiver_mutation::forget_impure_call_results(condition, scope, ctx);
+
     // Whatever the passes above proved about one value's null, they
     // proved about every value whose null it stands for.  Last, so it
     // sees the narrowed state rather than the state on the way in.
-    apply_non_null_implication_narrowing(scope, ctx);
+    apply_non_null_implication_narrowing(scope, &entry_locals, ctx);
 }
 
 /// Build a [`VarResolutionCtx`] from a variable name and forward-walk context.
@@ -669,20 +787,19 @@ pub(crate) fn build_var_ctx<'a>(
     scope_resolver: &'a dyn Fn(&str) -> Vec<ResolvedType>,
 ) -> VarResolutionCtx<'a> {
     VarResolutionCtx {
-        var_name,
-        current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        content: ctx.content,
-        cursor_offset: ctx.cursor_offset,
-        class_loader: ctx.class_loader,
         backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
         enclosing_return_type: ctx.enclosing_return_type.clone(),
         top_level_scope: ctx.top_level_scope.clone(),
-        branch_aware: false,
-        match_arm_narrowing: HashMap::new(),
         scope_var_resolver: Some(scope_resolver),
-        scope_proofs: None,
+        ..VarResolutionCtx::new(
+            var_name,
+            ctx.current_class,
+            ctx.all_classes,
+            ctx.content,
+            ctx.cursor_offset,
+            ctx.class_loader,
+        )
     }
 }

@@ -18,9 +18,10 @@ use std::collections::HashSet;
 
 /// ASCII-lowercase a key, borrowing when it is already lowercase.
 ///
-/// Exposed for the string-keyed indexes that have to fold a name the same
-/// way these maps do (the reference index keys functions by folded name,
-/// since PHP resolves them case-insensitively).
+/// Exposed for the code that has to fold a name the same way these maps
+/// do: the string-keyed indexes (the reference index keys functions by
+/// folded name, since PHP resolves them case-insensitively), and the checks
+/// that recognise a builtin function by the name a call spells.
 #[inline]
 pub(crate) fn fold(key: &str) -> Cow<'_, str> {
     if key.bytes().any(|b| b.is_ascii_uppercase()) {

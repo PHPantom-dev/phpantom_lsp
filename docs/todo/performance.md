@@ -953,8 +953,8 @@ exit that would make the fold linear in the common case:
    drop the repeated hashing.
 
 **Where to look:** `join_shapes`, `join_shape_entries`, and `join_values`
-in `php_type/mod.rs`, and the shape-folding branch of `merge_scopes` in
-`type_engine/variable/forward_walk/scope_state.rs`. Hand-written code
+in `php_type/mod.rs`, and the shape-folding branch of `merge_branch` in
+`type_engine/variable/forward_walk/scope_state/merge.rs`. Hand-written code
 does not reach the sizes where this shows; generated code and long
 procedural report builders do.
 
@@ -1130,59 +1130,166 @@ path) and `narrowed_by_rewalk` in
 
 ---
 
-## P55. Every edit re-reads every member-reference candidate file
+## P57. Narrowing deep-copies a class every time it crosses the `Arc` boundary
 
-**Impact: Medium-High · Complexity: Medium-High**
+**Impact: Medium · Complexity: Medium-High**
 
-`reindex_references_for_symbol_maps_batch` and
-`evict_reference_index_uri` both call
-`MemberRefCounts::invalidate_locations_all`, so any reparse marks the
-exact locations of *every* cached member declaration stale, not just the
-ones the edited file contributed to. The count side is invalidated far
-more selectively: `member_contributions` compares each file's old and
-new per-member contribution and only the members whose contribution
-actually changed become `count_stale`, which is what lets an edit that
-touches no access recompute nothing.
+A `ClassInfo`'s members are `SharedVec`s, so the struct is often called
+cheap to clone, but it still owns a `method_index` with one entry per
+method plus a dozen other `Vec`/`AtomMap` fields. For an
+inheritance-merged Eloquent model that is a few hundred entries and a
+dozen-plus allocations per copy.
 
-Locations are blanket-invalidated because a receiver's type can change
-without changing any indexed member name or count (the
-`Order $value` → `Buyer $value` case), and a clickable lens must never
-point at a range the edit moved. But the consequence is that the
-declaration CodeLens path re-queues every public member of the open file
-on every keystroke, and `member_declaration_references_batch` then calls
-`reference_file_content_arc` for each candidate file. That falls through
-to `get_file_content_arc`, which is an uncached
-`std::fs::read_to_string` for any file not open in the editor. On a
-large application a common member name (`handle`, `get`, `name`) is a
-candidate in thousands of files, so a typing pause costs thousands of
-file reads even though the expensive part, the per-file
-`ResolvedMemberFile` semantic layer, is still warm and reused.
+The narrowing layer pays that on every crossing, in both directions:
 
-### Fix
+- `ResolvedType::apply_narrowing` collects `arc.as_ref().clone()` for
+  every candidate on the way in, and pushes survivors back through
+  `from_class`, which wraps each copy in a *fresh* `Arc`. A class that
+  narrowing left untouched has been deep-copied and re-allocated for
+  nothing. Seventeen call sites reach it, covering every `instanceof`,
+  `assert`, `in_array`, and identity guard the forward walk sees.
+- `apply_property_narrowing` unwraps the whole vector with
+  `Arc::unwrap_or_clone` and re-wraps it afterwards, with a comment
+  explaining that it does so because the walk functions take
+  `Vec<ClassInfo>`. The `Arc`s come out of the class index, so the
+  refcount is always above one and the clone branch always runs.
+- `resolved_type_with_lookup` clones a class out of the index only to
+  hand it to `from_both`, which allocates a new `Arc` around the copy.
+  Fifteen call sites, essentially every method-call return type.
+- `narrowing/resolve.rs`, `narrowing/instanceof.rs`, and
+  `narrowing/assertions.rs` repeat the pattern, the last one deep-copying
+  a `MethodInfo` out of its `Arc`.
 
-Two independent halves, either of which helps on its own:
+`ResolvedType::from_arc` and `from_both_arc` already exist and are unused
+on these paths. The fix is to change the narrowing contract from
+`Vec<ClassInfo>` to `Vec<Arc<ClassInfo>>` — `apply_narrowing`'s closure,
+the `results` parameters in `narrowing::{instanceof,assertions,guards}`,
+`resolve_class_names_to_union`, and `ClassInfo::push_unique` — so a class
+is only allocated where one is genuinely constructed.
+`apply_property_narrowing`'s unwrap/rewrap then disappears.
 
-1. **Narrow the invalidation.** Split the blanket call into the two
-   causes it currently conflates. Offsets only shift in the files that
-   were reparsed, so a location cache entry needs invalidating when one
-   of its own locations names a rebuilt URI. The receiver-type case
-   belongs where the type change is already detected: `update_ast`
-   clears `resolved_members` when `any_signature_changed ||
-   any_function_changed`, and the location cache should be invalidated
-   from the same branch. Check what that flag covers before relying on
-   it — a docblock-only `@return` edit changes receiver types too, and
-   serving a stale clickable location is worse than the current cost.
+This is the same defect as [P53](#p53-the-deprecated-collector-deep-copies-a-class-per-member-access)
+on a different path, and it is worth measuring the two together.
 
-2. **Make the warm semantic layer self-sufficient.** `ResolvedMemberFile`
-   already packs the resolved receiver atoms per symbol-span index; it
-   does not carry the LSP `Range` for the access, which is the only
-   other thing `scan_file` needs the file's text for. Storing the range
-   alongside the targets (16 bytes per access) would let a warm
-   candidate file be filtered without reading it at all.
+**Where to look:** `apply_narrowing`, `from_class`, `from_arc`,
+`from_both`, and `from_both_arc` in `types/resolved_type.rs`;
+`apply_property_narrowing` in `type_engine/resolver/property_narrowing.rs`;
+`resolved_type_with_lookup` in
+`type_engine/variable/rhs_resolution/mod.rs`;
+`type_engine/types/narrowing/{resolve,instanceof,assertions}.rs`.
 
-**Where to look:** `invalidate_locations_all` and
-`member_declaration_references` in `reference_counts.rs`,
-`reindex_references_for_symbol_maps_batch` and `ResolvedMemberFile` in
-`reference_index.rs`, `member_declaration_references_batch` in
-`references/members.rs`, and `get_file_content_arc` in
-`backend/file_access.rs`.
+## P58. A member-completion cache hit copies the whole item list
+
+**Impact: Low · Complexity: Low**
+
+The member-completion cache exists so that each keystroke in
+`$model->wh…` reuses the unfiltered member list instead of re-resolving
+it. A hit clones the cached `Vec<CompletionItem>` wholesale, which for an
+Eloquent model is several hundred items each carrying several `String`s
+and an optional documentation block — and the prefix filter then throws
+most of them away. The cache is capped, so this is CPU rather than a
+leak, but it is paid on the keystroke the cache was added to make fast.
+
+Store an `Arc<Vec<CompletionItem>>` and have the filter take a slice,
+cloning only the items that survive.
+
+**Where to look:** `member_completion_cache` and
+`filter_member_completion_items` in
+`completion/handler/member_access.rs`.
+
+## P65. Every call site repeats the full function lookup, hit or miss
+
+**Impact: Low-Medium · Complexity: Medium**
+
+The forward walker asks `find_or_load_function` about the same call
+several times per statement (by-reference out-parameters, `@assert`
+narrowing, the return type), and nothing remembers the answer. A hit
+clones the whole `FunctionInfo` out of `global_functions`; a miss, which
+is every call to a function the project never declares, walks all four
+phases again, including cloning `autoload_file_paths` and building a URI
+per path. Every hover re-walks the enclosing body from its first
+statement, so the cost lands once per call site per hover.
+
+PHPStan's `nsrt/if.php` (a 545-line closure calling undeclared helpers
+such as `foo()` and `doFoo()`) measures about 70 ms per hover near its
+end in a release build, with `find_or_load_function`,
+`resolve_function_name_at`, and the `CiMap` lookups they make taking the
+top of the profile. Real code rarely calls hundreds of undeclared
+functions, but it does call the same declared ones over and over, and
+each of those pays the clone.
+
+The same file takes 53 s under the assertType runner in a debug build,
+which is why it is not among the ported fixtures in `tests/phpstan_nsrt/`
+yet; port it once this lands. Re-measured on 2026-09-27 it takes about
+210 s at `HEAD` (5f6422d3), so the cost has grown since. PHPStan's
+`nsrt/filterVar.php` (315 `filter_var()` calls in one function) takes
+about 540 s the same way, and `nsrt/array-functions.php` about 97 s;
+confirm with a profile that they are this item before counting them in.
+
+Caching the resolved `Arc<FunctionInfo>` (and a negative entry) per
+request, keyed by the candidate names, would turn the repeats into
+lookups. Returning an `Arc` rather than a clone is the larger half of
+the saving on its own.
+
+**Where to look:** `find_or_load_function` in `resolution.rs`, and the
+`function_loader` closures built for `VarResolutionCtx`.
+
+---
+
+## P66. Stub version filtering rescans a stub file once per symbol it declares
+
+**Impact: Low · Complexity: Low-Medium**
+
+`set_php_version` drops every stub symbol marked `@removed` at or before
+the target version. For a file that mentions `@removed` at all,
+`is_stub_function_removed` and its class and constant counterparts locate
+each symbol with `source.find("function NAME(")` from the start of the
+file, so a stub file declaring n symbols is scanned n times. Whether a
+file mentions `@removed` is now answered once per file, which halved the
+cost, but the per-symbol search remains: building a full-stub backend in
+a debug build still spends about 0.45 s there, and every test that uses
+`new_test_with_full_stubs` (including each fixture the assertType runner
+checks) pays it. The server pays it once at startup, far less in a
+release build.
+
+Scanning each such file once for its `@removed` docblocks and recording
+the name of the declaration that follows each one would give a per-file
+set of removed names, turning the filter into set lookups.
+
+**Where to look:** `set_php_version` in `lib.rs` and the
+`is_stub_*_removed` family in `stubs.rs`.
+
+---
+
+## P70. Diagnostics on a long file find each access's context by scanning
+
+**Impact: Low-Medium · Complexity: Medium**
+
+Several diagnostic collectors work out the context of a member access or
+call by scanning for it, so each access costs time in proportion to the
+length of the file and the whole pass costs its square. The forward walk
+over the same file no longer does: on a generated top-level script of N
+repeated blocks (an `if`/`elseif`/`else`, a `switch`, a `try`, a `while`,
+a closure and a few calls each), N = 4,000 (76,000 lines) takes 13.5s on a
+release build, doubling N roughly quadruples it, and well over half of
+the samples are in these lookups rather than in the walk:
+
+- `class_context_placeholder` (`class_lookup.rs`) calls
+  `text_scan::namespace_at_offset`, which searches the text backwards from
+  the access for a `namespace` keyword. A file without one is searched all
+  the way to its start, once per call from `collect_argument_type_diagnostics`,
+  the deprecated collector and the unknown-member collector (about 30%).
+- `SubjectCacheKey::build` (`diagnostics/subject_cache.rs`) calls
+  `SymbolMap::find_enclosing_scope` and `find_narrowing_block`, which test
+  every scope and every narrowing block in the file, plus
+  `active_var_def_offset` (about 15%).
+- String comparisons inside the unknown-member and deprecated collectors
+  themselves, not yet traced to a single call (about 12%).
+
+The namespace blocks, scopes and narrowing blocks of a file are all known
+once it is parsed, so each lookup can be a binary search over ranges
+recorded at that point.
+
+**Where to look:** `namespace_at_offset` in `text_scan.rs` and its
+callers, `find_enclosing_scope` and `find_narrowing_block` in
+`symbol_map/mod.rs`, and `SubjectCacheKey::build`.

@@ -1316,4 +1316,32 @@ class Consumer
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
+
+    /// A `use` import is scoped to the `namespace` block that declares it,
+    /// so the same short name in a sibling block names that block's class.
+    #[test]
+    fn an_import_does_not_apply_in_another_namespace_block() {
+        let backend = Backend::new_test();
+
+        let content = r#"<?php
+namespace X {
+    class Foo { public function onlyX(): void {} }
+}
+namespace A {
+    use X\Foo;
+    function a(): void { (new Foo)->onlyX(); }
+}
+namespace B {
+    function b(): void { (new Foo)->onlyX(); }
+}
+"#;
+
+        let diags = collect(&backend, content);
+        let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+        assert_eq!(
+            messages,
+            vec!["Class 'B\\Foo' not found"],
+            "only block B's `Foo` is unknown"
+        );
+    }
 }

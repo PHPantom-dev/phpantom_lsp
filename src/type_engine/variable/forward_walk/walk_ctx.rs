@@ -6,7 +6,6 @@ use super::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::atom::AtomMap;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::types::{ClassInfo, ResolvedType};
@@ -42,7 +41,26 @@ pub(crate) struct ForwardWalkCtx<'a> {
     /// Pre-computed top-level scope for resolving `global` variable imports.
     /// When a function body contains `global $x;`, the walker looks up
     /// `$x` in this map to seed the local scope with the top-level type.
-    pub top_level_scope: Option<AtomMap<Vec<ResolvedType>>>,
+    pub top_level_scope: Option<Locals>,
+    /// Whether the statement currently being walked sits lexically inside a
+    /// loop body (`for`/`foreach`/`while`/`do-while`, at any nesting depth).
+    ///
+    /// The fixed-point walk re-walks a loop body a handful of times to
+    /// converge, not once per actual runtime iteration, so a statement
+    /// inside one runs a statically unknowable number of times. Array
+    /// writes read this to decide whether a `[]` append may keep a tracked
+    /// shape's precise arity (safe outside a loop, where it runs exactly
+    /// once) or must widen straight to the collection type it is building
+    /// (required inside one, or the shape would grow by one entry per
+    /// re-walk instead of settling). See
+    /// `array_shape_writes::merge_nested_array_write`.
+    pub in_loop: bool,
+    /// The bounded `@template` parameters of the function or method whose
+    /// body is being walked, each mapped to its
+    /// [`TemplateParam`](crate::php_type::TypeKind::TemplateParam) marker.
+    /// An inline `@var` naming one of them is read through this, so an
+    /// `@var array<T>` inside the body knows what its elements are.
+    pub template_markers: Option<Arc<HashMap<String, PhpType>>>,
 }
 
 impl<'a> ForwardWalkCtx<'a> {
@@ -78,6 +96,8 @@ impl<'a> ForwardWalkCtx<'a> {
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: ctx.enclosing_return_type.clone(),
             top_level_scope: ctx.top_level_scope.clone(),
+            in_loop: false,
+            template_markers: None,
         }
     }
 
@@ -99,6 +119,43 @@ impl<'a> ForwardWalkCtx<'a> {
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: self.enclosing_return_type.clone(),
             top_level_scope: self.top_level_scope.clone(),
+            in_loop: self.in_loop,
+            template_markers: self.template_markers.clone(),
+        }
+    }
+
+    /// Return a copy of this context marked as walking inside a loop body
+    /// (or not). See [`ForwardWalkCtx::in_loop`].
+    pub(crate) fn with_in_loop(&self, in_loop: bool) -> ForwardWalkCtx<'a> {
+        ForwardWalkCtx {
+            current_class: self.current_class,
+            all_classes: self.all_classes,
+            content: self.content,
+            cursor_offset: self.cursor_offset,
+            class_loader: self.class_loader,
+            backend: self.backend,
+            loaders: self.loaders,
+            resolved_class_cache: self.resolved_class_cache,
+            enclosing_return_type: self.enclosing_return_type.clone(),
+            top_level_scope: self.top_level_scope.clone(),
+            in_loop,
+            template_markers: self.template_markers.clone(),
+        }
+    }
+
+    /// Return a copy of this context for walking the body of the
+    /// declaration starting at `decl_start`, with that declaration's
+    /// bounded templates as [`template_markers`](Self::template_markers).
+    pub(crate) fn for_declaration(&self, decl_start: u32) -> ForwardWalkCtx<'a> {
+        ForwardWalkCtx {
+            template_markers:
+                crate::type_engine::variable::resolution::declaration_template_markers(
+                    self.content,
+                    decl_start as usize,
+                ),
+            enclosing_return_type: self.enclosing_return_type.clone(),
+            top_level_scope: self.top_level_scope.clone(),
+            ..*self
         }
     }
 
@@ -142,21 +199,21 @@ impl<'a> ForwardWalkCtx<'a> {
         'a: 'b,
     {
         VarResolutionCtx {
-            var_name,
-            current_class: self.current_class,
-            all_classes: self.all_classes,
-            content: self.content,
-            cursor_offset,
-            class_loader: self.class_loader,
             backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: self.enclosing_return_type.clone(),
             top_level_scope: self.top_level_scope.clone(),
-            branch_aware: false,
-            match_arm_narrowing: HashMap::new(),
             scope_var_resolver: Some(scope_resolver),
             scope_proofs,
+            ..VarResolutionCtx::new(
+                var_name,
+                self.current_class,
+                self.all_classes,
+                self.content,
+                cursor_offset,
+                self.class_loader,
+            )
         }
     }
 }

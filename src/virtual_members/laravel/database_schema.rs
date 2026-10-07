@@ -1603,7 +1603,9 @@ fn apply_blueprint_statement(
         "addColumn" => {
             let strings = string_args(args);
             if strings.len() >= 2 {
-                let database_type = migration_database_type(&strings[0]);
+                // A type the column-method table does not know is still a
+                // column: `addColumn()` accepts any grammar type name.
+                let database_type = migration_database_type(&strings[0]).unwrap_or("TEXT");
                 let table = index.get_or_create_table(connection, table_name);
                 table.set_column(migration_column_with_chain(
                     &strings[1],
@@ -1633,8 +1635,9 @@ fn migration_column_from_blueprint_method<'a>(
     method: &'a str,
     args: &str,
 ) -> Option<(String, &'a str)> {
+    let database_type = migration_database_type(method)?;
     let column = first_string_arg(args).or_else(|| default_column_name(method))?;
-    Some((column, migration_database_type(method)))
+    Some((column, database_type))
 }
 
 fn default_column_name(method: &str) -> Option<String> {
@@ -1648,37 +1651,52 @@ fn default_column_name(method: &str) -> Option<String> {
     }
 }
 
-fn migration_database_type(method: &str) -> &'static str {
+/// The database type a Blueprint column method defines, or `None` for a method
+/// that defines no column.
+///
+/// Every Blueprint method that takes a column name is not a column definition:
+/// `index('email')`, `foreign('author_id')`, and `comment('…')` name a column or
+/// the table without adding one, so only the methods that reach
+/// `Blueprint::addColumn()` are listed here.
+fn migration_database_type(method: &str) -> Option<&'static str> {
     match method.to_ascii_lowercase().as_str() {
         "bigincrements" | "biginteger" | "foreignid" | "foreignidfor" | "id"
-        | "unsignedbiginteger" => "BIGINT",
-        "increments" | "integer" | "integerincrements" | "unsignedinteger" => "INTEGER",
-        "mediumincrements" | "mediuminteger" | "unsignedmediuminteger" => "MEDIUMINT",
-        "smallincrements" | "smallinteger" | "unsignedsmallinteger" => "SMALLINT",
-        "tinyincrements" | "tinyinteger" | "unsignedtinyinteger" => "TINYINT",
-        "boolean" => "BOOLEAN",
-        "decimal" | "unsigneddecimal" => "DECIMAL",
-        "double" => "DOUBLE",
-        "float" => "FLOAT",
-        "uuid" | "foreignuuid" => "UUID",
-        "ulid" | "foreignulid" => "CHAR(26)",
-        "ipaddress" | "macaddress" => "VARCHAR",
-        "json" => "JSON",
-        "jsonb" => "JSONB",
-        "date" => "DATE",
-        "datetime" | "datetimetz" => "DATETIME",
-        "time" | "timetz" => "TIME",
+        | "unsignedbiginteger" => Some("BIGINT"),
+        "increments" | "integer" | "integerincrements" | "unsignedinteger" => Some("INTEGER"),
+        "mediumincrements" | "mediuminteger" | "unsignedmediuminteger" => Some("MEDIUMINT"),
+        "smallincrements" | "smallinteger" | "unsignedsmallinteger" => Some("SMALLINT"),
+        "tinyincrements" | "tinyinteger" | "unsignedtinyinteger" => Some("TINYINT"),
+        "boolean" => Some("BOOLEAN"),
+        "decimal" | "unsigneddecimal" => Some("DECIMAL"),
+        "double" => Some("DOUBLE"),
+        "float" => Some("FLOAT"),
+        "uuid" | "foreignuuid" => Some("UUID"),
+        "ulid" | "foreignulid" => Some("CHAR(26)"),
+        "ipaddress" | "macaddress" => Some("VARCHAR"),
+        "json" => Some("JSON"),
+        "jsonb" => Some("JSONB"),
+        "date" => Some("DATE"),
+        "datetime" | "datetimetz" => Some("DATETIME"),
+        "time" | "timetz" => Some("TIME"),
         "timestamp" | "timestamptz" | "timestampstz" | "softdeletes" | "softdeletestz" => {
-            "TIMESTAMP"
+            Some("TIMESTAMP")
         }
-        "year" => "YEAR",
-        "binary" | "mediumbinary" | "largebinary" => "BLOB",
-        "computed" => "MIXED",
-        "enum" | "set" => "VARCHAR",
-        "morphs" | "nullablemorphs" | "uuidmorphs" | "nullableuuidmorphs" => "MIXED",
-        "string" | "char" | "tinytext" => "VARCHAR",
-        "text" | "mediumtext" | "longtext" => "TEXT",
-        _ => "TEXT",
+        "year" => Some("YEAR"),
+        "binary" | "mediumbinary" | "largebinary" => Some("BLOB"),
+        "computed" => Some("MIXED"),
+        "enum" | "set" => Some("VARCHAR"),
+        "morphs"
+        | "nullablemorphs"
+        | "uuidmorphs"
+        | "nullableuuidmorphs"
+        | "numericmorphs"
+        | "nullablenumericmorphs"
+        | "ulidmorphs"
+        | "nullableulidmorphs" => Some("MIXED"),
+        "string" | "char" | "tinytext" => Some("VARCHAR"),
+        "text" | "mediumtext" | "longtext" => Some("TEXT"),
+        "geometry" | "geography" | "tsvector" | "vector" | "rawcolumn" => Some("MIXED"),
+        _ => None,
     }
 }
 

@@ -123,12 +123,12 @@ pub(super) fn collect_diagnostics(pass: DiagnosticPass<'_>) -> Vec<(String, Vec<
                         let scope_t0 = Instant::now();
                         {
                             let file_ctx = backend.file_context(uri);
-                            let class_loader = backend.class_loader(&file_ctx);
+                            let class_loaders = backend.class_loaders(&file_ctx);
                             let owned_loaders = backend.diagnostic_loaders(&file_ctx);
                             crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                                 content,
                                 &file_ctx.classes,
-                                &class_loader,
+                                &class_loaders.as_dyn(),
                                 Some(backend),
                                 owned_loaders.loaders(),
                                 Some(&backend.resolved_class_cache),

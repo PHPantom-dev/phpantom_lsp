@@ -17,7 +17,8 @@ use crate::Backend;
 
 use super::balance::{Span, block_pairs};
 use super::blocks::{BlockRole, analyse};
-use super::component_tags::{TagKind, tag_spans};
+use super::component_tags::{TagKind, legacy_slot_name, tag_spans};
+use super::directives::BladeDirectives;
 
 /// One entry of a template's outline, in raw Blade byte offsets.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +46,7 @@ impl Backend {
     /// block, so the components and directives written inside one nest
     /// under it once the caller builds the tree.
     pub(crate) fn blade_outline(&self, content: &str) -> Vec<OutlineEntry> {
-        let mut entries = named_block_entries(content);
+        let mut entries = named_block_entries(content, &self.blade_directives.read());
         entries.extend(self.component_tag_entries(content));
         entries.sort_by(|a, b| {
             a.span
@@ -77,8 +78,15 @@ impl Backend {
                         .blade_component_fqn(&tag.name)
                         .or_else(|| self.anonymous_component_view(&tag.name, &anonymous)),
                 };
+                // The legacy `<x-slot name="footer">` is the same slot as
+                // `<x-slot:footer>`, so it is listed the same way.
+                let name = match (&tag.kind, tag.name.as_str()) {
+                    (TagKind::Blade, "slot") => legacy_slot_name(content, tag.name_span.end)
+                        .map_or_else(|| "slot".to_string(), |slot| format!("slot:{slot}")),
+                    _ => tag.name,
+                };
                 OutlineEntry {
-                    name: format!("{}{}", &tag.kind.opening()[1..], tag.name),
+                    name: format!("{}{}", &tag.kind.opening()[1..], name),
                     detail,
                     kind: SymbolKind::CLASS,
                     span: tag.span,
@@ -95,12 +103,12 @@ impl Backend {
 /// `@hasSection` and its cousins are left out: they ask about a name
 /// rather than standing for a region of the template, and the block they
 /// open is a condition whose contents belong to whatever encloses it.
-fn named_block_entries(content: &str) -> Vec<OutlineEntry> {
-    let blocks = analyse(content).blocks;
+fn named_block_entries(content: &str, known: &BladeDirectives) -> Vec<OutlineEntry> {
+    let blocks = analyse(content, known).blocks;
     if blocks.is_empty() {
         return Vec::new();
     }
-    let pairs = block_pairs(content);
+    let pairs = block_pairs(content, known);
     blocks
         .into_iter()
         .filter(|block| block.role != BlockRole::Check)

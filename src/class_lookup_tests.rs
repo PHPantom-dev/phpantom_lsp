@@ -399,3 +399,129 @@ fn subtype_of_typed_array_forms_resolve_nominal_value_types() {
         &loader
     ));
 }
+
+// ── is_subtype_of_typed: array shapes ───────────────────────
+
+/// Two shapes are settled by the entries they list. An unsealed one reads
+/// as the generic array it widens to everywhere else, and every
+/// `array{…, ...}` widens to the same `non-empty-array<array-key, mixed>`.
+#[test]
+fn subtype_of_typed_compares_unsealed_shapes_by_the_entries_they_list() {
+    use crate::php_type::PhpType;
+
+    let loader = loader_from(&[]);
+    let parse = |src: &str| PhpType::parse(src);
+
+    assert!(!is_subtype_of_typed(
+        &parse("array{foo: int, ...}"),
+        &parse("array{foo: string, ...}"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("array{bar: int, ...}"),
+        &parse("array{foo: int, ...}"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("array{foo?: int, ...}"),
+        &parse("array{foo: int, ...}"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("array{foo: int, ...<string, string>}"),
+        &parse("array{foo: int, ...<string, int>}"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("array{foo: int, ...}"),
+        &parse("array{foo: int}"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("list{string, ...<int>}"),
+        &parse("list{int, ...<int>}"),
+        &loader
+    ));
+
+    assert!(is_subtype_of_typed(
+        &parse("array{foo: int, bar: string, ...}"),
+        &parse("array{foo: int, ...}"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("array{foo: int, ...<string, int>}"),
+        &parse("array{foo: int|string, ...<string, int|string>}"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("array{foo: int}"),
+        &parse("array{foo: int, ...}"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("list{string, ...<int>}"),
+        &parse("list{string, ...<int>}"),
+        &loader
+    ));
+}
+
+/// The class hierarchy reaches into the entries of a shape, sealed or
+/// unsealed, and into the tail of an unsealed one.
+#[test]
+fn subtype_of_typed_follows_the_class_hierarchy_into_the_entries_of_a_shape() {
+    use crate::php_type::PhpType;
+
+    let animal = make_class("Animal", None, None, &[]);
+    let cat = make_class("Cat", None, Some("Animal"), &[]);
+    let plant = make_class("Plant", None, None, &[]);
+    let classes = [animal, cat, plant];
+    let loader = loader_from(&classes);
+    let parse = |src: &str| PhpType::parse(src);
+
+    assert!(is_subtype_of_typed(
+        &parse("array{pet: Cat, ...}"),
+        &parse("array{pet: Animal, ...}"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("array{pet: Cat}"),
+        &parse("array{pet: Animal}"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("array{pet: Cat, ...<string, Cat>}"),
+        &parse("array{pet: Animal, ...<string, Animal>}"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("list{Cat, ...<Cat>}"),
+        &parse("list{Animal, ...<Animal>}"),
+        &loader
+    ));
+
+    assert!(!is_subtype_of_typed(
+        &parse("array{pet: Plant, ...}"),
+        &parse("array{pet: Animal, ...}"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("array{pet: Animal, ...}"),
+        &parse("array{pet: Cat, ...}"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("array{pet: Cat}"),
+        &parse("array{pet: Plant}"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("array{pet: Cat, ...<string, Plant>}"),
+        &parse("array{pet: Animal, ...<string, Animal>}"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("array{pet: Cat, ...<string, Animal>}"),
+        &parse("array{pet: Animal, ...<string, Cat>}"),
+        &loader
+    ));
+}

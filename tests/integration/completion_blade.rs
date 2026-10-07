@@ -679,3 +679,81 @@ async fn an_import_that_precedes_them_all_follows_a_leading_directive() {
         "@use('App\\Models\\Zone')\n@use('App\\Models\\Account')\n{{ new Acco }}\n"
     );
 }
+
+/// The import edit a class completion in `template` carries, applied to
+/// the template.
+async fn complete_with_import(
+    backend: &phpantom_lsp::Backend,
+    uri: &Url,
+    template: &str,
+    line: u32,
+    character: u32,
+    fqn: &str,
+) -> String {
+    open_document(backend, uri, "blade", template).await;
+    let items = complete_typed(backend, uri, line, character).await;
+    let item = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some(fqn))
+        .unwrap_or_else(|| panic!("expected {fqn}, got: {:?}", labels(&items)));
+    let edits = item
+        .additional_text_edits
+        .as_ref()
+        .expect("expected an import edit");
+    apply(template, edits)
+}
+
+/// Blade compiles `@use` to a PHP `use` statement where it stands, and PHP
+/// rejects one inside a block, so a template whose first line opens one
+/// takes its first import above that line rather than inside the block.
+#[tokio::test]
+async fn a_first_import_goes_above_the_block_the_first_line_opens() {
+    let backend = create_test_backend();
+    index_models(&backend, &["App\\Models\\Widget"]);
+    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let template = "@if ($user)\n    {{ new Widg }}\n@endif\n";
+
+    let imported =
+        complete_with_import(&backend, &uri, template, 1, 15, "App\\Models\\Widget").await;
+    assert_eq!(
+        imported,
+        "@use('App\\Models\\Widget')\n@if ($user)\n    {{ new Widg }}\n@endif\n"
+    );
+}
+
+/// A component tag the project resolves opens a block too, and keeps the
+/// start of the template addressable all the same.
+#[tokio::test]
+async fn a_first_import_goes_above_a_component_tag_the_template_opens_with() {
+    let template = "<x-alert type=\"danger\">\n    {{ new Widg }}\n</x-alert>\n";
+    let (backend, _dir, uri) = component_workspace(template);
+    index_models(&backend, &["App\\Models\\Widget"]);
+
+    let imported =
+        complete_with_import(&backend, &uri, template, 1, 15, "App\\Models\\Widget").await;
+    let virtual_php = backend
+        .blade_virtual_php(uri.as_str())
+        .expect("blade virtual content");
+    assert!(
+        virtual_php.contains("$component = new \\App\\View\\Components\\Alert("),
+        "the tag must resolve to its class: {virtual_php}"
+    );
+    assert_eq!(imported, format!("@use('App\\Models\\Widget')\n{template}"));
+}
+
+/// A template that opens with a block of PHP takes the import as a PHP
+/// `use` statement inside that block.
+#[tokio::test]
+async fn a_template_opening_with_a_php_block_takes_the_import_inside_it() {
+    let backend = create_test_backend();
+    index_models(&backend, &["App\\Models\\Widget"]);
+    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let template = "@php\n    $widget = new Widg\n@endphp\n";
+
+    let imported =
+        complete_with_import(&backend, &uri, template, 1, 22, "App\\Models\\Widget").await;
+    assert_eq!(
+        imported,
+        "@php\nuse App\\Models\\Widget;\n    $widget = new Widg\n@endphp\n"
+    );
+}

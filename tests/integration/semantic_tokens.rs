@@ -1536,6 +1536,27 @@ fn blade_raw_echo_delimiter_tokens() {
     assert_eq!(close.unwrap().length, 3);
 }
 
+/// Blade matches echo tags longest-opening-first, so `{{!!$html!!}}` is a
+/// literal `{`, a raw echo, and a literal `}`: only the raw echo's own
+/// delimiters are keywords, and an `@` in front of the braces escapes
+/// nothing.
+#[test]
+fn blade_raw_echo_inside_literal_braces_delimiter_tokens() {
+    for (blade, expected) in [
+        ("{{!!$html!!}}", vec![(1, 3), (9, 3)]),
+        ("{{!! $html !!}}", vec![(1, 3), (11, 3)]),
+        ("@{{!!$html!!}}", vec![(2, 3), (10, 3)]),
+    ] {
+        let tokens = get_blade_tokens(blade);
+        let keywords: Vec<(u32, u32)> = tokens
+            .iter()
+            .filter(|t| t.token_type == TT_KEYWORD)
+            .map(|t| (t.character, t.length))
+            .collect();
+        assert_eq!(keywords, expected, "{blade:?} tokens: {tokens:?}");
+    }
+}
+
 #[test]
 fn blade_comment_delimiter_tokens() {
     let tokens = get_blade_tokens("{{-- this is a comment --}}");

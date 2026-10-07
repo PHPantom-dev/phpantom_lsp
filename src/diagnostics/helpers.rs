@@ -9,10 +9,28 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolMap;
-use crate::types::{ClassInfo, FileContext};
+use crate::types::{BlockClassLoaders, ClassInfo, FileContext, FunctionInfo, PerBlock};
 
 /// A byte range `[start, end)` in the source.
 pub(crate) type ByteRange = (usize, usize);
+
+/// PHP superglobals and auto-defined variables that are always in scope,
+/// so they are neither reported as undefined nor as unused.
+pub(crate) const SUPERGLOBALS: &[&str] = &[
+    "$_GET",
+    "$_POST",
+    "$_SERVER",
+    "$_REQUEST",
+    "$_SESSION",
+    "$_COOKIE",
+    "$_FILES",
+    "$_ENV",
+    "$GLOBALS",
+    "$argc",
+    "$argv",
+    "$http_response_header",
+    "$php_errormsg",
+];
 
 // ── Type-checking collectors ────────────────────────────────────────────────
 
@@ -24,12 +42,36 @@ pub(crate) type ByteRange = (usize, usize);
 pub(crate) struct TypeCheckCtx<'a> {
     /// Classes, use-map, namespace, and resolved names for the file.
     pub(crate) file_ctx: &'a FileContext,
-    pub(crate) class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    pub(crate) function_loader: &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
-    pub(crate) constant_loader: &'a dyn Fn(&str, u32) -> Option<Option<String>>,
+    /// One loader set per `namespace` block; pick with the `*_at` methods.
+    class_loaders: &'a BlockClassLoaders<'a>,
+    function_loaders: &'a PerBlock<'a, DynFunctionLoader<'a>>,
+    constant_loaders: &'a PerBlock<'a, DynConstantLoader<'a>>,
     /// Whether the file declares `strict_types=1`, which decides how
     /// forgiving the compatibility checks are.
     pub(crate) strict_types: bool,
+}
+
+type DynFunctionLoader<'a> = &'a (dyn Fn(&str, u32) -> Option<FunctionInfo> + 'a);
+type DynConstantLoader<'a> = &'a (dyn Fn(&str, u32) -> Option<Option<String>> + 'a);
+
+impl<'a> TypeCheckCtx<'a> {
+    /// The class loader for the `namespace` block containing `offset`.
+    pub(crate) fn class_loader_at(
+        &self,
+        offset: u32,
+    ) -> &'a (dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a) {
+        *self.class_loaders.at(offset)
+    }
+
+    /// The function loader for the `namespace` block containing `offset`.
+    pub(crate) fn function_loader_at(&self, offset: u32) -> DynFunctionLoader<'a> {
+        *self.function_loaders.at(offset)
+    }
+
+    /// The constant loader for the `namespace` block containing `offset`.
+    pub(crate) fn constant_loader_at(&self, offset: u32) -> DynConstantLoader<'a> {
+        *self.constant_loaders.at(offset)
+    }
 }
 
 /// Run a type-checking collector over one file.
@@ -57,18 +99,23 @@ pub(crate) fn collect_type_check<S>(
     // in the resolution pipeline below reuses one parsed AST.
     let _parse_guard = crate::parser::with_parse_cache(content);
 
-    let class_loader = backend.class_loader(&file_ctx);
-    let function_loader = backend.function_loader(&file_ctx);
-    let constant_loader = backend.constant_loader(&file_ctx);
+    let class_loaders = backend.class_loaders(&file_ctx);
+    let class_loaders = class_loaders.as_dyn();
+    let function_loaders = backend.function_loaders(&file_ctx);
+    let function_loaders = function_loaders.map(|loader| loader as DynFunctionLoader<'_>);
+    let constant_loaders = file_ctx.per_block(|use_map, namespace| {
+        backend.constant_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace)
+    });
+    let constant_loaders = constant_loaders.map(|loader| loader as DynConstantLoader<'_>);
     let strict_types = crate::parser::with_parsed_program(content, "strict_types", |program, _| {
         super::type_errors::has_strict_types(program)
     });
 
     let ctx = TypeCheckCtx {
         file_ctx: &file_ctx,
-        class_loader: &class_loader,
-        function_loader: &function_loader,
-        constant_loader: &constant_loader,
+        class_loaders: &class_loaders,
+        function_loaders: &function_loaders,
+        constant_loaders: &constant_loaders,
         strict_types,
     };
 
@@ -122,16 +169,22 @@ impl FileDiagnosticContext {
     ///
     /// The symbol map spells the name either way round depending on how
     /// the declaration was written, so a short name is also matched
-    /// against the file namespace's qualification of it.
-    pub(crate) fn declared_class(&self, name: &str) -> Option<&Arc<ClassInfo>> {
-        self.file.classes.iter().find(|c| {
-            c.name == name
-                || self
-                    .file
-                    .namespace
-                    .as_ref()
-                    .is_some_and(|ns| format!("{}\\{}", ns, c.name) == name)
-        })
+    /// against the namespace in effect at `offset`. A short name declared
+    /// in several `namespace` blocks resolves to the one in `offset`'s block.
+    pub(crate) fn declared_class(&self, name: &str, offset: u32) -> Option<&Arc<ClassInfo>> {
+        let namespace = self.file.namespace_at(offset);
+        let classes = &self.file.classes;
+        classes
+            .iter()
+            .find(|c| c.name == name && c.file_namespace.as_deref() == namespace.as_deref())
+            .or_else(|| {
+                classes.iter().find(|c| {
+                    c.name == name
+                        || namespace
+                            .as_ref()
+                            .is_some_and(|ns| format!("{}\\{}", ns, c.name) == name)
+                })
+            })
     }
 }
 

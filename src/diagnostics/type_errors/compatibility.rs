@@ -9,17 +9,20 @@
 //! See the "Architecture note" on [`is_type_compatible`] for the
 //! distinction between the two.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::class_lookup::is_subtype_of_typed;
 use crate::php_type::{
-    LiteralValue, PhpType, ShapeEntry, TypeKind, int_literal_is_within_range, is_array_like_name,
+    CallableType, LiteralValue, PhpType, ShapeEntry, ShapeParts, TypeKind,
+    int_literal_is_within_range, is_array_like_name, shape_key_type,
 };
 use crate::types::{ClassInfo, Visibility};
 
 /// Returns `true` when the type names a class by an unqualified short name
 /// the project cannot load.  Covers both `Foo` and `Foo<Bar>`: a generic
-/// whose base name is unresolvable is just as unverifiable as a plain one.
+/// whose base name is unresolvable is just as unverifiable as a plain one,
+/// and so is the `class-string<T>` of an enclosing template `T`.
 fn is_unloadable_short_name(
     ty: &PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -27,6 +30,9 @@ fn is_unloadable_short_name(
     let name = match ty.kind() {
         TypeKind::Named(n) => n.as_str(),
         TypeKind::Generic(g) => g.name.as_str(),
+        TypeKind::ClassString(Some(inner)) | TypeKind::InterfaceString(Some(inner)) => {
+            return is_unloadable_short_name(inner, class_loader);
+        }
         _ => return false,
     };
     !name.contains('\\')
@@ -48,7 +54,13 @@ fn is_unloadable_short_name(
 /// unknown, so a truthy narrowing that turns a bare `array` into a bare
 /// `non-empty-array` must not start contradicting typed parameters the
 /// unrefined type reached fine.
+///
+/// An unsealed shape is not one, whatever its tail holds: it names the
+/// entries it lists, which the plain array it widens to has lost.
 fn is_bare_array(ty: &PhpType) -> bool {
+    if ty.as_unsealed_shape().is_some() {
+        return false;
+    }
     match ty.kind() {
         TypeKind::Named(name) => !name.eq_ignore_ascii_case("iterable") && is_array_like_name(name),
         TypeKind::Array(inner) => inner.is_mixed(),
@@ -68,17 +80,17 @@ fn is_bare_array(ty: &PhpType) -> bool {
 /// so only a shape can be found short of one.  Whether the argument's
 /// shape can be trusted to be the *whole* array is the caller's call —
 /// this only reports the difference between the two.
+///
+/// Either side may be unsealed; the keys it lists are the ones it holds.
 pub(crate) fn missing_required_shape_keys(arg_type: &PhpType, param_type: &PhpType) -> Vec<String> {
-    let (TypeKind::ArrayShape(arg_entries), TypeKind::ArrayShape(param_entries)) =
-        (arg_type.kind(), param_type.kind())
-    else {
+    let (Some(arg), Some(param)) = (arg_type.shape_parts(), param_type.shape_parts()) else {
         return Vec::new();
     };
 
-    let arg_keys = shape_keys(arg_entries);
-    shape_keys(param_entries)
+    let arg_keys = shape_keys(arg.entries);
+    shape_keys(param.entries)
         .into_iter()
-        .zip(param_entries.iter())
+        .zip(param.entries.iter())
         .filter(|(key, entry)| !entry.optional && !arg_keys.contains(key))
         .map(|(key, _)| key)
         .collect()
@@ -123,6 +135,45 @@ pub(crate) fn shape_breaks_list_order(arg_type: &PhpType, param_type: &PhpType) 
         .any(|(index, key)| key.parse::<usize>() != Ok(index))
 }
 
+/// What an array type asks of every array it accepts, read off its
+/// spelling: `array<K, V>`, `list<V>`, `V[]`, `non-empty-array`, …
+struct ArrayDemand<'a> {
+    key: Option<&'a PhpType>,
+    value: Option<&'a PhpType>,
+    list: bool,
+    non_empty: bool,
+}
+
+impl<'a> ArrayDemand<'a> {
+    /// `None` for anything that is not an array type.  `iterable` is not
+    /// one: it takes a `Traversable` as readily as an array.
+    fn of(ty: &'a PhpType) -> Option<Self> {
+        let (name, args): (&str, &'a [PhpType]) = match ty.kind() {
+            TypeKind::Array(elem) => {
+                return Some(Self {
+                    key: None,
+                    value: Some(elem),
+                    list: false,
+                    non_empty: false,
+                });
+            }
+            TypeKind::Named(name) => (name.as_str(), &[]),
+            TypeKind::Generic(g) => (g.name.as_str(), &g.args),
+            _ => return None,
+        };
+        if !is_array_like_name(name) || name.eq_ignore_ascii_case("iterable") {
+            return None;
+        }
+        let list = is_list_name(name);
+        Some(Self {
+            key: if args.len() == 2 { args.first() } else { None },
+            value: args.last(),
+            list,
+            non_empty: crate::php_type::is_non_empty_array_name(name),
+        })
+    }
+}
+
 /// The key each shape entry stands for, filling in the sequential index
 /// PHP assigns an entry written without one: `array{a: int, string}`
 /// holds a `0` exactly as `array{a: int, 0: string}` does, so the two
@@ -147,6 +198,218 @@ fn shape_keys(entries: &[ShapeEntry]) -> Vec<String> {
         .collect()
 }
 
+/// Whether an array shape passes where another is expected, either of them
+/// possibly unsealed.
+///
+/// Only a key both shapes list can contradict: its value has to fit the
+/// parameter's.  A required key the argument does not list is a MAYBE,
+/// because a shape read off a variable lists the keys we saw assigned, not
+/// every key the array has; the caller reports it for a literal, which does
+/// enumerate them all.
+///
+/// Extra keys on the argument are harmless, since PHP array shapes are open
+/// by convention in most codebases.  The exception is an unsealed
+/// parameter, whose tail says what such an entry looks like: every entry
+/// the parameter does not list, and the tail of an unsealed argument, have
+/// to fit it.
+fn shape_is_compatible(
+    arg: &ShapeParts<'_>,
+    param: &ShapeParts<'_>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    strict_types: bool,
+) -> bool {
+    let arg_keys = shape_keys(arg.entries);
+    let param_keys = shape_keys(param.entries);
+    let listed_fit = param_keys
+        .iter()
+        .zip(param.entries.iter())
+        .all(|(key, pe)| {
+            arg_keys
+                .iter()
+                .position(|arg_key| arg_key == key)
+                .is_none_or(|i| {
+                    is_type_compatible(
+                        &arg.entries[i].value_type,
+                        &pe.value_type,
+                        class_loader,
+                        strict_types,
+                    )
+                })
+        });
+    if !listed_fit {
+        return false;
+    }
+    let Some((tail_key, tail_value)) = param.tail else {
+        return true;
+    };
+
+    // The tail is judged the way the type arguments of an array are: its
+    // keys and values are never coerced to fit, whatever the file's
+    // `strict_types`.  A bare `...` takes any key, so there is no point in
+    // building a type for each entry's key to find that out.
+    let any_key = tail_key.is_array_key();
+    let key_fits = |key: &PhpType| is_type_compatible(key, tail_key, class_loader, true);
+    let value_fits = |value: &PhpType| {
+        tail_value.is_mixed() || is_type_compatible(value, tail_value, class_loader, true)
+    };
+
+    let extras_fit = arg_keys
+        .iter()
+        .zip(arg.entries.iter())
+        .filter(|(key, _)| !param_keys.contains(*key))
+        .all(|(key, entry)| {
+            (any_key || key_fits(&shape_key_type(key))) && value_fits(&entry.value_type)
+        });
+    extras_fit
+        && arg.tail.is_none_or(|(arg_tail_key, arg_tail_value)| {
+            (any_key || key_fits(arg_tail_key)) && value_fits(arg_tail_value)
+        })
+}
+
+/// Whether an array shape, sealed or unsealed, passes where a typed array is
+/// expected.
+///
+/// Every key and value the shape lists is one the array holds, so each has
+/// to fit what the parameter declares, and a shape with no entries at all is
+/// the empty array a `non-empty-*` parameter rejects.  What an unsealed
+/// shape holds beyond them is known only by its tail, which is judged the
+/// way the type arguments of an array are: its keys and values are never
+/// coerced to fit, whatever the file's `strict_types`.
+fn shape_fits_array(
+    arg: &ShapeParts<'_>,
+    demand: &ArrayDemand<'_>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    strict_types: bool,
+) -> bool {
+    if demand.non_empty && arg.entries.is_empty() {
+        return false;
+    }
+    let listed_fit = shape_keys(arg.entries)
+        .iter()
+        .zip(arg.entries)
+        .all(|(key, entry)| {
+            (!demand.list || crate::php_type::is_canonical_int_key(key))
+                && demand.key.is_none_or(|key_type| {
+                    // A key is never coerced to fit, whatever the file's
+                    // `strict_types`: PHP decides it when the array is built.
+                    is_type_compatible(&shape_key_type(key), key_type, class_loader, true)
+                })
+                && demand.value.is_none_or(|value_type| {
+                    is_type_compatible(&entry.value_type, value_type, class_loader, strict_types)
+                })
+        });
+    listed_fit
+        && arg.tail.is_none_or(|(tail_key, tail_value)| {
+            demand
+                .key
+                .is_none_or(|key_type| is_type_compatible(tail_key, key_type, class_loader, true))
+                && demand.value.is_none_or(|value_type| {
+                    is_type_compatible(tail_value, value_type, class_loader, true)
+                })
+        })
+}
+
+/// `arg` seen as its generic ancestor `ancestor_name`, carrying the type
+/// arguments its `@extends`/`@implements` chain binds on the way up:
+/// `IntBox` with `@extends Box<int>` is a `Box<int>`.
+///
+/// `None` when the argument is not a class below that ancestor, or when a
+/// link of the chain does not say what it binds the next level to, since
+/// then the ancestor's arguments are unknown rather than contradicting.
+fn as_generic_ancestor(
+    arg: &PhpType,
+    ancestor_name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    let (name, args): (&str, &[PhpType]) = match arg.kind() {
+        TypeKind::Named(name) => (name.as_str(), &[]),
+        TypeKind::Generic(g) => (g.name.as_str(), &g.args),
+        _ => return None,
+    };
+    if name.eq_ignore_ascii_case(ancestor_name)
+        || is_array_like_name(name)
+        || crate::php_type::is_builtin_non_class_type(name)
+    {
+        return None;
+    }
+    let class = class_loader(name)?;
+    let ancestor = class_loader(ancestor_name)?;
+    if ancestor.template_params.is_empty() || class.fqn() == ancestor.fqn() {
+        return None;
+    }
+
+    let mut subs: HashMap<String, PhpType> = if args.len() == class.template_params.len() {
+        class
+            .template_params
+            .iter()
+            .map(|param| param.to_string())
+            .zip(args.iter().cloned())
+            .collect()
+    } else {
+        HashMap::new()
+    };
+    crate::inheritance::fill_template_bounds(&class, &mut subs);
+
+    let mut visited = HashSet::new();
+    let bound = bind_up_to_ancestor(&class, &ancestor, &subs, &mut visited, class_loader, 0)?;
+    let ancestor_args = ancestor
+        .template_params
+        .iter()
+        .map(|param| bound.get(param.as_str()).cloned())
+        .collect::<Option<Vec<_>>>()?;
+    Some(PhpType::generic(ancestor_name, ancestor_args))
+}
+
+/// The substitution for `ancestor`'s template parameters, threaded from
+/// `current`'s (`subs`) through each `@extends`/`@implements` on the way.
+fn bind_up_to_ancestor(
+    current: &ClassInfo,
+    ancestor: &ClassInfo,
+    subs: &HashMap<String, PhpType>,
+    visited: &mut HashSet<crate::atom::Atom>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    depth: u32,
+) -> Option<HashMap<String, PhpType>> {
+    if depth > crate::types::MAX_INHERITANCE_DEPTH {
+        return None;
+    }
+    for name in current.parent_class.iter().chain(current.interfaces.iter()) {
+        let Some(next) = class_loader(name) else {
+            continue;
+        };
+        if !visited.insert(next.fqn()) {
+            continue;
+        }
+        let next_short = crate::util::short_name(&next.name);
+        let binds = current
+            .extends_generics
+            .iter()
+            .chain(current.implements_generics.iter())
+            .any(|(bound_name, _)| crate::util::short_name(bound_name) == next_short);
+        if next.fqn() == ancestor.fqn() {
+            return binds.then(|| crate::inheritance::build_substitution_map(current, &next, subs));
+        }
+        let next_subs = if next.template_params.is_empty() || !binds {
+            let mut unbound = HashMap::new();
+            crate::inheritance::fill_template_bounds(&next, &mut unbound);
+            unbound
+        } else {
+            crate::inheritance::build_substitution_map(current, &next, subs)
+        };
+        if let Some(found) = bind_up_to_ancestor(
+            &next,
+            ancestor,
+            &next_subs,
+            visited,
+            class_loader,
+            depth + 1,
+        ) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 /// Returns `true` when two class-like types may name the same class
 /// despite being spelled differently.
 ///
@@ -165,6 +428,55 @@ fn may_name_same_class(a: &PhpType, b: &PhpType) -> bool {
     crate::util::short_name(name_a).eq_ignore_ascii_case(crate::util::short_name(name_b))
 }
 
+/// The first parameter of `arg_sig` that rejects a value `param_sig`
+/// promises to pass it, as `(zero-based position, passed type, accepted
+/// type)`.
+///
+/// Parameters are contravariant, so the check runs from the
+/// specification's type to the closure's.  A closure that declares no
+/// parameters here is one whose list was never recorded, and a position
+/// the closure has no parameter for simply drops the value (PHP ignores
+/// surplus arguments to a closure), so neither is a rejection.
+pub(crate) fn first_rejected_callable_param<'a>(
+    arg_sig: &'a CallableType,
+    param_sig: &'a CallableType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    strict_types: bool,
+) -> Option<(usize, &'a PhpType, &'a PhpType)> {
+    let accepting = &arg_sig.params;
+    if accepting.is_empty() {
+        return None;
+    }
+    let accepting_at = |i: usize| {
+        accepting
+            .get(i)
+            .or_else(|| accepting.last().filter(|last| last.variadic))
+    };
+    for (i, passed) in param_sig.params.iter().enumerate() {
+        // A variadic specification parameter fills every closure
+        // parameter from its position on.
+        let positions = if passed.variadic {
+            i..accepting.len().max(i + 1)
+        } else {
+            i..i + 1
+        };
+        for pos in positions {
+            let Some(accepts) = accepting_at(pos) else {
+                break;
+            };
+            if !is_type_compatible(
+                &passed.type_hint,
+                &accepts.type_hint,
+                class_loader,
+                strict_types,
+            ) {
+                return Some((pos, &passed.type_hint, &accepts.type_hint));
+            }
+        }
+    }
+    None
+}
+
 /// Check if an argument type is compatible with a parameter type.
 ///
 /// Returns `true` if the argument type can be passed to the parameter
@@ -176,6 +488,15 @@ pub(crate) fn is_type_compatible(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     strict_types: bool,
 ) -> bool {
+    if crate::virtual_members::laravel::has_model_type_operator(arg_type)
+        || crate::virtual_members::laravel::has_model_type_operator(param_type)
+    {
+        let arg = crate::virtual_members::laravel::expand_model_type(arg_type, class_loader);
+        let param = crate::virtual_members::laravel::expand_model_type(param_type, class_loader);
+        if &arg != arg_type || &param != param_type {
+            return is_type_compatible(&arg, &param, class_loader, strict_types);
+        }
+    }
     // ── Architecture note ───────────────────────────────────────
     //
     // This function is a diagnostic-policy layer on top of the core
@@ -373,12 +694,15 @@ pub(crate) fn is_type_compatible(
     // ── Callable specification ↔ callable specification ─────────
     // Both sides carry a signature, so the return type — covariant,
     // like any other value the caller receives back — is a real
-    // constraint to check.  It is also the half we can trust: a closure
-    // arrives here with a return type only when one was declared or
-    // resolved from its body, and with none at all when neither was
-    // possible.  Its parameter list is not recorded on the resolved type
-    // at all, so an empty `params` means "unknown", not "takes nothing",
-    // and parameters therefore stay a MAYBE.
+    // constraint to check.  A closure arrives here with a return type
+    // only when one was declared or resolved from its body, and with
+    // none at all when neither was possible.
+    //
+    // The parameters are contravariant: every value the specification
+    // promises to pass has to be accepted by the closure's parameter in
+    // that position.  An empty `params` on the argument means the list
+    // was not recorded (a first-class callable, a bare `Closure`), not
+    // "takes nothing", so it stays a MAYBE.
     //
     // This has to come before the bare-`callable` rule below, which
     // treats any two callable-ish types as compatible and would
@@ -386,12 +710,14 @@ pub(crate) fn is_type_compatible(
     if let (TypeKind::Callable(arg_sig), TypeKind::Callable(param_sig)) =
         (arg_type.kind(), param_type.kind())
     {
-        return match (&arg_sig.return_type, &param_sig.return_type) {
-            (Some(arg_return), Some(param_return)) => {
-                is_type_compatible(arg_return, param_return, class_loader, strict_types)
-            }
-            _ => true,
-        };
+        if let (Some(arg_return), Some(param_return)) =
+            (&arg_sig.return_type, &param_sig.return_type)
+            && !is_type_compatible(arg_return, param_return, class_loader, strict_types)
+        {
+            return false;
+        }
+        return first_rejected_callable_param(arg_sig, param_sig, class_loader, strict_types)
+            .is_none();
     }
     // Skip when param type is `callable` and arg type is Closure, callable, string, array,
     // or any object-like type (which might implement `__invoke`).
@@ -514,6 +840,28 @@ pub(crate) fn is_type_compatible(
         && (arg_type.is_closure() || arg_type.is_callable())
     {
         return true;
+    }
+
+    // ── Array shape → array shape ───────────────────────────────
+    // Ahead of the rules below, which read an array by its `kind()`: that
+    // is the generic array an unsealed shape widens to, and judging the
+    // shape by it would never see the entries it lists.
+    if let (Some(arg_shape), Some(param_shape)) = (arg_type.shape_parts(), param_type.shape_parts())
+    {
+        return shape_is_compatible(&arg_shape, &param_shape, class_loader, strict_types);
+    }
+
+    // ── Array shape → typed array ───────────────────────────────
+    // `array{id: string, index: string, body: array}` is accepted where
+    // `array<string, mixed>` or similar is expected: the shape is a more
+    // specific form of the typed array.  Like the rule above, it has to
+    // come before the generic-array rules, which an unsealed shape would
+    // reach as the array it widens to: that array's `mixed` tail swallows
+    // the entries the shape lists.
+    if let Some(arg_shape) = arg_type.shape_parts()
+        && let Some(demand) = ArrayDemand::of(param_type)
+    {
+        return shape_fits_array(&arg_shape, &demand, class_loader, strict_types);
     }
 
     // ── Bare array ↔ typed array: MAYBE ─────────────────────────
@@ -664,6 +1012,17 @@ pub(crate) fn is_type_compatible(
         }
     }
 
+    // ── view-string: any string may name a template ─────────────
+    // The Laravel PHPStan extensions' `view-string` is the subset of
+    // `string` that names a Blade template, which only the project's
+    // templates settle — a fact this layer cannot reach. Every string
+    // is accepted here (MAYBE), and the argument diagnostic checks a
+    // literal against the view index, where that fact lives, reporting
+    // the name rather than the type.
+    if param_type.is_view_string() && (arg_type.is_string_type() || arg_type.is_string_subtype()) {
+        return true;
+    }
+
     // ── model-property<Model>: string literal validation ────────
     // The Laravel PHPStan extensions' `model-property<Model>` is a string subtype
     // representing the property names of an Eloquent model.  When
@@ -689,9 +1048,11 @@ pub(crate) fn is_type_compatible(
                     crate::virtual_members::active_resolved_class_cache(),
                 );
                 let found = resolved.properties.iter().any(|p| *p.name == *prop_name)
-                    || crate::virtual_members::laravel::where_property::collect_column_names(&cls)
-                        .iter()
-                        .any(|col| *col == *prop_name);
+                    || crate::virtual_members::laravel::where_property::collect_column_names(
+                        &resolved,
+                    )
+                    .iter()
+                    .any(|col| *col == *prop_name);
                 return found;
             }
             return true;
@@ -739,11 +1100,11 @@ pub(crate) fn is_type_compatible(
 
     // ── Same-base generic covariance ────────────────────────────
     // When both arg and param are generics with the same base name
-    // (e.g. `array<string, HtmlString|string>` vs `array<string, string>`),
+    // (e.g. `array<string, Cat|Dog>` vs `array<string, Animal>`),
     // check each type argument covariantly using `is_type_compatible`
     // (which has all our MAYBE rules) rather than falling through to
     // `is_subtype_of_typed` (which uses strict structural subtyping
-    // and misses Stringable, type juggling, etc.).
+    // and would carry none of them into the arguments).
     if let (TypeKind::Generic(ga), TypeKind::Generic(gp)) = (arg_type.kind(), param_type.kind()) {
         let (name_arg, args_arg) = (&ga.name, &ga.args);
         let (name_param, args_param) = (&gp.name, &gp.args);
@@ -759,11 +1120,13 @@ pub(crate) fn is_type_compatible(
             let class_like = !is_array_like_name(name_arg) && !is_array_like_name(name_param);
             // A type argument is not a coercion site.  PHP converts the
             // value handed to an `int` parameter, but never the `T` inside
-            // a `Box<T>` it receives whole, so the juggling rules that a
-            // missing `strict_types` turns on have nothing to act on
-            // between two type arguments: `Box<string>` is no more a
-            // `Box<int>` in a lenient file than in a strict one.
-            let args_strict = strict_types || class_like;
+            // a `Box<T>` it receives whole (nor the keys or values inside
+            // an array passed whole), so the juggling rules that a missing
+            // `strict_types` turns on have nothing to act on between two
+            // type arguments: `Box<string>` is no more a `Box<int>` in a
+            // lenient file than in a strict one, and `array<int, V>` is no
+            // more an `array<string, V>` either.
+            let args_strict = true;
             let all_args_compatible = args_arg
                 .iter()
                 .zip(args_param.iter())
@@ -795,6 +1158,30 @@ pub(crate) fn is_type_compatible(
                 });
             }
         }
+    }
+
+    // ── class-string<A> → class-string<B> ───────────────────────
+    // The name of an `A` is the name of a `B` exactly when every `A` is a
+    // `B`, so the inner types decide it, MAYBE rules included: an
+    // enclosing template's `class-string<Collector<TNode, TValue>>` still
+    // says nothing that contradicts `class-string<Collector<Node, mixed>>`.
+    if let (TypeKind::ClassString(Some(arg_inner)), TypeKind::ClassString(Some(param_inner))) =
+        (arg_type.kind(), param_type.kind())
+    {
+        return is_type_compatible(arg_inner, param_inner, class_loader, true);
+    }
+
+    // ── Subclass → generic ancestor ─────────────────────────────
+    // `IntBox` reaches a `Box<string>` parameter with no type arguments
+    // of its own, so the rule above never sees it and the nominal
+    // fallback would only ask whether `IntBox` extends `Box`.  What its
+    // `@extends Box<int>` says is the `Box` it is, and that is what the
+    // parameter has to accept.
+    if let TypeKind::Generic(gp) = param_type.kind()
+        && !is_array_like_name(&gp.name)
+        && let Some(as_ancestor) = as_generic_ancestor(arg_type, &gp.name, class_loader)
+    {
+        return is_type_compatible(&as_ancestor, param_type, class_loader, strict_types);
     }
 
     // ── list<X> ↔ array<int, X>: MAYBE ─────────────────────────
@@ -943,76 +1330,6 @@ pub(crate) fn is_type_compatible(
         let is_array_like = crate::class_lookup::is_subtype_of(&cls, "ArrayAccess", class_loader)
             || crate::class_lookup::is_subtype_of(&cls, "Arrayable", class_loader);
         if is_array_like {
-            return true;
-        }
-    }
-
-    // ── Array shape superset → subset: MAYBE ────────────────────
-    // When an array shape has extra keys beyond what the parameter
-    // shape requires, the extra keys are harmless.  PHP array shapes
-    // are open by convention in most codebases.
-    // Optional keys in the param shape (marked with `?`) do not need
-    // to be present in the arg shape — they are, by definition,
-    // not required.
-    if let (TypeKind::ArrayShape(arg_entries), TypeKind::ArrayShape(param_entries)) =
-        (arg_type.kind(), param_type.kind())
-    {
-        let all_param_keys_satisfied = param_entries.iter().all(|pe| {
-            // Optional param keys don't need to appear in the arg.
-            if pe.optional {
-                // If present, check value compatibility; if absent, fine.
-                return arg_entries
-                    .iter()
-                    .find(|ae| ae.key == pe.key)
-                    .is_none_or(|ae| {
-                        is_type_compatible(
-                            &ae.value_type,
-                            &pe.value_type,
-                            class_loader,
-                            strict_types,
-                        )
-                    });
-            }
-            arg_entries.iter().any(|ae| {
-                ae.key == pe.key
-                    && is_type_compatible(
-                        &ae.value_type,
-                        &pe.value_type,
-                        class_loader,
-                        strict_types,
-                    )
-            })
-        });
-        if all_param_keys_satisfied {
-            return true;
-        }
-    }
-
-    // ── ArrayShape → typed array: MAYBE, but only if every entry fits ──
-    // `array{id: string, index: string, body: array}` should be
-    // accepted where `array<string, mixed>` or similar is expected: the
-    // shape is a more specific form of the typed array. But a shape
-    // literal is a complete, statically-known list of values (unlike a
-    // shape read off a real array, which may hold more at runtime), so
-    // when every entry's value type is checked and one fails to fit the
-    // declared value type, that is a genuine mismatch, not a MAYBE — a
-    // `list<int>` parameter rejects an argument shape holding a string.
-    if let TypeKind::ArrayShape(arg_entries) = arg_type.kind() {
-        let value_type = match param_type.kind() {
-            TypeKind::Generic(g) if is_array_like_name(&g.name) => g.args.last(),
-            TypeKind::Array(elem) => Some(elem),
-            _ => None,
-        };
-        if let Some(value_type) = value_type {
-            if arg_entries
-                .iter()
-                .all(|e| is_type_compatible(&e.value_type, value_type, class_loader, strict_types))
-            {
-                return true;
-            }
-        } else if matches!(param_type.kind(), TypeKind::Generic(g) if is_array_like_name(&g.name))
-            || matches!(param_type.kind(), TypeKind::Array(_))
-        {
             return true;
         }
     }

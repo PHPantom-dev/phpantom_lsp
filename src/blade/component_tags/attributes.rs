@@ -285,7 +285,7 @@ pub(crate) fn scan_component_tag_slots(content: &str, tag_names: &[String]) -> V
             }
             let name_start = i + 2 + "x-".len();
             let j = tag_name_end(bytes, name_start);
-            let Some(close) = find_byte(&masked, j, b'>') else {
+            let Some(close) = find_byte(bytes, j, b'>') else {
                 break;
             };
             let name = &masked[name_start..j];
@@ -359,6 +359,12 @@ fn slot_tag_name(masked: &str, tag_name: &str, lexed: &TagAttributes) -> Option<
             .flatten()
             .map(|value| masked[value].to_string())
     })
+}
+
+/// The name a `<x-slot>` tag's opening tag gives it through its
+/// `name="…"` attribute, lexing from `name_end`, the end of the tag name.
+pub(crate) fn legacy_slot_name(content: &str, name_end: usize) -> Option<String> {
+    slot_tag_name(content, "slot", &lex_tag_attributes(content, name_end))
 }
 
 /// Convert a kebab-case attribute name to the camelCase variable name

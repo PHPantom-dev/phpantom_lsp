@@ -141,12 +141,32 @@ pub(crate) fn resolve_name_via_loader(
 ///
 /// An explicit `use` import still wins: it resolves to a namespaced or
 /// aliased class whose FQN differs from the bare name, which this helper
-/// leaves untouched.
+/// leaves untouched.  The one exception is a class the file itself
+/// declares in `namespace` (`local_classes` is the file's class list):
+/// PHP refuses to compile an import that collides with a class declared
+/// in the same namespace block, so an unqualified name that matches one
+/// always means it.  This is what keeps a file with several `namespace`
+/// blocks from resolving a short name in a later block to the
+/// same-named class of the first, which is the namespace the file-wide
+/// class loader was built for.
 pub(crate) fn resolve_source_class_name(
     name: &str,
     namespace: Option<&str>,
+    local_classes: &[Arc<crate::types::ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> String {
+    if !name.contains('\\')
+        && let Some(local) = local_classes.iter().find(|c| {
+            c.name.eq_ignore_ascii_case(name)
+                && match (c.file_namespace.as_deref(), namespace) {
+                    (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                    (None, None) => true,
+                    _ => false,
+                }
+        })
+    {
+        return local.fqn().to_string();
+    }
     let resolved = class_loader(name);
     // Only a relative name inside a namespace can be shadowed by a global
     // class of the same path; a leading `\` is an explicit global reference.
@@ -188,7 +208,74 @@ pub(crate) fn resolve_php_type_names(
     ty: &crate::php_type::PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> crate::php_type::PhpType {
-    ty.resolve_names(&|name| resolve_name_via_loader(name, class_loader))
+    let resolved = ty.resolve_names(&|name| resolve_name_via_loader(name, class_loader));
+    fill_generic_type_defaults(&resolved, class_loader)
+}
+
+/// Spell out generic type arguments a declared type left to their
+/// `@template` default.
+///
+/// `@param Test<false> $one` on a class declaring
+/// `@template T1 = true  @template T2 = true` binds only `T1`; member
+/// lookups already see `T2`'s default because [`build_generic_subs`] fills
+/// omitted trailing parameters in, but the annotation's own `PhpType` still
+/// carries just the one argument written. Left alone, hover shows
+/// `Test<false>` and a comparison against the fully spelled `Test<false,
+/// true>` sees two different arities for what should be the same type.
+///
+/// This walks the type and rebuilds every `Generic` node whose argument
+/// count falls short of its class's template parameters, spelling out each
+/// omitted parameter the way [`build_generic_subs`] binds it for member
+/// substitution.
+///
+/// Only a parameter that is actually left to something is filled: one with
+/// a declared default, or a leading key parameter a short list skips
+/// (`Collection<User>` is `Collection<array-key, User>`, `Iterator<Foo>` is
+/// `Iterator<mixed, Foo>`). A trailing parameter with neither is left out,
+/// as PHPStan leaves it, rather than spelled `mixed`: writing
+/// `Iterator<Foo>` out as `Iterator<Foo, mixed>` would move `Foo` into the
+/// key slot for every consumer that reads the arguments positionally.
+///
+/// [`build_generic_subs`]: crate::inheritance::build_generic_subs
+fn fill_generic_type_defaults(
+    ty: &crate::php_type::PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> crate::php_type::PhpType {
+    use crate::php_type::{PhpType, TypeKind};
+
+    match ty.raw_kind() {
+        TypeKind::Generic(g) => {
+            let args: Vec<PhpType> = g
+                .args
+                .iter()
+                .map(|a| fill_generic_type_defaults(a, class_loader))
+                .collect();
+            let filled_args = class_loader(g.name.as_str()).and_then(|cls| {
+                let written = args.len();
+                let offset = crate::inheritance::generic_arg_offset(&cls, written);
+                let every_omitted_is_left_to_something = cls
+                    .template_params
+                    .iter()
+                    .skip(offset + written)
+                    .all(|param| cls.template_param_defaults.contains_key(param));
+                (cls.template_params.len() > written && every_omitted_is_left_to_something).then(
+                    || {
+                        let subs = crate::inheritance::build_generic_subs(&cls, &args);
+                        cls.template_params
+                            .iter()
+                            .map(|param| {
+                                subs.get(param.as_str())
+                                    .cloned()
+                                    .unwrap_or_else(PhpType::mixed)
+                            })
+                            .collect::<Vec<_>>()
+                    },
+                )
+            });
+            PhpType::generic_atom(g.name, filled_args.unwrap_or(args))
+        }
+        _ => ty.map_children(&|t| fill_generic_type_defaults(t, class_loader)),
+    }
 }
 
 /// [`resolve_php_type_names`] for a type written as source the reader
@@ -212,15 +299,17 @@ pub(crate) fn resolve_php_type_names(
 pub(crate) fn resolve_source_php_type_names(
     ty: &crate::php_type::PhpType,
     namespace: Option<&str>,
+    local_classes: &[Arc<crate::types::ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> crate::php_type::PhpType {
-    ty.resolve_names(&|name| {
-        let resolved = resolve_source_class_name(name, namespace, class_loader);
+    let resolved = ty.resolve_names(&|name| {
+        let resolved = resolve_source_class_name(name, namespace, local_classes, class_loader);
         if resolved == name.trim_start_matches('\\') {
             return name.to_string();
         }
         resolved
-    })
+    });
+    fill_generic_type_defaults(&resolved, class_loader)
 }
 
 /// Run `f` inside [`panic::catch_unwind`], logging and swallowing any
@@ -318,7 +407,7 @@ pub(crate) fn path_to_uri(path: &Path) -> String {
 ///
 /// Uses the `ignore` crate's `WalkBuilder` for gitignore-aware
 /// traversal.  This is consistent with the other workspace walkers
-/// (`scan_workspace_fallback_full`, `crate::references::collect_php_files_gitignore`).
+/// (`scan_workspace_fallback_full`, `crate::classmap_scanner::collect_php_files_gitignore`).
 ///
 /// Used by Go-to-implementation (Phase 5) which walks PSR-4 source
 /// directories.
@@ -335,27 +424,15 @@ pub(crate) fn collect_php_files(
     vendor_dir_paths: &[PathBuf],
     filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
 ) -> Vec<PathBuf> {
-    use ignore::WalkBuilder;
-
     let mut result = Vec::new();
-    let vendor_paths: Vec<PathBuf> = vendor_dir_paths.to_vec();
-    let filter_excludes = std::sync::Arc::clone(filters);
-
-    let walker = WalkBuilder::new(dir)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .hidden(true)
-        .parents(true)
-        .ignore(true)
-        .filter_entry(move |entry| {
-            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-            if is_dir && vendor_paths.iter().any(|vp| vp == entry.path()) {
-                return false;
-            }
-            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
-        })
-        .build();
+    let walker = crate::classmap_scanner::workspace_walk_builder(
+        dir,
+        std::sync::Arc::new(vendor_dir_paths.to_vec()),
+        std::sync::Arc::clone(filters),
+        false,
+        crate::classmap_scanner::LinkClaims::new([dir.to_path_buf()], None),
+    )
+    .build();
 
     for entry in walker.flatten() {
         let path = entry.path();
@@ -660,5 +737,60 @@ mod tests {
     fn unescape_string_literal_rejects_unquoted_input() {
         assert_eq!(unescape_php_string_literal("bare"), None);
         assert_eq!(unescape_php_string_literal("'unterminated"), None);
+    }
+
+    #[test]
+    fn collect_php_files_follows_interior_symlink() {
+        // Go-to-implementation's walker keeps the same symlink contract
+        // as the other workspace walkers (issue #383).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+        let link = root.join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+        let files = collect_php_files(&root, &[], &crate::classmap_scanner::IndexFilters::empty());
+        let linked = files
+            .iter()
+            .find(|p| p.ends_with("Hidden.php"))
+            .unwrap_or_else(|| panic!("linked file must be indexed: {files:?}"));
+        assert!(
+            linked.starts_with(&link),
+            "paths must keep the symlink spelling: {linked:?} vs {link:?}"
+        );
+    }
+
+    #[test]
+    fn collect_php_files_walks_a_link_target_once() {
+        // Two links to one tree must not make go-to-implementation offer
+        // the same class twice under two spellings.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+        for name in ["a", "b"] {
+            let link = root.join(name);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            #[cfg(windows)]
+            std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+        }
+
+        let files = collect_php_files(&root, &[], &crate::classmap_scanner::IndexFilters::empty());
+        assert_eq!(
+            files.len(),
+            1,
+            "the linked tree must be reported once, not once per link: {files:?}"
+        );
     }
 }

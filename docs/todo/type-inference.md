@@ -152,7 +152,9 @@ function's signature as a typed `Closure`.  This is relevant for DI
 containers and middleware patterns but is a niche use case.
 
 See `ClosureBindDynamicReturnTypeExtension` and
-`ClosureFromCallableDynamicReturnTypeExtension` in PHPStan.
+`ClosureFromCallableDynamicReturnTypeExtension` in PHPStan. A
+`Closure::fromCallable($cb)` assertion in
+`tests/phpstan_data/Analyser/Fiber/fnsr.php` is `// SKIP` on this.
 
 ---
 
@@ -252,7 +254,12 @@ $fn = function(int $x): string { return (string)$x; };
    should not be re-enriched to `(Closure(): mixed)`.
 
 **After fixing:** verify that extract function docblock generation
-emits the concrete callable signature in the `@param` tag.
+emits the concrete callable signature in the `@param` tag, and un-SKIP
+the `Closure(): 1`-style assertions in
+`tests/phpstan_data/Analyser/Fiber/fnsr.php` and the closure calls in
+`tests/phpstan_data/Rules/Functions/bug-anonymous-function-method-constant.php`
+(a closure without a declared return type, whose call reads back as
+`mixed`).
 
 ---
 
@@ -336,13 +343,24 @@ raw strings.
 
 ---
 
-## T26. Globbed constant unions (`Foo::BAR_*`)
+## T26. Class constants named as docblock types (`Foo::BAR`, `Foo::BAR_*`)
 
-**Impact: Low · Complexity: Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
-Resolve wildcard constant patterns like `Foo::BAR_*` to the union of
-all matching constant types on the class. PHPStan supports this syntax
-in docblock type strings:
+A class constant named in a type position is not read at all: `@param
+Foo::BAR $x`, `@param self::FOO|self::BAR $x` and `@param C::class|D::class
+$x` all stay as unresolved text (or fall back to the native hint), where
+PHPStan and Psalm give the constant's value (`'bar'`, `'bar'|'foo'`,
+`'App\C'|'App\D'`). The same constants are read when they are the operand
+of `key-of<>`/`value-of<>`, through `constant_operand_shape`, so the value
+lookup exists; the bare reference just never reaches it. Found porting
+Psalm's `ConstValuesTest` and `ReconcilerTest`; the assertions are `// SKIP`
+in `tests/psalm_assertions/const_values.php` and
+`tests/psalm_assertions/type_reconciliation_reconciler.php`.
+
+The wildcard form resolves a pattern like `Foo::BAR_*` to the union of all
+matching constant types on the class. PHPStan supports this syntax in
+docblock type strings:
 
 ```php
 class Status {
@@ -455,6 +473,12 @@ intentional).
 4. Future diagnostic (D-series) can warn on access of possibly-undefined
    variables.
 
+Knowing that a target is definitely set also settles `??=`: on a target
+that is set and never null (a non-nullable parameter, a required shape
+key) the fallback can never be assigned, so `$string ??= 1` is still
+`string`. Today the fallback is always added; the assertions in
+`tests/phpstan_nsrt/coalesce-assign.php` are `// SKIP` against this item.
+
 **References:**
 - Psalm: `Context::$vars_in_scope` and `Context::$vars_possibly_in_scope`
   (`Psalm\Context`)
@@ -545,7 +569,11 @@ below it needs no change.
 
 **Tests to update once fixed:** upstream's `nsrt/deducted-types.php` has
 a `$foo::INTEGER_CONSTANT` block that was dropped when
-`tests/phpstan_nsrt/deducted-types.php` was ported; port it back.
+`tests/phpstan_nsrt/deducted-types.php` was ported; port it back. The
+`$hw::B`/`$self::FOO` assertions in
+`tests/phpstan_data/Rules/Constants/bug-10212.php` and
+`tests/phpstan_data/Rules/Methods/return-type-class-constant.php` are
+`// SKIP` on this.
 
 ---
 
@@ -585,7 +613,9 @@ to the current class name identically to `Expression::Self_`.
 **Tests to update once fixed:** the `static::`/`$this::` assertions in
 upstream's `nsrt/class-constant-types.php` were dropped when
 `tests/phpstan_nsrt/class-constant-types.php` was ported (only the
-`self::` cases survive); port them back.
+`self::` cases survive); port them back. The `static::`/`$this::`
+assertions in `tests/phpstan_nsrt/class-constant-native-type.php` are
+`// SKIP` against this item.
 
 
 ---
@@ -608,7 +638,7 @@ The mechanism this needs already exists, in the shape used for
 `json_encode`'s `JSON_THROW_ON_ERROR`
 (`type_engine/types/flag_returns.rs`): read the flags argument's text at
 the call site and pick a branch from it. A conditional return type in
-`stub_patches.rs` cannot express this one, because the deciding value
+`stub_patches/` cannot express this one, because the deciding value
 arrives as a global constant (`PATHINFO_FILENAME`) and a condition can
 only name a literal value or a class constant.
 
@@ -661,3 +691,175 @@ reading that helper takes from the body.
 Once it is read, the pcre stub patches can declare `preg_match`'s and
 `preg_match_all`'s out types directly rather than inheriting
 phpstorm-stubs' `null|string[]`.
+
+## T42. A static factory's own `@return self<T>` breaks every chained call after it
+**Impact: Medium · Complexity: Unknown (needs investigation)**
+
+Found while porting Mago's `issue_362.php` (Test Porting Phase 4A): a
+static method that declares its own `@template T` and returns
+`self<T>` makes every completion request on a call chained off it come
+back `None` (not empty — no completion response at all), even when the
+receiving variable's type is separately pinned down by a `@var`
+annotation that makes the method's own template irrelevant.
+
+Minimal repro:
+
+```php
+class Product {
+    public function getPrice(): float { return 0.0; }
+}
+
+/** @template T */
+class Box {
+    /**
+     * @template T
+     * @return self<T>
+     */
+    public static function make(): self { return new self(); }
+
+    /** @return T */
+    public function get(): mixed {}
+}
+
+/** @var Box<Product> $box */
+$box = Box::make();
+$box->get()->  // completion() returns None here, not just an empty list
+```
+
+Removing either the method-level `@template T` + `@return self<T>` on
+`make()` (letting it return a bare `self` and relying entirely on the
+`@var` hint), or making `get()`'s call chain off a plain `new Box()`
+instead of `Box::make()`, makes the same chain resolve `getPrice`
+correctly. So the break is specific to a `self<T>`-returning static
+method sitting in the middle of a chain — one hop after it (`Box::make()
+->`) still lists `Box`'s own members fine; it is the *second* hop
+(`->get()->`, the one that needs `T` substituted from the instantiated
+type) that comes back empty-handed.
+
+The same failure reproduces with the original Mago pattern too: two
+independent method-level templates (`K`, `V`, both distinct from the
+class-level `TKey`/`TValue`) inferred from an `array<K, V>` argument and
+returned as `self<K, V>`, chained straight into an instance method
+whose own `@return TValue` should resolve through it. So this is not
+purely a same-name shadowing edge case between the class-level and
+method-level template — investigate whether both share one underlying
+cause before assuming they are separate bugs.
+
+Whatever produces the instantiated receiver type for the second hop
+comes back with nothing usable — worth checking whether the generic
+substitution map built for `self<T>` ends up unable to resolve `T` (no
+argument binds the method-level template, and the external `@var`
+override does not appear to reach it), and whether that unresolved-`T`
+case is handled by returning an error/`None` instead of falling back to
+the class's own declared (or unsubstituted) member types the way other
+partial-resolution failures in this pipeline do.
+
+**Blocks:** Test Porting Phase 4A pattern 362 (generic class implementing
+`ArrayAccess`/`IteratorAggregate` with a `self<K, V>`-returning static
+factory) cannot be ported until this is fixed — the ported test would
+assert on exactly the completion this bug empties out.
+
+## T43. `self::TypeAlias` inside `@extends`'s generic argument is not resolved
+**Impact: Low · Complexity: Medium**
+
+Found while porting Mago's `issue_870.php` (Test Porting Phase 4A). A
+class can declare its own `@type`/`@phpstan-type` alias and hand it to
+its own parent's template parameter via `self::`:
+
+```php
+/** @template TData as array<string, mixed> */
+abstract class Car {
+    /** @return TData */
+    abstract function getData(): array;
+}
+
+/**
+ * @type DataArray = array{'Gewicht': int}
+ * @extends Car<self::DataArray>
+ */
+class RedCar extends Car {
+    public function getData(): array { return ['Gewicht' => 1000]; }
+}
+```
+
+`getData()`'s inherited `@return TData` should resolve to the
+`DataArray` shape (offering `Gewicht` for array-key completion), but
+`self::DataArray` inside the `@extends` tag's generic argument list is
+not recognised as a reference to the class's own type alias, so `TData`
+never gets substituted and completion sees only the untyped `array`
+declared return.
+
+`extract_generics_tag` (`docblock.rs`, exercised by
+`test_extract_generics_tag_extends_single_param` and friends in
+`completion_generics.rs`) parses `@extends Foo<Bar>` generic arguments
+as plain type tokens; `self::DataArray` most likely parses as some
+`Named`/member-access token rather than being recognised as "look up
+`DataArray` in this class's own `type_aliases`, the same alias
+`resolve_type_alias_typed` already expands everywhere else."
+
+**Fix:** when parsing a generic argument off `@extends`/`@implements`/
+`@template-implements`, recognise a `self::Identifier` token and resolve
+it against the *declaring* class's own `type_aliases` map (via
+`resolve_type_alias_typed` with that class as `owning_class_name`)
+before substituting it into the parent's template.
+
+**Blocks:** Test Porting Phase 4A pattern 870.
+
+---
+
+## T44. A single enum case has no type
+**Impact: Low-Medium · Complexity: High**
+
+```php
+enum Suit { case Hearts; case Spades; case Clubs; }
+function f(Suit $s) {
+    if ($s === Suit::Hearts) {
+    } elseif ($s === Suit::Spades) {
+    } else {
+        $s; // PHPStan: Suit::Clubs; PHPantom: Suit
+    }
+}
+```
+
+`Suit::Hearts` resolves to the enum class, so narrowing by comparing
+against cases can only ever say "some `Suit`". PHPStan and Psalm give each
+case its own type, a subtype of the enum: comparing narrows to the cases
+left, a `match` over the rest is known exhaustive, a `readonly` property
+assigned one case keeps it, and `->value`/`->name` on it are the case's
+literal values.
+
+The type model needs an enum-case variant (or a literal kind for it) that
+is a subtype of its enum in `is_subtype_of`, prints as `Enum::CASE`, and
+joins back into the enum when every case is present. Narrowing by `===`
+and `instanceof` then subtracts cases the way it subtracts union members,
+and a branch that has compared away every case holds `never`.
+
+Since `value-of<…>` over an enum is evaluated, the gap also produces false
+positives. A case passed to a template binds the template to the whole
+enum, so the operator gives every case's value:
+
+```php
+/**
+ * @template T of Suit
+ * @param T $case
+ * @return value-of<T>
+ */
+function backingValue(Suit $case) { return $case->value; }
+
+/** @param 'hearts' $value */
+function acceptsHearts(string $value): void {}
+
+acceptsHearts(backingValue(Suit::Hearts)); // reported: 'spades' does not satisfy 'hearts'
+```
+
+A case held in a variable loses its value the same way: after `$case =
+Suit::Hearts;`, `acceptsHearts($case->value)` is reported too. Found
+running the php-typing-conformance suite
+(`phpdoc_advanced_fallback_value_of_template_enum.php`).
+
+Found porting PHPStan's `Rules/Comparison/data/bug-8485.php` and `Rules/Methods/data/return-type-class-constant.php`; both its
+case and its `never` assertion are `// SKIP` in the ported copy under
+`tests/phpstan_data/`.
+
+Found porting PHPStan's `Rules/Comparison/data/bug-8485.php`; the
+assertion is `// SKIP` in `tests/phpstan_data/`.

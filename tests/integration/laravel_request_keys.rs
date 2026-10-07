@@ -4,7 +4,7 @@
 
 use crate::common::{
     FORM_REQUEST_STUB, complete_at_opened, create_psr4_workspace, definition_locations,
-    goto_definition_at, item_labels, open_php, split_cursor,
+    goto_definition_at, item_labels, open_php_at, split_cursor,
 };
 use tower_lsp::lsp_types::*;
 
@@ -199,8 +199,7 @@ async fn open_at_cursor(
     files.push((open_path, stripped.as_str()));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
 
-    let uri = Url::from_file_path(dir.path().join(open_path)).unwrap();
-    open_php(&backend, &uri, &stripped).await;
+    let uri = open_php_at(&backend, &dir, open_path, &stripped).await;
 
     (backend, dir, uri, position)
 }

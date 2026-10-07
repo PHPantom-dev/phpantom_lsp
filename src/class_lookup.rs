@@ -146,6 +146,30 @@ pub(crate) fn find_class_by_name<'a>(
     }
 }
 
+/// Find the class in a slice whose fully-qualified name is `fqn`.
+///
+/// Unlike [`find_class_by_name`], a name without a namespace only matches a
+/// global class, so a resolved name never lands on a same-named class of
+/// another namespace block.
+pub(crate) fn find_class_by_fqn<'a>(
+    all_classes: &'a [Arc<ClassInfo>],
+    fqn: &str,
+) -> Option<&'a Arc<ClassInfo>> {
+    let fqn = fqn.strip_prefix('\\').unwrap_or(fqn);
+    let (namespace, short) = match fqn.rsplit_once('\\') {
+        Some((namespace, short)) => (Some(namespace), short),
+        None => (None, fqn),
+    };
+    all_classes.iter().find(|c| {
+        c.name.eq_ignore_ascii_case(short)
+            && match (c.file_namespace.as_deref(), namespace) {
+                (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                (None, None) => true,
+                _ => false,
+            }
+    })
+}
+
 /// The class a class-position expression names, as written.
 ///
 /// Covers the four spellings a `Foo::bar()`, `new Foo`, `Foo::CONST`, or
@@ -155,16 +179,27 @@ pub(crate) fn find_class_by_name<'a>(
 /// forwards it), and `parent` with its parent, or `None` when it has
 /// none.
 ///
+/// A name is resolved the way PHP resolves it in source (see
+/// [`crate::util::resolve_source_class_name`]): a class in the current
+/// namespace shadows a global one of the same name.
+///
 /// Every other expression kind (a variable holding a class-string, a call)
 /// needs resolution this cannot do and yields `None`; a caller that
 /// handles one matches it before reaching here.
 pub(crate) fn class_expression_name(
     expr: &mago_syntax::cst::Expression<'_>,
     current_class: &ClassInfo,
+    local_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     use mago_syntax::cst::Expression;
     match expr {
-        Expression::Identifier(ident) => Some(crate::atom::bytes_to_str(ident.value()).to_string()),
+        Expression::Identifier(ident) => Some(crate::util::resolve_source_class_name(
+            crate::atom::bytes_to_str(ident.value()),
+            current_class.file_namespace.as_deref(),
+            local_classes,
+            class_loader,
+        )),
         Expression::Self_(_) | Expression::Static(_) => Some(current_class.name.to_string()),
         Expression::Parent(_) => current_class.parent_class.map(|a| a.to_string()),
         _ => None,
@@ -255,6 +290,28 @@ pub(crate) fn load_ancestor(
             class_loader(&format!("\\{ancestor_name}")).filter(|c| !is_self(c))
         }
         other => other,
+    }
+}
+
+/// Check whether `child` is a subclass (direct or transitive) of
+/// `parent`, including implemented interfaces.
+///
+/// Returns `false` if `child` cannot be loaded or if there is no
+/// inheritance relationship.  Delegates to the shared nominal subtype
+/// walk ([`is_subtype_of`]), which handles
+/// transitive interface extension, FQN normalisation, and cycle
+/// detection.
+pub(crate) fn is_subclass_of(
+    child: &str,
+    parent: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    if child.eq_ignore_ascii_case(parent) {
+        return false; // same class, not a subclass
+    }
+    match class_loader(child) {
+        Some(child_class) => is_subtype_of(&child_class, parent, class_loader),
+        None => false,
     }
 }
 
@@ -466,6 +523,16 @@ pub(crate) fn is_subtype_of_typed(
         return true;
     }
 
+    if crate::virtual_members::laravel::has_model_type_operator(subtype)
+        || crate::virtual_members::laravel::has_model_type_operator(supertype)
+    {
+        let sub = crate::virtual_members::laravel::expand_model_type(subtype, class_loader);
+        let sup = crate::virtual_members::laravel::expand_model_type(supertype, class_loader);
+        if &sub != subtype || &sup != supertype {
+            return is_subtype_of_typed(&sub, &sup, class_loader);
+        }
+    }
+
     // ── Union subtype: every member must be a subtype ───────────
     if let TypeKind::Union(members) = subtype.kind() {
         return members
@@ -508,6 +575,22 @@ pub(crate) fn is_subtype_of_typed(
         return members
             .iter()
             .any(|m| is_subtype_of_typed(m, supertype, class_loader));
+    }
+
+    // ── Shape <: shape ──────────────────────────────────────────
+    // The structural check compared the entries each shape lists and found
+    // them wanting, but it takes the class names in them at face value, so
+    // the comparison is redone with the hierarchy applied to the entries.
+    //
+    // It also has to be answered here, ahead of the generic-array rules
+    // below: they read an array by its `kind()`, which for an unsealed shape
+    // is the generic array it widens to, and every `array{…, ...}` widens to
+    // the same `non-empty-array<array-key, mixed>`. Those rules would call
+    // any two of them subtypes, whatever entries they list.
+    if let (Some(sub), Some(wider)) = (subtype.shape_parts(), supertype.shape_parts()) {
+        return crate::php_type::shape_is_subshape(&sub, &wider, &|a, b| {
+            is_subtype_of_typed(a, b, class_loader)
+        });
     }
 
     // ── Generic covariance with class-loader awareness ──────────
@@ -701,9 +784,11 @@ pub(crate) fn is_subtype_of_typed(
                 crate::virtual_members::active_resolved_class_cache(),
             );
             return resolved.properties.iter().any(|p| *p.name == *prop_name)
-                || crate::virtual_members::laravel::where_property::collect_column_names(&cls)
-                    .iter()
-                    .any(|col| *col == *prop_name);
+                || crate::virtual_members::laravel::where_property::collect_column_names(
+                    &resolved,
+                )
+                .iter()
+                .any(|col| *col == *prop_name);
         }
         return true;
     }

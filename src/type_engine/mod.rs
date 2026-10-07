@@ -137,12 +137,38 @@ where
     }
     depth.with(|c| c.set(d + 1));
 
+    // Restores the depth and releases the key on drop, so a panic inside
+    // `compute` (caught by the request handler, which keeps the thread)
+    // does not leave this key answering nothing for the thread's life.
+    struct Restore<VisitedKey: Eq + std::hash::Hash + 'static> {
+        visited: &'static std::thread::LocalKey<
+            std::cell::RefCell<std::collections::HashSet<VisitedKey>>,
+        >,
+        depth: &'static std::thread::LocalKey<std::cell::Cell<u8>>,
+        previous_depth: u8,
+        key: Option<VisitedKey>,
+    }
+    impl<VisitedKey: Eq + std::hash::Hash + 'static> Drop for Restore<VisitedKey> {
+        fn drop(&mut self) {
+            let previous = self.previous_depth;
+            self.depth.with(|c| c.set(previous));
+            if let Some(key) = self.key.take() {
+                self.visited.with(|set| {
+                    set.borrow_mut().remove(&key);
+                });
+            }
+        }
+    }
+    let restore = Restore {
+        visited,
+        depth,
+        previous_depth: d,
+        key: Some(visited_key),
+    };
+
     let result = compute();
 
-    depth.with(|c| c.set(d));
-    visited.with(|set| {
-        set.borrow_mut().remove(&visited_key);
-    });
+    drop(restore);
     memo.with(|c| {
         if let Some(m) = c.borrow_mut().as_mut() {
             m.insert(memo_key, result.clone());

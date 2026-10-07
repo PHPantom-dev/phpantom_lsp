@@ -14,7 +14,6 @@ use crate::types::{ClassInfo, ResolvedType};
 use crate::type_engine::resolver::VarResolutionCtx;
 
 use super::array_access::{class_string_inner_binding, insert_or_union};
-use super::calls::resolve_arg_call_raw_type;
 use super::resolve_var_types;
 
 /// Resolve `new ClassName(…)` to the instantiated class.
@@ -46,12 +45,14 @@ pub(super) fn resolve_rhs_instantiation(
                 crate::util::resolve_source_class_name(
                     parent.as_str(),
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.all_classes,
                     ctx.class_loader,
                 )
             }
             other => crate::util::resolve_source_class_name(
                 other,
                 ctx.current_class.file_namespace.as_deref(),
+                ctx.all_classes,
                 ctx.class_loader,
             ),
         };
@@ -115,188 +116,33 @@ pub(super) fn resolve_rhs_instantiation(
             })
             .flatten();
         if let Some(cls) = declaration.as_deref() {
-            // Look for the constructor on the raw class first; if not
-            // found (child class without its own constructor), walk up
-            // the parent chain to find the original declaring class and
-            // use its unsubstituted constructor.  This preserves the
-            // original template param names in `template_bindings` so
-            // that `classify_template_binding` can match them against
-            // the parameter type hints (e.g. `array<T>` with binding
-            // `("T", "$arr")`).
-            let ancestor_cls_arc;
-            let ctor_owner: &ClassInfo;
-            let ctor_inherited;
-            let ctor_ref = if let Some(c) = cls.get_method("__construct") {
-                ctor_inherited = false;
-                ctor_owner = cls;
-                Some(c)
-            } else {
-                let mut found: Option<std::sync::Arc<ClassInfo>> = None;
-                let mut cur = cls.parent_class.as_ref().map(|p| p.to_string());
-                for _ in 0..15 {
-                    let parent_name = match cur {
-                        Some(ref n) => n.clone(),
-                        None => break,
-                    };
-                    if let Some(parent) = (ctx.class_loader)(&parent_name) {
-                        if parent.get_method("__construct").is_some() {
-                            found = Some(parent);
-                            break;
-                        }
-                        cur = parent.parent_class.as_ref().map(|p| p.to_string());
-                    } else {
-                        break;
-                    }
-                }
-                match found {
-                    Some(arc) => {
-                        ancestor_cls_arc = arc;
-                        ctor_inherited = true;
-                        ctor_owner = &ancestor_cls_arc;
-                        ancestor_cls_arc.get_method("__construct")
-                    }
-                    None => {
-                        ctor_inherited = false;
-                        ctor_owner = cls;
-                        None
-                    }
-                }
-            };
-            if let Some(ctor) = ctor_ref
-                && !ctor.template_bindings.is_empty()
-                && let Some(ref arg_list) = inst.argument_list
-            {
-                let arg_texts =
+            // An omitted argument still binds through its parameter's
+            // default, so `new E` and `new E()` go through here too.
+            let arg_texts = inst
+                .argument_list
+                .as_ref()
+                .map(|arg_list| {
                     crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
                         arg_list,
                         ctx.content,
-                    );
-                if !arg_texts.is_empty() {
-                    let rctx = ctx.as_resolution_ctx();
-                    let raw_subs =
-                        build_constructor_template_subs(ctor_owner, ctor, &arg_texts, &rctx, ctx);
-                    // When the constructor is inherited, its template_bindings
-                    // reference the ancestor's template param names.  Remap
-                    // them to the child's template params via the @extends chain.
-                    let subs = if ctor_inherited && !raw_subs.is_empty() {
-                        remap_inherited_ctor_subs(cls, &raw_subs, ctx.class_loader)
-                    } else {
-                        raw_subs
-                    };
-                    if !subs.is_empty() {
-                        // ── Infer unbound template params from bound constraints ──
-                        // When a template param has a bound like
-                        // `TIterator as Iterator<TKey, TValue>` and TIterator
-                        // has been resolved to a concrete type (e.g.
-                        // `Generator<int, string>`), match the concrete type's
-                        // generic args against the bound's args to infer the
-                        // nested template params (TKey=int, TValue=string).
-                        let mut subs = subs;
-                        for (bound_param, bound_type) in cls.template_param_bounds.iter() {
-                            let bound_param_str: &str = bound_param.as_ref();
-                            if let Some(concrete) = subs.get(bound_param_str).cloned()
-                                && let TypeKind::Generic(bound) = bound_type.kind()
-                            {
-                                let concrete_args = match &concrete.kind() {
-                                    TypeKind::Generic(g) => Some(g.args.as_slice()),
-                                    _ => None,
-                                };
-                                if let Some(concrete_args) = concrete_args {
-                                    for (i, bound_arg) in bound.args.iter().enumerate() {
-                                        if let TypeKind::Named(tpl_name) = bound_arg.kind()
-                                            && cls
-                                                .template_params
-                                                .iter()
-                                                .any(|t| t.as_str() == tpl_name.as_str())
-                                            && !subs.contains_key(tpl_name.as_str())
-                                            && let Some(concrete_arg) = concrete_args.get(i)
-                                        {
-                                            subs.insert(tpl_name.to_string(), concrete_arg.clone());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        let type_args: Vec<PhpType> = cls
-                            .template_params
-                            .iter()
-                            .map(|p| {
-                                let p_str: &str = p.as_ref();
-                                subs.get(p_str).cloned().unwrap_or_else(|| {
-                                    // Use the declared upper bound or `mixed`
-                                    // instead of the raw template name so that
-                                    // downstream consumers never see
-                                    // `PhpType::named("TValue")`.
-                                    cls.template_param_bounds
-                                        .get(p)
-                                        .cloned()
-                                        .unwrap_or_else(PhpType::mixed)
-                                })
-                            })
-                            .collect();
-                        let substituted_arc =
-                            crate::virtual_members::resolve_class_fully_with_type_args(
-                                cls,
-                                ctx.class_loader,
-                                ctx.resolved_class_cache,
-                                &type_args,
-                            );
-                        let mut substituted = Arc::unwrap_or_clone(substituted_arc);
-
-                        // ── Template-param mixin resolution ────────────────
-                        // When a class declares `@mixin TParam` where `TParam`
-                        // is a template parameter, the mixin cannot be resolved
-                        // during `resolve_class_fully` because the concrete type
-                        // is not yet known.  Now that generic args are concrete,
-                        // resolve those mixins and merge their members.
-                        if cls
-                            .mixins
-                            .iter()
-                            .any(|m| cls.template_params.iter().any(|t| t == m.as_str()))
-                        {
-                            let generic_subs =
-                                crate::inheritance::build_generic_subs(cls, &type_args);
-                            if !generic_subs.is_empty() {
-                                let mixin_members =
-                                    crate::virtual_members::phpdoc::resolve_template_param_mixins(
-                                        cls,
-                                        &generic_subs,
-                                        ctx.class_loader,
-                                    );
-                                if !mixin_members.is_empty() {
-                                    crate::virtual_members::merge_virtual_members(
-                                        &mut substituted,
-                                        mixin_members,
-                                    );
-                                }
-                            }
-                        }
-
-                        let generic_type =
-                            PhpType::generic_atom(substituted.fqn(), type_args.clone());
-                        return vec![ResolvedType::from_both(generic_type, substituted)];
-                    }
-                }
-            }
-
-            // ── Fallback: resolve omitted template params ─────────
-            // When no constructor argument bound any template param
-            // (e.g. `new Collection()` with no args, or the
-            // constructor has no template bindings), substitute all
-            // template params with their declared default, upper bound,
-            // or `mixed`. This prevents raw template names from leaking
-            // into method parameter/return types.
-            let type_args = crate::inheritance::default_type_args(cls);
-            let substituted = crate::virtual_members::resolve_class_fully_with_type_args(
-                cls,
-                ctx.class_loader,
-                ctx.resolved_class_cache,
-                &type_args,
-            );
-            let generic_type = PhpType::generic_atom(substituted.fqn(), type_args.clone());
+                    )
+                })
+                .unwrap_or_default();
+            let arg_refs: Vec<&str> = arg_texts.iter().map(String::as_str).collect();
+            let (generic_type, substituted) =
+                crate::type_engine::call_resolution::instantiate_class(
+                    cls,
+                    &arg_refs,
+                    &ctx.as_resolution_ctx(),
+                );
             return vec![ResolvedType::from_both_arc(generic_type, substituted)];
         }
 
+        // A class that cannot be loaded is still the type `new` produces,
+        // just without members to offer.
+        if classes.is_empty() {
+            return vec![ResolvedType::from_type_string(parsed_name)];
+        }
         return ResolvedType::from_classes_with_hint(classes, parsed_name);
     }
 
@@ -307,6 +153,25 @@ pub(super) fn resolve_rhs_instantiation(
     // use it to resolve the instantiated type.
     if let Expression::Variable(Variable::Direct(dv)) = inst.class {
         let var_name = bytes_to_str(dv.name).to_string();
+
+        // `new $class` on a `class-string<T>` of a bounded template builds
+        // a `T`, whatever classes its bound resolves to.
+        let var_types = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
+        if let [only] = var_types.as_slice()
+            && let TypeKind::ClassString(Some(inner)) = only.type_string.kind()
+            && inner.as_template_param().is_some()
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                inner,
+                &ctx.current_class.name,
+                ctx.all_classes,
+                ctx.class_loader,
+            );
+            if !classes.is_empty() {
+                return ResolvedType::from_classes_with_hint(classes, inner.clone());
+            }
+        }
+
         let resolved =
             crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
                 &var_name,
@@ -325,7 +190,6 @@ pub(super) fn resolve_rhs_instantiation(
         // type from `class-string<T>`.  This handles parameters typed
         // as `@param class-string<Foo> $var` where there is no
         // `$var = Foo::class` assignment.
-        let var_types = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
         let class_name = extract_class_string_inner(&var_types);
         if let Some(name) = class_name
             && let Some(cls) = (ctx.class_loader)(&name)
@@ -361,6 +225,39 @@ pub(super) fn extract_class_string_inner(resolved: &[ResolvedType]) -> Option<St
     })
 }
 
+/// Bind a template a `class-string<Wrapper<T>>` hint names, from the class
+/// the argument names: `T` is whatever that class's `Wrapper` ancestor was
+/// given at `tpl_position`.
+pub(crate) fn class_string_generic_binding(
+    arg_text: &str,
+    wrapper_name: &str,
+    tpl_position: usize,
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let class = class_string_inner_binding(arg_text, rctx)?;
+    crate::inheritance::extract_generic_arg_from_ancestor(
+        &class,
+        wrapper_name,
+        tpl_position,
+        rctx.class_loader,
+    )
+}
+
+/// Every generic argument `arg_type` hands its `wrapper_name` ancestor, for
+/// a caller that picks the position itself (a single-argument hint names
+/// the last of several).
+pub(crate) fn extract_generic_args_from_ancestor(
+    arg_type: &PhpType,
+    wrapper_name: &str,
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+) -> Option<Vec<PhpType>> {
+    crate::inheritance::extract_generic_args_from_ancestor(
+        arg_type,
+        wrapper_name,
+        rctx.class_loader,
+    )
+}
+
 /// Remap constructor template substitutions from ancestor param names to child
 /// param names when a constructor is inherited.
 ///
@@ -390,6 +287,7 @@ pub(crate) fn remap_inherited_ctor_subs(
     // need a reference across loop iterations.
     let mut cur_parent_class = child.parent_class;
     let mut cur_extends_generics = child.extends_generics.clone();
+    let mut owner_params: Vec<crate::atom::Atom> = Vec::new();
 
     for _ in 0..15 {
         let parent_name = match cur_parent_class {
@@ -418,6 +316,7 @@ pub(crate) fn remap_inherited_ctor_subs(
                 }
             }
             ancestor_to_child = new_mapping;
+            owner_params.clone_from(&parent.template_params);
         } else {
             // No @extends generics — can't map further.
             break;
@@ -433,14 +332,25 @@ pub(crate) fn remap_inherited_ctor_subs(
     }
 
     // Now remap: for each entry in raw_subs (keyed by ancestor param name),
-    // find which child param it maps to via ancestor_to_child.
+    // find which child param it maps to via ancestor_to_child. Several
+    // ancestor params can land on one child param (`@extends P<T, T>`), and
+    // then the child's is what all of them were bound to, joined in the
+    // ancestor's declaration order so the union reads the way the arguments
+    // were written.
+    let mut ordered: Vec<(&String, &PhpType)> = raw_subs.iter().collect();
+    ordered.sort_by_key(|(name, _)| {
+        owner_params
+            .iter()
+            .position(|param| param.as_str() == name.as_str())
+            .unwrap_or(usize::MAX)
+    });
     let mut result = HashMap::new();
-    for (ancestor_param, inferred_type) in raw_subs {
+    for (ancestor_param, inferred_type) in ordered {
         if let Some(child_type) = ancestor_to_child.get(ancestor_param) {
             // child_type is typically PhpType::named("V") — extract the name.
             match child_type.kind() {
                 TypeKind::Named(child_param) => {
-                    result.insert(child_param.to_string(), inferred_type.clone());
+                    insert_or_union(&mut result, child_param.to_string(), inferred_type.clone());
                 }
                 _ => {
                     // Complex mapping (e.g. mapped to a concrete type, not a
@@ -454,182 +364,6 @@ pub(crate) fn remap_inherited_ctor_subs(
         }
     }
     result
-}
-
-/// Build a template substitution map from constructor arguments.
-///
-/// Uses the constructor's `template_bindings` (from `@param T $name`
-/// annotations) to match template parameters to their concrete types
-/// inferred from the call-site arguments.  Handles:
-///   - Direct type: `@param T $bar` + `new Foo(new Baz())` → `T = Baz`
-///   - Array type: `@param T[] $items` + `new Foo([new X()])` → `T = X`
-///   - Generic wrapper: `@param Wrapper<T> $w` + `new Foo(new Wrapper(new X()))` → `T = X`
-///     (by resolving the wrapper's constructor template params recursively)
-pub(super) fn build_constructor_template_subs(
-    _class: &ClassInfo,
-    ctor: &crate::types::MethodInfo,
-    arg_texts: &[String],
-    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
-    ctx: &VarResolutionCtx<'_>,
-) -> HashMap<String, PhpType> {
-    let mut subs = HashMap::new();
-
-    // Bind the raw source-order argument texts to parameters by PHP's rules
-    // so a named argument (`id: Foo::class`) is routed to the parameter it
-    // targets rather than its ordinal slot, and its `name:` prefix is
-    // stripped off the value.
-    let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
-    let bound = crate::call_args::bind_text_args_to_params(&ctor.parameters, &arg_refs);
-
-    for (tpl_name, param_name) in &ctor.template_bindings {
-        let param_idx = match ctor
-            .parameters
-            .iter()
-            .position(|p| p.name == param_name.as_str())
-        {
-            Some(idx) => idx,
-            None => continue,
-        };
-
-        let provided_arg = bound.get(param_idx).and_then(|o| o.as_deref());
-
-        let param_hint = ctor
-            .parameters
-            .get(param_idx)
-            .and_then(|p| p.type_hint.as_ref());
-        let binding_mode = classify_template_binding(tpl_name, param_hint);
-
-        // Fall back to the parameter's default value only for binding
-        // modes where the default is meaningful.
-        let default_value = ctor
-            .parameters
-            .get(param_idx)
-            .and_then(|p| p.default_value.as_deref());
-        let arg_text: &str = match provided_arg {
-            Some(text) => text,
-            None => match &binding_mode {
-                TemplateBindingMode::ClassStringInner => match default_value {
-                    Some(d) => d,
-                    None => continue,
-                },
-                TemplateBindingMode::Direct => match default_value {
-                    Some(d) if d.ends_with("::class") => d,
-                    _ => continue,
-                },
-                _ => continue,
-            },
-        };
-
-        match binding_mode {
-            TemplateBindingMode::Direct => {
-                if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
-                    subs.insert(tpl_name.to_string(), resolved_type);
-                }
-            }
-            TemplateBindingMode::CallableReturnType => {
-                if let Some(bound) =
-                    crate::type_engine::call_resolution::bind_callable_return_template(
-                        arg_text, param_hint, tpl_name, rctx,
-                    )
-                {
-                    subs.insert(tpl_name.to_string(), bound);
-                }
-            }
-            TemplateBindingMode::CallableReturnArrayPosition(position) => {
-                // `@param callable(...): array<TKey, TValue> $cb` — bind
-                // from the key/value of the callback's array-shaped
-                // return, not the whole return type.
-                if let Some(extracted) = Backend::infer_closure_return_type(arg_text, rctx)
-                    .and_then(|ret_type| extract_array_position(&ret_type, position))
-                {
-                    subs.insert(tpl_name.to_string(), extracted);
-                }
-            }
-            TemplateBindingMode::CallableParamType(position) => {
-                if let Some(param_type) =
-                    crate::type_engine::call_resolution::bind_callable_param_template(
-                        arg_text, position, rctx,
-                    )
-                {
-                    subs.insert(tpl_name.to_string(), param_type);
-                }
-            }
-            TemplateBindingMode::ArrayElement => {
-                // `@param T[] $items` — resolve individual array elements.
-                if arg_text.starts_with('[') && arg_text.ends_with(']') {
-                    let inner = arg_text[1..arg_text.len() - 1].trim();
-                    if inner.is_empty() {
-                        // Empty array `[]` → element type is `never`
-                        // (an empty collection has no elements).
-                        subs.insert(tpl_name.to_string(), PhpType::never());
-                    } else {
-                        let first_elem =
-                            crate::type_engine::conditional_resolution::split_text_args(inner);
-                        if let Some(elem) = first_elem.first()
-                            && let Some(resolved_type) =
-                                Backend::resolve_arg_text_to_type(elem.trim(), rctx)
-                        {
-                            subs.insert(tpl_name.to_string(), resolved_type);
-                        }
-                    }
-                } else if let Some(resolved_type) =
-                    Backend::resolve_arg_text_to_type(arg_text, rctx)
-                        .or_else(|| resolve_arg_call_raw_type(arg_text, rctx))
-                {
-                    // Extract the element type from array-like types
-                    // so we bind T to the element, not the whole array.
-                    // The call-expression fallback covers arguments whose
-                    // declared return type is an array (`getConfigs()`
-                    // returning `array<string, Config>`) — those carry no
-                    // class info, so the general resolver yields nothing.
-                    if let Some(elem_type) = array_element_binding(resolved_type) {
-                        insert_or_union(&mut subs, tpl_name.to_string(), elem_type);
-                    }
-                }
-            }
-            TemplateBindingMode::ClassStringInner => {
-                if let Some(binding) = class_string_inner_binding(arg_text, rctx) {
-                    insert_or_union(&mut subs, tpl_name.to_string(), binding);
-                }
-            }
-            TemplateBindingMode::GenericWrapper(wrapper_name, tpl_position) => {
-                if let Some(concrete) = Backend::try_closure_return_type_for_template(
-                    arg_text,
-                    tpl_name,
-                    tpl_position,
-                    param_hint,
-                    rctx,
-                ) {
-                    subs.insert(tpl_name.to_string(), concrete);
-                    continue;
-                }
-                // `@param array<TKey, T> $items` with `[]` → `never`.
-                // An empty array literal has no keys or values, so all
-                // generic type args of array-like wrappers are `never`.
-                let is_array_like = matches!(
-                    wrapper_name.as_str(),
-                    "array" | "list" | "non-empty-array" | "non-empty-list"
-                );
-                if is_array_like
-                    && arg_text.starts_with('[')
-                    && arg_text.ends_with(']')
-                    && arg_text[1..arg_text.len() - 1].trim().is_empty()
-                {
-                    subs.insert(tpl_name.to_string(), PhpType::never());
-                } else if let Some(concrete) = resolve_generic_wrapper_template(
-                    &wrapper_name,
-                    tpl_position,
-                    arg_text,
-                    rctx,
-                    ctx,
-                ) {
-                    subs.insert(tpl_name.to_string(), concrete);
-                }
-            }
-        }
-    }
-
-    subs
 }
 
 /// What an `@param T[] $items` template binds to for an argument that
@@ -688,6 +422,39 @@ pub(crate) enum TemplateBindingMode {
     /// `class-string<>`.  The binding is resolved by unwrapping the
     /// `class-string<>` layer from the resolved argument type.
     ClassStringInner,
+    /// `@param class-string<Wrapper<T>> $class` — the template param is a
+    /// generic argument (at the given position) of the class the
+    /// class-string names.  The binding is read off that class's ancestry,
+    /// where it implements or extends `Wrapper` with concrete arguments.
+    ClassStringGeneric(String, usize),
+}
+
+/// The hint a binding of `tpl_name` is classified against, when the
+/// `@param` reaches it only through another template's bound.
+///
+/// `@template T as (Closure(TValue): TMappedValue)` with `@param T $cb`
+/// binds `TMappedValue` from `$cb` the way `@param (Closure(TValue):
+/// TMappedValue) $cb` would, so the templates the hint names are replaced
+/// by their bounds. `None` when the hint names `tpl_name` itself, or no
+/// bound in it does.
+pub(crate) fn bound_binding_hint(
+    tpl_name: &str,
+    param_hint: Option<&PhpType>,
+    bounds: &crate::atom::AtomMap<PhpType>,
+) -> Option<PhpType> {
+    let hint = param_hint?;
+    let tpl = [atom(tpl_name)];
+    if bounds.is_empty() || hint.references_any_name(&tpl) {
+        return None;
+    }
+    let subs: HashMap<String, PhpType> = bounds
+        .iter()
+        .filter(|(name, bound)| {
+            hint.references_any_name(&[**name]) && bound.references_any_name(&tpl)
+        })
+        .map(|(name, bound)| (name.to_string(), bound.clone()))
+        .collect();
+    (!subs.is_empty()).then(|| hint.substitute(&subs))
 }
 
 /// Classify how a template parameter name appears in a `@param` type hint.
@@ -885,6 +652,11 @@ pub(super) fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBi
             if inner.is_named(tpl_name) {
                 return TemplateBindingMode::ClassStringInner;
             }
+            if let TypeKind::Generic(g) = inner.kind()
+                && let Some(position) = g.args.iter().position(|a| a.is_named(tpl_name))
+            {
+                return TemplateBindingMode::ClassStringGeneric(g.name.to_string(), position);
+            }
             TemplateBindingMode::Direct
         }
         _ => TemplateBindingMode::Direct,
@@ -954,68 +726,6 @@ pub(crate) fn type_contains_name(ty: &PhpType, name: &str) -> bool {
     }
 }
 
-/// Resolve a template param that appears inside a generic wrapper type.
-///
-/// For `@param Wrapper<T> $a` with argument `new Wrapper(new X())`,
-/// recursively resolve the wrapper's constructor template params to
-/// find the concrete type for the template param at `tpl_position`.
-pub(super) fn resolve_generic_wrapper_template(
-    wrapper_name: &str,
-    tpl_position: usize,
-    arg_text: &str,
-    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<PhpType> {
-    // ── Built-in array-like types ───────────────────────────────
-    // `array`, `list`, `non-empty-array`, `non-empty-list` are not
-    // real classes — infer key/value types directly from the array
-    // literal argument.
-    if matches!(
-        wrapper_name,
-        "array" | "list" | "non-empty-array" | "non-empty-list"
-    ) {
-        if let Some(result) = resolve_array_literal_generic(tpl_position, arg_text, rctx) {
-            return Some(result);
-        }
-        // If the argument is not a literal (e.g. a variable), resolve its
-        // type and extract the generic arg at the given position.
-        if let Some(resolved) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
-            return extract_generic_arg_at_position(&resolved, tpl_position);
-        }
-        return None;
-    }
-
-    let wrapper_cls = (ctx.class_loader)(wrapper_name)
-        .map(Arc::unwrap_or_clone)
-        .or_else(|| {
-            ctx.all_classes
-                .iter()
-                .find(|c| crate::util::short_name(&c.name) == crate::util::short_name(wrapper_name))
-                .map(|c| ClassInfo::clone(c))
-        })?;
-
-    let wrapper_ctor = wrapper_cls.get_method("__construct")?;
-    if wrapper_ctor.template_bindings.is_empty() {
-        return None;
-    }
-
-    // Extract the constructor arguments from the argument text.
-    // e.g. from `new Foobar(new X())` extract `new X()`.
-    let paren_start = arg_text.find('(')?;
-    let paren_end = arg_text.rfind(')')?;
-    let inner_args = arg_text[paren_start + 1..paren_end].trim();
-
-    let wrapper_arg_texts = crate::type_engine::conditional_resolution::split_text_args(inner_args)
-        .into_iter()
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
-    let wrapper_subs =
-        build_constructor_template_subs(&wrapper_cls, wrapper_ctor, &wrapper_arg_texts, rctx, ctx);
-
-    let wrapper_tpl = wrapper_cls.template_params.get(tpl_position)?;
-    wrapper_subs.get(wrapper_tpl.as_str()).cloned()
-}
-
 /// Extract a generic type argument from an array literal.
 ///
 /// For `@param array<TKey, TValue> $kv` with argument `["a" => 1]`:
@@ -1023,7 +733,7 @@ pub(super) fn resolve_generic_wrapper_template(
 /// - `tpl_position == 1` → value type (`int`)
 ///
 /// For single-param wrappers like `list<T>`, position 0 is the element type.
-pub(super) fn resolve_array_literal_generic(
+pub(crate) fn resolve_array_literal_generic(
     tpl_position: usize,
     arg_text: &str,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
@@ -1071,36 +781,6 @@ pub(super) fn resolve_array_literal_generic(
             1 => Backend::resolve_arg_text_to_type(first, rctx),
             _ => None,
         }
-    }
-}
-
-/// Extract the generic type argument at a given position from a resolved type.
-///
-/// For `array<int, string>` with position 0 → `int`, position 1 → `string`.
-/// For `list<User>` with position 0 → `User`.
-/// Also handles `PhpType::array_of(inner)` as a single-arg generic.
-pub(super) fn extract_generic_arg_at_position(ty: &PhpType, position: usize) -> Option<PhpType> {
-    match ty.kind() {
-        TypeKind::Generic(g) => {
-            // `list<T>` has a single arg (the value type).  When the
-            // binding expects position 1 (value position of `array<K, V>`),
-            // map it to position 0 of the list.  Position 0 of a list
-            // is implicitly `int` (sequential keys).
-            let is_list_like = matches!(
-                g.name.to_ascii_lowercase().as_str(),
-                "list" | "non-empty-list"
-            );
-            if is_list_like && g.args.len() == 1 {
-                return match position {
-                    0 => Some(PhpType::int()),
-                    1 => g.args.first().cloned(),
-                    _ => None,
-                };
-            }
-            g.args.get(position).cloned()
-        }
-        TypeKind::Array(inner) if position == 0 => Some(inner.clone()),
-        _ => None,
     }
 }
 

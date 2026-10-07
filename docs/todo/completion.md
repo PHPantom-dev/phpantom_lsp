@@ -358,3 +358,42 @@ site pointing at a keyword would produce a bogus highlight and a rename
 edit that corrupts the hook. The fix needs a def kind those consumers
 skip (say `VarDefKind::ImplicitHookValue`) while variable completion
 includes it.
+
+## C13. `self::`/`static::` inside a `@require-extends` trait does not see the required class's static members
+
+**Impact: Low-Medium · Complexity: Medium**
+
+Found while porting Mago's `issue_1064.php` (Test Porting Phase 4A).
+`$this->` completion inside a trait carrying `@phpstan-require-extends`/
+`@psalm-require-extends` already offers the required class's instance
+methods and properties (`test_completion_require_extends_this_members_*`
+in `completion_traits.rs`), via `trait_this_bounds`/
+`extend_this_with_trait_bounds` in `type_engine/trait_context.rs`. Static
+access does not get the same treatment:
+
+```php
+class Foo {
+    const int FOO = 42;
+}
+
+/** @psalm-require-extends Foo */
+trait Bar {
+    public function foo(): int {
+        return static::   // completion offers nothing from Foo
+    }
+}
+```
+
+Every caller of `trait_this_bounds`/`extend_this_with_trait_bounds` is on
+a `$this`-context resolution path (`forward_walk/param_seeding.rs`,
+`forward_walk/callable_inference.rs`, `resolver/mod.rs`, and
+`diagnostics/deprecated.rs`) — none of them run for a bare `self::`/
+`static::` completion inside a trait body, so the required class's
+constants and static properties/methods never enter the candidate list
+there.
+
+**Fix:** find where `self::`/`static::` completion resolves its target
+class for a trait method body (as opposed to `$this->`'s path) and feed
+it through the same `@require-extends`/`@require-implements` bound the
+`$this->` path already consults, rather than adding a second lookup of
+the tag.

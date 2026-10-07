@@ -158,7 +158,7 @@ async fn test_in_array_strict_no_narrowing_without_strict_flag() {
 }
 
 #[tokio::test]
-async fn test_in_array_strict_else_branch_excludes() {
+async fn test_in_array_strict_else_branch_keeps_element_class() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///in_array_else.php").unwrap();
@@ -221,9 +221,11 @@ async fn test_in_array_strict_else_branch_excludes() {
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
+            // An `AdminUser` that `$admins` does not hold fails the check
+            // as well, so failing it rules no class out.
             assert!(
-                !method_names.contains(&"manageUsers"),
-                "Should NOT include AdminUser's method in else branch, got: {:?}",
+                method_names.contains(&"manageUsers"),
+                "Should include AdminUser's method in else branch, got: {:?}",
                 method_names
             );
             assert!(
@@ -298,10 +300,12 @@ async fn test_in_array_strict_negated_condition() {
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
-            // Negated: inside the then-body the variable is NOT in the haystack.
+            // Negated: inside the then-body the variable is not in the
+            // haystack, which an `AdminUser` can be as well as a
+            // `RegularUser`.
             assert!(
-                !method_names.contains(&"manageUsers"),
-                "Should NOT include AdminUser's method in negated in_array then-body, got: {:?}",
+                method_names.contains(&"manageUsers"),
+                "Should include AdminUser's method in negated in_array then-body, got: {:?}",
                 method_names
             );
             assert!(
@@ -393,7 +397,7 @@ async fn test_in_array_strict_guard_clause_narrows() {
 }
 
 #[tokio::test]
-async fn test_in_array_strict_guard_clause_positive_excludes() {
+async fn test_in_array_strict_guard_clause_positive_keeps_element_class() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///in_array_guard_positive.php").unwrap();
@@ -455,10 +459,12 @@ async fn test_in_array_strict_guard_clause_positive_excludes() {
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
-            // Positive in_array + return => after the guard, var is NOT in haystack.
+            // Positive in_array + return => after the guard, var is not in
+            // the haystack, which rules out no `AdminUser` the haystack
+            // does not hold.
             assert!(
-                !method_names.contains(&"manageUsers"),
-                "Should NOT include AdminUser's method after positive guard, got: {:?}",
+                method_names.contains(&"manageUsers"),
+                "Should include AdminUser's method after positive guard, got: {:?}",
                 method_names
             );
             assert!(

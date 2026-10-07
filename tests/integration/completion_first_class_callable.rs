@@ -1073,3 +1073,105 @@ async fn test_first_class_callable_immediate_function_invocation() {
     let names = method_names(&items);
     assert!(names.contains(&"get"), "Expected get in {:?}", names);
 }
+
+// ─── Dynamic member name, invokable object ──────────────────────────────────
+
+#[tokio::test]
+async fn test_first_class_callable_dynamic_instance_method_name() {
+    // `$obj->$name(...)` where `$name` holds a known string literal
+    // resolves through the method that literal names, same as writing
+    // `$obj->inner(...)` directly.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/fcc_dynamic_method.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Box {\n",
+        "    public function inner(): Inner { return new Inner(); }\n",
+        "}\n",
+        "class Inner {\n",
+        "    public function value(): string { return ''; }\n",
+        "}\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        $box = new Box();\n",
+        "        $name = 'inner';\n",
+        "        $fn = $box->$name(...);\n",
+        "        $fn()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 12: `        $fn()->`  cursor after `->`
+    let items = complete_at(&backend, &uri, src, 12, 15).await;
+    let names = method_names(&items);
+    assert!(names.contains(&"value"), "Expected value in {:?}", names);
+}
+
+#[tokio::test]
+async fn test_first_class_callable_dynamic_static_method_name() {
+    // `Class::$name(...)` where `$name` holds a known string literal
+    // resolves through the static method that literal names.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/fcc_dynamic_static.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public function getTitle(): string { return ''; }\n",
+        "}\n",
+        "class Config {\n",
+        "    public static function make(): Product { return new Product(); }\n",
+        "}\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        $name = 'make';\n",
+        "        $fn = Config::$name(...);\n",
+        "        $fn()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 11: `        $fn()->`  cursor after `->`
+    let items = complete_at(&backend, &uri, src, 11, 15).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"getTitle"),
+        "Expected getTitle in {:?}",
+        names,
+    );
+}
+
+#[tokio::test]
+async fn test_first_class_callable_invokable_object() {
+    // `$obj(...)` on an object whose class declares `__invoke()` resolves
+    // through that method's return type.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/fcc_invokable.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Result {\n",
+        "    public function getValue(): int { return 0; }\n",
+        "}\n",
+        "class Multiplier {\n",
+        "    public function __invoke(): Result { return new Result(); }\n",
+        "}\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        $test = new Multiplier();\n",
+        "        $h = $test(...);\n",
+        "        $h()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 11: `        $h()->`  cursor after `->`
+    let items = complete_at(&backend, &uri, src, 11, 14).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"getValue"),
+        "Expected getValue in {:?}",
+        names,
+    );
+}

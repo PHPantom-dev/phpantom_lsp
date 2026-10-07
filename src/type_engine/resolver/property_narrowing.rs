@@ -2,7 +2,6 @@
 /// narrowing to a `$this->prop` (or `$obj->prop`) resolution result by
 /// walking the enclosing method body from its start down to the cursor.
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::types::ClassInfo;
@@ -104,21 +103,17 @@ pub(crate) fn apply_property_narrowing(
         "apply_property_narrowing",
         |program, _content| {
             let ctx = VarResolutionCtx {
-                var_name: property_path,
-                current_class,
-                all_classes: rctx.all_classes,
-                content: rctx.content,
-                cursor_offset: rctx.cursor_offset,
-                class_loader: rctx.class_loader,
                 backend: rctx.backend,
                 loaders: Loaders::with_function(rctx.function_loader),
                 resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
-                enclosing_return_type: None,
-                top_level_scope: None,
-                branch_aware: false,
-                match_arm_narrowing: HashMap::new(),
-                scope_var_resolver: None,
-                scope_proofs: None,
+                ..VarResolutionCtx::new(
+                    property_path,
+                    current_class,
+                    rctx.all_classes,
+                    rctx.content,
+                    rctx.cursor_offset,
+                    rctx.class_loader,
+                )
             };
             walk_property_narrowing_in_statements(
                 program.statements.iter(),

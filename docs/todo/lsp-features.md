@@ -377,7 +377,7 @@ one step, and renaming a namespace segment rewrites every affected
 `namespace` declaration, `use` statement, and FQN reference while
 moving the PSR-4 directories to match (see `build_class_move_edit` in
 `src/rename/class.rs` and `build_namespace_rename_edit` in
-`src/rename/namespace.rs`). What's still missing is the editor-triggered
+`src/rename/namespace/`). What's still missing is the editor-triggered
 path: when the user renames or moves a PHP file in the editor's file
 tree (rather than through the LSP rename command), nothing updates the
 file's `namespace` declaration or the workspace's `use` imports.
@@ -538,7 +538,7 @@ destination. Where the two namespaces declare the same class name
 (`App\Internal\Helper` and `App\Support\Helper` both exist), the whole
 rename is refused with a message naming the clash, because the merge
 has no well-defined answer for that name — see
-`namespace_merge_conflict` in `src/rename/namespace.rs`.
+`namespace_merge_conflict` in `src/rename/namespace/layout.rs`.
 
 Refusing is the safe answer, not the desirable one: a user merging
 twenty files should not be blocked by one clash. What is missing is a

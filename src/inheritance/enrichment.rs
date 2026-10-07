@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use super::ancestry::ClassLoader;
 use crate::php_type::PhpType;
 use crate::types::{MethodInfo, ParameterInfo, PropertyInfo};
 
@@ -56,8 +57,20 @@ fn ancestor_has_richer_type(effective: &Option<PhpType>, native: &Option<PhpType
 /// type. The child's *native* hint still has the last word: an override
 /// declaring `: array` cannot return the `string` half of an interface's
 /// `@return array|string`, so the inherited union is restricted to what the
-/// override's own declaration allows.
-fn inherited_return_type(existing: &MethodInfo, ancestor: &MethodInfo) -> Option<PhpType> {
+/// override's own declaration allows. A native `never` allows nothing to be
+/// returned, and a native subclass cannot be widened to its ancestor.
+fn inherited_return_type(
+    existing: &MethodInfo,
+    ancestor: &MethodInfo,
+    class_loader: ClassLoader<'_>,
+) -> Option<PhpType> {
+    if existing
+        .native_return_type
+        .as_ref()
+        .is_some_and(PhpType::is_never)
+    {
+        return None;
+    }
     if !(existing.return_type.is_none() && ancestor.return_type.is_some()
         || lacks_docblock_override(&existing.return_type, &existing.native_return_type)
             && ancestor_has_richer_type(&ancestor.return_type, &ancestor.native_return_type))
@@ -65,10 +78,39 @@ fn inherited_return_type(existing: &MethodInfo, ancestor: &MethodInfo) -> Option
         return None;
     }
 
-    let inherited = ancestor.return_type.as_ref()?;
+    let inherited = in_override_param_names(ancestor.return_type.as_ref()?, existing, ancestor);
+    // A covariant native return names a more specific runtime class than
+    // the ancestor's docblock, even when that docblock carries generics.
+    // Same-class generics and docblocks narrower than the native hint still
+    // enrich the declaration.
+    if let Some(native) = existing.native_return_type.as_ref()
+        && matches!(native.kind(), crate::php_type::TypeKind::Named(_))
+        && let Some(native_name) = native.base_name()
+        && let Some(inherited_name) = inherited.base_name()
+        && !native_name
+            .trim_start_matches('\\')
+            .eq_ignore_ascii_case(inherited_name.trim_start_matches('\\'))
+        && crate::class_lookup::is_subclass_of(native_name, inherited_name, class_loader)
+    {
+        return None;
+    }
     Some(match existing.native_return_type {
         Some(ref native) => inherited.without_alternatives_the_native_type_forbids(native),
-        None => inherited.clone(),
+        None => inherited,
+    })
+}
+
+/// `ty`, written in `ancestor`'s docblock, with each conditional that names
+/// one of `ancestor`'s parameters renamed to the parameter `existing`
+/// declares in the same position.
+fn in_override_param_names(ty: &PhpType, existing: &MethodInfo, ancestor: &MethodInfo) -> PhpType {
+    if !ty.contains_conditional() {
+        return ty.clone();
+    }
+    ty.rename_conditional_params(&|name| {
+        let position = ancestor.parameters.iter().position(|p| p.name == name)?;
+        let renamed = existing.parameters.get(position)?.name;
+        (renamed != name).then_some(renamed)
     })
 }
 
@@ -82,9 +124,10 @@ fn inherited_return_type(existing: &MethodInfo, ancestor: &MethodInfo) -> Option
 pub(crate) fn enrich_method_arc_from_ancestor(
     existing: &mut Arc<MethodInfo>,
     ancestor: &MethodInfo,
+    class_loader: ClassLoader<'_>,
 ) {
-    if method_enrichment_would_change(existing, ancestor) {
-        enrich_method_from_ancestor(Arc::make_mut(existing), ancestor);
+    if method_enrichment_would_change(existing, ancestor, class_loader) {
+        enrich_method_from_ancestor(Arc::make_mut(existing), ancestor, class_loader);
     }
 }
 
@@ -96,15 +139,19 @@ pub(crate) fn enrich_method_arc_from_ancestor(
 /// an equal value counts as "no change".  A `false` here guarantees the
 /// enrichment is semantically a no-op, so the caller can skip the
 /// copy-on-write clone.
-fn method_enrichment_would_change(existing: &MethodInfo, ancestor: &MethodInfo) -> bool {
+fn method_enrichment_would_change(
+    existing: &MethodInfo,
+    ancestor: &MethodInfo,
+    class_loader: ClassLoader<'_>,
+) -> bool {
     // Return type.
-    if let Some(inherited) = inherited_return_type(existing, ancestor)
+    if let Some(inherited) = inherited_return_type(existing, ancestor, class_loader)
         && existing.return_type.as_ref() != Some(&inherited)
     {
         return true;
     }
 
-    // Template parameters (copies bounds and bindings alongside).
+    // Template parameters (copies bounds, defaults and bindings alongside).
     if existing.template_params.is_empty() && !ancestor.template_params.is_empty() {
         return true;
     }
@@ -218,7 +265,8 @@ fn parameter_enrichment_would_change(
 /// `native_return_type` (no docblock), and the ancestor's `return_type`
 /// differs from its `native_return_type` (has docblock), copy the
 /// ancestor's `return_type` to the child.  If the child has no
-/// `return_type` at all, always inherit the ancestor's.
+/// `return_type` at all, inherit the ancestor's. A narrower native class
+/// return is preserved, and native union restrictions still apply.
 ///
 /// **Parameter rule:** Match by position (not by name, since the child
 /// may rename parameters).  Same effective-vs-native comparison as
@@ -226,9 +274,13 @@ fn parameter_enrichment_would_change(
 ///
 /// **Description rule:** Inherit `description` and `return_description`
 /// when the child has `None`.
-pub(crate) fn enrich_method_from_ancestor(existing: &mut MethodInfo, ancestor: &MethodInfo) {
+pub(crate) fn enrich_method_from_ancestor(
+    existing: &mut MethodInfo,
+    ancestor: &MethodInfo,
+    class_loader: ClassLoader<'_>,
+) {
     // ── Return type ─────────────────────────────────────────────
-    if let Some(inherited) = inherited_return_type(existing, ancestor) {
+    if let Some(inherited) = inherited_return_type(existing, ancestor, class_loader) {
         existing.return_type = Some(inherited);
     }
 
@@ -236,6 +288,7 @@ pub(crate) fn enrich_method_from_ancestor(existing: &mut MethodInfo, ancestor: &
     if existing.template_params.is_empty() && !ancestor.template_params.is_empty() {
         existing.template_params = ancestor.template_params.clone();
         existing.template_param_bounds = ancestor.template_param_bounds.clone();
+        existing.template_param_defaults = ancestor.template_param_defaults.clone();
         existing.template_bindings = ancestor.template_bindings.clone();
         // Template return types like `T` only make sense when the
         // template params are present — inherit the return type too
@@ -246,8 +299,11 @@ pub(crate) fn enrich_method_from_ancestor(existing: &mut MethodInfo, ancestor: &
     }
 
     // ── Conditional return type ─────────────────────────────────
-    if existing.conditional_return.is_none() && ancestor.conditional_return.is_some() {
-        existing.conditional_return = ancestor.conditional_return.clone();
+    if existing.conditional_return.is_none()
+        && let Some(ref conditional) = ancestor.conditional_return
+    {
+        existing.conditional_return =
+            Some(in_override_param_names(conditional, existing, ancestor));
     }
 
     // ── Type assertions ─────────────────────────────────────────

@@ -18,18 +18,39 @@ thread_local! {
 /// PHP code rarely nests loops beyond 6 levels; this is a hard safety net.
 pub(crate) const MAX_LOOP_DEPTH: u32 = 6;
 
-/// Increment the loop depth counter and return the new depth.
-pub(crate) fn enter_loop() -> u32 {
-    LOOP_DEPTH.with(|c| {
-        let v = c.get() + 1;
-        c.set(v);
-        v
-    })
+/// One level of loop nesting, held for as long as the loop's body is
+/// being walked.
+///
+/// The depth is restored when the guard drops, so a panic that unwinds
+/// out of a loop body (request handlers catch it and the worker thread
+/// lives on) does not leave the thread believing it is still inside the
+/// loop, which would clamp every later walk's fixed-point passes and,
+/// past [`MAX_LOOP_DEPTH`], skip every loop body on that thread.
+pub(crate) struct LoopDepthGuard {
+    depth: u32,
 }
 
-/// Decrement the loop depth counter.
-pub(crate) fn leave_loop(depth: u32) {
-    LOOP_DEPTH.with(|c| c.set(depth - 1));
+impl LoopDepthGuard {
+    /// Enter one more level of loop nesting.
+    pub(crate) fn enter() -> Self {
+        let depth = LOOP_DEPTH.with(|c| {
+            let v = c.get() + 1;
+            c.set(v);
+            v
+        });
+        Self { depth }
+    }
+
+    /// The nesting depth this guard entered (1 for an outermost loop).
+    pub(crate) fn depth(&self) -> u32 {
+        self.depth
+    }
+}
+
+impl Drop for LoopDepthGuard {
+    fn drop(&mut self) {
+        LOOP_DEPTH.with(|c| c.set(self.depth - 1));
+    }
 }
 
 /// Clamp `max_iterations` based on the current loop nesting depth.
@@ -72,14 +93,45 @@ pub(crate) struct ExitEdges {
     pub continues: Vec<ScopeState>,
 }
 
-/// Open an exit-edge frame for a loop or `switch` about to walk its body.
-pub(crate) fn push_exit_frame() {
-    EXIT_EDGES.with(|frames| frames.borrow_mut().push(ExitEdges::default()));
+/// An open exit-edge frame for a loop or `switch` whose body is being
+/// walked.
+///
+/// [`Self::pop`] closes it and hands back what jumped out; a guard that is
+/// dropped without being popped (a panic unwinding out of the body) still
+/// closes its frame, so the frames of the structures around it stay
+/// aligned with the walk that owns them.
+#[must_use]
+pub(crate) struct ExitFrameGuard {
+    popped: bool,
 }
 
-/// Close the innermost exit-edge frame and return what jumped out of it.
-pub(crate) fn pop_exit_frame() -> ExitEdges {
-    EXIT_EDGES.with(|frames| frames.borrow_mut().pop().unwrap_or_default())
+impl ExitFrameGuard {
+    /// Open an exit-edge frame for a body about to be walked.
+    pub(crate) fn push() -> Self {
+        EXIT_EDGES.with(|frames| frames.borrow_mut().push(ExitEdges::default()));
+        Self { popped: false }
+    }
+
+    /// Close the frame and return what jumped out of it.
+    pub(crate) fn pop(mut self) -> ExitEdges {
+        self.popped = true;
+        EXIT_EDGES.with(|frames| frames.borrow_mut().pop().unwrap_or_default())
+    }
+}
+
+impl Drop for ExitFrameGuard {
+    fn drop(&mut self) {
+        if self.popped {
+            return;
+        }
+        // Unwinding through a borrow (a panic inside `record_exit_edge`)
+        // must not become a second panic here.
+        EXIT_EDGES.with(|frames| {
+            if let Ok(mut frames) = frames.try_borrow_mut() {
+                frames.pop();
+            }
+        });
+    }
 }
 
 /// Discard the edges recorded so far by the innermost frame.

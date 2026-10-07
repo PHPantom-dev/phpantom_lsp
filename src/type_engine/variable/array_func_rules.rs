@@ -17,7 +17,9 @@
 /// the handful of questions the rules ask about an argument, and the
 /// rules stay in one place so a fix to `array_map`'s element type
 /// reaches every consumer.
-use crate::php_type::{LiteralValue, PhpType, TypeKind, is_array_like_name};
+use crate::php_type::{
+    LiteralValue, PhpType, ShapeEntry, TypeKind, canonical_int_key, is_array_like_name,
+};
 
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
@@ -82,6 +84,13 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
         param_index: usize,
         subject: &PhpType,
     ) -> Option<PhpType>;
+
+    /// Split `subject` by the type-check function `guard` into the values
+    /// it accepts (`None` when none pass) and whether it can reject any.
+    /// `None` when `guard` is not a type check.
+    fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
+        crate::type_engine::types::narrowing::split_type_by_guard_name(guard, subject, None)
+    }
 }
 
 /// For known array-producing functions, resolve the **raw output type**
@@ -103,6 +112,52 @@ pub(in crate::type_engine) fn array_func_raw_type(
     // the result describes all of them together rather than just the first.
     if func_name.eq_ignore_ascii_case("array_merge") {
         return array_merge_type(args);
+    }
+
+    if func_name.eq_ignore_ascii_case("array_keys")
+        && let Some(keys) = shape_keys_type(args)
+    {
+        return Some(keys);
+    }
+
+    // Handed an array subject, the `preg_` replacers return its keys with
+    // string values, dropping an entry whose replacement fails (and, for
+    // `preg_filter`, one the pattern does not match). So a shape keeps its
+    // keys, each of them optional.
+    let preg_subject = if ["preg_replace", "preg_replace_callback", "preg_filter"]
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case(func_name))
+    {
+        Some(2)
+    } else if func_name.eq_ignore_ascii_case("preg_replace_callback_array") {
+        Some(1)
+    } else {
+        None
+    };
+    if let Some(subject) = preg_subject
+        && let Some(entries) = args
+            .arg_raw_type(subject)
+            .as_ref()
+            .and_then(explicit_key_shape_entries)
+    {
+        return Some(PhpType::array_shape(
+            entries
+                .into_iter()
+                .map(|entry| ShapeEntry {
+                    value_type: PhpType::string(),
+                    optional: true,
+                    ..entry
+                })
+                .collect(),
+        ));
+    }
+
+    // A shape the filter can decide entry by entry keeps its keys and its
+    // per-entry types instead of collapsing into the container it describes.
+    if func_name.eq_ignore_ascii_case("array_filter")
+        && let Some(filtered) = filter_shape_type(args)
+    {
+        return Some(filtered);
     }
 
     // Type-preserving functions: output array has same element type.
@@ -171,10 +226,32 @@ pub(in crate::type_engine) fn array_func_raw_type(
         return range_type(args);
     }
 
+    // Splitting a string always leaves at least one piece, so the pointer
+    // idiom `end(explode('/', $path))` is a `string`.  Only a negative
+    // `$limit`, which drops pieces from the end, can leave none; an empty
+    // separator throws rather than returning.  Mirrors PHPStan's
+    // `ExplodeFunctionDynamicReturnTypeExtension`.
+    if func_name.eq_ignore_ascii_case("explode") {
+        let keeps_all = !args.has_arg(2)
+            || args
+                .arg_raw_type(2)
+                .is_some_and(|limit| limit.is_subtype_of(&PhpType::parse("int<0, max>")));
+        let pieces = PhpType::string();
+        return Some(if keeps_all {
+            PhpType::generic("non-empty-list", vec![pieces])
+        } else {
+            PhpType::list(pieces)
+        });
+    }
+
     // array_map: callback is first arg, array is second.
     // The callback's return type determines the output element type.
     if func_name.eq_ignore_ascii_case("array_map") {
-        let element = array_map_element_type(args)?.widen_scalar_literals();
+        if let Some(mapped) = array_map_shape(args) {
+            return Some(mapped);
+        }
+        let seed = args.arg_raw_type(1).and_then(|t| t.iterable_element_type());
+        let element = array_map_value(array_map_element_type(args, seed)?);
         return Some(array_map_container(element, args));
     }
 
@@ -195,7 +272,7 @@ pub(in crate::type_engine) fn array_func_raw_type(
         }
         let key = raw
             .iterable_key_type()
-            .and_then(|key| super::resolution::normalize_array_key_type(&key));
+            .and_then(|key| super::array_shape_writes::normalize_array_key_type(&key));
         return match (key, val) {
             (Some(k), Some(v)) => Some(PhpType::generic_array(k, v)),
             (None, Some(v)) => Some(PhpType::list(v)),
@@ -231,7 +308,8 @@ pub(in crate::type_engine) fn array_func_element_type(
         // A scalar element is the honest answer for `array_pop(list<string>)`
         // just as `User` is for `list<User>`, so the element type is read
         // without `skip_scalar`.
-        return args.arg_raw_type(0)?.iterable_element_type();
+        let raw = args.arg_raw_type(0)?;
+        return element_or_sentinel(func_name, &raw);
     }
 
     // `array_sum`/`array_product` are declared `int|float` because the
@@ -243,7 +321,7 @@ pub(in crate::type_engine) fn array_func_element_type(
     // `max`/`min` hand back one of the values they were given, which the
     // stub can only spell as `mixed`.
     if func_name.eq_ignore_ascii_case("max") || func_name.eq_ignore_ascii_case("min") {
-        return min_max_type(args);
+        return min_max_type(args, func_name.eq_ignore_ascii_case("max"));
     }
 
     // The key readers are stubbed `TKey|null` because an empty array has no
@@ -253,6 +331,12 @@ pub(in crate::type_engine) fn array_func_element_type(
         || func_name.eq_ignore_ascii_case("key")
     {
         let raw = args.arg_raw_type(0)?;
+        if !func_name.eq_ignore_ascii_case("key")
+            && let Some(key) =
+                shape_end_key_type(&raw, func_name.eq_ignore_ascii_case("array_key_first"))
+        {
+            return Some(key);
+        }
         return raw
             .is_provably_non_empty()
             .then(|| array_key_domain(&raw))
@@ -302,6 +386,72 @@ pub(in crate::type_engine) fn array_func_element_type(
     }
 
     None
+}
+
+/// What an element function hands back for `raw`: an element, or the
+/// `false` / `null` it returns when there is no element to give.
+///
+/// The pointer readers answer `false` and the removers and finders answer
+/// `null`.  `reset()`, `end()`, `current()` and the removers only miss on an
+/// empty array, so an argument that proves it has entries rules the sentinel
+/// out; `next()` and `prev()` can step off either end of any array, and
+/// `array_find()` can match nothing, so they always keep it.
+fn element_or_sentinel(func_name: &str, raw: &PhpType) -> Option<PhpType> {
+    let (sentinel, always) = match func_name.to_ascii_lowercase().as_str() {
+        "reset" | "end" | "current" => (PhpType::false_(), false),
+        "next" | "prev" => (PhpType::false_(), true),
+        "array_find" => (PhpType::null(), true),
+        _ => (PhpType::null(), false),
+    };
+    if matches!(raw.kind(), TypeKind::ArrayShape(_) | TypeKind::ListShape(_))
+        && raw
+            .shape_entries()
+            .is_some_and(|entries| entries.is_empty())
+    {
+        return Some(sentinel);
+    }
+    // A remover takes the entry at its end of the shape: the first one
+    // certainly present, or any optional one before it.
+    let from_front = if func_name.eq_ignore_ascii_case("array_shift") {
+        Some(true)
+    } else if func_name.eq_ignore_ascii_case("array_pop") {
+        Some(false)
+    } else {
+        None
+    };
+    if let Some(from_front) = from_front
+        && let TypeKind::ArrayShape(entries) = raw.kind()
+    {
+        let (mut values, present) = if from_front {
+            leading_entry_values(entries.iter())
+        } else {
+            leading_entry_values(entries.iter().rev())
+        };
+        if !present {
+            values.push(sentinel);
+        }
+        return Some(PhpType::join_runtime_value_types(values));
+    }
+    let element = raw.iterable_element_type()?;
+    if element.is_mixed() || (!always && raw.is_provably_non_empty()) {
+        return Some(element);
+    }
+    let mut members: Vec<PhpType> = element.union_members().into_iter().cloned().collect();
+    members.push(sentinel);
+    Some(PhpType::union(members))
+}
+
+/// The values of `entries` up to and including the first one that is
+/// certainly present, and whether there was one.
+fn leading_entry_values<'a>(entries: impl Iterator<Item = &'a ShapeEntry>) -> (Vec<PhpType>, bool) {
+    let mut values: Vec<PhpType> = Vec::new();
+    for entry in entries {
+        values.push(entry.value_type.clone());
+        if !entry.optional {
+            return (values, true);
+        }
+    }
+    (values, false)
 }
 
 /// The function a callable string names (`'intval'`, `"\\strlen"`), with
@@ -390,6 +540,9 @@ fn range_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
 /// implicit `int` of a `T[]`, and turns a `T[]` a signature accepts today
 /// into an argument it rejects.
 fn array_merge_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    if let Some(merged) = merge_shapes(args) {
+        return Some(merged);
+    }
     let int_ty = PhpType::int();
     let mut values: Vec<PhpType> = Vec::new();
     let mut keys: Vec<PhpType> = Vec::new();
@@ -428,6 +581,349 @@ fn array_merge_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     Some(PhpType::generic_array(key, value))
 }
 
+/// `array_merge` over arguments that are all array shapes, entry by entry.
+///
+/// A string key overwrites the entry an earlier argument gave it, in that
+/// entry's position, and an integer key is appended under the next index.
+/// An optional string key may or may not overwrite, so the value joins
+/// both; an optional integer entry leaves every later index uncertain, and
+/// the rule declines, as it does for any argument that is not a shape.
+///
+/// A spread of a shape whose entries are all present passes each entry as
+/// an argument of its own. An argument that may be one of several shapes is
+/// merged as the single shape they join into, a key only some of them have
+/// becoming optional.
+fn merge_shapes(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let mut arrays: Vec<PhpType> = Vec::new();
+    let mut index = 0;
+    while args.has_arg(index) {
+        let raw = args.arg_raw_type(index)?;
+        if !args.is_spread(index) {
+            arrays.push(raw);
+        } else {
+            let TypeKind::ArrayShape(entries) = raw.kind() else {
+                return None;
+            };
+            if entries.iter().any(|entry| entry.optional) {
+                return None;
+            }
+            arrays.extend(entries.iter().map(|entry| entry.value_type.clone()));
+        }
+        index += 1;
+    }
+
+    let mut merged: Vec<ShapeEntry> = Vec::new();
+    let mut next_index: i64 = 0;
+    for array in arrays {
+        let array = match array.kind() {
+            TypeKind::Union(members) => {
+                let (first, rest) = members.split_first()?;
+                rest.iter()
+                    .try_fold(first.clone(), |joined, member| joined.join_shapes(member))?
+            }
+            _ => array,
+        };
+        for entry in explicit_key_shape_entries(&array)? {
+            let key = entry.key.as_deref().unwrap_or_default();
+            if canonical_int_key(key).is_some() {
+                if entry.optional {
+                    return None;
+                }
+                merged.push(ShapeEntry {
+                    key: Some(next_index.to_string()),
+                    ..entry
+                });
+                next_index += 1;
+            } else if let Some(existing) = merged
+                .iter_mut()
+                .find(|existing| existing.key.as_deref() == Some(key))
+            {
+                if entry.optional {
+                    existing.value_type = PhpType::join_runtime_value_types(vec![
+                        existing.value_type.clone(),
+                        entry.value_type,
+                    ]);
+                } else {
+                    existing.value_type = entry.value_type;
+                    existing.optional = false;
+                }
+            } else {
+                merged.push(entry);
+            }
+        }
+    }
+    Some(shape_with_implicit_keys(merged))
+}
+
+/// A single array shape's entries with every key spelled out, the
+/// positional ones numbered the way PHP numbers them (one past the
+/// largest integer key so far).
+///
+/// `None` for anything but a single shape: a union of shapes, a nullable
+/// one, or a generic array has no one entry list to walk.
+fn explicit_key_shape_entries(ty: &PhpType) -> Option<Vec<ShapeEntry>> {
+    let TypeKind::ArrayShape(entries) = ty.kind() else {
+        return None;
+    };
+    let mut next_index: i64 = 0;
+    Some(
+        entries
+            .iter()
+            .map(|entry| {
+                let key = match &entry.key {
+                    Some(key) => {
+                        if let Some(n) = canonical_int_key(key) {
+                            next_index = next_index.max(n + 1);
+                        }
+                        key.clone()
+                    }
+                    None => {
+                        let key = next_index.to_string();
+                        next_index += 1;
+                        key
+                    }
+                };
+                ShapeEntry {
+                    key: Some(key),
+                    ..entry.clone()
+                }
+            })
+            .collect(),
+    )
+}
+
+/// How many distinct keys a key union read off a shape may carry.
+///
+/// A literal array with more entries than this is a data table rather than
+/// a set of cases a caller tells apart, and the union's pairwise absorption
+/// is quadratic in its member count.
+const MAX_KEY_ALTERNATIVES: usize = 32;
+
+/// The keys of every alternative of an array-shape type, each as the
+/// literal PHP stores it and paired with whether its entry is optional.
+///
+/// `None` unless every alternative is a single array shape whose keys can be
+/// spelled as literals. A class-constant key only records the constant's
+/// name, not the value it stands for.
+fn shape_key_alternatives(ty: &PhpType) -> Option<Vec<Vec<(PhpType, bool)>>> {
+    ty.union_members()
+        .into_iter()
+        .map(|member| {
+            explicit_key_shape_entries(member)?
+                .into_iter()
+                .map(|entry| {
+                    let key = entry.key?;
+                    if key.contains("::") {
+                        return None;
+                    }
+                    let literal = match canonical_int_key(&key) {
+                        Some(_) => PhpType::literal_int(key),
+                        None => PhpType::literal_string_value(key),
+                    };
+                    Some((literal, entry.optional))
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The union of `members`, or `None` when there are none or too many.
+fn literal_key_union(members: impl IntoIterator<Item = PhpType>) -> Option<PhpType> {
+    let mut distinct: Vec<PhpType> = Vec::new();
+    for member in members {
+        if !distinct.contains(&member) {
+            if distinct.len() == MAX_KEY_ALTERNATIVES {
+                return None;
+            }
+            distinct.push(member);
+        }
+    }
+    match distinct.len() {
+        0 => None,
+        1 => distinct.pop(),
+        _ => Some(PhpType::union(distinct)),
+    }
+}
+
+/// `array_keys()` of an array shape, keeping the literal keys.
+///
+/// Without a search value every key comes back in order, so a shape whose
+/// entries are all present gives a shape of its keys. A search value keeps
+/// only some of them, and an optional entry leaves the position of every
+/// later key open, so either gives a list of the possible keys instead.
+fn shape_keys_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let alternatives = shape_key_alternatives(&args.arg_raw_type(0)?)?;
+    let searched = args.has_arg(1);
+    let mut results: Vec<PhpType> = Vec::new();
+    for keys in alternatives {
+        let result = if keys.is_empty() {
+            PhpType::array_shape(Vec::new())
+        } else if !searched && keys.iter().all(|(_, optional)| !optional) {
+            PhpType::array_shape(
+                keys.into_iter()
+                    .map(|(key, _)| ShapeEntry {
+                        key: None,
+                        value_type: key,
+                        optional: false,
+                    })
+                    .collect(),
+            )
+        } else {
+            PhpType::list(literal_key_union(keys.into_iter().map(|(key, _)| key))?)
+        };
+        if !results.contains(&result) {
+            results.push(result);
+        }
+    }
+    match results.len() {
+        1 => results.pop(),
+        _ => Some(PhpType::union(results)),
+    }
+}
+
+/// `array_key_first()` (`first`) or `array_key_last()` of an array shape.
+///
+/// The answer is the key of the first entry from that end that is certainly
+/// present, or of any optional entry before it. A shape whose entries may
+/// all be missing may be empty, which answers `null`.
+fn shape_end_key_type(raw: &PhpType, first: bool) -> Option<PhpType> {
+    let mut keys: Vec<PhpType> = Vec::new();
+    for mut alternative in shape_key_alternatives(raw)? {
+        if !first {
+            alternative.reverse();
+        }
+        let mut present = false;
+        for (key, optional) in alternative {
+            keys.push(key);
+            if !optional {
+                present = true;
+                break;
+            }
+        }
+        if !present {
+            keys.push(PhpType::null());
+        }
+    }
+    literal_key_union(keys)
+}
+
+/// An array shape over `entries`, written positionally when they are the
+/// required `0, 1, 2, …` a positional shape stands for.
+fn shape_with_implicit_keys(mut entries: Vec<ShapeEntry>) -> PhpType {
+    let sequential = entries.iter().enumerate().all(|(i, entry)| {
+        !entry.optional && entry.key.as_deref().and_then(canonical_int_key) == Some(i as i64)
+    });
+    if sequential {
+        for entry in &mut entries {
+            entry.key = None;
+        }
+    }
+    PhpType::array_shape(entries)
+}
+
+/// `array_filter` over an array shape, decided entry by entry.
+///
+/// Each entry's value is split into what the filter keeps and whether it
+/// can drop it: an entry nothing survives is removed, one the filter may
+/// drop becomes optional, and one it always keeps stays as it was. Without
+/// a callback the split is truthiness; with one it is the type check a
+/// callable string names, and a callback that may be any of several such
+/// strings gives one shape per alternative. Any other callback says too
+/// little about which entries survive, and the rule declines.
+fn filter_shape_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let entries = explicit_key_shape_entries(&args.arg_raw_type(0)?)?;
+    if !args.has_arg(1) {
+        return filtered_shape(&entries, |value| {
+            Some((value.truthy_type(), value.falsy_type().is_some()))
+        });
+    }
+    // Only the default mode hands the type check the value.
+    if args.has_arg(2) {
+        return None;
+    }
+    let mut shapes: Vec<PhpType> = Vec::new();
+    for guard in callback_guard_names(args, 1)? {
+        let shape = filtered_shape(&entries, |value| args.guard_split(&guard, value))?;
+        if !shapes.contains(&shape) {
+            shapes.push(shape);
+        }
+    }
+    match shapes.len() {
+        0 => None,
+        1 => shapes.pop(),
+        _ => Some(PhpType::union(shapes)),
+    }
+}
+
+/// Rebuild a filtered shape from `entries` (keys already explicit), given
+/// how the filter splits one entry's value. `None` when it cannot say.
+fn filtered_shape(
+    entries: &[ShapeEntry],
+    split: impl Fn(&PhpType) -> Option<(Option<PhpType>, bool)>,
+) -> Option<PhpType> {
+    let mut kept = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let (accepted, may_reject) = split(&entry.value_type)?;
+        let Some(value_type) = accepted else {
+            continue;
+        };
+        kept.push(ShapeEntry {
+            key: entry.key.clone(),
+            value_type,
+            optional: entry.optional || may_reject,
+        });
+    }
+    Some(shape_with_implicit_keys(kept))
+}
+
+/// The type-check functions the callback at `index` names: one for
+/// `'is_int'`, several for a variable holding one of a few such strings.
+/// `None` when any alternative is something else.
+fn callback_guard_names(args: &dyn ArrayFuncArgs, index: usize) -> Option<Vec<String>> {
+    let callback = args.arg_raw_type(index)?;
+    callback
+        .union_members()
+        .into_iter()
+        .map(|member| {
+            let content = member.as_literal()?.string_content()?;
+            let name = content.trim_start_matches('\\');
+            crate::type_engine::types::narrowing::type_guard_kind_from_name(name)?;
+            Some(name.to_string())
+        })
+        .collect()
+}
+
+/// What the filter callback at index 1 proves about the value its
+/// `param_index`th parameter is handed.
+///
+/// An inline function or callable string is read directly; a variable
+/// holding one of several type-check names keeps whatever any of them
+/// accepts.
+fn filter_callback_narrowing(
+    args: &dyn ArrayFuncArgs,
+    param_index: usize,
+    subject: &PhpType,
+) -> Option<PhpType> {
+    if let Some(narrowed) = args.callback_param_narrowing(1, param_index, subject) {
+        return Some(narrowed);
+    }
+    // A named function receives the entry as its first argument only.
+    if param_index != 0 {
+        return None;
+    }
+    let mut accepted: Vec<PhpType> = Vec::new();
+    for guard in callback_guard_names(args, 1)? {
+        if let Some(kept) = args.guard_split(&guard, subject)?.0 {
+            accepted.push(kept);
+        }
+    }
+    match accepted.len() {
+        0 => None,
+        1 => accepted.pop(),
+        _ => Some(PhpType::join_runtime_value_types(accepted)),
+    }
+}
+
 /// The type of `max()`/`min()`'s result.
 ///
 /// PHP gives the function two shapes: handed a single iterable it compares
@@ -437,27 +933,66 @@ fn array_merge_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
 ///
 /// Returns `None` as soon as one argument cannot be resolved, since a union
 /// missing a member would be narrower than the call can promise.
-fn min_max_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+fn min_max_type(args: &dyn ArrayFuncArgs, want_max: bool) -> Option<PhpType> {
     if !args.has_arg(1) {
-        return args.arg_raw_type(0)?.iterable_element_type();
+        let iterable = args.arg_raw_type(0)?;
+        // Every number a literal array holds is known, so the one that
+        // comes out is too.
+        if let TypeKind::ArrayShape(entries) = iterable.kind()
+            && entries.iter().all(|entry| !entry.optional)
+            && let Some(extreme) =
+                extreme_number(entries.iter().map(|entry| &entry.value_type), want_max)
+        {
+            return Some(extreme);
+        }
+        return iterable.iterable_element_type();
+    }
+
+    let mut raw_args = Vec::new();
+    let mut index = 0;
+    while args.has_arg(index) {
+        raw_args.push(args.arg_raw_type(index)?);
+        index += 1;
+    }
+    if let Some(extreme) = extreme_number(raw_args.iter(), want_max) {
+        return Some(extreme);
     }
 
     let mut members = Vec::new();
-    let mut index = 0;
-    while args.has_arg(index) {
-        let widened = widen_non_bool_scalar_literals(&args.arg_raw_type(index)?);
+    for raw in &raw_args {
+        let widened = widen_non_bool_scalar_literals(raw);
         for member in widened.union_members() {
             if !members.contains(member) {
                 members.push(member.clone());
             }
         }
-        index += 1;
     }
     match members.len() {
         0 => None,
         1 => members.pop(),
         _ => Some(PhpType::union(members)),
     }
+}
+
+/// The largest (or smallest) of `values` when every one is an `int` or
+/// `float` literal. `None` when any is not, or there are none.
+fn extreme_number<'a>(
+    values: impl Iterator<Item = &'a PhpType>,
+    want_max: bool,
+) -> Option<PhpType> {
+    let mut best: Option<(f64, &PhpType)> = None;
+    for value in values {
+        let n = match value.as_literal()? {
+            literal @ LiteralValue::Int(_) => literal.parse_i64()? as f64,
+            literal @ LiteralValue::Float(_) => literal.parse_f64()?,
+            LiteralValue::String(_) => return None,
+        };
+        let better = best.is_none_or(|(b, _)| if want_max { n > b } else { n < b });
+        if better {
+            best = Some((n, value));
+        }
+    }
+    best.map(|(_, value)| value.clone())
 }
 
 /// Widen literal `int`/`float`/`string` members the way
@@ -524,6 +1059,53 @@ fn array_map_container(element: PhpType, args: &dyn ArrayFuncArgs) -> PhpType {
         Some(key) => PhpType::generic_array(key, element),
         None => PhpType::generic_array_val(element),
     }
+}
+
+/// `array_map` over a single shape: every key survives and each value
+/// becomes what the callback returns for it, so `array{c: string}` maps to
+/// `array{c: T}` and a `list{…}` keeps its arity.
+///
+/// Entries whose values widen to the same type share one callback
+/// inference, so a long homogeneous literal costs no more than a list.
+fn array_map_shape(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    if args.has_arg(2) || args.is_spread(1) {
+        return None;
+    }
+    let input = args.arg_raw_type(1)?;
+    let TypeKind::ArrayShape(entries) = input.kind() else {
+        return None;
+    };
+    let mut mapped_by_seed: Vec<(PhpType, PhpType)> = Vec::new();
+    let mut mapped = Vec::with_capacity(entries.len());
+    for entry in entries.iter() {
+        let seed = entry.value_type.widen_scalar_literals();
+        let value = match mapped_by_seed.iter().find(|(s, _)| *s == seed) {
+            Some((_, value)) => value.clone(),
+            None => {
+                let value = array_map_value(array_map_element_type(args, Some(seed.clone()))?);
+                mapped_by_seed.push((seed, value.clone()));
+                value
+            }
+        };
+        mapped.push(ShapeEntry {
+            value_type: value,
+            ..entry.clone()
+        });
+    }
+    Some(if matches!(input.raw_kind(), TypeKind::ListShape(_)) {
+        PhpType::list_shape(mapped)
+    } else {
+        PhpType::array_shape(mapped)
+    })
+}
+
+/// A callback result as the value `array_map` stores: literals widened,
+/// and a `void` callback's missing return read as the `null` it produces.
+fn array_map_value(result: PhpType) -> PhpType {
+    if result.is_void() {
+        return PhpType::null();
+    }
+    result.widen_scalar_literals()
 }
 
 /// Whether `ty` promises the sequential integer keys a `list` has.
@@ -621,7 +1203,7 @@ fn filter_callback_type(raw: &PhpType, args: &dyn ArrayFuncArgs) -> Option<PhpTy
 fn filter_value_type(raw: &PhpType, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     let param_index = filter_value_param_index(args)?;
     let element = raw.extract_value_type(false)?;
-    let narrowed = args.callback_param_narrowing(1, param_index, element)?;
+    let narrowed = filter_callback_narrowing(args, param_index, element)?;
     // A callback that admits every value it could receive says nothing,
     // and the rebuilt union would only reorder the members.
     if element.is_subtype_of(&narrowed) {
@@ -648,7 +1230,7 @@ fn filter_key_type(raw: &PhpType, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     } else {
         raw.iterable_key_type()?
     };
-    let narrowed = args.callback_param_narrowing(1, param_index, &key)?;
+    let narrowed = filter_callback_narrowing(args, param_index, &key)?;
     // A callback that admits every key it could receive (`is_int($k) ||
     // is_string($k)`) leaves nothing to say, and answering with the
     // rebuilt union would only reorder its members.
@@ -709,30 +1291,40 @@ fn filter_key_param_index(args: &dyn ArrayFuncArgs) -> Option<usize> {
 ///    returns the `ExtendedMethodReflection` the body hands back).
 /// 2. Otherwise infer it from the callback body, with the callback's
 ///    first parameter seeded to the input array's element type.
-/// 3. Otherwise assume the callback passes its element through.
-fn array_map_element_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+/// 3. Otherwise use the return type the callback's own type declares
+///    (a `callable(…): T` or `Closure(…): T` value).
+/// 4. Otherwise assume the callback passes its element through.
+///
+/// `input_element` is the value the callback is handed: the input's
+/// element type, or one shape entry's value.
+fn array_map_element_type(
+    args: &dyn ArrayFuncArgs,
+    input_element: Option<PhpType>,
+) -> Option<PhpType> {
     if let Some(declared) = args.callback_declared_return_type(0)
         && !declared.is_untyped()
     {
-        // Only a class-like declaration can be narrowed by a hierarchy
-        // relation, so a scalar one skips the body walk entirely.
-        if declared.is_scalar_leaf() {
-            return Some(declared);
-        }
-        let seed = args
-            .arg_raw_type(1)
-            .and_then(|t| t.iterable_element_type())
-            .unwrap_or_else(PhpType::mixed);
+        let seed = input_element.unwrap_or_else(PhpType::mixed);
         let narrowed = args
             .callback_inferred_return_type(0, &seed)
             .filter(|inferred| args.narrows(inferred, &declared));
         return Some(narrowed.unwrap_or(declared));
     }
 
-    let input_element = args.arg_raw_type(1)?.iterable_element_type()?;
-
-    if let Some(inferred) = args.callback_inferred_return_type(0, &input_element) {
+    if let Some(inferred) = input_element
+        .as_ref()
+        .and_then(|element| args.callback_inferred_return_type(0, element))
+    {
         return Some(inferred);
+    }
+
+    if let Some(returned) = args
+        .arg_raw_type(0)
+        .as_ref()
+        .and_then(PhpType::callable_return_type)
+        .filter(|ty| !ty.is_untyped() && !ty.is_mixed())
+    {
+        return Some(returned.clone());
     }
 
     // Final fallback: assume the callback passes its element through. That
@@ -740,5 +1332,5 @@ fn array_map_element_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     // scalar element says nothing about the result, and `array_map('intval',
     // $strings)` would be reported as `list<string>` on the strength of an
     // input the callback exists to change.
-    (!input_element.is_scalar_leaf()).then_some(input_element)
+    input_element.filter(|element| !element.is_scalar_leaf())
 }

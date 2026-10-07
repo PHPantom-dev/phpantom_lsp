@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::atom::AtomMap;
 
 use crate::php_type::PhpType;
 use crate::type_engine::variable::forward_walk::ScopeProofs;
@@ -106,6 +105,15 @@ pub(crate) type TransResolverFn<'a> = Option<&'a dyn Fn(&str) -> Option<crate::p
 /// instead of re-entering `resolve_variable_types`.
 pub(crate) type ScopeVarResolverFn<'a> =
     Option<&'a dyn Fn(&str) -> Vec<crate::types::ResolvedType>>;
+
+/// Type alias for the optional scope-membership resolver from the
+/// forward walker.  Unlike [`ScopeVarResolverFn`], which returns an empty
+/// vec both when a variable was never assigned on any surviving path and
+/// when it was assigned but its type could not be resolved, this answers
+/// which of the two it is: `true` when the variable has *some* entry in
+/// the walker's `ScopeState` (even an empty/unresolved one), `false` when
+/// it has none at all.
+pub(crate) type ScopeContainsResolverFn<'a> = Option<&'a dyn Fn(&str) -> bool>;
 
 /// Optional Laravel macro callback `$this` resolver.
 pub(crate) type LaravelMacroThisResolverFn<'a> = Option<&'a dyn Fn(&str) -> Option<Arc<ClassInfo>>>;
@@ -306,6 +314,10 @@ impl<'a> CtxLoaders<'a> {
 /// Introducing this struct avoids passing 7–10 individual arguments to
 /// every helper in the resolution chain, which keeps clippy happy and
 /// makes call-sites much easier to read.
+///
+/// Build one with [`VarResolutionCtx::new`] and name only the optional
+/// fields that differ, rather than restating all fifteen.
+#[derive(Clone)]
 pub(crate) struct VarResolutionCtx<'a> {
     pub var_name: &'a str,
     pub current_class: &'a ClassInfo,
@@ -328,13 +340,7 @@ pub(crate) struct VarResolutionCtx<'a> {
     /// Pre-computed top-level scope for resolving `global` variable imports.
     /// When a function body contains `global $x;`, the walker looks up
     /// `$x` in this map to seed the local scope with the top-level type.
-    pub top_level_scope: Option<AtomMap<Vec<crate::types::ResolvedType>>>,
-    /// Legacy flag: historically selected branch-aware resolution for
-    /// hover vs union-all resolution for completion.  The forward
-    /// walker now inherently produces position-accurate types, so both
-    /// paths behave identically.  Kept for API compatibility with
-    /// callers that set it to `true` (hover, diagnostics).
-    pub branch_aware: bool,
+    pub top_level_scope: Option<crate::type_engine::variable::forward_walk::Locals>,
     /// Match-arm instanceof narrowings: var name → narrowed types.
     /// Empty outside of match(true) arm bodies.
     pub match_arm_narrowing: HashMap<String, Vec<crate::types::ResolvedType>>,
@@ -349,6 +355,15 @@ pub(crate) struct VarResolutionCtx<'a> {
     /// variable's types from the forward walker's in-progress
     /// `ScopeState`.
     pub scope_var_resolver: ScopeVarResolverFn<'a>,
+    /// Optional scope-membership resolver, set alongside
+    /// `scope_var_resolver`.
+    ///
+    /// `resolve_null_coalesce_chain` uses this to tell a bare variable
+    /// that was never assigned on any surviving path (contributes
+    /// nothing to a `??` chain, like a stripped `null`) apart from one
+    /// that was assigned but whose type resolution failed (still
+    /// contributes `mixed`, per `widen_unresolved_branch`).
+    pub scope_contains_resolver: ScopeContainsResolverFn<'a>,
     /// The proofs that scope holds which are not variable types: what a
     /// boolean stands for, which `preg_match` outcome a variable is, and
     /// whose null a value's null stands for.
@@ -361,6 +376,47 @@ pub(crate) struct VarResolutionCtx<'a> {
 }
 
 impl<'a> VarResolutionCtx<'a> {
+    /// A context over the fields no caller can do without, with every
+    /// optional one at its neutral value: no backend, no loaders, no
+    /// resolved-class cache, no enclosing return type, no top-level scope,
+    /// no match-arm narrowing and no forward-walk scope.
+    ///
+    /// Callers that do have one of those name it with struct-update
+    /// syntax:
+    ///
+    /// ```ignore
+    /// VarResolutionCtx {
+    ///     backend: Some(backend),
+    ///     ..VarResolutionCtx::new("", class, classes, content, offset, &loader)
+    /// }
+    /// ```
+    pub(crate) fn new(
+        var_name: &'a str,
+        current_class: &'a ClassInfo,
+        all_classes: &'a [Arc<ClassInfo>],
+        content: &'a str,
+        cursor_offset: u32,
+        class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Self {
+        Self {
+            var_name,
+            current_class,
+            all_classes,
+            content,
+            cursor_offset,
+            class_loader,
+            backend: None,
+            loaders: Loaders::default(),
+            resolved_class_cache: None,
+            enclosing_return_type: None,
+            top_level_scope: None,
+            match_arm_narrowing: HashMap::new(),
+            scope_var_resolver: None,
+            scope_contains_resolver: None,
+            scope_proofs: None,
+        }
+    }
+
     /// Create a [`ResolutionCtx`] from this variable resolution context.
     ///
     /// The non-optional `current_class` is wrapped in `Some(…)`.
@@ -412,21 +468,8 @@ impl<'a> VarResolutionCtx<'a> {
     /// recursion on self-referential assignments.
     pub(crate) fn with_cursor_offset(&self, cursor_offset: u32) -> VarResolutionCtx<'a> {
         VarResolutionCtx {
-            var_name: self.var_name,
-            current_class: self.current_class,
-            all_classes: self.all_classes,
-            content: self.content,
             cursor_offset,
-            class_loader: self.class_loader,
-            backend: self.backend,
-            loaders: self.loaders,
-            resolved_class_cache: self.resolved_class_cache,
-            enclosing_return_type: self.enclosing_return_type.clone(),
-            top_level_scope: self.top_level_scope.clone(),
-            branch_aware: self.branch_aware,
-            match_arm_narrowing: self.match_arm_narrowing.clone(),
-            scope_var_resolver: self.scope_var_resolver,
-            scope_proofs: self.scope_proofs,
+            ..self.clone()
         }
     }
 
@@ -459,21 +502,8 @@ impl<'a> VarResolutionCtx<'a> {
         match_arm_narrowing: HashMap<String, Vec<crate::types::ResolvedType>>,
     ) -> VarResolutionCtx<'a> {
         VarResolutionCtx {
-            var_name: self.var_name,
-            current_class: self.current_class,
-            all_classes: self.all_classes,
-            content: self.content,
-            cursor_offset: self.cursor_offset,
-            class_loader: self.class_loader,
-            backend: self.backend,
-            loaders: self.loaders,
-            resolved_class_cache: self.resolved_class_cache,
-            enclosing_return_type: self.enclosing_return_type.clone(),
-            top_level_scope: self.top_level_scope.clone(),
-            branch_aware: self.branch_aware,
             match_arm_narrowing,
-            scope_var_resolver: self.scope_var_resolver,
-            scope_proofs: self.scope_proofs,
+            ..self.clone()
         }
     }
 }

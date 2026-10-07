@@ -85,7 +85,7 @@ fn pair_tags(content: &str) -> Option<PairedTags<'_>> {
             };
             let name_start = i + 2 + (prefix.len() - 1);
             let j = tag_name_end(bytes, name_start);
-            let Some(close) = find_byte(&masked, j, b'>') else {
+            let Some(close) = find_byte(bytes, j, b'>') else {
                 break;
             };
             tokens.push(Token::Close(TagCloser {

@@ -26,8 +26,13 @@ use tower_lsp::lsp_types::*;
 
 use super::{CodeActionData, make_code_action_data};
 use crate::Backend;
+use crate::blade::use_directive::{
+    UseDirective, first_string_literal, group_members, use_directives,
+};
 use crate::diagnostics::use_statements::scan_use_statements;
-use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
+use crate::text_position::{
+    line_start_byte_offset, offset_to_position, position_to_byte_offset, ranges_overlap,
+};
 
 impl Backend {
     /// Collect "Remove unused import" code actions.
@@ -248,6 +253,127 @@ pub(crate) fn build_line_deletion_edit(
     delete_line_span(content, &lines, start_line, end_line, removed_import_lines)
 }
 
+/// Build the edit that removes the `@use` directive an unused-import
+/// diagnostic reports in a Blade template, or just the reported member of
+/// a group directive whose other members stay, or `None` when `range` is
+/// not on a directive.
+///
+/// `template` is the template's own text, where the directive is written;
+/// the virtual PHP the template lowers to holds it as a `use` statement in
+/// a prologue no template text stands behind.  `removed_import_lines` and
+/// `all_removed_ranges` describe the whole batch, as for
+/// [`build_line_deletion_edit`].
+pub(crate) fn build_use_directive_deletion_edit(
+    template: &str,
+    range: &Range,
+    removed_import_lines: &HashSet<usize>,
+    all_removed_ranges: &[Range],
+) -> Option<TextEdit> {
+    let at = position_to_byte_offset(template, range.start);
+    let directive = use_directives(template).find(|directive| directive.span.contains(&at))?;
+
+    // A member of a group directive is reported on its own, and goes on its
+    // own unless the batch takes every member, and the directive with them.
+    if at != directive.span.start
+        && let Some(members) = group_member_spans(&directive)
+    {
+        let batch: Vec<usize> = all_removed_ranges
+            .iter()
+            .map(|range| position_to_byte_offset(template, range.start))
+            .collect();
+        let removed: Vec<bool> = members
+            .iter()
+            .map(|member| batch.iter().any(|start| member.contains(start)))
+            .collect();
+        if removed.contains(&false) {
+            let deleted = match members.iter().position(|member| member.contains(&at)) {
+                Some(index) => group_member_removal(&members, &removed, index),
+                None => at..position_to_byte_offset(template, range.end),
+            };
+            return Some(byte_deletion_edit(template, deleted));
+        }
+    }
+
+    let span = directive.span;
+    let line_start = template[..span.start].rfind('\n').map_or(0, |at| at + 1);
+    let line_end = template[span.end..]
+        .find('\n')
+        .map_or(template.len(), |at| span.end + at);
+    let before = &template[line_start..span.start];
+    let after = &template[span.end..line_end];
+
+    // A directive on lines of its own takes them with it.
+    if before.trim().is_empty() && after.trim().is_empty() {
+        let lines: Vec<&str> = template.lines().collect();
+        let first_line = offset_to_position(template, span.start).line as usize;
+        let last_line = offset_to_position(template, span.end).line as usize;
+        return Some(delete_line_span(
+            template,
+            &lines,
+            first_line,
+            last_line,
+            removed_import_lines,
+        ));
+    }
+
+    // One sharing its line with markup takes the blanks that separate it
+    // from what follows it, or else from what precedes it.
+    let deleted = if after.trim().is_empty() {
+        span.start - (before.len() - before.trim_end_matches([' ', '\t']).len())..span.end
+    } else {
+        span.start..span.end + (after.len() - after.trim_start_matches([' ', '\t']).len())
+    };
+    Some(byte_deletion_edit(template, deleted))
+}
+
+/// The byte range of each member a group `@use` directive lists, or `None`
+/// when the directive imports a single name.
+fn group_member_spans(directive: &UseDirective<'_>) -> Option<Vec<std::ops::Range<usize>>> {
+    let (literal_at, literal) = first_string_literal(directive.arguments)?;
+    let (list_at, members) = group_members(literal)?;
+    let list_start = directive.arguments_at + literal_at + list_at;
+    Some(
+        members
+            .into_iter()
+            .map(|(member_at, member)| {
+                list_start + member_at..list_start + member_at + member.len()
+            })
+            .collect(),
+    )
+}
+
+/// The text to delete to remove member `index` of a group import whose
+/// members span `members`, when the batch removes the members `removed`
+/// marks (at least one of them stays).
+///
+/// A member takes the separator after it while every member before it goes
+/// too, and the separator before it otherwise.  That way no two removals in
+/// a batch take the same comma, and whatever stays is still separated.
+fn group_member_removal(
+    members: &[std::ops::Range<usize>],
+    removed: &[bool],
+    index: usize,
+) -> std::ops::Range<usize> {
+    if removed[..index].contains(&false) {
+        members[index - 1].end..members[index].end
+    } else if let Some(next) = members.get(index + 1) {
+        members[index].start..next.start
+    } else {
+        members[index].clone()
+    }
+}
+
+/// An edit deleting the byte range `deleted` of `content`.
+fn byte_deletion_edit(content: &str, deleted: std::ops::Range<usize>) -> TextEdit {
+    TextEdit {
+        range: Range {
+            start: offset_to_position(content, deleted.start),
+            end: offset_to_position(content, deleted.end),
+        },
+        new_text: String::new(),
+    }
+}
+
 /// Delete lines `start_line..=end_line` (inclusive), including the
 /// trailing newline, optionally consuming an adjoining blank line so no
 /// gap is left behind.
@@ -342,6 +468,9 @@ pub(crate) fn should_consume_previous_blank_line(
 /// nearest `use` import line that is NOT in `removed_import_lines`.
 /// Blank lines are skipped; any non-blank, non-`use` line stops the
 /// search and returns `None`.
+///
+/// A line a Blade template's `@use(...)` directive opens is an import line
+/// too.
 pub(crate) fn nearest_surviving_import_line(
     lines: &[&str],
     mut line: isize,
@@ -356,7 +485,10 @@ pub(crate) fn nearest_surviving_import_line(
             continue;
         }
 
-        if trimmed.starts_with("use ") {
+        let use_directive = trimmed
+            .strip_prefix("@use")
+            .is_some_and(|rest| rest.trim_start_matches([' ', '\t']).starts_with('('));
+        if trimmed.starts_with("use ") || use_directive {
             let idx = usize::try_from(line).ok()?;
             if !removed_import_lines.contains(&idx) {
                 return Some(idx);
@@ -719,6 +851,121 @@ mod tests {
         // namespace braces are tracked separately so depth 1 inside a
         // braced namespace is still "top level" for import purposes.
         assert!(cursor_on_use_import_line(content, 2));
+    }
+
+    // ── A template's `@use` directives ──────────────────────────────
+
+    /// Remove the imports `unused` lists from `template` as one batch, each
+    /// at the range its unused-import diagnostic reports, the way the fixer
+    /// does.
+    fn remove_from_template(template: &str, unused: &[(&str, &str)]) -> String {
+        let ranges: Vec<Range> = unused
+            .iter()
+            .map(|(fqn, alias)| {
+                let span = crate::blade::use_directive::find_use_directive(template, fqn, alias)
+                    .expect("a directive imports it");
+                crate::text_position::byte_range_to_lsp_range(template, span.start, span.end)
+            })
+            .collect();
+        let removed_lines: HashSet<usize> = ranges.iter().map(|r| r.start.line as usize).collect();
+        let mut edits: Vec<TextEdit> = ranges
+            .iter()
+            .map(|range| {
+                build_use_directive_deletion_edit(template, range, &removed_lines, &ranges)
+                    .expect("the range is on a directive")
+            })
+            .collect();
+        edits.sort_by_key(|edit| Reverse(edit.range.start));
+        edits.dedup_by(|a, b| a.range == b.range);
+        crate::text_position::apply_text_edits(template, &edits)
+    }
+
+    const POST: (&str, &str) = ("App\\Models\\Post", "Post");
+    const TAG: (&str, &str) = ("App\\Models\\Tag", "Tag");
+
+    #[test]
+    fn an_unused_use_directive_takes_its_line_with_it() {
+        let template = "@use('App\\Models\\Post')\n@use('App\\Models\\Tag')\n{{ Tag::count() }}\n";
+        assert_eq!(
+            remove_from_template(template, &[POST]),
+            "@use('App\\Models\\Tag')\n{{ Tag::count() }}\n"
+        );
+    }
+
+    /// The blank line separating the imports from the markup goes with the
+    /// last of them, as it does under a PHP file's last import, and stays
+    /// while one is left above it.
+    #[test]
+    fn the_blank_line_after_the_imports_goes_with_the_last_of_them() {
+        assert_eq!(
+            remove_from_template("@use('App\\Models\\Post')\n\n<p>text</p>\n", &[POST]),
+            "<p>text</p>\n"
+        );
+        assert_eq!(
+            remove_from_template(
+                "@use('App\\Models\\Post')\n@use('App\\Models\\Tag')\n\n{{ Post::count() }}\n",
+                &[TAG]
+            ),
+            "@use('App\\Models\\Post')\n\n{{ Post::count() }}\n"
+        );
+    }
+
+    /// A directive sharing its line with markup goes without the markup.
+    #[test]
+    fn a_use_directive_sharing_its_line_leaves_the_markup_alone() {
+        for (template, removed) in [
+            ("@use('App\\Models\\Post') <p>text</p>\n", "<p>text</p>\n"),
+            ("<p>text</p> @use('App\\Models\\Post')\n", "<p>text</p>\n"),
+            ("<p>@use('App\\Models\\Post')</p>\n", "<p></p>\n"),
+        ] {
+            assert_eq!(remove_from_template(template, &[POST]), removed);
+        }
+    }
+
+    /// An unused member of a group directive goes on its own, and no two
+    /// members removed in one batch take the same comma.
+    #[test]
+    fn an_unused_member_leaves_the_rest_of_its_group_directive() {
+        let template = "@use('App\\Models\\{User, Post, Comment}')\n";
+        let user = ("App\\Models\\User", "User");
+        let comment = ("App\\Models\\Comment", "Comment");
+        for (unused, removed) in [
+            (&[user][..], "@use('App\\Models\\{Post, Comment}')\n"),
+            (&[POST], "@use('App\\Models\\{User, Comment}')\n"),
+            (&[comment], "@use('App\\Models\\{User, Post}')\n"),
+            (&[user, POST], "@use('App\\Models\\{Comment}')\n"),
+            (&[POST, comment], "@use('App\\Models\\{User}')\n"),
+            (&[user, comment], "@use('App\\Models\\{Post}')\n"),
+            (&[user, POST, comment], ""),
+        ] {
+            assert_eq!(
+                remove_from_template(template, unused),
+                removed,
+                "removing {unused:?}"
+            );
+        }
+    }
+
+    /// A group wrapped one member to a line loses the member's line.
+    #[test]
+    fn a_wrapped_group_directive_loses_the_members_line() {
+        let template = "@use('App\\Models\\{\n    User,\n    Post,\n    Comment,\n}')\n";
+        assert_eq!(
+            remove_from_template(template, &[POST]),
+            "@use('App\\Models\\{\n    User,\n    Comment,\n}')\n"
+        );
+    }
+
+    /// A `use` statement inside `@php` is a line of PHP, left to
+    /// [`build_line_deletion_edit`].
+    #[test]
+    fn a_range_off_every_directive_is_not_a_directive_deletion() {
+        let template = "@php\nuse App\\Models\\Post;\n@endphp\n";
+        let range = Range::new(Position::new(1, 0), Position::new(1, 21));
+        assert!(
+            build_use_directive_deletion_edit(template, &range, &HashSet::from([1]), &[range])
+                .is_none()
+        );
     }
 
     // ── Contiguous block blank-line regression ──────────────────────

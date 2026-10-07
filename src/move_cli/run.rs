@@ -330,7 +330,7 @@ fn build_plan(root: &Path, edit: WorkspaceEdit) -> Result<MovePlan, String> {
         let source = source_path_for_target(&path, &moves);
         let content = std::fs::read_to_string(&source)
             .map_err(|e| format!("failed to read {}: {e}", source.display()))?;
-        writes.push((path, apply_text_edits(content, file_edits)?));
+        writes.push((path, apply_planned_edits(&content, &file_edits)?));
     }
     validate_moves(root, &moves)?;
     Ok(MovePlan { writes, moves })
@@ -363,17 +363,17 @@ fn source_path_for_target(target: &Path, moves: &[(PathBuf, PathBuf)]) -> PathBu
         .unwrap_or_else(|| target.to_path_buf())
 }
 
-fn apply_text_edits(mut content: String, mut edits: Vec<TextEdit>) -> Result<String, String> {
-    edits.sort_by_key(|edit| std::cmp::Reverse(edit.range.start));
+/// Apply a file's planned edits, refusing the whole file when one of
+/// them no longer fits the text it was planned against.
+fn apply_planned_edits(content: &str, edits: &[TextEdit]) -> Result<String, String> {
     for edit in edits {
-        let start = crate::text_position::position_to_byte_offset(&content, edit.range.start);
-        let end = crate::text_position::position_to_byte_offset(&content, edit.range.end);
+        let start = crate::text_position::position_to_byte_offset(content, edit.range.start);
+        let end = crate::text_position::position_to_byte_offset(content, edit.range.end);
         if start > end || end > content.len() {
             return Err("a planned text edit no longer matches its source file".into());
         }
-        content.replace_range(start..end, &edit.new_text);
     }
-    Ok(content)
+    Ok(crate::text_position::apply_text_edits(content, edits))
 }
 
 fn validate_moves(root: &Path, moves: &[(PathBuf, PathBuf)]) -> Result<(), String> {

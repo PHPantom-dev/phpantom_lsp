@@ -276,7 +276,7 @@ fn class_to_symbol(class: &ClassInfo, idx: &LineIndex<'_>) -> Option<DocumentSym
         if constant.is_virtual {
             continue;
         }
-        if let Some(sym) = constant_to_symbol(constant, idx, class.kind == ClassLikeKind::Enum) {
+        if let Some(sym) = constant_to_symbol(constant, idx) {
             children.push(sym);
         }
     }
@@ -457,13 +457,7 @@ fn property_to_symbol(prop: &PropertyInfo, idx: &LineIndex<'_>) -> Option<Docume
 
 /// Convert a `ConstantInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
-fn constant_to_symbol(
-    constant: &ConstantInfo,
-    idx: &LineIndex<'_>,
-    is_enum: bool,
-) -> Option<DocumentSymbol> {
-    let _ = is_enum;
-
+fn constant_to_symbol(constant: &ConstantInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
     let (kind, detail) = if constant.is_enum_case {
         (SymbolKind::ENUM_MEMBER, constant.enum_value.clone())
     } else {
@@ -723,6 +717,7 @@ mod tests {
             template_params: vec![],
             template_param_bounds: Default::default(),
             template_bindings: vec![],
+            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,
@@ -756,6 +751,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$items"),
@@ -767,6 +763,7 @@ mod tests {
                     is_variadic: true,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
             ]
             .into(),
@@ -784,6 +781,7 @@ mod tests {
             template_params: vec![],
             template_param_bounds: Default::default(),
             template_bindings: vec![],
+            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,
@@ -922,10 +920,12 @@ mod tests {
             template_params: vec![],
             template_param_bounds: Default::default(),
             template_bindings: vec![],
+            template_param_defaults: Default::default(),
             throws: Vec::new(),
             is_polyfill: false,
             overloads: vec![],
             is_pure: false,
+            is_impure: false,
         };
         let detail = build_function_detail(&func);
         assert_eq!(detail, Some("()".to_string()));

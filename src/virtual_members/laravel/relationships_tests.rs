@@ -807,6 +807,85 @@ fn with_pivot_absent_returns_empty() {
 }
 
 #[test]
+fn relation_type_preserves_unresolved_models_and_parent_bindings() {
+    let mut child = make_class("Child");
+    child.parent_class = Some(atom("ParentModel"));
+    for (name, return_type) in [
+        ("unparameterized", "HasMany"),
+        ("missing", "HasMany<Missing, $this>"),
+        ("parentModel", "HasOne<parent, $this>"),
+    ] {
+        child
+            .methods
+            .push(Arc::new(make_method(name, Some(return_type))));
+    }
+    let classes = [Arc::new(child), Arc::new(make_class("ParentModel"))];
+    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+    for (path, expected) in [
+        ("unparameterized", PhpType::parse("HasMany")),
+        (
+            "missing",
+            PhpType::generic(
+                "HasMany",
+                vec![PhpType::parse("Missing"), PhpType::this_type(atom("Child"))],
+            ),
+        ),
+    ] {
+        assert_eq!(
+            resolve_relation_type(&classes[0], path, &loader, None),
+            Some(expected),
+        );
+        assert!(resolve_relation_chain_details(&classes[0], path, &loader, None).is_none());
+    }
+    let relation =
+        resolve_relation_chain_details(&classes[0], "parentModel", &loader, None).unwrap();
+    assert_eq!(relation.models[0].fqn(), "ParentModel");
+    assert_eq!(
+        relation.relation_type,
+        PhpType::parse("HasOne<ParentModel, Child>")
+    );
+}
+
+#[test]
+fn relation_chain_projects_custom_relations_in_the_declaring_namespace() {
+    let mut owner = make_class("Owner");
+    owner.file_namespace = Some(atom("App"));
+    owner.methods.push(Arc::new(make_method(
+        "children",
+        Some("SpecialHasMany<string, Child>"),
+    )));
+    let mut child = make_class("Child");
+    child.file_namespace = Some(atom("App"));
+    child.methods.push(Arc::new(make_method(
+        "owner",
+        Some("BelongsTo<Owner, $this>"),
+    )));
+    let mut custom = make_class("SpecialHasMany");
+    custom.file_namespace = Some(atom("App"));
+    custom.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Relations\\HasMany"));
+    custom.template_params = vec![atom("TKey"), atom("TChild")];
+    custom.extends_generics = vec![(
+        atom("Illuminate\\Database\\Eloquent\\Relations\\HasMany"),
+        vec![PhpType::parse("TChild")],
+    )];
+    let classes = [
+        Arc::new(owner),
+        Arc::new(child),
+        Arc::new(custom),
+        Arc::new(make_class(
+            "Illuminate\\Database\\Eloquent\\Relations\\HasMany",
+        )),
+    ];
+    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+    let relation = resolve_relation_chain_details(&classes[0], "children", &loader, None).unwrap();
+    assert_eq!(relation.models[0].fqn(), "App\\Child");
+    assert_eq!(
+        resolve_relation_chain(&classes[0], "children.owner", &loader, None).as_deref(),
+        Some("App\\Owner"),
+    );
+}
+
+#[test]
 fn relation_chain_details_keep_the_terminal_declaring_model() {
     let mut team = make_class("Team");
     for (name, return_type) in [

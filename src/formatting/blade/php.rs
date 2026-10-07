@@ -54,12 +54,13 @@ use mago_php_version::PHPVersion;
 
 use crate::atom::bytes_to_str;
 use crate::blade::component_tags::is_attr_name_char;
-use crate::blade::signature::matching_paren;
+use crate::blade::directives::{DirectiveHead, directive_head};
+use crate::blade::signature::{echo_delimiters, is_echo_start, matching_paren};
+use crate::text_scan::{find, find_byte};
 
 use super::reindent::{
-    AttributeValue, DISABLE_MARKER, DirectiveHead, ENABLE_MARKER, OPAQUE_ELEMENTS,
-    PRESERVED_ELEMENTS, attribute_head, directive_head, echo_delimiters, find, find_byte,
-    find_closing_tag, find_directive, find_marker_comment, is_component_name, is_echo_start,
+    AttributeValue, DISABLE_MARKER, ENABLE_MARKER, OPAQUE_ELEMENTS, PRESERVED_ELEMENTS,
+    attribute_head, find_closing_tag, find_directive, find_marker_comment, is_component_name,
     tag_name,
 };
 

@@ -62,8 +62,6 @@ impl Backend {
     ) {
         let symbol_map = &ctx.symbol_map;
         let file_resolved_names = &ctx.file.resolved_names;
-        let file_use_map = &ctx.file.use_map;
-        let file_namespace = &ctx.file.namespace;
         let local_classes = &ctx.file.classes;
 
         // ── Collect type alias names from local classes ──────────────────
@@ -111,6 +109,8 @@ impl Backend {
                 } => (name.as_str(), *is_fqn, *context),
                 _ => continue,
             };
+            let file_use_map = ctx.file.use_map_at(span.start);
+            let file_namespace = ctx.file.namespace_at(span.start);
 
             // `@see` legally carries URIs, prose, and naming suggestions in
             // addition to FQSENs, so a target that resolves to nothing is
@@ -178,10 +178,11 @@ impl Backend {
             // ── Attempt resolution through all phases ───────────────────
 
             // 1. Local classes (same file)
-            if local_classes
-                .iter()
-                .any(|c| c.name == ref_name || c.fqn() == fqn)
-            {
+            if local_classes.iter().any(|c| {
+                c.fqn() == fqn
+                    || (c.name == ref_name
+                        && c.file_namespace.as_deref() == file_namespace.as_deref())
+            }) {
                 continue;
             }
 
@@ -341,7 +342,7 @@ class Panel {}
             "Filament\\Panel".to_string(),
             crate::util::path_to_uri(&vendor_class_path),
         );
-        backend.clear_class_not_found_cache();
+        backend.clear_not_found_caches();
 
         // After the clear, the lookup must succeed.
         let result = backend.find_or_load_class("Filament\\Panel");

@@ -1,7 +1,7 @@
 //! Rename of variables, parameters, and closure/arrow-function bindings.
 
 use crate::common::{
-    apply_edits, create_test_backend, edits_for_uri, open_php, prepare_rename, rename,
+    apply_edits, create_test_backend, edits_for_uri, open_php, prepare_rename, rename, split_cursor,
 };
 use tower_lsp::lsp_types::*;
 
@@ -858,5 +858,436 @@ async fn rename_function_param_propagates_into_closure_use_and_arrow() {
         result.contains("fn () => $renamed;"),
         "Arrow function body not renamed: {}",
         result
+    );
+}
+
+// ─── Scope boundaries ───────────────────────────────────────────────────────
+//
+// Cases adapted from laravel-lsp's MIT-licensed test suite. Each renames the
+// variable at the `§` cursor and compares the whole rewritten file, so an
+// edit that strays into a neighbouring scope fails the test.
+
+/// Renames the variable at the `§` cursor in `source` to `new_name` and
+/// returns the rewritten file.
+async fn rename_at_cursor(source: &str, new_name: &str) -> String {
+    let (text, position) = split_cursor(source);
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, &text).await;
+    let edit = rename(&backend, &uri, position.line, position.character, new_name)
+        .await
+        .expect("expected a workspace edit");
+    apply_edits(&text, &edits_for_uri(&edit, &uri))
+}
+
+const CLOSURE_WITH_ITS_OWN_LOCAL: &str = "<?php
+function outer() {
+    $user = 1;
+    $fn = function () {
+        $user = 2;
+        return $user;
+    };
+    return $user + $fn();
+}
+";
+
+#[tokio::test]
+async fn rename_outer_local_leaves_a_closures_same_named_local_alone() {
+    let source = CLOSURE_WITH_ITS_OWN_LOCAL.replacen("$user = 1", "$§user = 1", 1);
+    assert_eq!(
+        rename_at_cursor(&source, "$person").await,
+        CLOSURE_WITH_ITS_OWN_LOCAL
+            .replace("$user = 1", "$person = 1")
+            .replace("$user + $fn", "$person + $fn"),
+    );
+}
+
+#[tokio::test]
+async fn rename_closure_local_leaves_the_outer_same_named_local_alone() {
+    let source = CLOSURE_WITH_ITS_OWN_LOCAL.replacen("$user = 2", "$§user = 2", 1);
+    assert_eq!(
+        rename_at_cursor(&source, "$person").await,
+        CLOSURE_WITH_ITS_OWN_LOCAL
+            .replace("$user = 2", "$person = 2")
+            .replace("return $user;", "return $person;"),
+    );
+}
+
+#[tokio::test]
+async fn rename_variable_captured_by_reference_keeps_the_ampersand() {
+    let result = rename_at_cursor(
+        "<?php
+function make() {
+    $§count = 0;
+    $inc = function () use (&$count) {
+        $count++;
+    };
+    $inc();
+    return $count;
+}
+",
+        "$total",
+    )
+    .await;
+    assert_eq!(
+        result,
+        "<?php
+function make() {
+    $total = 0;
+    $inc = function () use (&$total) {
+        $total++;
+    };
+    $inc();
+    return $total;
+}
+"
+    );
+}
+
+#[tokio::test]
+async fn rename_by_reference_parameter_keeps_the_ampersand() {
+    let result = rename_at_cursor(
+        "<?php
+function bump(&$§c) {
+    $c = $c + 1;
+    return $c;
+}
+",
+        "$counter",
+    )
+    .await;
+    assert_eq!(
+        result,
+        "<?php
+function bump(&$counter) {
+    $counter = $counter + 1;
+    return $counter;
+}
+"
+    );
+}
+
+const ARROW_PARAM_SHADOWING_A_LOCAL: &str = "<?php
+function f() {
+    $x = 1;
+    $g = fn($x) => $x * 2;
+    return $g($x);
+}
+";
+
+#[tokio::test]
+async fn rename_outer_local_leaves_a_shadowing_arrow_parameter_alone() {
+    let source = ARROW_PARAM_SHADOWING_A_LOCAL.replacen("$x = 1", "$§x = 1", 1);
+    assert_eq!(
+        rename_at_cursor(&source, "$y").await,
+        ARROW_PARAM_SHADOWING_A_LOCAL
+            .replace("$x = 1", "$y = 1")
+            .replace("$g($x)", "$g($y)"),
+    );
+}
+
+#[tokio::test]
+async fn rename_arrow_parameter_leaves_the_shadowed_outer_local_alone() {
+    let source = ARROW_PARAM_SHADOWING_A_LOCAL.replacen("fn($x)", "fn($§x)", 1);
+    assert_eq!(
+        rename_at_cursor(&source, "$y").await,
+        ARROW_PARAM_SHADOWING_A_LOCAL.replace("fn($x) => $x * 2", "fn($y) => $y * 2"),
+    );
+}
+
+#[tokio::test]
+async fn rename_local_reaches_an_arrow_function_that_captures_it() {
+    let result = rename_at_cursor(
+        "<?php
+function calc() {
+    $§base = 10;
+    $add = fn($x) => $x + $base;
+    return $add(1) + $base;
+}
+",
+        "$offset",
+    )
+    .await;
+    assert_eq!(
+        result,
+        "<?php
+function calc() {
+    $offset = 10;
+    $add = fn($x) => $x + $offset;
+    return $add(1) + $offset;
+}
+"
+    );
+}
+
+#[tokio::test]
+async fn rename_parameter_leaves_same_named_properties_alone() {
+    let source = "<?php
+class Account {
+    public static $user = 's';
+    public $user2;
+    public function show($§user) {
+        $this->user = $user;
+        return self::$user . $user;
+    }
+}
+";
+    assert_eq!(
+        rename_at_cursor(source, "$member").await,
+        "<?php
+class Account {
+    public static $user = 's';
+    public $user2;
+    public function show($member) {
+        $this->user = $member;
+        return self::$user . $member;
+    }
+}
+"
+    );
+}
+
+#[tokio::test]
+async fn rename_top_level_script_variable() {
+    let result = rename_at_cursor(
+        "<?php
+$§user = 'a';
+echo $user;
+function f() {
+    $user = 'b';
+    return $user;
+}
+",
+        "$name",
+    )
+    .await;
+    assert_eq!(
+        result,
+        "<?php
+$name = 'a';
+echo $name;
+function f() {
+    $user = 'b';
+    return $user;
+}
+"
+    );
+}
+
+#[tokio::test]
+async fn rename_outer_local_leaves_a_nested_closures_compact_string_alone() {
+    let source = "<?php
+function outer() {
+    $§user = cu();
+    $cb = function () {
+        $user = g();
+        return compact('user');
+    };
+    return [$user, $cb];
+}
+";
+    assert_eq!(
+        rename_at_cursor(source, "$account").await,
+        "<?php
+function outer() {
+    $account = cu();
+    $cb = function () {
+        $user = g();
+        return compact('user');
+    };
+    return [$account, $cb];
+}
+"
+    );
+}
+
+#[tokio::test]
+async fn rename_closure_local_rewrites_its_own_compact_string() {
+    let source = "<?php
+function outer() {
+    $user = cu();
+    $cb = function () {
+        $§user = g();
+        return compact('user');
+    };
+    return [$user, $cb];
+}
+";
+    assert_eq!(
+        rename_at_cursor(source, "$account").await,
+        "<?php
+function outer() {
+    $user = cu();
+    $cb = function () {
+        $account = g();
+        return compact('account');
+    };
+    return [$user, $cb];
+}
+"
+    );
+}
+
+#[tokio::test]
+async fn rename_variable_used_as_a_variable_variable_name() {
+    let result = rename_at_cursor(
+        "<?php
+function f() {
+    $§name = 'a';
+    $$name = 1;
+    return $name;
+}
+",
+        "$key",
+    )
+    .await;
+    assert_eq!(
+        result,
+        "<?php
+function f() {
+    $key = 'a';
+    $$key = 1;
+    return $key;
+}
+"
+    );
+}
+
+#[tokio::test]
+async fn rename_variable_inside_interpolated_strings_and_heredoc_but_not_nowdoc() {
+    let result = rename_at_cursor(
+        "<?php
+function f() {
+    $§x = 1;
+    $a = \"Hello $x\";
+    $b = \"V {$x}\";
+    $h = <<<EOT
+val $x
+EOT;
+    $n = <<<'EOT'
+raw $x
+EOT;
+    return $a . $b . $h . $n;
+}
+",
+        "$y",
+    )
+    .await;
+    assert_eq!(
+        result,
+        "<?php
+function f() {
+    $y = 1;
+    $a = \"Hello $y\";
+    $b = \"V {$y}\";
+    $h = <<<EOT
+val $y
+EOT;
+    $n = <<<'EOT'
+raw $x
+EOT;
+    return $a . $b . $h . $n;
+}
+"
+    );
+}
+
+#[tokio::test]
+async fn rename_variable_used_as_an_unbraced_dynamic_property_name() {
+    let result = rename_at_cursor(
+        "<?php
+function f($obj, $§key) {
+    return $obj->$key;
+}
+",
+        "$field",
+    )
+    .await;
+    assert_eq!(
+        result,
+        "<?php
+function f($obj, $field) {
+    return $obj->$field;
+}
+"
+    );
+}
+
+const GLOBAL_COUNT: &str = "<?php
+$count = 10;
+function bump() {
+    global $count;
+    $count = 20;
+    return $count;
+}
+function other() {
+    $count = 1;
+    return $count;
+}
+echo $count;
+";
+
+/// [`GLOBAL_COUNT`] with every `$count` bound to the global renamed to `$total`.
+fn global_count_renamed() -> String {
+    GLOBAL_COUNT
+        .replace("$count = 10", "$total = 10")
+        .replace(
+            "global $count;\n    $count = 20;\n    return $count;",
+            "global $total;\n    $total = 20;\n    return $total;",
+        )
+        .replace("echo $count", "echo $total")
+}
+
+#[tokio::test]
+async fn rename_top_level_variable_reaches_functions_that_declare_it_global() {
+    let source = GLOBAL_COUNT.replacen("$count = 10", "$§count = 10", 1);
+    assert_eq!(
+        rename_at_cursor(&source, "$total").await,
+        global_count_renamed()
+    );
+}
+
+#[tokio::test]
+async fn rename_from_a_global_declaration_reaches_the_top_level_variable() {
+    let source = GLOBAL_COUNT.replacen("global $count", "global $§count", 1);
+    assert_eq!(
+        rename_at_cursor(&source, "$total").await,
+        global_count_renamed()
+    );
+}
+
+#[tokio::test]
+async fn rename_from_a_use_of_a_global_reaches_the_top_level_variable() {
+    let source = GLOBAL_COUNT.replacen("$count = 20", "$§count = 20", 1);
+    assert_eq!(
+        rename_at_cursor(&source, "$total").await,
+        global_count_renamed()
+    );
+}
+
+#[tokio::test]
+async fn rename_outer_local_leaves_a_closure_that_declares_the_name_global_alone() {
+    let source = "<?php
+function outer() {
+    $§x = 1;
+    $fn = function () {
+        global $x;
+        return $x;
+    };
+    return $x;
+}
+";
+    assert_eq!(
+        rename_at_cursor(source, "$y").await,
+        "<?php
+function outer() {
+    $y = 1;
+    $fn = function () {
+        global $x;
+        return $x;
+    };
+    return $y;
+}
+"
     );
 }

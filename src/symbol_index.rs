@@ -68,10 +68,30 @@ pub(crate) struct SymbolIndex {
     pub(crate) duplicate_classes: Arc<RwLock<DuplicateDeclarations<Arc<ClassInfo>>>>,
     /// Negative-result cache for `find_or_load_class`.
     pub(crate) class_not_found_cache: Arc<RwLock<CiSet>>,
+    /// Negative-result cache for `find_or_load_function`.
+    ///
+    /// Without it, every lookup of a name no index carries re-runs the
+    /// full fallback chain — including a walk over every known autoload
+    /// file — and the forward walker asks about the same unresolved
+    /// call over and over.  Entries are removed when a parse declares
+    /// the name and cleared wholesale whenever the indexes grow, the
+    /// same lifecycle `class_not_found_cache` follows.
+    pub(crate) function_not_found_cache: Arc<RwLock<CiSet>>,
     /// Global method store: `(class_fqn, method_name)` → `Arc<MethodInfo>`.
     pub(crate) method_store: MethodStore,
     /// Reverse inheritance index: parent FQN → list of child FQNs.
     pub(crate) gti_index: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// The same inheritance edges the other way round: child FQN → the
+    /// parent FQNs (extends, implements, use) its declaration registered it
+    /// under.
+    ///
+    /// Kept in step with [`gti_index`](Self::gti_index) so that dropping one
+    /// file's classes touches only the child lists that file contributed to,
+    /// instead of scanning every entry in a workspace-sized map on each
+    /// edit, and so that re-registering a child tests a list the length of
+    /// its own `extends`/`implements` clause rather than the list of every
+    /// implementor of a popular interface.
+    pub(crate) gti_parents_index: Arc<RwLock<HashMap<String, Vec<String>>>>,
     /// Identity of this set of indexes, unique for the life of the process
     /// and shared by every clone (a cloned `Backend` shares the indexes
     /// themselves).  Per-thread caches key on it so that a worker thread
@@ -82,6 +102,11 @@ pub(crate) struct SymbolIndex {
     /// `fqn_class_index` and `class_not_found_cache`.  See
     /// [`note_class_lookup_change`](Self::note_class_lookup_change).
     class_lookup_generation: Arc<AtomicU64>,
+    /// Bumped, under `function_not_found_cache`'s write lock, each time
+    /// the cache is retired after `autoload_function_index` grew.  A
+    /// lookup records a miss only if it is unchanged since the lookup
+    /// began.
+    function_index_generation: Arc<AtomicU64>,
 }
 
 impl SymbolIndex {
@@ -90,6 +115,7 @@ impl SymbolIndex {
         Self {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             class_lookup_generation: Arc::new(AtomicU64::new(0)),
+            function_index_generation: Arc::new(AtomicU64::new(0)),
             uri_classes_index: Arc::new(RwLock::new(HashMap::new())),
             global_functions: Arc::new(RwLock::new(CiMap::new())),
             duplicate_functions: Arc::new(RwLock::new(CiMap::new())),
@@ -105,9 +131,24 @@ impl SymbolIndex {
             fqn_class_index: Arc::new(RwLock::new(CiMap::new())),
             duplicate_classes: Arc::new(RwLock::new(CiMap::new())),
             class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
+            function_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
+            gti_parents_index: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    pub(crate) fn function_index_generation(&self) -> u64 {
+        self.function_index_generation.load(Ordering::Acquire)
+    }
+
+    /// Retire the function negative cache after the function index grew,
+    /// invalidating misses recorded by lookups that began earlier.
+    pub(crate) fn retire_function_misses(&self) {
+        let mut nf_cache = self.function_not_found_cache.write();
+        self.function_index_generation
+            .fetch_add(1, Ordering::Release);
+        nf_cache.clear();
     }
 
     /// Identity of this index, for keying per-thread caches.

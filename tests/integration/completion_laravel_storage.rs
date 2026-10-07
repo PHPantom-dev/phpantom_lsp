@@ -4,8 +4,7 @@
 //! concrete `FilesystemAdapter` for a driver the framework ships, and the
 //! registered closure's own return type for a `Storage::extend()` driver.
 
-use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php};
-use tower_lsp::lsp_types::*;
+use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php_at};
 
 const COMPOSER_JSON: &str = r#"{
     "autoload": {
@@ -120,11 +119,9 @@ async fn complete_labels_with_provider(
 ) -> Vec<String> {
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, files);
     if let Some((path, text)) = provider {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        open_php(&backend, &uri, text).await;
+        open_php_at(&backend, &dir, path, text).await;
     }
-    let uri = Url::from_file_path(dir.path().join(open_path)).unwrap();
-    open_php(&backend, &uri, content).await;
+    let uri = open_php_at(&backend, &dir, open_path, content).await;
     complete_labels_at_opened(&backend, &uri, line, character).await
 }
 

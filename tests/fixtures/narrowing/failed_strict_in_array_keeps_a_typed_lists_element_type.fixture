@@ -1,0 +1,26 @@
+// test: a failed strict in_array against a typed list rules none of its element type out
+// feature: hover
+// A `list<string>` may hold no string at all, and a
+// `list<'draft'|'archived'>` may lack either value, so a needle such a
+// list does not hold can still be any of them.
+// expect_hover: $scalar => string|int|null
+// expect_hover: $status => 'draft'|'archived'|'live'
+---
+<?php
+
+/**
+ * @param list<string> $names
+ * @param 'draft'|'archived'|'live' $state
+ * @param list<'draft'|'archived'> $closed
+ */
+function check(string|int|null $value, array $names, string $state, array $closed): void
+{
+    if (!in_array($value, $names, true)) {
+        $scalar = $value;
+        echo $scal<>ar;
+    }
+    if (!in_array($state, $closed, true)) {
+        $status = $state;
+        echo $status;
+    }
+}

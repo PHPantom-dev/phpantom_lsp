@@ -22,6 +22,8 @@ fn context<'a>(
         resolved_class_cache: None,
         enclosing_return_type: None,
         top_level_scope: None,
+        in_loop: false,
+        template_markers: None,
     }
 }
 

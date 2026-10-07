@@ -6,8 +6,8 @@
 //! completion, the two surfaces a user actually sees it on.
 
 use crate::common::{
-    FORM_REQUEST_STUB, complete_labels_at_opened, create_psr4_workspace, hover_text_at, open_php,
-    split_cursor,
+    FORM_REQUEST_STUB, complete_labels_at_opened, create_psr4_workspace, hover_text_at,
+    open_php_at, split_cursor,
 };
 use tower_lsp::lsp_types::*;
 
@@ -264,8 +264,7 @@ async fn open_at_cursor(
     files.push(("src/PostController.php", stripped.as_str()));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
 
-    let uri = Url::from_file_path(dir.path().join("src/PostController.php")).unwrap();
-    open_php(&backend, &uri, &stripped).await;
+    let uri = open_php_at(&backend, &dir, "src/PostController.php", &stripped).await;
 
     (backend, dir, uri, position)
 }

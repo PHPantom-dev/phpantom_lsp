@@ -327,6 +327,11 @@ impl LaravelMorphMapIndex {
         self.aliases.keys().cloned().collect()
     }
 
+    /// Whether `alias` is registered.
+    pub(crate) fn has_alias(&self, alias: &str) -> bool {
+        self.aliases.contains_key(alias)
+    }
+
     /// Whether a provider called `enforceMorphMap()` / `requireMorphMap()`, so
     /// that every morphable model must appear in the map.
     pub(crate) fn is_enforced(&self) -> bool {

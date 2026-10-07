@@ -47,8 +47,10 @@
 //! - [`return_types`]: the primary call return-type resolution entry
 //!   point, plus the auth/date facade helpers and literal/expression-to-type
 //!   conversions it depends on.
+//! - [`template_binding`]: binding a function's, method's, or
+//!   constructor's `@template` parameters from call-site argument texts.
 //! - [`template_subs`]: building a method-level `@template` substitution
-//!   map from call-site argument texts.
+//!   map, and the helpers binding and finishing one relies on.
 //! - [`arg_type_resolution`]: resolving inline argument expressions to
 //!   their raw `PhpType`.
 //! - [`facade_owner`]: picking the concrete container class that types a
@@ -65,9 +67,10 @@ mod out_param;
 mod reflection;
 mod return_types;
 mod target_cache;
+mod template_binding;
 mod template_subs;
 
-pub(crate) use out_param::{OutParamCallee, effective_out_type};
+pub(crate) use out_param::{OutParamCallee, effective_out_type, resolve_out_type_for_call};
 
 pub(crate) use facade_owner::facade_concrete_owner;
 pub(crate) use reflection::{
@@ -75,15 +78,15 @@ pub(crate) use reflection::{
     resolve_reflected_property_at_new,
 };
 pub(crate) use return_types::{
-    MethodReturnCtx, folded_class_constant_type, folded_global_constant_type,
+    MethodReturnCtx, class_constant_type, enum_case_property_literal, folded_global_constant_type,
     resolve_static_access_type,
 };
 pub(crate) use target_cache::{
-    activate_type_engine_caches, body_inference_in_progress, call_site_param_types,
-    try_infer_body_return_type,
+    activate_body_infer_memo, activate_type_engine_caches, body_inference_context,
+    body_inference_in_progress, call_site_param_types, try_infer_body_return_type,
 };
+pub(crate) use template_binding::{TemplateCallee, bind_template_args, instantiate_class};
 pub(crate) use template_subs::{
-    array_literal_shape_type, bind_callable_param_template, bind_callable_return_template,
-    build_call_template_subs, evaluate_constant_operands, finish_template_subs,
-    type_operator_bound_literal,
+    array_literal_shape_type_with, build_call_template_subs, evaluate_constant_operands,
+    finish_template_subs, generalize_object_template_arg,
 };

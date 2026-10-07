@@ -34,6 +34,20 @@ pub async fn open_php(backend: &Backend, uri: &Url, text: &str) {
     open_document(backend, uri, "php", text).await;
 }
 
+/// [`open_php`] for the file at `relative` inside a workspace directory
+/// (the one [`create_psr4_workspace`] hands back), with `content` as the
+/// buffer the editor opens it with, and hand back the URI it opened as.
+pub async fn open_php_at(
+    backend: &Backend,
+    dir: &tempfile::TempDir,
+    relative: &str,
+    content: &str,
+) -> Url {
+    let uri = Url::from_file_path(dir.path().join(relative)).unwrap();
+    open_php(backend, &uri, content).await;
+    uri
+}
+
 // ─── Completion ─────────────────────────────────────────────────────────────
 
 /// Send a `textDocument/completion` request for a document that is already
@@ -799,20 +813,15 @@ pub fn inject_phpstan_diag_with_data(
     diag
 }
 
-/// Send a code action request for an arbitrary range.
-pub fn get_code_actions_in_range(
-    backend: &Backend,
-    uri: &str,
-    content: &str,
-    range: Range,
-) -> Vec<CodeActionOrCommand> {
-    let params = CodeActionParams {
+/// The one place these helpers build `CodeActionParams`.
+fn code_action_params(uri: &str, range: Range, diagnostics: Vec<Diagnostic>) -> CodeActionParams {
+    CodeActionParams {
         text_document: TextDocumentIdentifier {
             uri: uri.parse().unwrap(),
         },
         range,
         context: CodeActionContext {
-            diagnostics: vec![],
+            diagnostics,
             only: None,
             trigger_kind: None,
         },
@@ -822,8 +831,37 @@ pub fn get_code_actions_in_range(
         partial_result_params: PartialResultParams {
             partial_result_token: None,
         },
-    };
-    backend.handle_code_action(uri, content, &params)
+    }
+}
+
+/// Send a code action request for an arbitrary range.
+pub fn get_code_actions_in_range(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+    range: Range,
+) -> Vec<CodeActionOrCommand> {
+    backend.handle_code_action(uri, content, &code_action_params(uri, range, vec![]))
+}
+
+/// Send `textDocument/codeAction` through the `LanguageServer` trait
+/// method, the way an editor does.
+///
+/// [`get_code_actions_in_range`] calls the handler directly with the text
+/// as an argument, which skips everything the server does around it: the
+/// per-language gate, fetching the document's content (a template is
+/// analysed as the virtual PHP it lowers to), the panic guard, and the
+/// collapse of an empty list to no response.  A test of any of those has
+/// to come through here, with the document opened first.
+pub async fn code_actions_via_server(
+    backend: &Backend,
+    uri: &Url,
+    range: Range,
+) -> Option<CodeActionResponse> {
+    backend
+        .code_action(code_action_params(uri.as_str(), range, vec![]))
+        .await
+        .expect("code_action must not fail")
 }
 
 /// Send a code action request at a specific line and character (point range).
@@ -881,6 +919,20 @@ pub fn find_action_containing<'a>(
         CodeActionOrCommand::CodeAction(ca) if ca.title.contains(needle) => Some(ca),
         _ => None,
     })
+}
+
+/// Find all code actions whose title contains `needle`.
+pub fn find_actions_containing<'a>(
+    actions: &'a [CodeActionOrCommand],
+    needle: &str,
+) -> Vec<&'a CodeAction> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            CodeActionOrCommand::CodeAction(ca) if ca.title.contains(needle) => Some(ca),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Find all code actions whose title starts with `prefix`.
@@ -1286,6 +1338,46 @@ pub async fn goto_definition_at(
         })
         .await
         .unwrap()
+}
+
+/// Send `textDocument/references` at `position` in a document that is
+/// already open, and return the locations, or none when the server answers
+/// with nothing.
+pub async fn find_references(
+    backend: &Backend,
+    uri: &Url,
+    position: Position,
+    include_declaration: bool,
+) -> Vec<Location> {
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration,
+            },
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default()
+}
+
+/// The messages of the syntax, argument-count, and slow diagnostics
+/// reported on an open Blade template, read against the virtual PHP it
+/// lowers to.
+pub fn template_diagnostics(backend: &Backend, uri: &Url) -> Vec<String> {
+    let virtual_php = backend
+        .blade_virtual_php(uri.as_str())
+        .expect("the template should be preprocessed");
+    let mut diags = Vec::new();
+    backend.collect_syntax_error_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+    backend.collect_argument_count_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+    backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+    diags.into_iter().map(|d| d.message).collect()
 }
 
 /// The "Undefined variable" messages reported on an open Blade template,

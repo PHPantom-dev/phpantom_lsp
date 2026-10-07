@@ -698,6 +698,9 @@ fn split_params_at_depth_zero(text: &str) -> Vec<&str> {
 /// - `$obj->method(...)` (instance method on resolved variable)
 /// - `ClassName::method(...)` (static method)
 /// - `self::method(...)` / `static::method(...)`
+/// - `$obj->$name(...)` / `ClassName::$name(...)` (member name held in a
+///   variable with a known literal string value)
+/// - `$obj(...)` (an object whose class declares `__invoke()`)
 ///
 /// Returns `None` if the text is not a recognised callable form or the
 /// return type cannot be determined.
@@ -711,11 +714,17 @@ pub(crate) fn resolve_first_class_callable_return_type(
     let callee_expr = crate::type_engine::subject_expr::SubjectExpr::parse_callee(callable_text);
 
     // For method calls (instance and static), use the main pipeline
-    // with a return type hint capture.
+    // with a return type hint capture.  A bare variable callable
+    // (`$test(...)`) goes through the same pipeline: the variable
+    // invocation arm resolves the variable's own type and, for an
+    // object holding `__invoke()`, that method's return type — which
+    // covers `$test(...)` on an invokable object the same way it
+    // already covers `$fn = $otherFn(...)` on a closure variable.
     match &callee_expr {
         crate::type_engine::subject_expr::SubjectExpr::MethodCall { .. }
         | crate::type_engine::subject_expr::SubjectExpr::StaticMethodCall { .. }
-        | crate::type_engine::subject_expr::SubjectExpr::NewExpr { .. } => {
+        | crate::type_engine::subject_expr::SubjectExpr::NewExpr { .. }
+        | crate::type_engine::subject_expr::SubjectExpr::Variable(_) => {
             let mut return_type: Option<PhpType> = None;
             let classes = crate::Backend::resolve_call_return_types_expr_with_hint(
                 &callee_expr,
@@ -743,9 +752,6 @@ pub(crate) fn resolve_first_class_callable_return_type(
             let func_info = function_loader(func_name, 0)?;
             func_info.return_type.clone()
         }
-        // Variable callables ($fn = $otherFn(...)) are not handled
-        // here; they would need forward walker resolution of the
-        // source variable first.
         _ => None,
     }
 }

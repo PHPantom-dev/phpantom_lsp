@@ -17,11 +17,9 @@
 
 use std::ops::Range;
 
-use super::directives::match_directive;
+use super::directives::{BladeDirectives, DirectiveHead, directive_head};
 use super::pairing::{self, Pair, Stray, Token};
-use super::signature::{
-    InertOpener, inert_regions, mask_regions, matching_paren, split_top_level_args,
-};
+use super::signature::{InertOpener, inert_regions, mask_regions, split_top_level_args};
 
 /// A byte range of the original Blade source.
 pub(crate) type Span = Range<usize>;
@@ -322,7 +320,7 @@ struct Closer {
 /// open block ends that block anyway (with a report, and without a pair),
 /// so that no later closer can pair with an opener a stray closer already
 /// consumed.
-pub(crate) fn walk(content: &str) -> Balance {
+pub(crate) fn walk(content: &str, known: &BladeDirectives) -> Balance {
     let mut balance = Balance::default();
     if !content.contains('@') {
         return balance;
@@ -332,7 +330,7 @@ pub(crate) fn walk(content: &str) -> Balance {
     let masked = mask_regions(content, &regions);
 
     let mut tokens: Vec<Token<Opened, Closer>> = Vec::new();
-    for Directive { name, span, args } in directives(&masked) {
+    for Directive { name, span, args } in directives(&masked, known) {
         if let Some(block) = BLOCKS.iter().find(|block| block.opener == name) {
             if opens_block(block, &masked, args.as_ref()) {
                 tokens.push(Token::Open(Opened { block, span, args }));
@@ -408,8 +406,8 @@ pub(crate) fn walk(content: &str) -> Balance {
 }
 
 /// Every block directive in `content` that does not pair up.
-pub(crate) fn check(content: &str) -> Vec<Imbalance> {
-    walk(content).imbalances
+pub(crate) fn check(content: &str, known: &BladeDirectives) -> Vec<Imbalance> {
+    walk(content, known).imbalances
 }
 
 /// A block directive and the closer that ends it.
@@ -429,8 +427,8 @@ pub(crate) struct BlockPair {
 /// Read from the same walk as [`check`], so the two agree on what a
 /// closer closes: a closer that does not match the innermost open
 /// block (already reported by [`check`]) pairs with nothing.
-pub(crate) fn block_pairs(content: &str) -> Vec<BlockPair> {
-    walk(content).pairs
+pub(crate) fn block_pairs(content: &str, known: &BladeDirectives) -> Vec<BlockPair> {
+    walk(content, known).pairs
 }
 
 /// Whether an occurrence of `block`'s opener with `args` opens a block.
@@ -470,13 +468,16 @@ pub(crate) struct Directive {
 /// `@php` block is yielded. The scan resumes past each directive's
 /// argument list, so a name written inside one
 /// (`@include('partials.@endif')`) is not read as a directive of its own.
-pub(crate) fn directives(masked: &str) -> impl Iterator<Item = Directive> + '_ {
+pub(crate) fn directives<'a>(
+    masked: &'a str,
+    known: &'a BladeDirectives,
+) -> impl Iterator<Item = Directive> + 'a {
     let bytes = masked.as_bytes();
     let mut i = 0;
     std::iter::from_fn(move || {
         while let Some(at) = bytes[i..].iter().position(|byte| *byte == b'@') {
             i += at;
-            let Some((name, args)) = directive_at(masked, i) else {
+            let Some((name, args)) = directive_at(masked, i, known) else {
                 i += 1;
                 continue;
             };
@@ -488,42 +489,23 @@ pub(crate) fn directives(masked: &str) -> impl Iterator<Item = Directive> + '_ {
     })
 }
 
-/// The directive at `at` (which is on an `@`), and the byte range of its
-/// argument list, parentheses included, when it has one.
+/// The known directive at `at` (which is on an `@`), and the byte range of
+/// its argument list, parentheses included, when it has one.
 ///
-/// Blade's own `compileStatements` pattern is anchored with `\B`, so a name
-/// glued to a preceding word is not a directive: an `@production` in
-/// `admin@production.example` compiles to nothing, and `@@if` is the escape
-/// for a literal `@if`.
-fn directive_at(content: &str, at: usize) -> Option<(&'static str, Option<Span>)> {
+/// A `@name` Blade does not compile (a custom directive, a built-in one the
+/// installed Blade predates, an email address's domain, a `@click="…"`
+/// binding) opens and closes nothing here.
+fn directive_at(
+    content: &str,
+    at: usize,
+    known: &BladeDirectives,
+) -> Option<(&'static str, Option<Span>)> {
     let bytes = content.as_bytes();
-    if at > 0 && (bytes[at - 1] == b'@' || is_word_byte(bytes[at - 1])) {
+    let DirectiveHead::Named { name, args, .. } = directive_head(content, bytes, at, bytes.len())
+    else {
         return None;
-    }
-    let name = match_directive(content.get(at + 1..)?)?;
-    let after = at + 1 + name.len();
-    // `@error="…"` and `@class="…"` are a JavaScript framework's bindings
-    // written in markup. Blade has no directive form that runs a name into
-    // an `=`, so neither opens nor closes anything.
-    if bytes.get(after) == Some(&b'=') {
-        return None;
-    }
-    // Blade allows spaces and tabs, but no newline, between a directive
-    // name and its opening parenthesis.
-    let mut open = after;
-    while matches!(bytes.get(open), Some(b' ' | b'\t')) {
-        open += 1;
-    }
-    if bytes.get(open) != Some(&b'(') {
-        return Some((name, None));
-    }
-    // An unterminated argument list is a template mid-edit; the directive
-    // is read without one rather than swallowing the rest of the file.
-    Some((name, matching_paren(bytes, open).map(|end| open..end + 1)))
-}
-
-fn is_word_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
+    };
+    Some((known.builtin(name)?, args))
 }
 
 #[cfg(test)]
@@ -534,7 +516,7 @@ mod tests {
     /// assertions: `"mismatched endif/endforeach"`, `"unexpected endif"`,
     /// `"unclosed if"`.
     fn report(content: &str) -> Vec<String> {
-        check(content)
+        check(content, &BladeDirectives::default())
             .into_iter()
             .map(|imbalance| match imbalance {
                 Imbalance::Mismatched {
@@ -674,14 +656,14 @@ mod tests {
     fn every_block_name_is_a_known_directive() {
         for block in BLOCKS {
             assert_eq!(
-                match_directive(block.opener),
+                crate::blade::directives::match_directive(block.opener),
                 Some(block.opener),
                 "opener {:?} is not a known directive",
                 block.opener
             );
             for closer in block.closers {
                 assert_eq!(
-                    match_directive(closer),
+                    crate::blade::directives::match_directive(closer),
                     Some(*closer),
                     "closer {closer:?} is not a known directive"
                 );
@@ -695,7 +677,7 @@ mod tests {
     #[test]
     fn a_directive_name_inside_an_argument_list_is_not_yielded() {
         let blade = "@include('partials.@endif')\n@if ($ok)\n@endif\n";
-        let found: Vec<_> = directives(blade)
+        let found: Vec<_> = directives(blade, &BladeDirectives::default())
             .map(|directive| {
                 (
                     directive.name,
@@ -717,7 +699,7 @@ mod tests {
     /// `block_pairs` spans as `(name, opener_start, closer_end)` triples,
     /// for readable assertions.
     fn pairs(content: &str) -> Vec<(&str, usize, usize)> {
-        block_pairs(content)
+        block_pairs(content, &BladeDirectives::default())
             .into_iter()
             .map(|pair| {
                 (
@@ -740,7 +722,7 @@ mod tests {
     #[test]
     fn a_pair_carries_the_openers_argument_list() {
         let blade = "@section('body')\n<p>hi</p>\n@endsection\n";
-        let args = block_pairs(blade)[0]
+        let args = block_pairs(blade, &BladeDirectives::default())[0]
             .args
             .clone()
             .expect("section has args");

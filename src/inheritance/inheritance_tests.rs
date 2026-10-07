@@ -3,6 +3,62 @@ use crate::atom::{AtomMap, atom};
 use crate::php_type::PhpType;
 use crate::types::{ClassLikeKind, MethodInfo};
 
+#[test]
+fn inherited_return_docblocks_preserve_covariant_native_classes() {
+    use crate::test_fixtures::{make_class, make_method};
+
+    let base = Arc::new(make_class("BaseResult"));
+    let mut specific = make_class("SpecificResult");
+    specific.parent_class = Some(atom("BaseResult"));
+    let classes = [base, Arc::new(specific)];
+    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+
+    for (native, own_return, inherited, expected) in [
+        (
+            "SpecificResult",
+            "SpecificResult",
+            "BaseResult<Model>",
+            "SpecificResult",
+        ),
+        (
+            "BaseResult",
+            "BaseResult",
+            "BaseResult<Model>",
+            "BaseResult<Model>",
+        ),
+        (
+            "BaseResult",
+            "BaseResult",
+            "SpecificResult",
+            "SpecificResult",
+        ),
+        (
+            "SpecificResult",
+            "SpecificResult<Model>",
+            "BaseResult<OtherModel>",
+            "SpecificResult<Model>",
+        ),
+        (
+            "array",
+            "array",
+            "array<int, string>|string",
+            "array<int, string>",
+        ),
+        ("never", "never", "BaseResult<Model>", "never"),
+    ] {
+        let mut method = make_method("getResult", Some(own_return));
+        method.native_return_type = Some(PhpType::parse(native));
+        let mut method = Arc::new(method);
+        let ancestor = make_method("getResult", Some(inherited));
+        enrich_method_arc_from_ancestor(&mut method, &ancestor, &loader);
+        assert_eq!(
+            method.return_type,
+            Some(PhpType::parse(expected)),
+            "native {native}, own {own_return}, inherited {inherited}",
+        );
+    }
+}
+
 /// Helper to build a `HashMap<String, PhpType>` from `(&str, &str)` pairs.
 fn make_subs(pairs: &[(&str, &str)]) -> HashMap<String, PhpType> {
     pairs
@@ -309,6 +365,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
             is_variadic: false,
             is_reference: false,
             closure_this_type: None,
+            param_out_type: None,
         }]
         .into(),
         return_type: Some(PhpType::parse("TValue")),
@@ -325,6 +382,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
         template_params: Vec::new(),
         template_param_bounds: Default::default(),
         template_bindings: Vec::new(),
+        template_param_defaults: Default::default(),
         has_scope_attribute: false,
         is_abstract: false,
         is_final: false,
@@ -392,6 +450,7 @@ fn test_extends_generics_propagate_through_parent_use_generics() {
             template_params: Vec::new(),
             template_param_bounds: Default::default(),
             template_bindings: Vec::new(),
+            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,
@@ -676,4 +735,36 @@ fn method_tag_does_not_shadow_a_real_inherited_method() {
         mock.return_type.as_ref().unwrap().to_string(),
         "Foo&MockInterface"
     );
+}
+
+/// A failed search up a single-`extends` interface chain loads each
+/// interface once, even though the parser records the parent both in
+/// `interfaces` and in `parent_class`.
+#[test]
+fn find_declaring_ancestor_loads_each_interface_once() {
+    use std::cell::Cell;
+
+    const DEPTH: usize = 12;
+    let classes: Vec<Arc<ClassInfo>> = (0..DEPTH)
+        .map(|i| {
+            let mut iface = crate::test_fixtures::make_class(&format!("I{i}"));
+            iface.kind = ClassLikeKind::Interface;
+            if i + 1 < DEPTH {
+                let parent = atom(&format!("I{}", i + 1));
+                iface.parent_class = Some(parent);
+                iface.interfaces = vec![parent];
+            }
+            Arc::new(iface)
+        })
+        .collect();
+    let loads = Cell::new(0usize);
+    let loader = |name: &str| {
+        loads.set(loads.get() + 1);
+        classes.iter().find(|c| c.name == name).cloned()
+    };
+
+    let mut class = crate::test_fixtures::make_class("C");
+    class.interfaces = vec![atom("I0")];
+    assert!(find_declaring_ancestor(&class, &loader, &|_| false).is_none());
+    assert_eq!(loads.get(), DEPTH);
 }

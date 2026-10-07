@@ -1,3 +1,8 @@
+use std::ops::Range;
+
+use super::signature::{echo_delimiters, is_echo_start, matching_paren};
+use crate::text_scan::find;
+
 /// Every directive name `match_directive` recognises, in no particular
 /// order beyond the loose grouping comments below. [`DIRECTIVE_COMPLETIONS`]
 /// is checked against this list (`every_known_directive_has_a_completion`)
@@ -133,16 +138,135 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "dd",
 ];
 
+/// The directives Blade handles in a pass of its own before it looks for a
+/// `compile*` method: the `@verbatim` and `@php` block passes. They exist
+/// whatever methods the installed compiler declares.
+const PRECOMPILED_DIRECTIVES: &[&str] = &["verbatim", "endverbatim", "php", "endphp"];
+
+/// The index into [`KNOWN_DIRECTIVES`] of the directive the text right after
+/// an `@` names.
+fn known_directive_index(after_at: &str) -> Option<usize> {
+    KNOWN_DIRECTIVES.iter().position(|&d| {
+        after_at
+            .strip_prefix(d)
+            .is_some_and(|rest| rest.bytes().next().is_none_or(|next| !is_word_byte(next)))
+    })
+}
+
+/// The directive the text right after an `@` names, out of every directive
+/// some Blade version compiles.
+///
+/// Whether the project's own compiler has it is a separate question that
+/// [`BladeDirectives::builtin`] answers; this is for the scans that only
+/// need to know whether a `@name(…)` is shaped like a directive.
 pub fn match_directive(s: &str) -> Option<&'static str> {
-    for &d in KNOWN_DIRECTIVES {
-        if let Some(stripped) = s.strip_prefix(d) {
-            let next_char = stripped.chars().next();
-            if next_char.is_none() || !next_char.unwrap().is_alphanumeric() {
-                return Some(d);
-            }
-        }
+    known_directive_index(s).map(|index| KNOWN_DIRECTIVES[index])
+}
+
+/// A byte of the `\w+` run Blade reads a directive name as.
+pub(crate) fn is_word_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// Whether the byte before `at` lets an `@` there start a directive.
+///
+/// Blade's own `compileStatements` pattern is anchored with `\B`, so a
+/// name glued to a preceding word is not a directive: an `@production`
+/// in `admin@production.example` compiles to nothing, and `@@if` is the
+/// escape for a literal `@if`.
+pub(crate) fn boundary_before(bytes: &[u8], at: usize) -> bool {
+    at == 0 || !(bytes[at - 1] == b'@' || is_word_byte(bytes[at - 1]))
+}
+
+/// The end of the `\w+` run starting at `from`.
+pub(crate) fn word_end(bytes: &[u8], from: usize) -> usize {
+    let mut i = from;
+    while i < bytes.len() && is_word_byte(bytes[i]) {
+        i += 1;
     }
-    None
+    i
+}
+
+/// What parsing the `@` at a candidate directive position found.
+pub(crate) enum DirectiveHead<'a> {
+    /// Not a directive: the word-boundary rule failed, the name was
+    /// empty, or this is a `@click="…"`-style JavaScript framework
+    /// binding that the caller reads as an attribute instead. The
+    /// offset is where the caller should resume scanning.
+    None(usize),
+    /// `@@name` is the escape for a literal `@name`.
+    Escaped(usize),
+    /// `@{{ … }}` is a literal echo, whose braces are text rather than a
+    /// directive.
+    LiteralEcho(usize),
+    /// A directive name, and where its argument list opens and (if it
+    /// closes within `limit`) the argument list's full range.
+    Named {
+        name: &'a str,
+        name_end: usize,
+        open: usize,
+        args: Option<Range<usize>>,
+    },
+}
+
+/// Parse the directive head at the `@` at `at`: its name and, when
+/// present, its argument list. `limit` bounds the search for the
+/// argument list's closing paren and the literal echo's closing
+/// delimiter, so a caller working on a fragment does not read past it.
+///
+/// The name is any `\w+` run; whether Blade knows it is the caller's
+/// question ([`match_directive`]). Blade allows spaces and tabs, but no
+/// newline, between the name and its `(`, and an argument list left
+/// unterminated is read as no argument list rather than swallowing the
+/// rest of the file.
+pub(crate) fn directive_head<'a>(
+    src: &'a str,
+    bytes: &[u8],
+    at: usize,
+    limit: usize,
+) -> DirectiveHead<'a> {
+    if !boundary_before(bytes, at) {
+        return DirectiveHead::None(at + 1);
+    }
+    match bytes.get(at + 1) {
+        Some(b'@') => return DirectiveHead::Escaped(at + 2),
+        Some(b'{') if is_echo_start(bytes, at + 1) => {
+            let (open, close) = echo_delimiters(bytes, at + 1);
+            let body_start = at + 1 + open.len();
+            let end = find(bytes, body_start, limit, close.as_bytes())
+                .map_or(body_start, |end| end + close.len());
+            return DirectiveHead::LiteralEcho(end);
+        }
+        _ => {}
+    }
+    let name_end = word_end(bytes, at + 1);
+    if name_end == at + 1 {
+        return DirectiveHead::None(at + 1);
+    }
+    let name = &src[at + 1..name_end];
+    // `@click="…"` is a JavaScript framework's binding; the caller reads
+    // it as an attribute.
+    if bytes.get(name_end) == Some(&b'=') {
+        return DirectiveHead::None(name_end);
+    }
+
+    let mut open = name_end;
+    while matches!(bytes.get(open), Some(b' ' | b'\t')) {
+        open += 1;
+    }
+    let args = (bytes.get(open) == Some(&b'('))
+        .then(|| {
+            matching_paren(bytes, open)
+                .filter(|close| *close < limit)
+                .map(|close| open..close + 1)
+        })
+        .flatten();
+    DirectiveHead::Named {
+        name,
+        name_end,
+        open,
+        args,
+    }
 }
 
 /// A directive a service provider registered on top of the ones Blade
@@ -196,13 +320,21 @@ struct CustomEntry {
     closer: Option<String>,
 }
 
-/// The directives a project's service providers register, expanded so that
-/// every name a template can write is one lookup away.
+/// The directives a project's templates can write: the built-in ones its
+/// installed Blade compiler defines, and the ones its service providers
+/// register, expanded so that every name is one lookup away.
 ///
-/// Empty for a project that registers none, which is the common case and
-/// costs the preprocessor nothing.
+/// Blade only compiles an `@name` it has a `compileName()` method or a
+/// registered handler for, and leaves any other as plain text, so a
+/// `"@context":` key in a JSON-LD block is text on a Laravel that predates
+/// `@context`. The default (no compiler read, nothing registered) knows
+/// every built-in directive and nothing else.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CustomDirectives {
+pub struct BladeDirectives {
+    /// Which entries of [`KNOWN_DIRECTIVES`] the installed compiler defines,
+    /// by index, or `None` when there was no compiler source to read and
+    /// every one is taken to exist.
+    installed: Option<Box<[bool]>>,
     /// Longest name first, so a registration that another name is a prefix
     /// of (`foo` and `foo::bar`) is not shadowed by the shorter one.
     entries: Vec<CustomEntry>,
@@ -217,9 +349,33 @@ pub struct CustomDirectiveCompletion<'a> {
     pub is_snippet: bool,
 }
 
-impl CustomDirectives {
-    /// Expand the registrations a provider scan found, giving each
-    /// `Blade::if()` the four names Blade synthesizes from it.
+impl BladeDirectives {
+    /// The directive set of a project whose compiler declares the methods
+    /// `compiler_has_method` accepts (`None` when no compiler was found),
+    /// plus the registrations its provider scan found.
+    ///
+    /// Blade looks a directive up as `method_exists($this, 'compile' .
+    /// ucfirst($name))`, so `compiler_has_method` is asked for that name and
+    /// must answer case-insensitively, the way PHP compares method names.
+    pub fn new(
+        compiler_has_method: Option<&dyn Fn(&str) -> bool>,
+        registrations: &[CustomDirective],
+    ) -> Self {
+        let installed = compiler_has_method.map(|has_method| {
+            KNOWN_DIRECTIVES
+                .iter()
+                .map(|&d| PRECOMPILED_DIRECTIVES.contains(&d) || has_method(&format!("compile{d}")))
+                .collect()
+        });
+        Self {
+            installed,
+            ..Self::from_registrations(registrations)
+        }
+    }
+
+    /// Every built-in directive, plus the registrations a provider scan
+    /// found, giving each `Blade::if()` the four names Blade synthesizes
+    /// from it.
     pub fn from_registrations(registrations: &[CustomDirective]) -> Self {
         let mut entries: Vec<CustomEntry> = Vec::new();
         let mut record = |name: String, form: CustomForm, closer: Option<String>| {
@@ -260,12 +416,36 @@ impl CustomDirectives {
                 .cmp(&a.name.len())
                 .then_with(|| a.name.cmp(&b.name))
         });
-        Self { entries }
+        Self {
+            installed: None,
+            entries,
+        }
+    }
+
+    /// The built-in directive the text right after an `@` names, when the
+    /// installed compiler has it.
+    pub fn builtin(&self, after_at: &str) -> Option<&'static str> {
+        let index = known_directive_index(after_at)?;
+        self.has_index(index).then_some(KNOWN_DIRECTIVES[index])
+    }
+
+    /// Whether the installed compiler has the built-in directive `name`.
+    pub fn has_builtin(&self, name: &str) -> bool {
+        KNOWN_DIRECTIVES
+            .iter()
+            .position(|&d| d == name)
+            .is_some_and(|index| self.has_index(index))
+    }
+
+    fn has_index(&self, index: usize) -> bool {
+        self.installed
+            .as_ref()
+            .is_none_or(|installed| installed[index])
     }
 
     /// The custom directive the text right after an `@` names, and how it
     /// lowers.
-    pub fn match_directive(&self, after_at: &str) -> Option<(&str, CustomForm)> {
+    pub fn custom(&self, after_at: &str) -> Option<(&str, CustomForm)> {
         self.entries.iter().find_map(|entry| {
             let rest = after_at.strip_prefix(entry.name.as_str())?;
             // Blade reads a directive name as `\w+`, so a registered name
@@ -285,7 +465,7 @@ impl CustomDirectives {
     /// opener inserts the whole block. A `Blade::directive()` handler's
     /// arity is its own business, so its name is inserted bare rather than
     /// an argument list being invented for it.
-    pub fn completions(&self) -> impl Iterator<Item = CustomDirectiveCompletion<'_>> {
+    pub fn custom_completions(&self) -> impl Iterator<Item = CustomDirectiveCompletion<'_>> {
         self.entries.iter().map(|entry| match &entry.closer {
             Some(closer) => CustomDirectiveCompletion {
                 name: &entry.name,
@@ -298,10 +478,6 @@ impl CustomDirectives {
                 is_snippet: false,
             },
         })
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 }
 
@@ -973,8 +1149,19 @@ pub fn translate_directive(directive: &str) -> String {
         // render directive's data array, so it gets a marker of its own.
         "each" => "blade_each_directive".to_string(),
         "slot" | "props" | "aware" | "class" | "style" | "checked" | "selected" | "disabled"
-        | "readonly" | "required" | "json" | "dump" | "lang" | "choice" | "js" | "vite"
-        | "fonts" | "dd" => "blade_directive".to_string(),
+        | "readonly" | "required" | "json" | "dump" | "js" | "vite" | "fonts" | "dd" => {
+            "blade_directive".to_string()
+        }
+        // `@lang('key')` and `@choice('key', $n)` compile to
+        // `app('translator')->get('key')` / `->choice('key', $n)`, so they
+        // lower to the real helper calls rather than the generic
+        // `blade_directive` marker: symbol extraction recognises the
+        // translation-key argument of `__()`/`trans_choice()` by callee
+        // name, and this way the key gets the same completion,
+        // go-to-definition, hover, and diagnostic support as any other
+        // translation call.
+        "lang" => "__".to_string(),
+        "choice" => "trans_choice".to_string(),
         // `unset(...)` is a language construct, not a function — it cannot
         // be passed as an argument to `blade_directive(...)`, so it keeps
         // its own real name instead of the generic marker.
@@ -1069,7 +1256,56 @@ mod tests {
         }
     }
 
-    fn custom(names: &[(&str, bool)]) -> CustomDirectives {
+    /// The directive set of a compiler declaring exactly `methods`.
+    fn compiler(methods: &[&str]) -> BladeDirectives {
+        let methods: Vec<String> = methods.iter().map(|m| m.to_ascii_lowercase()).collect();
+        let has_method = |name: &str| methods.contains(&name.to_ascii_lowercase());
+        BladeDirectives::new(Some(&has_method), &[])
+    }
+
+    /// A Laravel older than `CompilesContexts` has no `compileContext()`, so
+    /// `@context` is text to it, while everything it does define is still a
+    /// directive.
+    #[test]
+    fn a_built_in_directive_exists_only_when_the_compiler_defines_it() {
+        let directives = compiler(&["compileIf", "compileEndif", "compileEndPushOnce"]);
+        assert_eq!(directives.builtin(r#"context": "x""#), None);
+        assert!(!directives.has_builtin("context"));
+        assert_eq!(directives.builtin("if ($x)"), Some("if"));
+        assert_eq!(directives.builtin("endif"), Some("endif"));
+        // PHP method names are case-insensitive, and so is Blade's lookup.
+        assert_eq!(directives.builtin("endPushOnce"), Some("endPushOnce"));
+    }
+
+    /// `@verbatim` and `@php` blocks are cut out of the template before
+    /// Blade looks for a `compile*` method, so they exist whatever the
+    /// compiler declares.
+    #[test]
+    fn the_precompiled_blocks_exist_without_a_compile_method() {
+        let directives = compiler(&[]);
+        for name in PRECOMPILED_DIRECTIVES {
+            assert_eq!(directives.builtin(name), Some(*name));
+        }
+    }
+
+    /// With no compiler to read, every built-in directive is taken to exist.
+    #[test]
+    fn without_a_compiler_every_built_in_directive_exists() {
+        let directives = BladeDirectives::new(None, &[]);
+        for &name in KNOWN_DIRECTIVES {
+            assert!(directives.has_builtin(name), "{name} should exist");
+        }
+    }
+
+    /// Blade reads a directive name as `\w+`, so a known name glued to an
+    /// underscore is a different directive.
+    #[test]
+    fn a_name_glued_to_an_underscore_is_not_a_built_in_directive() {
+        assert_eq!(match_directive("if_ready"), None);
+        assert_eq!(match_directive("if("), Some("if"));
+    }
+
+    fn custom(names: &[(&str, bool)]) -> BladeDirectives {
         let registrations: Vec<CustomDirective> = names
             .iter()
             .map(|(name, conditional)| CustomDirective {
@@ -1077,7 +1313,7 @@ mod tests {
                 conditional: *conditional,
             })
             .collect();
-        CustomDirectives::from_registrations(&registrations)
+        BladeDirectives::from_registrations(&registrations)
     }
 
     /// `Blade::if('admin')` registers four directives, not one.
@@ -1091,7 +1327,7 @@ mod tests {
             ("endadmin", CustomForm::End),
         ] {
             assert_eq!(
-                directives.match_directive(written),
+                directives.custom(written),
                 Some((written, expected)),
                 "@{written} did not resolve to {expected:?}"
             );
@@ -1102,13 +1338,13 @@ mod tests {
     fn a_plain_registration_is_a_statement() {
         let directives = custom(&[("datetime", false)]);
         assert_eq!(
-            directives.match_directive("datetime($post->createdAt)"),
+            directives.custom("datetime($post->createdAt)"),
             Some(("datetime", CustomForm::Statement))
         );
         // A name that merely starts with a registered one is a different
         // directive, exactly as Blade's own `\w+` name pattern reads it.
-        assert_eq!(directives.match_directive("datetimezone"), None);
-        assert_eq!(directives.match_directive("datetime_utc"), None);
+        assert_eq!(directives.custom("datetimezone"), None);
+        assert_eq!(directives.custom("datetime_utc"), None);
     }
 
     /// A registered name another registration is a prefix of still wins for
@@ -1118,11 +1354,11 @@ mod tests {
     fn the_longest_registered_name_wins() {
         let directives = custom(&[("foo", false), ("foo::bar", false)]);
         assert_eq!(
-            directives.match_directive("foo::bar"),
+            directives.custom("foo::bar"),
             Some(("foo::bar", CustomForm::Statement))
         );
         assert_eq!(
-            directives.match_directive("foo"),
+            directives.custom("foo"),
             Some(("foo", CustomForm::Statement))
         );
     }
@@ -1134,7 +1370,10 @@ mod tests {
     fn a_name_blade_would_reject_registers_nothing() {
         for name in ["", "has space", "dash-ed", "a::b::c", "trailing::"] {
             assert!(
-                custom(&[(name, false)]).is_empty(),
+                custom(&[(name, false)])
+                    .custom_completions()
+                    .next()
+                    .is_none(),
                 "{name:?} was accepted as a directive name"
             );
         }
@@ -1147,7 +1386,7 @@ mod tests {
     fn completions_insert_what_the_registration_guarantees() {
         let directives = custom(&[("admin", true), ("datetime", false)]);
         let mut inserted: Vec<(String, String, bool)> = directives
-            .completions()
+            .custom_completions()
             .map(|c| (c.name.to_string(), c.insert_text, c.is_snippet))
             .collect();
         inserted.sort();
@@ -1186,5 +1425,30 @@ mod tests {
                 completion.insert_text
             );
         }
+    }
+
+    /// An `@` escapes an echo only when it comes directly before the echo's
+    /// opener. Blade matches echo tags longest-opening-first, so in
+    /// `@{{!!$a!!}}` the raw echo starts at the second `{` and the `@` is
+    /// text.
+    #[test]
+    fn an_at_before_a_raw_echo_inside_literal_braces_escapes_nothing() {
+        for (src, literal_end) in [("@{{ $a }}", 9), ("@{!! $a !!}", 11)] {
+            assert!(
+                matches!(
+                    directive_head(src, src.as_bytes(), 0, src.len()),
+                    DirectiveHead::LiteralEcho(end) if end == literal_end
+                ),
+                "{src:?} is a literal echo"
+            );
+        }
+        let src = "@{{!!$a!!}}";
+        assert!(
+            matches!(
+                directive_head(src, src.as_bytes(), 0, src.len()),
+                DirectiveHead::None(1)
+            ),
+            "{src:?} escapes nothing"
+        );
     }
 }

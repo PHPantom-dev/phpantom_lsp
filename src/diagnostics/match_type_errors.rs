@@ -8,8 +8,6 @@
 //! union with a non-scalar member) leaves the arm alone, because a value
 //! outside that set could still compare equal.
 
-use std::collections::HashMap;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::control_flow::r#match::{Match, MatchArm};
 use mago_syntax::cst::expression::Expression;
@@ -59,9 +57,11 @@ impl Backend {
     ) {
         let file_ctx = self.file_context(uri);
         let _parse_guard = with_parse_cache(content);
-        let class_loader = self.class_loader(&file_ctx);
-        let function_loader_cl = self.function_loader(&file_ctx);
-        let constant_loader_cl = self.constant_loader(&file_ctx);
+        let class_loaders = self.class_loaders(&file_ctx);
+        let function_loaders = self.function_loaders(&file_ctx);
+        let constant_loaders = file_ctx.per_block(|use_map, namespace| {
+            self.constant_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace)
+        });
         let default_class = ClassInfo::default();
 
         let issues: Vec<MatchArmIssue> =
@@ -79,26 +79,24 @@ impl Backend {
                         find_innermost_enclosing_class(&file_ctx.classes, subject_offset);
                     let current_class = enclosing.unwrap_or(&default_class);
 
-                    let owned_loaders =
-                        self.diagnostic_loaders_over(&function_loader_cl, &constant_loader_cl);
+                    let owned_loaders = self.diagnostic_loaders_over(
+                        function_loaders.at(subject_offset),
+                        constant_loaders.at(subject_offset),
+                    );
                     let loaders = owned_loaders.loaders();
 
                     let var_ctx = VarResolutionCtx {
-                        var_name: "",
-                        top_level_scope: None,
-                        current_class,
-                        all_classes: &file_ctx.classes,
-                        content,
-                        cursor_offset: subject_offset,
-                        class_loader: &class_loader,
                         backend: Some(self),
                         loaders,
                         resolved_class_cache: Some(&self.resolved_class_cache),
-                        enclosing_return_type: None,
-                        branch_aware: true,
-                        match_arm_narrowing: HashMap::new(),
-                        scope_var_resolver: None,
-                        scope_proofs: None,
+                        ..VarResolutionCtx::new(
+                            "",
+                            current_class,
+                            &file_ctx.classes,
+                            content,
+                            subject_offset,
+                            class_loaders.at(subject_offset),
+                        )
                     };
 
                     let subject_type = match resolve_expression_type(match_data.subject, &var_ctx) {

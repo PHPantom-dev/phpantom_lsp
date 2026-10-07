@@ -448,6 +448,90 @@ class MemberVisibilityDemo extends Scaffolding\ScaffoldingVault
 }
 
 
+// ── Diagnostic: Unreachable Code ────────────────────────────────────────────
+// A statement after one that always leaves the block never runs.  These are
+// dimmed rather than underlined: dead code is tidying, not a defect.  The
+// check reads the shape of the statement list only, so it needs no type
+// resolution and keeps up with typing.
+
+class UnreachableCodeDemo
+{
+    public function afterReturn(): void
+    {
+        return;
+
+        // Dimmed — nothing after the return can run:
+        echo 'never';
+    }
+
+    public function everyBranchLeaves(bool $flag): string
+    {
+        if ($flag) {
+            return 'yes';
+        } elseif ($flag) {
+            throw new \RuntimeException('impossible');
+        } else {
+            return 'no';
+        }
+
+        // Dimmed — all three branches leave, so nothing follows them:
+        echo 'never';
+    }
+
+    public function oneBranchFallsThrough(bool $flag): void
+    {
+        if ($flag) {
+            return;
+        }
+
+        // No diagnostic — an `if` with no `else` always has a path that
+        // reaches here:
+        echo 'reached when the flag is false';
+    }
+
+    public function insideALoop(array $items): void
+    {
+        foreach ($items as $item) {
+            if ($item === null) {
+                continue;
+
+                // Dimmed — `continue` leaves the iteration:
+                echo 'never';
+            }
+        }
+
+        // No diagnostic — the loop body may never run at all, so what
+        // follows the loop is reachable:
+        echo 'reached';
+    }
+
+    public function nestedDeclaration(): void
+    {
+        return;
+
+        // Dimmed — a declaration inside a function body is created by
+        // running the statement, so this one never comes into being.
+        // A `function` or `class` written at the top level of a file is
+        // hoisted instead, and is left alone there.
+        function neverDeclared(): void {}
+    }
+
+    public function jumpTarget(): void
+    {
+        goto tail;
+
+        // Dimmed — unreachable by falling through:
+        echo 'never';
+
+        tail:
+
+        // No diagnostic — a label is an entry point, so the dead run ends
+        // here:
+        echo 'reached by the jump';
+    }
+}
+
+
 // ── Diagnostic: Docblock Contradicts the Type Hint ──────────────────────────
 // A `@param` or `@return` tag refines the native declaration; it must not
 // disagree with it.  When the signature admits `null` and the tag does not,

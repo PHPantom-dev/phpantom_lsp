@@ -96,6 +96,14 @@ const RELATIONSHIP_METHOD_FQN_MAP: &[(&str, &str)] = &[
     ),
 ];
 
+/// Whether `short` is the short name of a relationship class that
+/// [`infer_relationship_from_body`] can produce.
+pub(crate) fn is_inferable_relationship_short_name(short: &str) -> bool {
+    RELATIONSHIP_METHOD_FQN_MAP
+        .iter()
+        .any(|(_, fqn)| short_name(fqn) == short)
+}
+
 /// Known Eloquent relationship class short names that yield a single
 /// (nullable) related model instance when accessed as a property.
 const SINGULAR_RELATIONSHIPS: &[&str] = &["HasOne", "MorphOne", "BelongsTo", "HasOneThrough"];
@@ -207,6 +215,14 @@ pub(crate) fn is_pivot_relationship(return_type: &PhpType) -> bool {
         return false;
     }
     PIVOT_RELATIONSHIPS.contains(&short_name(base))
+}
+
+/// Cheap byte pre-filter: whether PHP `source` could declare a many-to-many
+/// relationship, either through a `BelongsToMany`/`MorphToMany` return type
+/// or a `belongsToMany`/`morphToMany`/`morphedByMany` builder call.
+pub(crate) fn source_may_declare_pivot_relationship(source: &[u8]) -> bool {
+    memchr::memmem::find(source, b"ToMany").is_some()
+        || memchr::memmem::find(source, b"edByMany").is_some()
 }
 
 /// Whether `class` declares at least one many-to-many relationship method,
@@ -532,6 +548,33 @@ pub(crate) fn resolve_relation_chain_details(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&super::super::ResolvedClassCache>,
 ) -> Option<ResolvedRelation> {
+    let mut resolved = walk_relation_chain(model, chain, class_loader, cache)?;
+    if resolved.models.is_empty() {
+        return None;
+    }
+    resolved.relation_type = resolved
+        .relation_type
+        .replace_self_bound(&model.fqn(), None);
+    Some(resolved)
+}
+
+/// Resolve the terminal relationship, retaining its declaring-model binding
+/// even when the related model cannot be loaded.
+pub(crate) fn resolve_relation_type(
+    model: &ClassInfo,
+    chain: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: Option<&super::super::ResolvedClassCache>,
+) -> Option<PhpType> {
+    walk_relation_chain(model, chain, class_loader, cache).map(|resolved| resolved.relation_type)
+}
+
+fn walk_relation_chain(
+    model: &ClassInfo,
+    chain: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: Option<&super::super::ResolvedClassCache>,
+) -> Option<ResolvedRelation> {
     let mut segments = chain.split('.').peekable();
     let mut current = vec![crate::inheritance::ClassRef::Borrowed(model)];
     loop {
@@ -554,7 +597,8 @@ pub(crate) fn resolve_relation_chain_details(
             else {
                 continue;
             };
-            let relation = return_type.replace_self_bound(&class.fqn(), None);
+            let relation =
+                return_type.resolve_self_refs_bounded(&class.fqn(), class.parent_class.as_deref());
             collect_relation_models(
                 &relation,
                 class,
@@ -564,7 +608,7 @@ pub(crate) fn resolve_relation_chain_details(
                 &mut relations,
             );
         }
-        if models.is_empty() {
+        if relations.is_empty() {
             return None;
         }
         if segments.peek().is_none() {
@@ -572,6 +616,9 @@ pub(crate) fn resolve_relation_chain_details(
                 models,
                 relation_type: PhpType::union(relations).simplified(),
             });
+        }
+        if models.is_empty() {
+            return None;
         }
         current = models
             .into_iter()
@@ -594,10 +641,21 @@ fn collect_relation_models(
         }
         return;
     }
-    let Some(related) = related_model_type(relation, class_loader) else {
-        return;
-    };
-    if collect_related_classes(&related, declaring, class_loader, cache, models) {
+    let relation_loader = |name: &str| resolve_related_fqn(name, declaring, class_loader);
+    if let Some(related) = related_model_type(relation, &relation_loader) {
+        collect_related_classes(&related, declaring, class_loader, cache, models);
+        relations.push(relation.clone());
+    } else if classify_relationship_typed(relation).is_some()
+        || relation.base_name().is_some_and(|name| {
+            name == super::ELOQUENT_RELATION_FQN
+                || resolve_related_fqn(name, declaring, class_loader).is_some_and(|class| {
+                    crate::inheritance::ancestors(&class, class_loader).any(|(name, _)| {
+                        name == super::ELOQUENT_RELATION_FQN
+                            || classify_relationship_typed(&PhpType::named(name)).is_some()
+                    })
+                })
+        })
+    {
         relations.push(relation.clone());
     }
 }
@@ -612,14 +670,22 @@ pub(crate) fn related_model_type(
         return extract_related_type_typed(relation).cloned();
     }
     const RELATION: &str = "Illuminate\\Database\\Eloquent\\Relations\\Relation";
-    if !crate::class_lookup::is_subtype_of_typed(
+    if crate::class_lookup::is_subtype_of_typed(
         relation,
         &PhpType::named(atom(RELATION)),
         class_loader,
-    ) {
-        return None;
+    ) && let Some(related) =
+        crate::inheritance::extract_generic_arg_from_ancestor(relation, RELATION, 0, class_loader)
+    {
+        return Some(related);
     }
-    crate::inheritance::extract_generic_arg_from_ancestor(relation, RELATION, 0, class_loader)
+    let class = class_loader(relation.base_name()?)?;
+    let (ancestor, _) = crate::inheritance::ancestors(&class, class_loader)
+        .find(|(name, _)| classify_relationship_typed(&PhpType::named(*name)).is_some())?;
+    // Partial framework stubs may stop at a concrete relation instead of
+    // declaring its Relation ancestry. Preserve its own generic binding.
+    crate::inheritance::extract_generic_arg_from_ancestor(relation, &ancestor, 0, class_loader)
+        .or_else(|| extract_related_type_typed(relation).cloned())
 }
 
 fn collect_related_classes(

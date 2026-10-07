@@ -28,18 +28,21 @@
             <tr>
                 <th>Name</th>
                 <th>Email</th>
-                <th>Role</th>
+                <th>Badge</th>
             </tr>
         </thead>
         <tbody>
             @foreach($users->active()->byName() as $user)
                 @php $rowLabel = 'Author: ' . $user->name; @endphp
-                {{-- Bound component attributes: the expressions below are real
-                     PHP, so $rowLabel (used only here) is not "unused" and
-                     $user->email resolves for hover/go-to-definition. --}}
-                <tr :data-label="$rowLabel" :data-email="$user->email">
+                <tr>
                     <td>{{ $user->name }}</td>
                     <td>{{ $user->email }}</td>
+                    {{-- Bound component attributes are real PHP, so $rowLabel
+                         (used only here) is not "unused" and $user resolves
+                         for hover/go-to-definition. The same `:attr` on a
+                         plain HTML tag stays text, because Alpine and Vue
+                         bind with that syntax too. --}}
+                    <td><x-widgets::badge label="Author" :author="$user" :title="$rowLabel" /></td>
                 </tr>
             @endforeach
         </tbody>

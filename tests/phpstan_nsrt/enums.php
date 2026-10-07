@@ -48,7 +48,7 @@ class BarClass
 	{
 		assertType('Bar', Bar::ONE);
 		assertType('Bar', Bar::TWO);
-		assertType('string', Bar::TWO->value);
+		assertType('\'two\'', Bar::TWO->value);
 
 		assertType('EnumTypeAssertions\Bar', Bar::from($s));
 		assertType('?EnumTypeAssertions\Bar', Bar::tryFrom($s));
@@ -65,14 +65,14 @@ class BazClass
 	{
 		assertType('Baz', Baz::ONE);
 		assertType('Baz', Baz::TWO);
-		assertType('int', Baz::TWO->value);
+		assertType('2', Baz::TWO->value);
 
 		assertType('EnumTypeAssertions\Baz', Baz::from($i));
 		assertType('?EnumTypeAssertions\Baz', Baz::tryFrom($i));
 
 		assertType('int', $baz->value);
-		assertType('int', Baz::ONE->value);
-		assertType('int', Baz::TWO->value);
+		assertType('1', Baz::ONE->value);
+		assertType('2', Baz::TWO->value);
 	}
 
 }

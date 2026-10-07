@@ -76,7 +76,12 @@ pub(crate) fn merge_traits_into(
             && extends_eloquent_model(merged, class_loader)
         {
             let model_fqn = merged.fqn();
-            let factory_fqn = model_to_factory_fqn(&model_fqn);
+            let factory_fqn = merged
+                .laravel()
+                .and_then(|l| l.custom_factory.as_ref())
+                .and_then(|ty| ty.base_name())
+                .map(str::to_owned)
+                .unwrap_or_else(|| model_to_factory_fqn(&model_fqn));
             if class_loader(&factory_fqn).is_some() {
                 for param in &trait_info.template_params {
                     trait_subs.insert(param.to_string(), PhpType::named(atom(&factory_fqn)));
@@ -93,13 +98,29 @@ pub(crate) fn merge_traits_into(
 
         // Recursively merge traits used by this trait (trait composition).
         // The sub-trait's own `@use` generics (from the trait's docblock)
-        // apply, not the outer class's.
+        // apply, not the outer class's, but they may name this trait's
+        // template parameters (`@use CollectionTrait<TValue>`), so bind
+        // those to what the outer `@use` supplied first.
         if !trait_info.used_traits.is_empty() {
+            let substituted_use_generics: Vec<(Atom, Vec<PhpType>)> = if trait_subs.is_empty() {
+                trait_info.use_generics.clone()
+            } else {
+                trait_info
+                    .use_generics
+                    .iter()
+                    .map(|(name, args)| {
+                        (
+                            *name,
+                            args.iter().map(|arg| arg.substitute(&trait_subs)).collect(),
+                        )
+                    })
+                    .collect()
+            };
             merge_traits_into(
                 merged,
                 &trait_info.used_traits,
                 &TraitContext {
-                    use_generics: &trait_info.use_generics,
+                    use_generics: &substituted_use_generics,
                     precedences: &trait_info.trait_precedences,
                     aliases: &trait_info.trait_aliases,
                 },

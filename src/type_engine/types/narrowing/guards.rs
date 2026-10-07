@@ -6,9 +6,10 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::atom::{atom, bytes_to_str};
+use crate::atom::{Atom, atom, bytes_to_str};
+use crate::ci_map::fold;
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::{AssertionKind, ClassInfo, ResolvedType};
+use crate::types::{AssertionKind, ClassInfo, ClassLikeKind, ResolvedType};
 
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
@@ -27,12 +28,13 @@ use super::*;
 ///   - `class_exists($var)`, `interface_exists($var)`, `enum_exists($var)`,
 ///     `trait_exists($var)` — confirms `$var` names *some* declared
 ///     class-like, narrowing a string to the generic `class-string`
-///     (the target class is not known statically).
+///     (the target class is not known statically), or to
+///     `class-string<UnitEnum>` for `enum_exists()`.
 ///
 /// Returns `Some((target, negated))` where `target` is `Some(name)` for
-/// `is_a()` with a resolvable second argument, or `None` for the generic
-/// `*_exists()` forms.  `negated` is `true` when the guard is wrapped in
-/// `!`.
+/// `is_a()` with a resolvable second argument and for `enum_exists()`, or
+/// `None` for the other `*_exists()` forms.  `negated` is `true` when the
+/// guard is wrapped in `!`.
 pub(in crate::type_engine) fn try_extract_class_string_guard(
     expr: &Expression<'_>,
     var_name: &str,
@@ -46,14 +48,12 @@ pub(in crate::type_engine) fn try_extract_class_string_guard(
                 .map(|(target, negated)| (target, !negated))
         }
         Expression::Call(Call::Function(func_call)) => {
-            let func_name = match func_call.function {
-                Expression::Identifier(ident) => {
-                    bytes_to_str(ident.value()).trim_start_matches('\\')
-                }
-                _ => return None,
+            let Expression::Identifier(ident) = func_call.function else {
+                return None;
             };
+            let func_name = fold(bytes_to_str(ident.value()).trim_start_matches('\\'));
             let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
-            match func_name {
+            match func_name.as_ref() {
                 "is_a" => {
                     if args.len() < 3 {
                         return None;
@@ -74,7 +74,10 @@ pub(in crate::type_engine) fn try_extract_class_string_guard(
                     if expr_to_subject_key(argument_value(args[0])).as_deref() != Some(var_name) {
                         return None;
                     }
-                    Some((None, false))
+                    // Every enum implements `UnitEnum`, so `enum_exists()`
+                    // knows more than that the name is declared.
+                    let target = (func_name == "enum_exists").then(|| "UnitEnum".to_string());
+                    Some((target, false))
                 }
                 _ => None,
             }
@@ -133,17 +136,15 @@ pub(in crate::type_engine) fn try_extract_member_exists_guard(
             None
         }
         Expression::Call(Call::Function(func_call)) => {
-            let func_name = match func_call.function {
-                Expression::Identifier(ident) => {
-                    bytes_to_str(ident.value()).trim_start_matches('\\')
-                }
-                _ => return None,
+            let Expression::Identifier(ident) = func_call.function else {
+                return None;
             };
-            let is_method = match func_name {
-                "property_exists" => false,
-                "method_exists" => true,
-                _ => return None,
-            };
+            let is_method =
+                match fold(bytes_to_str(ident.value()).trim_start_matches('\\')).as_ref() {
+                    "property_exists" => false,
+                    "method_exists" => true,
+                    _ => return None,
+                };
             let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
             if args.len() < 2 {
                 return None;
@@ -161,8 +162,8 @@ pub(in crate::type_engine) fn try_extract_member_exists_guard(
 /// Check whether a statement unconditionally exits the current scope.
 ///
 /// A statement unconditionally exits if every code path through it
-/// ends with `return`, `throw`, `continue`, or `break`.  This is used
-/// to detect guard clause patterns like:
+/// ends with `return`, `throw`, `exit`, `continue`, or `break`.  This is
+/// used to detect guard clause patterns like:
 ///
 /// ```text
 /// if (!$var instanceof Foo) {
@@ -173,82 +174,152 @@ pub(in crate::type_engine) fn try_extract_member_exists_guard(
 ///
 /// A call to a function or method declared `never` also exits, which
 /// takes type information rather than the AST alone; [`ExitCtx`] carries
-/// what that lookup needs.
+/// what that lookup needs.  The structural rules live in
+/// [`statement_leaves_block`], shared with the unreachable-code
+/// diagnostic, which asks the same question without types.
 pub(in crate::type_engine) fn statement_unconditionally_exits(
     stmt: &Statement<'_>,
     ctx: &ExitCtx<'_>,
 ) -> bool {
+    statement_leaves_block(stmt, &|expr| expression_is_never_call(expr, ctx))
+}
+
+/// [`statement_unconditionally_exits`] for a statement list: whether
+/// control is gone by the end of it.  See [`statements_leave_block`].
+pub(in crate::type_engine) fn statements_unconditionally_exit<'s>(
+    stmts: impl Iterator<Item = &'s Statement<'s>>,
+    ctx: &ExitCtx<'_>,
+) -> bool {
+    statements_leave_block(stmts, &|expr| expression_is_never_call(expr, ctx))
+}
+
+/// Whether every path through `stmt` leaves the statement list it sits in.
+///
+/// `return`, `throw`, `exit`, `die`, `continue` and `break` leave; so does
+/// a block whose statements do (see [`statements_leave_block`]) and an
+/// `if` whose every branch does, which needs an `else`.  `goto` does not
+/// count: its label may sit further down the same list, in which case the
+/// list keeps running.
+///
+/// `never_call` recognises an expression statement that calls a
+/// `never`-returning function.  That takes types, so a caller with none
+/// to hand passes `&|_| false`.
+pub(crate) fn statement_leaves_block(
+    stmt: &Statement<'_>,
+    never_call: &dyn Fn(&Expression<'_>) -> bool,
+) -> bool {
     match stmt {
-        Statement::Return(_) => true,
-        Statement::Continue(_) => true,
-        Statement::Break(_) => true,
-        // `throw new …;` is parsed as an expression statement
-        // containing a Throw expression.
+        Statement::Return(_) | Statement::Continue(_) | Statement::Break(_) => true,
+        // `throw`, `exit` and `die` are expressions in PHP, so they
+        // reach here wrapped in an expression statement.
         Statement::Expression(es) => {
             matches!(
                 es.expression,
                 Expression::Throw(_)
-                    | Expression::Construct(mago_syntax::cst::Construct::Exit(_))
-                    | Expression::Construct(mago_syntax::cst::Construct::Die(_))
-            ) || expression_is_never_call(es.expression, ctx)
+                    | Expression::Construct(Construct::Exit(_))
+                    | Expression::Construct(Construct::Die(_))
+            ) || never_call(es.expression)
         }
-        // A block exits if any statement in it exits — everything after
-        // the first exiting statement is unreachable, so a trailing
-        // assignment does not make the block fall through.
-        Statement::Block(block) => block
-            .statements
-            .iter()
-            .any(|s| statement_unconditionally_exits(s, ctx)),
+        Statement::Block(block) => statements_leave_block(block.statements.iter(), never_call),
         // An if/else exits if ALL branches exist and ALL exit.
-        Statement::If(if_stmt) => if_body_unconditionally_exits(&if_stmt.body, ctx),
+        Statement::If(if_stmt) => match &if_stmt.body {
+            IfBody::Statement(body) => {
+                statement_leaves_block(body.statement, never_call)
+                    && body
+                        .else_if_clauses
+                        .iter()
+                        .all(|ei| statement_leaves_block(ei.statement, never_call))
+                    && body
+                        .else_clause
+                        .as_ref()
+                        .is_some_and(|ec| statement_leaves_block(ec.statement, never_call))
+            }
+            IfBody::ColonDelimited(body) => {
+                statements_leave_block(body.statements.iter(), never_call)
+                    && body
+                        .else_if_clauses
+                        .iter()
+                        .all(|ei| statements_leave_block(ei.statements.iter(), never_call))
+                    && body
+                        .else_clause
+                        .as_ref()
+                        .is_some_and(|ec| statements_leave_block(ec.statements.iter(), never_call))
+            }
+        },
         _ => false,
     }
 }
 
-/// Check whether an `if` body (including all branches) unconditionally
-/// exits.  This requires:
-///   - The then-body exits, AND
-///   - All elseif bodies exit, AND
-///   - An else clause exists and exits.
-fn if_body_unconditionally_exits(body: &IfBody<'_>, ctx: &ExitCtx<'_>) -> bool {
-    match body {
-        IfBody::Statement(stmt_body) => {
-            if !statement_unconditionally_exits(stmt_body.statement, ctx) {
-                return false;
-            }
-            if !stmt_body
-                .else_if_clauses
-                .iter()
-                .all(|ei| statement_unconditionally_exits(ei.statement, ctx))
-            {
-                return false;
-            }
-            stmt_body
-                .else_clause
-                .as_ref()
-                .is_some_and(|ec| statement_unconditionally_exits(ec.statement, ctx))
+/// Whether control is gone by the end of a statement list.
+///
+/// Everything after the first statement that leaves is unreachable, so a
+/// trailing assignment does not make the list fall through.  A `goto`
+/// label is the exception: it is an entry point, so control can be back
+/// in the list after the exit and run out of its end.  That holds for a
+/// label nested inside a later statement too (see
+/// [`contains_entry_label`]), in which case whether the list ends
+/// reachable is that statement's own answer.
+pub(crate) fn statements_leave_block<'s>(
+    stmts: impl Iterator<Item = &'s Statement<'s>>,
+    never_call: &dyn Fn(&Expression<'_>) -> bool,
+) -> bool {
+    let mut reachable = true;
+    for stmt in stmts {
+        if matches!(stmt, Statement::Label(_)) {
+            reachable = true;
+        } else if reachable || contains_entry_label(stmt) {
+            reachable = !statement_leaves_block(stmt, never_call);
         }
-        IfBody::ColonDelimited(colon_body) => {
-            if !colon_body
-                .statements
-                .iter()
-                .any(|s| statement_unconditionally_exits(s, ctx))
-            {
-                return false;
+    }
+    !reachable
+}
+
+/// Whether a `goto` can land somewhere inside this statement.
+///
+/// PHP lets a jump enter a block, an `if` branch, a `try` or `catch` body
+/// and a `declare` body, but not a loop, a `switch`, a `finally` or another
+/// function, so only the former are searched.
+pub(crate) fn contains_entry_label(stmt: &Statement<'_>) -> bool {
+    let any = |stmts: &[Statement<'_>]| stmts.iter().any(contains_entry_label);
+    match stmt {
+        Statement::Label(_) => true,
+        Statement::Block(block) => any(block.statements.as_slice()),
+        Statement::If(if_stmt) => match &if_stmt.body {
+            IfBody::Statement(body) => {
+                contains_entry_label(body.statement)
+                    || body
+                        .else_if_clauses
+                        .iter()
+                        .any(|ei| contains_entry_label(ei.statement))
+                    || body
+                        .else_clause
+                        .as_ref()
+                        .is_some_and(|ec| contains_entry_label(ec.statement))
             }
-            if !colon_body.else_if_clauses.iter().all(|ei| {
-                ei.statements
-                    .iter()
-                    .any(|s| statement_unconditionally_exits(s, ctx))
-            }) {
-                return false;
+            IfBody::ColonDelimited(body) => {
+                any(body.statements.as_slice())
+                    || body
+                        .else_if_clauses
+                        .iter()
+                        .any(|ei| any(ei.statements.as_slice()))
+                    || body
+                        .else_clause
+                        .as_ref()
+                        .is_some_and(|ec| any(ec.statements.as_slice()))
             }
-            colon_body.else_clause.as_ref().is_some_and(|ec| {
-                ec.statements
+        },
+        Statement::Try(try_stmt) => {
+            any(try_stmt.block.statements.as_slice())
+                || try_stmt
+                    .catch_clauses
                     .iter()
-                    .any(|s| statement_unconditionally_exits(s, ctx))
-            })
+                    .any(|catch| any(catch.block.statements.as_slice()))
         }
+        Statement::Declare(declare) => match &declare.body {
+            DeclareBody::Statement(body) => contains_entry_label(body),
+            DeclareBody::ColonDelimited(body) => any(body.statements.as_slice()),
+        },
+        _ => false,
     }
 }
 
@@ -258,10 +329,9 @@ fn if_body_unconditionally_exits(body: &IfBody<'_>, ctx: &ExitCtx<'_>) -> bool {
 fn then_body_unconditionally_exits(body: &IfBody<'_>, ctx: &ExitCtx<'_>) -> bool {
     match body {
         IfBody::Statement(stmt_body) => statement_unconditionally_exits(stmt_body.statement, ctx),
-        IfBody::ColonDelimited(colon_body) => colon_body
-            .statements
-            .iter()
-            .any(|s| statement_unconditionally_exits(s, ctx)),
+        IfBody::ColonDelimited(colon_body) => {
+            statements_unconditionally_exit(colon_body.statements.iter(), ctx)
+        }
     }
 }
 
@@ -276,6 +346,9 @@ pub(in crate::type_engine) struct ExitCtx<'a> {
     /// Enclosing class, used for `$this->…`, `self::`, `static::` and
     /// `parent::` receivers and for namespace-relative name resolution.
     pub current_class: &'a ClassInfo,
+    /// The file's classes, so a name resolves to the one its own
+    /// namespace block declares.
+    pub all_classes: &'a [Arc<ClassInfo>],
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     pub function_loader: FunctionLoaderFn<'a>,
     pub resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
@@ -301,6 +374,7 @@ impl<'a> ExitCtx<'a> {
     ) -> Self {
         Self {
             current_class: ctx.current_class,
+            all_classes: ctx.all_classes,
             class_loader: ctx.class_loader,
             function_loader: ctx.loaders.function_loader,
             resolved_class_cache: ctx.resolved_class_cache,
@@ -410,6 +484,7 @@ fn expression_is_never_call(expr: &Expression<'_>, ctx: &ExitCtx<'_>) -> bool {
                 Expression::Identifier(ident) => crate::util::resolve_source_class_name(
                     bytes_to_str(ident.value()),
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.all_classes,
                     ctx.class_loader,
                 ),
                 // `never` is the bottom type, so a child override can
@@ -778,9 +853,10 @@ const TRAVERSABLE_FQN: &str = "Traversable";
 
 /// The domain a `is_*()` builtin tests its argument against.
 ///
-/// Returns `None` for any other function name.
+/// Returns `None` for any other function name.  PHP function names are
+/// case-insensitive, so `Is_String` names the same check as `is_string`.
 pub(crate) fn type_guard_kind_from_name(name: &str) -> Option<TypeGuardKind> {
-    Some(match name.trim_start_matches('\\') {
+    Some(match fold(name.trim_start_matches('\\')).as_ref() {
         "is_array" => TypeGuardKind::Array,
         "is_string" => TypeGuardKind::String,
         "is_int" | "is_integer" | "is_long" => TypeGuardKind::Int,
@@ -797,6 +873,32 @@ pub(crate) fn type_guard_kind_from_name(name: &str) -> Option<TypeGuardKind> {
     })
 }
 
+/// Whether a call to the function `name` is a check that narrows the
+/// subject passed as its first argument.
+///
+/// A local variable is narrowed by offering every in-scope name to the
+/// extractors, but a property path (`$this->stream`) only exists in scope
+/// once the condition scan has seeded it, and that scan asks this. So it
+/// must name every function an extractor reads a first-argument subject
+/// from: [`type_guard_kind_from_name`], `is_a()` (both the instanceof and
+/// the class-string form), `try_extract_class_string_guard`,
+/// `try_extract_member_exists_guard`, and `try_extract_in_array`.
+pub(crate) fn narrows_first_argument(name: &str) -> bool {
+    let name = fold(name.trim_start_matches('\\'));
+    type_guard_kind_from_name(&name).is_some()
+        || matches!(
+            name.as_ref(),
+            "is_a"
+                | "class_exists"
+                | "interface_exists"
+                | "enum_exists"
+                | "trait_exists"
+                | "property_exists"
+                | "method_exists"
+                | "in_array"
+        )
+}
+
 /// Narrow `ty` to the values the `is_*()` builtin named by `name`
 /// accepts.
 ///
@@ -810,6 +912,28 @@ pub(crate) fn narrow_type_by_guard_name(
     let kind = type_guard_kind_from_name(name)?;
     let narrowed = filter_type_by_guard(ty, kind, true, class_loader)?;
     (!narrowed.is_empty_sentinel()).then_some(narrowed)
+}
+
+/// Split `ty` by the type-check function `name` (`is_int`, `is_string`, …)
+/// into the values it accepts and whether it can reject any.
+///
+/// A type check decides by type alone, so unlike an arbitrary callback
+/// both halves are known: the accepted part is `None` when no value of
+/// `ty` passes, and the flag is `false` when every value does.  Returns
+/// `None` for a name that is not a type check.
+pub(crate) fn split_type_by_guard_name(
+    name: &str,
+    ty: &PhpType,
+    class_loader: GuardClassLoader<'_>,
+) -> Option<(Option<PhpType>, bool)> {
+    let kind = type_guard_kind_from_name(name)?;
+    let accepted = match filter_type_by_guard(ty, kind, true, class_loader) {
+        None => Some(ty.clone()),
+        Some(filtered) if filtered.is_empty_sentinel() => None,
+        Some(filtered) => Some(filtered),
+    };
+    let may_reject = guard_outcome_possible(ty, kind, false, class_loader);
+    Some((accepted, may_reject))
 }
 
 /// Narrow `ty` to the values of `var_name` that can make `condition`
@@ -1046,12 +1170,34 @@ fn type_matches_guard(
                 || ty.is_subtype_of(&PhpType::float())
                 || ty.is_subtype_of(&PhpType::bool())
         }
-        // `is_resource()` returns false for a closed resource, but a value
-        // declared `closed-resource` is still in the resource domain, so the
-        // subtype check covers both refinements.
         TypeGuardKind::Resource => ty.is_subtype_of(&PhpType::named(atom("resource"))),
         TypeGuardKind::Iterable => type_is_iterable(ty, class_loader),
     }
+}
+
+/// Whether a value of the non-union type `ty` can land in the branch of
+/// a type guard selected by `keep_matching`.
+///
+/// For most guards the answer follows from the type alone, but
+/// `is_resource()` returns false for a closed resource, so a plain
+/// `resource` reaches both branches: only `open-resource` is sure to pass
+/// and only `closed-resource` is sure to fail.
+fn guard_member_survives(
+    ty: &PhpType,
+    kind: TypeGuardKind,
+    keep_matching: bool,
+    class_loader: GuardClassLoader<'_>,
+) -> bool {
+    if kind == TypeGuardKind::Resource && type_matches_guard(ty, kind, class_loader) {
+        return if ty.is_named("open-resource") {
+            keep_matching
+        } else if ty.is_named("closed-resource") {
+            !keep_matching
+        } else {
+            true
+        };
+    }
+    type_matches_guard(ty, kind, class_loader) == keep_matching
 }
 
 /// Whether `foreach` can walk a value of `ty`: an array (in any of its
@@ -1184,6 +1330,13 @@ fn filter_type_by_guard(
     if let Some(expanded) = expand_pseudo_type_for_guard(ty) {
         return filter_type_by_guard(&expanded, kind, keep_matching, class_loader);
     }
+    // `is_array()` and `is_object()` each keep one half of an `iterable`,
+    // so it has to be split before they can drop the other.
+    if matches!(kind, TypeGuardKind::Array | TypeGuardKind::Object)
+        && let Some(split) = ty.split_iterable()
+    {
+        return filter_type_by_guard(&split, kind, keep_matching, class_loader);
+    }
 
     // `is_numeric()` also returns true for numeric strings, not just
     // `int`/`float`.  Narrow string-like members to `numeric-string`
@@ -1194,11 +1347,19 @@ fn filter_type_by_guard(
         return (narrowed != ty.clone()).then_some(narrowed);
     }
 
+    if kind == TypeGuardKind::Callable
+        && keep_matching
+        && let Some(loader) = class_loader
+        && let Some(narrowed) = narrow_classes_to_callable(ty, loader)
+    {
+        return Some(narrowed);
+    }
+
     match ty.kind() {
         TypeKind::Union(members) => {
             let filtered: Vec<PhpType> = members
                 .iter()
-                .filter(|m| type_matches_guard(m, kind, class_loader) == keep_matching)
+                .filter(|m| guard_member_survives(m, kind, keep_matching, class_loader))
                 .cloned()
                 .collect();
             if filtered.len() == members.len() {
@@ -1216,11 +1377,9 @@ fn filter_type_by_guard(
             // `?T` is `T|null`.  For `is_array`, null doesn't match,
             // so we keep only the inner type (if it matches) or only
             // null (if it doesn't).
-            let inner_matches = type_matches_guard(inner, kind, class_loader);
-            let null_matches = type_matches_guard(&PhpType::null(), kind, class_loader);
             match (
-                inner_matches == keep_matching,
-                null_matches == keep_matching,
+                guard_member_survives(inner, kind, keep_matching, class_loader),
+                guard_member_survives(&PhpType::null(), kind, keep_matching, class_loader),
             ) {
                 (true, true) => None, // keep both → no change
                 (true, false) => Some(inner.clone()),
@@ -1243,13 +1402,97 @@ fn filter_type_by_guard(
                 };
             }
             // Non-union type: if it matches the predicate, keep it.
-            if type_matches_guard(ty, kind, class_loader) == keep_matching {
+            if guard_member_survives(ty, kind, keep_matching, class_loader) {
                 None // no change needed
             } else {
                 Some(PhpType::empty_sentinel())
             }
         }
     }
+}
+
+/// What `is_callable()` passing leaves of `ty` when some alternative names
+/// a class, or `None` when none does and the type alone decides.
+///
+/// An instance is callable when its class declares `__invoke`, so such a
+/// class stays as it is.  A class that cannot be extended (final, or an
+/// enum) and declares none drops out.  Any other class or interface may
+/// have a callable subclass, so it survives as that subclass would:
+/// `Route&callable`.
+fn narrow_classes_to_callable(
+    ty: &PhpType,
+    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    let members: Vec<PhpType> = match ty.kind() {
+        TypeKind::Nullable(inner) => inner.union_members().into_iter().cloned().collect(),
+        _ => ty.union_members().into_iter().cloned().collect(),
+    };
+    let mut names_class = false;
+    let mut kept: Vec<PhpType> = Vec::with_capacity(members.len());
+    for member in members {
+        let class = match member.kind() {
+            TypeKind::Named(name) if !crate::php_type::is_keyword_type(name) => loader(name),
+            TypeKind::Generic(g) if !crate::php_type::is_keyword_type(&g.name) => loader(&g.name),
+            _ => None,
+        };
+        let Some(class) = class else {
+            if member.is_callable() || member.is_mixed() {
+                kept.push(if member.is_mixed() {
+                    PhpType::callable()
+                } else {
+                    member
+                });
+            }
+            continue;
+        };
+        names_class = true;
+        if declares_invoke(&class, loader) {
+            kept.push(member);
+        } else if !class.is_final && class.kind != ClassLikeKind::Enum {
+            kept.push(PhpType::intersection(vec![member, PhpType::callable()]));
+        }
+    }
+    if !names_class {
+        return None;
+    }
+    Some(match kept.len() {
+        0 => PhpType::empty_sentinel(),
+        1 => kept.swap_remove(0),
+        _ => PhpType::union(kept),
+    })
+}
+
+/// Whether `class`, a trait it uses, or an ancestor declares `__invoke`.
+fn declares_invoke(class: &ClassInfo, loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> bool {
+    if class.get_method_ci("__invoke").is_some() {
+        return true;
+    }
+    let mut seen: Vec<Atom> = Vec::new();
+    let mut pending: Vec<Atom> = class
+        .parent_class
+        .iter()
+        .chain(class.used_traits.iter())
+        .copied()
+        .collect();
+    while let Some(name) = pending.pop() {
+        if seen.contains(&name) {
+            continue;
+        }
+        seen.push(name);
+        let Some(cls) = loader(&name) else {
+            continue;
+        };
+        if cls.get_method_ci("__invoke").is_some() {
+            return true;
+        }
+        pending.extend(
+            cls.parent_class
+                .iter()
+                .chain(cls.used_traits.iter())
+                .copied(),
+        );
+    }
+    false
 }
 
 /// Expand compound pseudo-types into unions of their constituent scalar
@@ -1294,10 +1537,10 @@ fn narrow_to_numeric_inclusive(ty: &PhpType) -> PhpType {
                 .iter()
                 .filter_map(narrow_single_type_to_numeric)
                 .collect();
-            match narrowed.len() {
-                0 => PhpType::empty_sentinel(),
-                1 => narrowed.into_iter().next().unwrap(),
-                _ => PhpType::union(narrowed),
+            if narrowed.is_empty() {
+                PhpType::empty_sentinel()
+            } else {
+                PhpType::union(narrowed)
             }
         }
         // `null` never satisfies `is_numeric()`; narrow the inner type only.

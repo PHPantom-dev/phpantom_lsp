@@ -1079,20 +1079,10 @@ fn macro_name(expr: &Expression<'_>) -> Option<String> {
 /// precise, bounded set of vendor files where `::macro()` calls live.  Scanning
 /// these (rather than the whole vendor tree) keeps macro discovery cheap.
 pub(crate) fn parse_installed_providers(installed_json: &str) -> Vec<String> {
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(installed_json) else {
-        return Vec::new();
-    };
-    // installed.json is either a top-level array (Composer 1) or
-    // `{ "packages": [...] }` (Composer 2).
-    let packages = json
-        .as_array()
-        .or_else(|| json.get("packages").and_then(|p| p.as_array()));
-    let Some(packages) = packages else {
-        return Vec::new();
-    };
+    let packages = crate::composer::parse_installed_packages(installed_json);
 
     let mut out = Vec::new();
-    for package in packages {
+    for package in &packages {
         let Some(providers) = package
             .pointer("/extra/laravel/providers")
             .and_then(|v| v.as_array())

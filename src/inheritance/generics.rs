@@ -13,8 +13,8 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo, PropertyInfo};
 use crate::util::short_name;
 
-/// Apply generic type substitution to a method's return type and parameter
-/// type hints.
+/// Apply generic type substitution to a method's return type, type
+/// assertions and parameter type hints.
 pub(crate) fn apply_substitution_to_method(
     method: &mut MethodInfo,
     subs: &HashMap<String, PhpType>,
@@ -24,6 +24,23 @@ pub(crate) fn apply_substitution_to_method(
     }
     if let Some(ref mut cond) = method.conditional_return {
         apply_substitution_to_conditional(cond, subs);
+    }
+    // `@phpstan-assert-if-true T $id` on a generic interface promises the
+    // implementation's `T`, not the bound.
+    for assertion in &mut method.type_assertions {
+        assertion.asserted_type = assertion.asserted_type.substitute(subs);
+    }
+    // `@template TResult = T` falls back to the class's `T`, which the
+    // receiver binds just as it binds `T` in the signature.
+    if !method.template_param_defaults.is_empty() {
+        for (_, default) in method.template_param_defaults.iter_mut() {
+            *default = default.substitute(subs);
+        }
+    }
+    // So does `@template F of E`: an argument is held to the `E` the
+    // receiver bound, not to `E`'s own bound.
+    for bound in method.template_param_bounds.values_mut() {
+        *bound = bound.substitute(subs);
     }
     // Only copy-on-write the shared parameter list when a parameter
     // actually references a substituted name — substitution usually
@@ -100,18 +117,54 @@ pub(crate) fn bind_inherited_class_keywords(
     let Some(declaring_parent) = declaring_parent else {
         return;
     };
-    if let Some(ref mut ret) = method.return_type
-        && ret.contains_bare_parent()
-    {
-        *ret = ret.replace_bare_parent(declaring_parent);
-    }
+    let bind = |ty: &mut Option<PhpType>| {
+        if let Some(t) = ty
+            && t.contains_bare_parent()
+        {
+            *t = t.replace_bare_parent(declaring_parent);
+        }
+    };
+    bind(&mut method.return_type);
+    bind(&mut method.native_return_type);
     if method_has_bare_parent(method) {
         for param in method.parameters.make_mut() {
-            if let Some(ref mut hint) = param.type_hint
-                && hint.contains_bare_parent()
-            {
-                *hint = hint.replace_bare_parent(declaring_parent);
-            }
+            bind(&mut param.type_hint);
+            bind(&mut param.native_type_hint);
+        }
+    }
+}
+
+/// Whether an inheritance merge would rewrite a relative class keyword in
+/// `property`'s type: bare `self`, or bare `parent` when the declaring
+/// class's own parent is known.
+pub(crate) fn property_has_inherited_class_keyword(
+    property: &PropertyInfo,
+    declaring_parent: Option<&str>,
+) -> bool {
+    property.type_hint.as_ref().is_some_and(|h| {
+        h.contains_bare_self() || (declaring_parent.is_some() && h.contains_bare_parent())
+    })
+}
+
+/// Bind the relative class keywords in an inherited property's type to the
+/// classes the declaration meant, like [`bind_inherited_class_keywords`]
+/// does for a method.
+pub(crate) fn bind_inherited_class_keywords_in_property(
+    property: &mut PropertyInfo,
+    class_name: &str,
+    declaring_parent: Option<&str>,
+) {
+    for ty in [&mut property.type_hint, &mut property.native_type_hint] {
+        let Some(hint) = ty else {
+            continue;
+        };
+        if hint.contains_bare_self() {
+            *hint = hint.replace_bare_self(class_name);
+        }
+        if let Some(declaring_parent) = declaring_parent
+            && hint.contains_bare_parent()
+        {
+            *hint = hint.replace_bare_parent(declaring_parent);
         }
     }
 }
@@ -123,23 +176,30 @@ pub(crate) fn bind_inherited_class_keywords(
 /// or trait-imported method must carry the declaring class rather than
 /// the literal keyword. `static` is deliberately left alone: it binds
 /// late, to the class the call is made on.
+///
+/// The native hints are bound alongside the effective ones. Enrichment
+/// reads an effective type that differs from its native hint as a
+/// docblock override, so binding only one side would make the bound copy
+/// look richer than it is and let it overwrite an override's narrower
+/// native return type.
 pub(crate) fn replace_bare_self_in_method(method: &mut MethodInfo, class_name: &str) {
-    if let Some(ref mut ret) = method.return_type
-        && ret.contains_bare_self()
-    {
-        *ret = ret.replace_bare_self(class_name);
-    }
+    let bind = |ty: &mut Option<PhpType>| {
+        if let Some(t) = ty
+            && t.contains_bare_self()
+        {
+            *t = t.replace_bare_self(class_name);
+        }
+    };
+    bind(&mut method.return_type);
+    bind(&mut method.native_return_type);
     let any_param = method
         .parameters
         .iter()
         .any(|p| p.type_hint.as_ref().is_some_and(|h| h.contains_bare_self()));
     if any_param {
         for param in method.parameters.make_mut() {
-            if let Some(ref mut hint) = param.type_hint
-                && hint.contains_bare_self()
-            {
-                *hint = hint.replace_bare_self(class_name);
-            }
+            bind(&mut param.type_hint);
+            bind(&mut param.native_type_hint);
         }
     }
 }
@@ -176,7 +236,8 @@ pub(crate) fn apply_substitution_to_property(
 /// hundreds of parent methods, but only the handful that actually mention
 /// a template parameter need a distinct, substituted copy. The checked
 /// fields mirror [`apply_substitution_to_method`] exactly (return type,
-/// conditional return, parameter hints).
+/// conditional return, type assertions, parameter hints, template
+/// defaults).
 pub(crate) fn method_references_params(method: &MethodInfo, template_params: &[String]) -> bool {
     if template_params.is_empty() {
         return false;
@@ -189,11 +250,23 @@ pub(crate) fn method_references_params(method: &MethodInfo, template_params: &[S
             .conditional_return
             .as_ref()
             .is_some_and(|c| c.references_any_template_param(template_params))
+        || method.type_assertions.iter().any(|a| {
+            a.asserted_type
+                .references_any_template_param(template_params)
+        })
         || method.parameters.iter().any(|p| {
             p.type_hint
                 .as_ref()
                 .is_some_and(|h| h.references_any_template_param(template_params))
         })
+        || method
+            .template_param_defaults
+            .iter()
+            .any(|(_, d)| d.references_any_template_param(template_params))
+        || method
+            .template_param_bounds
+            .values()
+            .any(|b| b.references_any_template_param(template_params))
 }
 
 /// Whether [`apply_substitution_to_property`] would rewrite `property`'s
@@ -212,8 +285,10 @@ pub(crate) fn property_references_params(
 }
 
 /// Fill in every template parameter of `source` that `subs` leaves
-/// unbound, using the parameter's declared bound (`@template T of object`
-/// → `object`) or `mixed` where it declares none.
+/// unbound, using the parameter's declared default (`@template T = Foo`),
+/// else its bound (`@template T of object` → `object`), else `mixed`. A
+/// default or bound naming another parameter reads what that one is bound
+/// to.
 ///
 /// A class that extends, uses, or implements a generic without saying what
 /// it binds the parameters to would otherwise leak the raw template names
@@ -224,12 +299,8 @@ pub(crate) fn fill_template_bounds(source: &ClassInfo, subs: &mut HashMap<String
         if subs.contains_key(key.as_str()) {
             continue;
         }
-        let bound = source
-            .template_param_bounds
-            .get(param_name)
-            .cloned()
-            .unwrap_or_else(PhpType::mixed);
-        subs.insert(key, bound);
+        let fallback = default_type_arg(source, param_name).substitute(subs);
+        subs.insert(key, fallback);
     }
 }
 
@@ -293,35 +364,43 @@ pub(crate) fn build_substitution_map(
     // Right-align a short argument list to the trailing template params,
     // matching `build_generic_subs` and PHPStan/Psalm convention so that
     // `@extends Collection<User>` binds `User` to the value parameter.
-    let offset = right_align_offset(
-        &parent.template_params,
-        &parent.template_param_bounds,
-        type_args.len(),
-    );
+    let offset = generic_arg_offset(parent, type_args.len());
 
+    let mut omitted: Vec<&Atom> = Vec::new();
     for (i, param_name) in parent.template_params.iter().enumerate() {
-        if i < offset {
-            // Skipped leading (key-like) param: fall back to its declared
-            // bound or `mixed` so the raw template name never leaks.
-            let fallback = parent
-                .template_param_bounds
-                .get(param_name)
-                .cloned()
-                .unwrap_or_else(PhpType::mixed);
-            map.insert(param_name.to_string(), fallback);
-            continue;
+        match i.checked_sub(offset).and_then(|index| type_args.get(index)) {
+            Some(arg) => {
+                // Apply any active substitutions to the type argument.
+                // This handles chaining: if arg is "T" and active_subs has
+                // {T => Foo}, the result is {param_name => Foo}.
+                let resolved = if active_subs.is_empty() {
+                    arg.clone()
+                } else {
+                    arg.substitute(active_subs)
+                };
+                map.insert(param_name.to_string(), resolved);
+            }
+            // A skipped leading (key-like) param falls back to its declared
+            // default, bound, or `mixed` so the raw template name never
+            // leaks.
+            None if i < offset => omitted.push(param_name),
+            // A trailing param the arguments stop short of takes its
+            // declared default, which can name another parameter
+            // (`@template EO of DI = DI`) and so stands for what that one
+            // received. Without a default it is left for
+            // `fill_template_bounds`.
+            None if parent.template_param_defaults.contains_key(param_name) => {
+                omitted.push(param_name);
+            }
+            None => {}
         }
-        if let Some(arg) = type_args.get(i - offset) {
-            // Apply any active substitutions to the type argument.
-            // This handles chaining: if arg is "T" and active_subs has
-            // {T => Foo}, the result is {param_name => Foo}.
-            let resolved = if active_subs.is_empty() {
-                arg.clone()
-            } else {
-                arg.substitute(active_subs)
-            };
-            map.insert(param_name.to_string(), resolved);
-        }
+    }
+    let fallbacks: Vec<PhpType> = omitted
+        .iter()
+        .map(|param_name| default_type_arg(parent, param_name).substitute(&map))
+        .collect();
+    for (param_name, fallback) in omitted.into_iter().zip(fallbacks) {
+        map.insert(param_name.to_string(), fallback);
     }
 
     map
@@ -401,31 +480,30 @@ pub(crate) fn build_generic_subs(
     // The heuristic only activates when every skipped leading param
     // has an `array-key` (or `int` / `string`) bound, which is the
     // universal convention for collection key parameters.
-    let offset = right_align_offset(
-        &class.template_params,
-        &class.template_param_bounds,
-        type_args.len(),
-    );
+    let offset = generic_arg_offset(class, type_args.len());
 
     let mut subs = HashMap::new();
+    let mut omitted: Vec<&Atom> = Vec::new();
     for (i, param_name) in class.template_params.iter().enumerate() {
-        if i < offset {
-            // Skipped (right-aligned) params: fall back to their
-            // declared default, upper bound, or `mixed` so the raw
-            // template name never leaks into downstream consumers.
-            let fallback = default_type_arg(class, param_name);
-            subs.insert(param_name.to_string(), fallback);
-            continue;
+        // Skipped (right-aligned) params, and params left over once the
+        // arguments run out, fall back to their declared default, upper
+        // bound, or `mixed` so the raw template name never leaks into
+        // downstream consumers.
+        match i.checked_sub(offset).and_then(|index| type_args.get(index)) {
+            Some(arg) => {
+                subs.insert(param_name.to_string(), arg.clone());
+            }
+            None => omitted.push(param_name),
         }
-        if let Some(arg) = type_args.get(i - offset) {
-            subs.insert(param_name.to_string(), arg.clone());
-        } else {
-            // Unbound param (more template params than type args and
-            // right-alignment didn't apply): use its default before
-            // falling back to the upper bound or `mixed`.
-            let fallback = default_type_arg(class, param_name);
-            subs.insert(param_name.to_string(), fallback);
-        }
+    }
+    // A default can name another parameter (`@template EO of DI = DI`), which
+    // stands for whatever that parameter received here.
+    let fallbacks: Vec<PhpType> = omitted
+        .iter()
+        .map(|param_name| default_type_arg(class, param_name).substitute(&subs))
+        .collect();
+    for (param_name, fallback) in omitted.into_iter().zip(fallbacks) {
+        subs.insert(param_name.to_string(), fallback);
     }
 
     subs
@@ -449,6 +527,19 @@ pub(crate) fn default_type_args(class: &ClassInfo) -> Vec<PhpType> {
         .iter()
         .map(|p| default_type_arg(class, p))
         .collect()
+}
+
+/// The type arguments `child`'s `@extends` tag hands its parent `parent`,
+/// so a call written against the parent from inside the child
+/// (`parent::get()`) sees `@extends Foo<Dog>`'s `Dog` where the parent
+/// says `T`.  `None` when the child does not extend `parent` generically.
+pub(crate) fn extends_type_args(child: &ClassInfo, parent: &ClassInfo) -> Option<Vec<PhpType>> {
+    let parent_short = crate::util::short_name(&parent.name);
+    child
+        .extends_generics
+        .iter()
+        .find(|(name, _)| crate::util::short_name(name) == parent_short)
+        .map(|(_, args)| args.clone())
 }
 
 /// Overlay call-site template values on a class's declared defaults.
@@ -563,13 +654,28 @@ pub(crate) fn apply_generic_args(class: &ClassInfo, type_args: &[PhpType]) -> Cl
         .iter()
         .any(|m| method_references_params(m, &sub_keys))
     {
-        let fp = crate::virtual_members::TransformFingerprint::new(Some(&subs), None, 0);
         for method in result.methods.make_mut() {
-            if method_references_params(method, &sub_keys) {
+            // A method that redeclares one of these names as its own
+            // `@template` shadows the class's: its signature must keep
+            // the raw name for call-site binding, not the class-level
+            // erasure, or the argument never gets a chance to bind it
+            // (see `class_scoped_template_values`, which strips the same
+            // shadowed names from the *values* side of a call).
+            let method_subs = class_scoped_template_values(&subs, &method.template_params);
+            if method_subs.is_empty() {
+                continue;
+            }
+            let method_sub_keys: Vec<String> = method_subs.keys().cloned().collect();
+            if method_references_params(method, &method_sub_keys) {
+                let fp = crate::virtual_members::TransformFingerprint::new(
+                    Some(method_subs.as_ref()),
+                    None,
+                    0,
+                );
                 let transformed =
                     crate::virtual_members::intern_transformed_method(method, fp, || {
                         let mut m = (**method).clone();
-                        apply_substitution_to_method(&mut m, &subs);
+                        apply_substitution_to_method(&mut m, &method_subs);
                         m
                     });
                 *method = transformed;
@@ -633,6 +739,31 @@ pub(crate) fn right_align_offset(
             .is_some_and(is_key_like_bound)
     });
     if all_skipped_are_key_like { skip } else { 0 }
+}
+
+/// Where the written arguments of a generic `class` start among its
+/// template parameters.
+///
+/// [`right_align_offset`] decides it from the parameters' bounds, which
+/// leaves the core iterable interfaces out: their `TKey` is unbounded, yet
+/// `Iterator<Foo>` names the value, not the key. PHPStan hard-codes the same
+/// reading for `Traversable`, `Iterator`, `IteratorAggregate` and
+/// `Generator`.
+pub(crate) fn generic_arg_offset(class: &ClassInfo, num_args: usize) -> usize {
+    if num_args == 1
+        && class.template_params.len() > 1
+        && matches!(
+            class.fqn().as_str(),
+            "Traversable" | "Iterator" | "IteratorAggregate" | "Generator"
+        )
+    {
+        return 1;
+    }
+    right_align_offset(
+        &class.template_params,
+        &class.template_param_bounds,
+        num_args,
+    )
 }
 
 /// Whether a template parameter bound represents a key-like type.

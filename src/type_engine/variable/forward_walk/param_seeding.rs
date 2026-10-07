@@ -71,8 +71,7 @@ pub(crate) fn seed_params<'b>(
 
         let param_results = resolve_param_type(
             &pname,
-            native_type.as_ref(),
-            is_variadic,
+            param,
             &EnclosingMethod {
                 span_start: method_span_start,
                 name: method_name,
@@ -208,15 +207,43 @@ fn finish_constant_operands(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> Option<Ph
 }
 
 /// Finish a `@param` type the docblock parser could only read as text:
-/// qualify the class names in it, then evaluate the type operators it
-/// reads through a constant.
+/// expand the type aliases it names, qualify the class names in it, bind
+/// `self` to the enclosing class, then evaluate the type operators it reads
+/// through a constant.
+///
+/// Aliases go first, while their names are still as written: qualifying
+/// would turn `Shape` into a class name that nothing declares.  Expanding
+/// them here, once, is what lets narrowing see the members of a
+/// `@param Row|null` alias at all.
 ///
 /// Reading the constant here means the body sees the keys the table
 /// actually has, and the declaration is judged a refinement of the native
 /// `string` hint rather than an operator nothing can compare.
 pub(crate) fn resolve_docblock_param_type(raw: &PhpType, ctx: &ForwardWalkCtx<'_>) -> PhpType {
+    let expanded = crate::type_engine::type_resolution::expand_nested_type_aliases(
+        raw,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    let raw = expanded.as_ref().unwrap_or(raw);
     let resolved = crate::util::resolve_php_type_names(raw, ctx.class_loader);
+    let resolved = bind_enclosing_self(&resolved, ctx).unwrap_or(resolved);
     finish_constant_operands(&resolved, ctx).unwrap_or(resolved)
+}
+
+/// A declared parameter type with `self` bound to the enclosing class, or
+/// `None` when there is nothing to bind.
+///
+/// `self` is lexical, so it names the enclosing class wherever the value
+/// travels afterwards (`$o->foo` on an `object{foo: self}`).  A trait is
+/// left alone: there `self` is whichever class uses it.
+fn bind_enclosing_self(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> Option<PhpType> {
+    let class = ctx.current_class;
+    (!class.name.is_empty()
+        && class.kind != crate::types::ClassLikeKind::Trait
+        && ty.contains_bare_self())
+    .then(|| ty.replace_bare_self(&class.fqn()))
 }
 
 /// The declaration a parameter belongs to, as far as resolving its type
@@ -246,8 +273,7 @@ pub(crate) struct EnclosingMethod<'a> {
 /// methods with no body).
 pub(crate) fn resolve_param_type(
     pname: &str,
-    native_type: Option<&PhpType>,
-    is_variadic: bool,
+    param: &FunctionLikeParameter<'_>,
     enclosing: &EnclosingMethod<'_>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
@@ -257,37 +283,60 @@ pub(crate) fn resolve_param_type(
         has_scope_attr,
         trait_prototype,
     } = *enclosing;
+    let is_variadic = param.ellipsis.is_some();
+    // The hint as written, which is what the declarations it is compared
+    // against below record.
+    let raw_native = param.hint.as_ref().map(|h| extract_hint_type(h));
+    // A `null` default makes the parameter accept null whatever its type
+    // says (`bool $a = null` is `?bool`).
+    let default_is_null = crate::parser::param_default_is_null(param);
+    let accept_default = |ty: PhpType| if default_is_null { ty.or_null() } else { ty };
+    let native_type = raw_native.clone().map(accept_default);
+    let native_type = native_type.as_ref();
     // Eloquent scope Builder enrichment: when the enclosing class
     // extends Eloquent Model and this is a scope method (convention
     // or #[Scope] attribute), enrich bare `Builder` to
     // `Builder<EnclosingModel>`.
-    let enriched_type = native_type.and_then(|nt| {
-        if let Some(mname) = method_name {
-            super::super::resolution::enrich_builder_type_in_scope(
-                nt,
-                mname,
-                has_scope_attr,
-                ctx.current_class,
-                ctx.class_loader,
-            )
-        } else {
-            None
-        }
-    });
+    let enriched_type = raw_native
+        .as_ref()
+        .and_then(|nt| {
+            if let Some(mname) = method_name {
+                super::super::resolution::enrich_builder_type_in_scope(
+                    nt,
+                    mname,
+                    has_scope_attr,
+                    ctx.current_class,
+                    ctx.class_loader,
+                )
+            } else {
+                None
+            }
+        })
+        .map(accept_default);
 
-    // Check the `@param` docblock annotation.
-    let raw_docblock_type = crate::docblock::find_iterable_raw_type_in_source(
+    // Check the `@param` docblock annotation.  The declaration's bounded
+    // templates are marked with their bounds before the docblock is
+    // weighed against the native hint, so `@param T $foo` on `int $foo`
+    // (`@template T of int`) is judged by what `T` is known to be.
+    let unmarked_docblock_type = super::super::resolution::declared_param_docblock_type(
         ctx.content,
         method_span_start as usize,
         pname,
     )
     .map(|t| resolve_docblock_param_type(&t, ctx));
+    let raw_docblock_type = unmarked_docblock_type.clone().map(|t| {
+        super::super::resolution::substitute_template_param_bounds(
+            t,
+            ctx.content,
+            method_span_start as usize,
+        )
+    });
 
     // With no `@param` of its own, an override inherits the ancestor's,
     // which `@extends`/`@implements` template substitution may have
     // narrowed below the native hint PHP forced the override to restate.
     let inherited_refinement = if raw_docblock_type.is_none() && enriched_type.is_none() {
-        inherited_param_refinement(pname, method_name, native_type, ctx)
+        inherited_param_refinement(pname, method_name, raw_native.as_ref(), ctx).map(accept_default)
     } else {
         None
     };
@@ -298,7 +347,9 @@ pub(crate) fn resolve_param_type(
     let trait_refinement =
         if inherited_refinement.is_none() && raw_docblock_type.is_none() && enriched_type.is_none()
         {
-            trait_prototype.and_then(|proto| prototype_param_refinement(proto, pname, native_type))
+            trait_prototype
+                .and_then(|proto| prototype_param_refinement(proto, pname, raw_native.as_ref()))
+                .map(accept_default)
         } else {
             None
         };
@@ -315,10 +366,27 @@ pub(crate) fn resolve_param_type(
     // the generic args survive into the resolved ClassInfo.
     let native_for_effective = type_for_resolution.cloned();
     let doc_parsed = raw_docblock_type.clone();
+    // A template can take the `null` itself, so it keeps its own name
+    // (`@param T $t = null` stays `T`).
+    let doc_accepts_default = default_is_null
+        && !doc_parsed.as_ref().is_some_and(|doc| {
+            super::super::resolution::references_method_template(
+                doc,
+                ctx.content,
+                method_span_start as usize,
+            )
+        });
     let effective_type = crate::docblock::resolve_effective_type_typed(
         native_for_effective.as_ref(),
         doc_parsed.as_ref(),
-    );
+    )
+    .map(|ty| {
+        if doc_accepts_default {
+            ty.or_null()
+        } else {
+            ty
+        }
+    });
 
     // Substitute method-level template params with their bounds.
     let effective_type = effective_type.map(|ty| {
@@ -381,13 +449,15 @@ pub(crate) fn resolve_param_type(
         )
     } else if let Some(ref eff) = effective_type
         && (trait_refinement.is_some()
-            || raw_docblock_type.as_ref().is_some_and(|rdt| *rdt != *eff))
+            || unmarked_docblock_type
+                .as_ref()
+                .is_some_and(|rdt| *rdt != *eff))
     {
-        // The effective type differs from the raw docblock type, meaning
-        // template substitution produced a concrete type (e.g. `K` →
-        // `array-key`).  Use the substituted type so that downstream
-        // narrowing (type guards, instanceof) operates on the concrete
-        // type rather than the bare template parameter name.
+        // The effective type differs from the docblock type as written,
+        // meaning template marking produced a bounded type (e.g. `K` →
+        // `K of array-key`).  Use it so that downstream narrowing (type
+        // guards, instanceof) operates on the bound rather than on a bare
+        // template parameter name nothing can resolve.
         vec![ResolvedType::from_type_string(eff.clone())]
     } else if let Some(ref rdt) = raw_docblock_type {
         let parsed_docblock = rdt.clone();
@@ -438,15 +508,32 @@ pub(crate) fn resolve_param_type(
         }
     }
 
-    // Variadic parameter wrapping.
-    if is_variadic && !param_results.is_empty() {
-        for rt in &mut param_results {
-            rt.type_string = PhpType::list(rt.type_string.clone());
-            rt.class_info = None;
-        }
+    if is_variadic {
+        wrap_variadic(&mut param_results);
     }
 
     param_results
+}
+
+/// Turn a variadic parameter's element types into the array it receives.
+///
+/// Named arguments land in it under their names, so its keys are
+/// `int|string` rather than a list's (PHPStan and Psalm agree).  The array
+/// exists even when the elements are untyped.
+pub(crate) fn wrap_variadic(param_results: &mut Vec<ResolvedType>) {
+    if param_results.is_empty() {
+        param_results.push(ResolvedType::from_type_string(PhpType::mixed()));
+    }
+    for rt in param_results {
+        rt.type_string = PhpType::generic(
+            "array",
+            vec![
+                PhpType::union(vec![PhpType::int(), PhpType::string()]),
+                rt.type_string.clone(),
+            ],
+        );
+        rt.class_info = None;
+    }
 }
 
 /// The declaration a trait's own method implements.
@@ -588,6 +675,15 @@ pub(crate) fn try_resolve_from_merged_class(
     let declared = merged_param.type_hint.as_ref()?;
     // The merged declaration is as much a place a `key-of<CONSTANT>` is read
     // as the source docblock is, and for a method it is the one that wins.
+    let expanded = crate::type_engine::type_resolution::expand_nested_type_aliases(
+        declared,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    let declared = expanded.as_ref().unwrap_or(declared);
+    let bound = bind_enclosing_self(declared, ctx);
+    let declared = bound.as_ref().unwrap_or(declared);
     let finished = finish_constant_operands(declared, ctx);
     let hint = finished.as_ref().unwrap_or(declared);
 

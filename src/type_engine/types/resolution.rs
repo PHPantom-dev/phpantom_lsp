@@ -141,7 +141,27 @@ pub(crate) fn type_hint_to_classes_typed(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<Arc<ClassInfo>> {
-    type_hint_to_classes_typed_depth(ty, owning_class_name, all_classes, class_loader, 0)
+    type_hint_to_classes_typed_depth(ty, owning_class_name, all_classes, class_loader, 0, false)
+}
+
+/// [`type_hint_to_classes_typed`] for a method's *return* type hint.
+///
+/// A returned collection is one Eloquent actually produced, so — unlike a
+/// parameter, property, or `@var` hint resolved through the plain
+/// entry point above — it is safe to swap the declared
+/// `Illuminate\Database\Eloquent\Collection<…, TModel>` for the model's
+/// custom collection class (see
+/// [`laravel::try_swap_custom_collection`]). Resolving a value the
+/// caller merely declared as the base collection to the narrower
+/// subclass would be an over-claim: the caller may have built a plain
+/// collection itself.
+pub(crate) fn type_hint_to_classes_typed_returned(
+    ty: &PhpType,
+    owning_class_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Vec<Arc<ClassInfo>> {
+    type_hint_to_classes_typed_depth(ty, owning_class_name, all_classes, class_loader, 0, true)
 }
 
 /// Type `hint` as the classes it names, or as a bare type string when it
@@ -157,6 +177,14 @@ pub(crate) fn resolved_types_for_hint(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<crate::types::ResolvedType> {
+    let hint = if laravel::has_model_type_operator(&hint) && !owning_class_name.is_empty() {
+        laravel::expand_model_type(
+            &hint.resolve_self_refs_bounded(owning_class_name, None),
+            class_loader,
+        )
+    } else {
+        laravel::expand_model_type(&hint, class_loader)
+    };
     let classes = type_hint_to_classes_typed(&hint, owning_class_name, all_classes, class_loader);
     if classes.is_empty() {
         vec![crate::types::ResolvedType::from_type_string(hint)]
@@ -167,30 +195,39 @@ pub(crate) fn resolved_types_for_hint(
 
 /// Inner implementation with a recursion depth guard to prevent
 /// infinite loops from circular type aliases.
+///
+/// `produced` is true only when `ty` is a method's return type hint (see
+/// [`type_hint_to_classes_typed_returned`]); it is threaded unchanged
+/// through every recursive call so a union/generic-arg member nested
+/// inside a return type is still treated as returned.
 fn type_hint_to_classes_typed_depth(
     ty: &PhpType,
     owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     depth: u8,
+    produced: bool,
 ) -> Vec<Arc<ClassInfo>> {
     if depth > MAX_ALIAS_DEPTH {
         return vec![];
     }
 
     match ty.kind() {
-        // ── Leniency / list-shape markers → unwrap inner ───────────
-        // Unreachable via `kind()`, which sees through both markers, but the
-        // arms keep this match exhaustive over the type language.
-        TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
-            type_hint_to_classes_typed_depth(
-                inner,
-                owning_class_name,
-                all_classes,
-                class_loader,
-                depth,
-            )
-        }
+        // ── Leniency / list-shape / template / unsealed / class-name markers ─
+        // Unreachable via `kind()`, which sees through all five markers,
+        // but the arms keep this match exhaustive over the type language.
+        TypeKind::UnsealedShape(_) => vec![],
+        TypeKind::Benevolent(inner)
+        | TypeKind::ListShape(inner)
+        | TypeKind::TemplateParam(_, inner)
+        | TypeKind::ClassNameLiteral(inner) => type_hint_to_classes_typed_depth(
+            inner,
+            owning_class_name,
+            all_classes,
+            class_loader,
+            depth,
+            produced,
+        ),
         // ── Nullable → unwrap inner ────────────────────────────────
         TypeKind::Nullable(inner) => type_hint_to_classes_typed_depth(
             inner,
@@ -198,6 +235,7 @@ fn type_hint_to_classes_typed_depth(
             all_classes,
             class_loader,
             depth,
+            produced,
         ),
 
         // ── Union type ─────────────────────────────────────────────
@@ -211,6 +249,7 @@ fn type_hint_to_classes_typed_depth(
                     all_classes,
                     class_loader,
                     depth,
+                    produced,
                 );
                 if matches!(member.kind(), TypeKind::Generic(_)) {
                     // Different arguments can instantiate the same class with
@@ -236,6 +275,7 @@ fn type_hint_to_classes_typed_depth(
                     all_classes,
                     class_loader,
                     depth,
+                    produced,
                 );
                 ClassInfo::extend_unique_arc(&mut results, resolved);
             }
@@ -244,14 +284,31 @@ fn type_hint_to_classes_typed_depth(
 
         // ── Object shape ───────────────────────────────────────────
         TypeKind::ObjectShape(entries) => {
+            // The synthetic class stands in for no class of its own, so a
+            // `self` in a property type names the owning class, exactly as a
+            // bare `self` would (see `resolve_named_type`).
+            let self_fqn = if !owning_class_name.is_empty()
+                && entries.iter().any(|e| e.value_type.contains_bare_self())
+            {
+                find_class_by_name(all_classes, owning_class_name)
+                    .map(Arc::clone)
+                    .or_else(|| class_loader(owning_class_name))
+                    .map(|c| c.fqn())
+            } else {
+                None
+            };
             let properties = SharedVec::from_vec(
                 entries
                     .iter()
                     .map(|e| {
+                        let type_hint = match &self_fqn {
+                            Some(fqn) => e.value_type.replace_bare_self(fqn),
+                            None => e.value_type.clone(),
+                        };
                         Arc::new(PropertyInfo {
                             name: atom(&e.key.clone().unwrap_or_default()),
                             name_offset: 0,
-                            type_hint: Some(e.value_type.clone()),
+                            type_hint: Some(type_hint),
                             native_type_hint: None,
                             description: None,
                             is_static: false,
@@ -274,9 +331,15 @@ fn type_hint_to_classes_typed_depth(
             })]
         }
 
-        TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
-            resolve_named_type(s, &[], owning_class_name, all_classes, class_loader, depth)
-        }
+        TypeKind::StaticType(s) | TypeKind::ThisType(s) => resolve_named_type(
+            s,
+            &[],
+            owning_class_name,
+            all_classes,
+            class_loader,
+            depth,
+            produced,
+        ),
 
         // ── Named type (class name, keyword, or alias) ─────────────
         TypeKind::Named(name) => resolve_named_type(
@@ -286,17 +349,42 @@ fn type_hint_to_classes_typed_depth(
             all_classes,
             class_loader,
             depth,
+            produced,
         ),
 
         // ── Generic type ───────────────────────────────────────────
-        TypeKind::Generic(g) => resolve_named_type(
-            &g.name,
-            &g.args,
-            owning_class_name,
-            all_classes,
-            class_loader,
-            depth,
-        ),
+        TypeKind::Generic(g) => {
+            if matches!(
+                g.name.as_str(),
+                "builder-of" | "collection-of" | "factory-of" | "relation-of"
+            ) {
+                let bound = if owning_class_name.is_empty() {
+                    ty.clone()
+                } else {
+                    ty.resolve_self_refs_bounded(owning_class_name, None)
+                };
+                let expanded = laravel::expand_model_type(&bound, class_loader);
+                if &expanded != ty {
+                    return type_hint_to_classes_typed_depth(
+                        &expanded,
+                        owning_class_name,
+                        all_classes,
+                        class_loader,
+                        depth + 1,
+                        produced,
+                    );
+                }
+            }
+            resolve_named_type(
+                &g.name,
+                &g.args,
+                owning_class_name,
+                all_classes,
+                class_loader,
+                depth,
+                produced,
+            )
+        }
 
         // ── Array slice (T[]) ──────────────────────────────────────
         // Not a class type itself; skip.
@@ -327,6 +415,7 @@ fn resolve_named_type(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     depth: u8,
+    produced: bool,
 ) -> Vec<Arc<ClassInfo>> {
     // ── Fast reject: built-in scalar/pseudo types can never resolve
     //    to a class and are never type aliases. ──────────────────────
@@ -347,6 +436,7 @@ fn resolve_named_type(
             all_classes,
             class_loader,
             depth + 1,
+            produced,
         );
     }
 
@@ -366,6 +456,7 @@ fn resolve_named_type(
                 all_classes,
                 class_loader,
                 depth,
+                produced,
             );
         }
         return find_class_by_name(all_classes, owning_class_name)
@@ -411,14 +502,22 @@ fn resolve_named_type(
 
     match lookup_class_declaration(name, owning_class_name, all_classes, class_loader) {
         Some(cls) => {
+            let cls = Arc::unwrap_or_clone(cls);
+
             // ── Eloquent custom collection swapping ────────────────
-            let cls = laravel::try_swap_custom_collection(
-                Arc::unwrap_or_clone(cls),
-                name,
-                generic_args,
-                all_classes,
-                class_loader,
-            );
+            // Only for a returned type hint — see
+            // `type_hint_to_classes_typed_returned`.
+            let cls = if produced {
+                laravel::try_swap_custom_collection(
+                    cls,
+                    name,
+                    generic_args,
+                    all_classes,
+                    class_loader,
+                )
+            } else {
+                cls
+            };
 
             // A type hint that names a generic class without arguments
             // (`@var ItemCollection $items`, a bare parameter or return
@@ -551,6 +650,7 @@ fn resolve_named_type(
                     all_classes,
                     class_loader,
                     depth + 1,
+                    produced,
                 );
             }
 
@@ -609,6 +709,106 @@ pub(crate) fn resolve_type_alias_typed(
     }
 
     last_resolved
+}
+
+/// Expand every type alias named anywhere inside `ty` (`Shape|null`,
+/// `list<Row>`), or `None` when it names none.
+///
+/// [`resolve_type_alias_typed`] only expands a type that *is* an alias; a
+/// declared type that merely contains one needs this walk.  An alias body
+/// that names another alias is expanded too, up to the same ten levels the
+/// chain lookup allows, so a cycle stops rather than recursing forever.
+pub(crate) fn expand_nested_type_aliases(
+    ty: &PhpType,
+    owning_class_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    // Aliases are declared on a class in the file, so a file that declares
+    // none cannot name one.
+    if all_classes.iter().all(|c| c.type_aliases.is_empty()) {
+        return None;
+    }
+    fn walk(
+        ty: &PhpType,
+        depth: u8,
+        owning_class_name: &str,
+        all_classes: &[Arc<ClassInfo>],
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> PhpType {
+        if depth >= 10 {
+            return ty.clone();
+        }
+        if matches!(ty.kind(), TypeKind::Named(_)) {
+            return match resolve_type_alias_typed(ty, owning_class_name, all_classes, class_loader)
+            {
+                Some(expanded) => walk(
+                    &expanded,
+                    depth + 1,
+                    owning_class_name,
+                    all_classes,
+                    class_loader,
+                ),
+                None => ty.clone(),
+            };
+        }
+        ty.map_children(&|child| walk(child, depth, owning_class_name, all_classes, class_loader))
+    }
+    let expanded = walk(ty, 0, owning_class_name, all_classes, class_loader);
+    (expanded != *ty).then_some(expanded)
+}
+
+/// [`expand_nested_type_aliases`] for a type read off a member of `class`,
+/// which may be declared in another file.
+///
+/// The file-scoped lookup only sees the classes of the file being
+/// analysed, but a member signature names the aliases of the class that
+/// declares it. An inherited or trait-imported member no longer records
+/// that class, so a bare alias name the file cannot resolve is looked up
+/// on `class`, the traits it uses and its ancestors, nearest first.
+pub(crate) fn expand_member_type_aliases(
+    ty: &PhpType,
+    class: &ClassInfo,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    if let Some(expanded) = expand_nested_type_aliases(ty, &class.name, all_classes, class_loader) {
+        return Some(expanded);
+    }
+    let TypeKind::Named(name) = ty.kind() else {
+        return None;
+    };
+    if is_builtin_non_class_type(name) {
+        return None;
+    }
+    let name = atom(name);
+    let mut queue: Vec<Arc<ClassInfo>> = Vec::new();
+    let mut visited = crate::atom::AtomSet::default();
+    let mut loaded_current: Option<Arc<ClassInfo>> = None;
+    let mut index = 0;
+    loop {
+        let current: &ClassInfo = loaded_current.as_deref().unwrap_or(class);
+        if let Some(def) = current.type_aliases.get(&name) {
+            let expanded = expand_type_alias_def(def, all_classes, class_loader)?;
+            return Some(
+                expand_nested_type_aliases(&expanded, &current.name, all_classes, class_loader)
+                    .unwrap_or(expanded),
+            );
+        }
+        for related in current
+            .used_traits
+            .iter()
+            .chain(current.parent_class.iter())
+        {
+            if visited.insert(*related)
+                && let Some(loaded) = class_loader(related)
+            {
+                queue.push(loaded);
+            }
+        }
+        loaded_current = Some(Arc::clone(queue.get(index)?));
+        index += 1;
+    }
 }
 
 /// Single-level alias lookup (no chaining).
@@ -678,6 +878,35 @@ pub(crate) fn resolve_imported_type_alias(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
+    let visiting = std::cell::RefCell::new(Vec::new());
+    resolve_imported_alias_in_source(
+        source_class_name,
+        original_name,
+        all_classes,
+        class_loader,
+        &visiting,
+    )
+}
+
+/// [`resolve_imported_type_alias`], with the imports already being
+/// resolved on the way here.
+///
+/// An imported alias is written in its source class's scope, so any alias
+/// its body names (`array{r: RDto}` under `@import-type RDto from R`) is
+/// that class's, not the importer's, and is expanded there. An import of an
+/// import is followed the same way. `visiting` holds the `(class, alias)`
+/// pairs being resolved, so an alias that names itself through a cycle of
+/// imports resolves to `mixed` where it recurs, as PHPStan gives up on a
+/// circular alias. Leaving the name there instead would hand it back to the
+/// caller's own alias walk, which would expand the cycle once more per
+/// level it allows.
+fn resolve_imported_alias_in_source(
+    source_class_name: &str,
+    original_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    visiting: &std::cell::RefCell<Vec<(String, String)>>,
+) -> Option<PhpType> {
     let lookup = source_class_name
         .rsplit('\\')
         .next()
@@ -685,15 +914,74 @@ pub(crate) fn resolve_imported_type_alias(
     let source_class = all_classes
         .iter()
         .find(|c| c.name == lookup)
-        .map(|c| ClassInfo::clone(c))
-        .or_else(|| class_loader(source_class_name).map(Arc::unwrap_or_clone));
-
-    let source_class = source_class?;
+        .cloned()
+        .or_else(|| class_loader(source_class_name))?;
     let def = source_class.type_aliases.get(&atom(original_name))?;
 
-    // Don't follow nested imports — just return the local definition.
-    match def {
-        TypeAliasDef::Local(php_type) => Some(php_type.clone()),
-        TypeAliasDef::Import { .. } => None,
+    let key = (source_class_name.to_string(), original_name.to_string());
+    if visiting.borrow().contains(&key) {
+        return Some(PhpType::mixed());
     }
+    visiting.borrow_mut().push(key);
+    let resolved = match def {
+        TypeAliasDef::Local(php_type) => Some(expand_aliases_in_source(
+            php_type,
+            &source_class,
+            class_loader,
+            visiting,
+        )),
+        TypeAliasDef::Import {
+            source_class,
+            original_name,
+        } => resolve_imported_alias_in_source(
+            source_class,
+            original_name,
+            &[],
+            class_loader,
+            visiting,
+        ),
+    };
+    visiting.borrow_mut().pop();
+    resolved
+}
+
+/// Expand the aliases `source_class` declares or imports wherever they are
+/// named inside `ty`.
+fn expand_aliases_in_source(
+    ty: &PhpType,
+    source_class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    visiting: &std::cell::RefCell<Vec<(String, String)>>,
+) -> PhpType {
+    if source_class.type_aliases.is_empty() {
+        return ty.clone();
+    }
+    if let TypeKind::Named(name) = ty.kind()
+        && let Some(def) = source_class.type_aliases.get(name)
+    {
+        let expanded = match def {
+            TypeAliasDef::Local(body) => {
+                let key = (source_class.fqn().to_string(), name.to_string());
+                if visiting.borrow().contains(&key) {
+                    return PhpType::mixed();
+                }
+                visiting.borrow_mut().push(key);
+                let expanded = expand_aliases_in_source(body, source_class, class_loader, visiting);
+                visiting.borrow_mut().pop();
+                Some(expanded)
+            }
+            TypeAliasDef::Import {
+                source_class,
+                original_name,
+            } => resolve_imported_alias_in_source(
+                source_class,
+                original_name,
+                &[],
+                class_loader,
+                visiting,
+            ),
+        };
+        return expanded.unwrap_or_else(|| ty.clone());
+    }
+    ty.map_children(&|child| expand_aliases_in_source(child, source_class, class_loader, visiting))
 }

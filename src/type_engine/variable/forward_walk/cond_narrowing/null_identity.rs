@@ -1,5 +1,4 @@
 use super::*;
-use crate::type_engine::variable::forward_walk::scope_state::type_admits_null;
 
 /// Strip `null` from a subject that an identity comparison has matched
 /// against a value that cannot be `null`.
@@ -27,9 +26,7 @@ pub(super) fn apply_identity_comparison_null_narrowing<'b>(
     collect_identity_comparisons(condition, truthy, &mut compared);
 
     for (subject, comparand) in compared {
-        let Some(key) =
-            expr_to_var_name(subject).or_else(|| narrowing::expr_to_subject_key(subject))
-        else {
+        let Some(key) = expr_to_subject(subject) else {
             continue;
         };
         // The cheap half first: with no null to rule out there is
@@ -55,6 +52,82 @@ pub(super) fn expr_accepts_null(
     let var_ctx = build_var_ctx("", ctx, &scope_resolver);
     crate::type_engine::variable::resolution::resolve_arg_raw_type(expr, &var_ctx)
         .is_none_or(|ty| ty.accepts_null())
+}
+
+/// Narrow a subject compared identical to a comparand whose own resolved
+/// type is a single literal value, the way `$x === 2` written inline
+/// already narrows `$x` via [`apply_literal_identity_narrowing`] — except
+/// here the literal is not written in the condition itself, it is what
+/// the comparand's own type has already been narrowed to:
+///
+/// ```php
+/// $a = 2;
+/// $b = getPositiveInt(); // positive-int
+/// assert($a === $b);
+/// $b; // 2, not just positive-int
+/// ```
+///
+/// A comparand written as a literal is left to
+/// [`apply_literal_identity_narrowing`], which already handles it and
+/// does not need a full type resolution to do so.
+pub(super) fn apply_identity_comparison_literal_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    truthy: bool,
+) {
+    let mut compared: Vec<(&Expression<'_>, &Expression<'_>)> = Vec::new();
+    collect_identity_comparisons(condition, truthy, &mut compared);
+
+    for (subject, comparand) in compared {
+        if literal_comparand_type(comparand).is_some() {
+            continue;
+        }
+        let Some(key) = expr_to_subject(subject) else {
+            continue;
+        };
+        let Some(literal) = single_literal_type(comparand, scope, ctx) else {
+            continue;
+        };
+        seed_synthetic_key_if_needed(&key, scope, ctx);
+        let types = scope.get(&key).to_vec();
+        if types.is_empty() {
+            continue;
+        }
+        let admits = types.iter().any(|rt| {
+            rt.type_string
+                .union_members()
+                .iter()
+                .any(|member| literal.is_subtype_of(member))
+        });
+        if admits {
+            scope.set(&key, vec![ResolvedType::from_type_string(literal)]);
+            write_offset_key_into_shapes(&key, scope);
+        }
+    }
+}
+
+/// The single literal value `expr` resolves to, if its type admits only
+/// one exact value: a literal int/float/string, or `true`/`false`.
+///
+/// A refined type like `positive-int` does not qualify on its own — only
+/// a value narrowed down to one exact literal does, whether that
+/// narrowing came from a literal assignment or from an earlier identity
+/// check.
+fn single_literal_type(
+    expr: &Expression<'_>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<PhpType> {
+    let resolved = resolve_rhs_with_scope(expr, scope, ctx);
+    let [rt] = resolved.as_slice() else {
+        return None;
+    };
+    let members = rt.type_string.union_members();
+    let [ty] = members.as_slice() else {
+        return None;
+    };
+    (ty.as_literal().is_some() || ty.is_true() || ty.is_false()).then(|| (*ty).clone())
 }
 
 /// Collect the `(subject, comparand)` pairs of every identity comparison
@@ -113,29 +186,42 @@ pub(super) fn collect_identity_comparisons<'b>(
 /// is the guarded state: a holder that is no longer nullable is one the
 /// condition ruled the null out of, whichever shape the guard was written
 /// in (`instanceof`, `!== null`, a bare truthy test, an assertion helper).
+///
+/// `entry` is the scope's variable map from before the condition was
+/// applied. A trigger reads nothing but its holder's value, so only a
+/// holder the condition changed can have started to meet one; looking up
+/// just those keeps a condition from testing every proof the scope has
+/// accumulated.
 pub(super) fn apply_non_null_implication_narrowing(
     scope: &mut ScopeState,
+    entry: &Locals,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    if !scope.non_null_implications.is_empty() {
-        let proven: Vec<Atom> = scope
-            .non_null_implications
-            .iter()
-            .filter(|(holder, _)| !scope_value_is_nullable(holder, scope))
-            .flat_map(|(_, implieds)| implieds.iter().copied())
-            .collect();
-        for implied in proven {
-            seed_synthetic_key_if_needed(&implied, scope, ctx);
-            strip_null_from_scope(&implied, scope);
-        }
-    }
-
-    if scope.implied_narrowings.is_empty() {
+    if scope.non_null_implications.is_empty() && scope.implied_narrowings.is_empty() {
         return;
     }
-    let proven: Vec<(Atom, Vec<ResolvedType>)> = scope
-        .implied_narrowings
+    let mut changed: Vec<Atom> = Vec::new();
+    let _ = scope.locals.diff::<()>(entry, |key, now, _| {
+        if now.is_some() {
+            changed.push(*key);
+        }
+        std::ops::ControlFlow::Continue(())
+    });
+
+    let proven: Vec<Atom> = changed
         .iter()
+        .filter(|holder| !scope_value_is_nullable(holder, scope))
+        .filter_map(|holder| scope.non_null_implications.get(holder))
+        .flat_map(|implieds| implieds.iter().copied())
+        .collect();
+    for implied in proven {
+        seed_synthetic_key_if_needed(&implied, scope, ctx);
+        strip_null_from_scope(&implied, scope);
+    }
+
+    let proven: Vec<(Atom, Vec<ResolvedType>)> = changed
+        .iter()
+        .filter_map(|holder| Some((holder, scope.implied_narrowings.get(holder)?)))
         .flat_map(|(holder, proofs)| {
             proofs
                 .iter()
@@ -218,7 +304,9 @@ fn recorded_narrows_current(
             narrow.type_string.unwrap_nullable().class_name(),
             wide.type_string.unwrap_nullable().class_name(),
         ) {
-            (Some(child), Some(parent)) => is_subclass_of(child, parent, ctx.class_loader),
+            (Some(child), Some(parent)) => {
+                crate::class_lookup::is_subclass_of(child, parent, ctx.class_loader)
+            }
             _ => false,
         }
     };
@@ -273,6 +361,14 @@ pub(super) fn collect_proven_non_null_exprs<'b>(
             if decomposes {
                 collect_proven_non_null_exprs(bin.lhs, truthy, out);
                 collect_proven_non_null_exprs(bin.rhs, truthy, out);
+                return;
+            }
+
+            // Only an object is an instance of anything.
+            if matches!(bin.operator, BinaryOperator::Instanceof(_)) {
+                if truthy {
+                    out.push(bin.lhs);
+                }
                 return;
             }
 
@@ -348,7 +444,7 @@ pub(super) fn strip_null_by_constant_identity(
     }
     if constant_types
         .iter()
-        .any(|rt| type_admits_null(&rt.type_string))
+        .any(|rt| rt.type_string.accepts_null())
     {
         return;
     }

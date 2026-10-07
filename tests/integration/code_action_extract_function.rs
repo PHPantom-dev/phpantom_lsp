@@ -6,7 +6,8 @@
 //! selection with a call and inserts a new function or method definition.
 
 use crate::common::{
-    apply_workspace_edit, create_test_backend, get_code_actions_in_range, resolve_action,
+    apply_workspace_edit, create_test_backend, find_action, get_code_actions_in_range,
+    resolve_action,
 };
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
@@ -45,6 +46,52 @@ fn find_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
         }
         _ => None,
     })
+}
+
+/// [`find_extract_action`] but without the "not disabled" requirement, for
+/// the tests that assert on what the handler offers at all.
+fn find_any_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
+    find_action(actions, "Extract function").or_else(|| find_action(actions, "Extract method"))
+}
+
+/// Find a `refactor.extract` action whose title mentions "Extract",
+/// matching on the kind rather than on a title prefix.
+fn find_refactor_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
+    actions.iter().find_map(|a| match a {
+        CodeActionOrCommand::CodeAction(ca)
+            if ca.kind == Some(CodeActionKind::REFACTOR_EXTRACT)
+                && ca.title.contains("Extract") =>
+        {
+            Some(ca)
+        }
+        _ => None,
+    })
+}
+
+/// Find a *disabled* `refactor.extract` action whose title mentions
+/// "Extract".
+fn find_disabled_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
+    actions.iter().find_map(|a| match a {
+        CodeActionOrCommand::CodeAction(ca)
+            if ca.disabled.is_some()
+                && ca.kind == Some(CodeActionKind::REFACTOR_EXTRACT)
+                && ca.title.contains("Extract") =>
+        {
+            Some(ca)
+        }
+        _ => None,
+    })
+}
+
+/// The titles of every offered action, for assertion messages.
+fn action_titles(actions: &[CodeActionOrCommand]) -> Vec<String> {
+    actions
+        .iter()
+        .map(|a| match a {
+            CodeActionOrCommand::CodeAction(ca) => ca.title.clone(),
+            CodeActionOrCommand::Command(cmd) => cmd.title.clone(),
+        })
+        .collect()
 }
 
 // ── Offering / not offering the action ──────────────────────────────────────
@@ -1340,5 +1387,222 @@ function foo(array &$out) {
     assert!(
         result.contains("$count = "),
         "call site should keep assigning $count:\n{result}"
+    );
+}
+
+// ── Code action on Backend ──────────────────────────────────────────────────
+
+#[test]
+fn extract_function_action_offered_for_complete_statements() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = 1;
+    $y = $x + 2;
+    echo $y;
+}
+";
+    // Select `$x = 1;\n    $y = $x + 2;`
+    let start_line = 2; // `    $x = 1;`
+    let end_line = 3; // `    $y = $x + 2;`
+
+    let actions = get_code_actions(&backend, uri, content, start_line, 4, end_line, 16);
+    let extract_action = find_action(&actions, "Extract function");
+    assert!(
+        extract_action.is_some(),
+        "should offer extract function action, got: {:?}",
+        action_titles(&actions)
+    );
+}
+
+#[test]
+fn extract_function_not_offered_for_empty_selection() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = 1;
+}
+";
+    // Empty selection.
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 2, 4);
+    assert!(
+        find_any_extract_action(&actions).is_none(),
+        "should not offer extract for empty selection"
+    );
+}
+
+#[test]
+fn extract_function_not_offered_for_partial_statement() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = 1 + 2;
+}
+";
+    // Select just `1 + 2` — not a complete statement.
+    let actions = get_code_actions(&backend, uri, content, 2, 9, 2, 14);
+    assert!(
+        find_any_extract_action(&actions).is_none(),
+        "should not offer extract for partial statement"
+    );
+}
+
+#[test]
+fn extract_method_offered_when_using_this() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+class Foo {
+    private int $value = 0;
+
+    public function bar() {
+        $x = $this->value;
+        echo $x;
+    }
+}
+";
+    // Select `$x = $this->value;\n        echo $x;`
+    let actions = get_code_actions(&backend, uri, content, 5, 8, 6, 16);
+    let extract_method = find_action(&actions, "Extract method");
+    assert!(
+        extract_method.is_some(),
+        "should offer extract method when $this is used, got: {:?}",
+        action_titles(&actions)
+    );
+}
+
+#[test]
+fn extract_function_offered_for_trailing_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = 1;
+    return $x;
+}
+";
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 3, 14);
+    let extract_action = find_any_extract_action(&actions);
+    assert!(
+        extract_action.is_some(),
+        "should offer extract when return is the last selected statement"
+    );
+}
+
+#[test]
+fn extract_function_offered_for_guard_clause_return() {
+    // Non-trailing returns that form guard clauses should now be
+    // offered with the appropriate guard strategy.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo($x) {
+    if ($x) {
+        return 1;
+    }
+    echo 'done';
+}
+";
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 5, 17);
+    let extract_action = find_any_extract_action(&actions);
+    assert!(
+        extract_action.is_some(),
+        "should offer extract for guard clause return pattern, got: {:?}",
+        action_titles(&actions)
+    );
+}
+
+// ── Disabled code action with rejection reason ──────────────────────────────
+
+#[test]
+fn unsafe_returns_resolve_produces_no_edit() {
+    // Phase 1 no longer emits disabled actions (validation is
+    // deferred to resolve).  Instead it offers a normal action
+    // and resolve returns None when the return strategy is unsafe.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    if ($a) return 1;
+    if ($b) return null;
+    echo 'done';
+}
+";
+    backend
+        .open_files()
+        .write()
+        .insert(uri.to_string(), Arc::new(content.to_string()));
+
+    // Select the three statements (mixed return values including
+    // null → Unsafe strategy).
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 4, 17);
+    let extract = find_refactor_extract_action(&actions);
+    assert!(
+        extract.is_some(),
+        "Phase 1 should still offer the action (validation deferred to resolve)"
+    );
+
+    let action = extract.unwrap();
+    assert!(action.edit.is_none(), "Phase 1 should not have an edit");
+    assert!(
+        action.data.is_some(),
+        "Phase 1 should have data for resolve"
+    );
+
+    // Phase 2: resolve should produce no edit because the return
+    // strategy is unsafe.  Call resolve directly (not via
+    // `resolve_action`, which asserts the edit is present).
+    let (resolved, _) = backend.resolve_code_action(action.clone());
+    assert!(
+        resolved.edit.is_none(),
+        "resolve should produce no edit for unsafe returns"
+    );
+}
+
+#[test]
+fn no_disabled_action_for_empty_selection() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = 1;
+}
+";
+    // Empty selection.
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 2, 4);
+    let disabled_extract = find_disabled_extract_action(&actions);
+    assert!(
+        disabled_extract.is_none(),
+        "should NOT emit a disabled extract action for empty selection"
+    );
+}
+
+#[test]
+fn no_disabled_action_for_partial_statement() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = some_function($a, $b);
+}
+";
+    // Select partial statement (just the function call, not the assignment).
+    let actions = get_code_actions(&backend, uri, content, 2, 9, 2, 30);
+    let disabled_extract = find_disabled_extract_action(&actions);
+    assert!(
+        disabled_extract.is_none(),
+        "should NOT emit a disabled extract action for partial statement"
     );
 }

@@ -1,0 +1,19 @@
+// test: a failed loose in_array against a typed list rules none of its values out
+// feature: hover
+// A `list<'a'|'b'>` may hold neither value, so a needle it does not hold
+// can still be either.
+// expect_hover: $grade => 'a'|'b'|'c'
+---
+<?php
+
+/**
+ * @param 'a'|'b'|'c' $value
+ * @param list<'a'|'b'> $passing
+ */
+function check(string $value, array $passing): void
+{
+    if (!in_array($value, $passing)) {
+        $grade = $value;
+        echo $gra<>de;
+    }
+}

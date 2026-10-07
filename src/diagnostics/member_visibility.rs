@@ -69,48 +69,14 @@
 
 use std::sync::Arc;
 
+use super::member_lookup::{MemberKind, declared_member, display_class_name};
+use crate::atom::Atom;
 use crate::class_lookup::is_subtype_of;
+use crate::inheritance::ancestors;
 use crate::types::{ClassInfo, ClassLikeKind, Visibility};
 
 /// Diagnostic code for an access to a member the calling scope may not see.
 pub(crate) const INVALID_MEMBER_ACCESS_CODE: &str = "invalid_member_access";
-
-/// Guard against a cycle in a malformed or mid-edit hierarchy.  Matches
-/// the depth cap the other hierarchy walks in the codebase use.
-const MAX_HIERARCHY_DEPTH: u32 = 20;
-
-/// Which kind of member a lookup turned out to be, so the message can
-/// name it without re-deriving it from the access syntax.
-#[derive(Clone, Copy)]
-enum MemberKind {
-    Method,
-    Property,
-    StaticProperty,
-    Constant,
-}
-
-impl MemberKind {
-    fn label(self) -> &'static str {
-        match self {
-            MemberKind::Method => "method",
-            MemberKind::Property => "property",
-            MemberKind::StaticProperty => "static property",
-            MemberKind::Constant => "constant",
-        }
-    }
-
-    /// Spell the member the way PHP's own error message does.
-    fn qualify(self, owner: &str, member_name: &str) -> String {
-        match self {
-            MemberKind::Method => format!("{}::{}()", owner, member_name),
-            MemberKind::Property => format!("{}::${}", owner, member_name),
-            // Extraction strips the `$` from `Foo::$bar`, so it is put
-            // back here rather than being taken from the member name.
-            MemberKind::StaticProperty => format!("{}::${}", owner, member_name),
-            MemberKind::Constant => format!("{}::{}", owner, member_name),
-        }
-    }
-}
 
 /// What one branch of a union type says about the access.
 enum BranchVerdict {
@@ -129,8 +95,32 @@ struct Rejection {
     /// The class whose scope the reader has to enter for the access to
     /// become legal.
     owner: Arc<ClassInfo>,
-    visibility: Visibility,
+    restriction: Restriction,
     kind: MemberKind,
+}
+
+/// The two visibilities that can bar an access.
+///
+/// `Visibility` has a third, `Public`, which no rejection can ever
+/// carry: the check settles a public member before a `Rejection` is
+/// built.  Spelling the pair that remains lets the compiler hold that
+/// invariant, instead of leaving every `match` on a rejection with an
+/// arm for a state that cannot arise.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Restriction {
+    Private,
+    Protected,
+}
+
+impl Restriction {
+    /// `None` for a public member, which nothing can make unreachable.
+    fn from_visibility(visibility: Visibility) -> Option<Self> {
+        match visibility {
+            Visibility::Private => Some(Self::Private),
+            Visibility::Protected => Some(Self::Protected),
+            Visibility::Public => None,
+        }
+    }
 }
 
 /// Build the diagnostic message for an access PHP would reject, or
@@ -253,9 +243,9 @@ fn judge_branch(
     // nothing about the class can make one unreachable — so it is
     // settled before the scan for a magic handler, which is the only
     // work here proportional to the class's size.
-    if visibility == Visibility::Public {
+    let Some(restriction) = Restriction::from_visibility(visibility) else {
         return BranchVerdict::Permitted;
-    }
+    };
 
     // A class that answers for members the caller cannot see directly
     // turns the access into a magic-method call rather than an error.
@@ -288,13 +278,13 @@ fn judge_branch(
             member_name,
             is_static,
             is_method_call,
-            visibility,
+            restriction,
             class_loader,
         )
         .unwrap_or_else(|| Arc::clone(merged));
         return BranchVerdict::Rejected(Rejection {
             owner,
-            visibility,
+            restriction,
             kind,
         });
     }
@@ -302,7 +292,7 @@ fn judge_branch(
     // Anything at or below the receiver is at or below whatever declared
     // a protected member, so this settles the common inside-the-hierarchy
     // case without looking for the declaring class.
-    if visibility == Visibility::Protected
+    if restriction == Restriction::Protected
         && scopes.iter().any(|scope| {
             scope.fqn() == merged.fqn() || is_subtype_of(scope, merged.fqn().as_str(), class_loader)
         })
@@ -316,7 +306,7 @@ fn judge_branch(
         member_name,
         is_static,
         is_method_call,
-        visibility,
+        restriction,
         class_loader,
     ) else {
         // The provenance walk came up empty, which means something in
@@ -327,7 +317,7 @@ fn judge_branch(
 
     let rejection = Rejection {
         owner,
-        visibility,
+        restriction,
         kind,
     };
     if scopes
@@ -357,18 +347,17 @@ fn declaring_class(
     member_name: &str,
     is_static: bool,
     is_method_call: bool,
-    visibility: Visibility,
+    restriction: Restriction,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Arc<ClassInfo>> {
     let raw = class_loader(merged.fqn().as_str())?;
 
-    match visibility {
-        Visibility::Public => None,
+    match restriction {
         // A private member is never inherited, so the merge can only
         // have taken it from the class itself or from a trait used
         // somewhere up the chain.  The nearest level that supplies it
         // is the scope it belongs to.
-        Visibility::Private => {
+        Restriction::Private => {
             if declared_member(&raw, member_name, is_static, is_method_call).is_some()
                 || declares_through_own_traits(
                     &raw,
@@ -380,27 +369,29 @@ fn declaring_class(
             {
                 return Some(raw);
             }
-            ancestors(&raw, class_loader).find(|ancestor| {
-                declares_through_own_traits(
-                    ancestor,
-                    member_name,
-                    is_static,
-                    is_method_call,
-                    class_loader,
-                )
-            })
+            ancestors(&raw, class_loader)
+                .map(|(_, ancestor)| ancestor)
+                .find(|ancestor| {
+                    declares_through_own_traits(
+                        ancestor,
+                        member_name,
+                        is_static,
+                        is_method_call,
+                        class_loader,
+                    )
+                })
         }
         // A protected member is visible to everything below the class
         // that introduced it, so the owner is the *furthest* level that
         // declares it non-privately.  A private namesake further up is
         // a different member that the nearer declaration shadows, and
         // must not be mistaken for the introducer.
-        Visibility::Protected => {
+        Restriction::Protected => {
             let mut owner = None;
             if declares_non_privately(&raw, member_name, is_static, is_method_call, class_loader) {
                 owner = Some(Arc::clone(&raw));
             }
-            for ancestor in ancestors(&raw, class_loader) {
+            for (_, ancestor) in ancestors(&raw, class_loader) {
                 if declares_non_privately(
                     &ancestor,
                     member_name,
@@ -432,7 +423,6 @@ fn declares_through_own_traits(
             is_static,
             is_method_call,
             class_loader,
-            0,
         )
         .is_some()
     })
@@ -457,7 +447,6 @@ fn declares_non_privately(
             is_static,
             is_method_call,
             class_loader,
-            0,
         )
         .is_some_and(|visibility| visibility != Visibility::Private)
     })
@@ -478,30 +467,22 @@ fn declares_non_privately(
 /// from, so such a member is simply not found here — which costs a
 /// report rather than inventing one.
 fn trait_declares(
-    trait_name: &str,
+    trait_name: &Atom,
     member_name: &str,
     is_static: bool,
     is_method_call: bool,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    depth: u32,
 ) -> Option<Visibility> {
-    if depth > MAX_HIERARCHY_DEPTH {
-        return None;
-    }
-    let used = class_loader(trait_name)?;
-    if let Some((visibility, _)) = declared_member(&used, member_name, is_static, is_method_call) {
-        return Some(visibility);
-    }
-    used.used_traits.iter().find_map(|nested| {
-        trait_declares(
-            nested,
-            member_name,
-            is_static,
-            is_method_call,
-            class_loader,
-            depth + 1,
-        )
-    })
+    let declares = |class: &ClassInfo| {
+        declared_member(class, member_name, is_static, is_method_call).is_some()
+    };
+    let (_, declaring) = crate::inheritance::ancestry::find_declaring_trait(
+        std::slice::from_ref(trait_name),
+        class_loader,
+        &declares,
+    )?;
+    declared_member(&declaring, member_name, is_static, is_method_call)
+        .map(|(visibility, _)| visibility)
 }
 
 /// Find a private member on an ancestor, which the inheritance merge
@@ -516,7 +497,7 @@ fn private_ancestor_declaration(
     is_method_call: bool,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Rejection> {
-    for ancestor in ancestors(merged, class_loader) {
+    for (_, ancestor) in ancestors(merged, class_loader) {
         let Some((visibility, kind)) =
             declared_member(&ancestor, member_name, is_static, is_method_call)
         else {
@@ -530,77 +511,11 @@ fn private_ancestor_declaration(
         }
         return Some(Rejection {
             owner: ancestor,
-            visibility,
+            restriction: Restriction::Private,
             kind,
         });
     }
     None
-}
-
-/// The raw ancestors of a class, nearest first.
-///
-/// Lazy on purpose.  The caller that looks for a private ancestor member
-/// stops at the first level that has one, and this runs on every member
-/// the assembled class does not carry — the ordinary state of code being
-/// typed — so materialising the whole chain would allocate a vector per
-/// access to read one entry of it.
-fn ancestors<'a>(
-    class: &Arc<ClassInfo>,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> impl Iterator<Item = Arc<ClassInfo>> + 'a {
-    let mut next = class.parent_class;
-    let mut depth = 0u32;
-    std::iter::from_fn(move || {
-        let name = next?;
-        depth += 1;
-        if depth > MAX_HIERARCHY_DEPTH {
-            return None;
-        }
-        let ancestor = class_loader(&name)?;
-        next = ancestor.parent_class;
-        Some(ancestor)
-    })
-}
-
-/// The visibility and kind `class` declares `member_name` with, matching
-/// the member kind the access syntax asks for.
-///
-/// Method names are compared case-insensitively and property and
-/// constant names case-sensitively, which is how PHP compares them.
-fn declared_member(
-    class: &ClassInfo,
-    member_name: &str,
-    is_static: bool,
-    is_method_call: bool,
-) -> Option<(Visibility, MemberKind)> {
-    if is_method_call {
-        return class
-            .methods
-            .iter()
-            .find(|m| m.name.eq_ignore_ascii_case(member_name))
-            .map(|m| (m.visibility, MemberKind::Method));
-    }
-
-    if is_static {
-        if let Some(constant) = class.constants.iter().find(|c| c.name == member_name) {
-            return Some((constant.visibility, MemberKind::Constant));
-        }
-        // A static property is written `Foo::$bar`, and the stored name
-        // may or may not carry the `$`.
-        return class
-            .properties
-            .iter()
-            .find(|p| {
-                p.is_static && (p.name == member_name || format!("${}", p.name) == member_name)
-            })
-            .map(|p| (p.visibility, MemberKind::StaticProperty));
-    }
-
-    class
-        .properties
-        .iter()
-        .find(|p| p.name == member_name)
-        .map(|p| (p.visibility, MemberKind::Property))
 }
 
 /// Whether the scope the access is written in may see the declaration.
@@ -619,16 +534,13 @@ fn is_accessible(
     current_class: Option<&ClassInfo>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
-    if rejection.visibility == Visibility::Public {
-        return true;
-    }
     let Some(current) = current_class else {
         return false;
     };
     if current.fqn() == rejection.owner.fqn() {
         return true;
     }
-    rejection.visibility == Visibility::Protected
+    rejection.restriction == Restriction::Protected
         && is_subtype_of(current, rejection.owner.fqn().as_str(), class_loader)
 }
 
@@ -673,10 +585,9 @@ fn handles_inaccessible_access(class: &ClassInfo, is_static: bool, is_method_cal
 /// declares the member rather than the one the access went through —
 /// that is the class whose scope the reader has to enter to fix it.
 fn build_message(rejection: &Rejection, member_name: &str) -> String {
-    let modifier = match rejection.visibility {
-        Visibility::Private => "private",
-        Visibility::Protected => "protected",
-        Visibility::Public => "public",
+    let modifier = match rejection.restriction {
+        Restriction::Private => "private",
+        Restriction::Protected => "protected",
     };
 
     let owner = display_class_name(&rejection.owner);
@@ -684,9 +595,9 @@ fn build_message(rejection: &Rejection, member_name: &str) -> String {
         MemberKind::Method => "call",
         _ => "access",
     };
-    let scope = match rejection.visibility {
-        Visibility::Protected => format!("outside {} or its subclasses", owner),
-        _ => "outside its declaring class".to_string(),
+    let scope = match rejection.restriction {
+        Restriction::Protected => format!("outside {} or its subclasses", owner),
+        Restriction::Private => "outside its declaring class".to_string(),
     };
 
     format!(
@@ -697,12 +608,4 @@ fn build_message(rejection: &Rejection, member_name: &str) -> String {
         rejection.kind.qualify(&owner, member_name),
         scope,
     )
-}
-
-/// Name the class for the message, preferring the FQN.
-fn display_class_name(owner: &ClassInfo) -> String {
-    if owner.name.starts_with("__anonymous@") {
-        return "anonymous class".to_string();
-    }
-    owner.fqn().to_string()
 }

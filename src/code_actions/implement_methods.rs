@@ -31,9 +31,8 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let ctx = self.file_context(uri);
-
         let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
+        let ctx = self.file_context_at(uri, cursor_offset);
 
         // Find the class the cursor is inside. `find_class_at_offset`'s
         // lower bound also covers the `class Foo implements Bar`
@@ -786,6 +785,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$age"),
@@ -797,6 +797,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
             ]
             .into(),
@@ -821,6 +822,7 @@ mod tests {
                 is_variadic: false,
                 is_reference: false,
                 closure_this_type: None,
+                param_out_type: None,
             }]
             .into(),
             ..MethodInfo::virtual_method("getAttribute", None)
@@ -844,6 +846,7 @@ mod tests {
                     is_variadic: true,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$out"),
@@ -855,6 +858,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: true,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
             ]
             .into(),
@@ -1313,6 +1317,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$options"),
@@ -1324,6 +1329,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
             ]
             .into(),

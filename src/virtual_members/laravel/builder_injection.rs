@@ -19,7 +19,9 @@ use std::sync::Arc;
 
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MethodInfo};
-use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_maybe_cached};
+use crate::virtual_members::{
+    ResolvedClassCache, resolve_class_base_cached, resolve_class_fully_maybe_cached,
+};
 
 use super::helpers::{extends_eloquent_builder, extends_eloquent_model};
 use super::where_property::{build_where_property_methods_for_class, lowercase_method_names};
@@ -290,6 +292,9 @@ fn inject_scopes_and_model_methods(
     //    known columns.  These are instance methods on the Builder so
     //    that `$query->whereBrandId(42)` resolves.
     if let Some(model_class) = class_loader(model_arg) {
+        // Base resolution carries the column lists the model inherits
+        // without re-entering the virtual-member providers.
+        let model_class = resolve_class_base_cached(&model_class, class_loader);
         let existing = lowercase_method_names(&result.methods);
         let where_methods = build_where_property_methods_for_class(&model_class, &existing);
         for mut method in where_methods {

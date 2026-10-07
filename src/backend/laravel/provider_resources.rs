@@ -5,20 +5,20 @@
 use crate::Backend;
 
 impl Backend {
-    pub(crate) fn build_provider_resources(&self) {
+    pub(crate) fn build_provider_resources(&self, providers: &super::LaravelProviders) {
         let mut scans = crate::virtual_members::laravel::ProviderScans::default();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        for (fqn, origin) in self.laravel_providers_with_origin() {
-            scans.record_registered(&fqn);
-            let Some(uri) = self.resolve_class_uri(&fqn) else {
+        for (fqn, origin) in providers.with_origin() {
+            scans.record_registered(fqn);
+            let Some(uri) = self.resolve_class_uri(fqn) else {
                 continue;
             };
             if !seen.insert(uri.clone()) {
                 continue;
             }
             let Some((identity, resources)) =
-                self.scan_provider_resources(&uri, None, &fqn, origin)
+                self.scan_provider_resources(&uri, None, fqn, *origin)
             else {
                 continue;
             };
@@ -98,6 +98,18 @@ impl Backend {
         Some((identity, resources))
     }
 
+    /// Drop a deleted provider file's registrations from the merged table.
+    pub(super) fn forget_laravel_provider_resources(&self, uri: &str) {
+        let merged = {
+            let mut scans = self.laravel_provider_scans.write();
+            if !scans.is_built() || !scans.remove(uri) {
+                return;
+            }
+            scans.merged()
+        };
+        self.publish_provider_resources(merged);
+    }
+
     /// Publish a freshly merged provider-resource table, dropping the caches
     /// that were derived from the previous one.
     fn publish_provider_resources(
@@ -111,13 +123,13 @@ impl Backend {
             + resources.class_component_namespaces.len()
             + resources.folio_mounts.len()
             > 0;
-        let has_bindings = !resources.bindings.is_empty();
-        let directives = crate::blade::directives::CustomDirectives::from_registrations(
-            &resources.custom_directives,
-        );
-        let directives_changed = *self.blade_custom_directives.read() != directives;
-        *self.blade_custom_directives.write() = directives;
-        *self.laravel_provider_resources.write() = resources;
+        let bindings_changed = {
+            let mut published = self.laravel_provider_resources.write();
+            let changed = published.bindings != resources.bindings;
+            *published = resources;
+            changed
+        };
+        self.laravel_string_key_cache.write().translations = None;
 
         // The shared and composed template variables are resolved from these
         // registrations, so the previous scan's set is stale whether or not
@@ -129,26 +141,66 @@ impl Backend {
             cache.config_keys = None;
             cache.config_trees = None;
             cache.view_names = None;
-            cache.trans_keys = None;
             cache.routes = None;
             cache.blade_discovery = None;
         }
 
         // The provider bindings overlay the core container alias table, which
-        // an earlier resolution may already have built without them.
-        if has_bindings {
-            *self.laravel_aliases.write() = None;
-            self.clear_class_not_found_cache();
+        // an earlier resolution may already have built from the previous set.
+        if bindings_changed {
+            self.laravel_aliases.invalidate();
+            self.clear_not_found_caches();
+            // A binding is followed without a class lookup naming the
+            // provider that registered it, so a cached receiver resolution
+            // records no dependency on the alias table.
+            self.clear_resolved_member_files();
         }
 
         // Which directives exist decides what the preprocessor lowers rather
-        // than masks, and the providers registering them are scanned after
-        // the workspace index has already preprocessed every template — so
-        // the templates have to be preprocessed again against the set that
-        // just arrived.
+        // than masks, and the compiler and the providers registering them
+        // are read after the workspace index has already preprocessed every
+        // template — so the templates have to be preprocessed again against
+        // the set that just arrived.
+        //
+        // Read last: loading the compiler can fall back to the container
+        // alias table, which must be built from the table published above.
+        let compiler_methods = self.blade_compiler_methods();
+        let has_method = |name: &str| {
+            compiler_methods
+                .as_ref()
+                .is_some_and(|m| m.contains(&name.to_ascii_lowercase()))
+        };
+        let directives = crate::blade::directives::BladeDirectives::new(
+            compiler_methods
+                .is_some()
+                .then_some(&has_method as &dyn Fn(&str) -> bool),
+            &self.laravel_provider_resources.read().custom_directives,
+        );
+        let directives_changed = *self.blade_directives.read() != directives;
         if directives_changed {
+            *self.blade_directives.write() = directives;
             self.reparse_blade_templates();
         }
+    }
+
+    /// The lowercased names of every method the installed
+    /// `Illuminate\View\Compilers\BladeCompiler` declares, its `Concerns`
+    /// traits' included, or `None` when the project has no Blade compiler.
+    ///
+    /// Blade compiles a built-in `@name` through a `compileName()` method,
+    /// so this is what decides which built-in directives the project's
+    /// templates have.
+    fn blade_compiler_methods(&self) -> Option<std::collections::HashSet<String>> {
+        let class = self.find_or_load_class("Illuminate\\View\\Compilers\\BladeCompiler")?;
+        let loader = |name: &str| self.find_or_load_class(name);
+        let merged = crate::inheritance::resolve_class_with_inheritance(&class, &loader);
+        Some(
+            merged
+                .methods
+                .iter()
+                .map(|method| method.name.to_ascii_lowercase())
+                .collect(),
+        )
     }
 
     /// Re-preprocess every Blade template already in the virtual-PHP cache.
@@ -177,7 +229,12 @@ impl Backend {
     /// them the container would let win, and only the merge knows that.  A
     /// cheap no-op for every file that is not a registered provider, and until
     /// the full scan has run.
-    pub(crate) fn refresh_laravel_provider_resources(&self, uri: &str, content: &str) {
+    pub(crate) fn refresh_laravel_provider_resources(
+        &self,
+        uri: &str,
+        content: &str,
+        providers: &super::ProvidersOnce<'_>,
+    ) {
         if !self.resolved_class_cache.read().is_laravel() {
             return;
         }
@@ -189,7 +246,7 @@ impl Backend {
         // in what order, both of which the merge depends on, so a change to it
         // rebuilds from scratch.
         if self.is_laravel_provider_list_uri(uri) {
-            self.build_provider_resources();
+            self.build_provider_resources(providers.get());
             return;
         }
 
@@ -204,7 +261,7 @@ impl Backend {
             // full scan ran, because the file is written after the list that
             // names it.  It joins the table the moment it parses.
             if self.declares_registered_provider(uri) {
-                self.build_provider_resources();
+                self.build_provider_resources(providers.get());
             }
             return;
         };

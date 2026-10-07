@@ -148,7 +148,7 @@ class TypeHintGtdDemo
         // Catch block exception types — Ctrl+Click GtdNotFoundException or GtdAccessException
         try {
             $this->paramTypes(new GtdAlpha());
-        } catch (GtdNotFoundException|GtdAccessException $e) {}
+        } catch (GtdNotFoundException|GtdAccessException) {}
     }
 
     public function paramTypes(GtdAlpha $item): GtdAlpha { return $item; }                             // Ctrl+Click GtdAlpha
@@ -303,4 +303,41 @@ class CoverageDefaultClassDemo
  */
 class CoverageFunctionTargetDemo
 {
+}
+
+
+// ── PHPUnit data providers and dependencies (go-to-definition) ─────────────
+// `@dataProvider` and `@depends` name a method by string.  Ctrl+Click the
+// name to jump to it; renaming the method updates the tag too.  The PHPUnit
+// 10 attributes navigate the same way once PHPUnit is installed:
+// `#[DataProvider('additions')]`, `#[Depends('testCreatesALedger')]`, and
+// `#[DataProviderExternal(Fixtures::class, 'additions')]` for a provider
+// that lives in another class.
+
+class DataProviderDemo
+{
+    /**
+     * @dataProvider additions                DataProviderDemo::additions()
+     */
+    public function testAdds(int $a, int $b, int $sum): void
+    {
+    }
+
+    public function testCreatesALedger(): Scaffolding\CoverageLedger
+    {
+        return new Scaffolding\CoverageLedger();
+    }
+
+    /**
+     * @depends clone testCreatesALedger      DataProviderDemo::testCreatesALedger()
+     */
+    public function testUsesTheLedger(Scaffolding\CoverageLedger $ledger): void
+    {
+    }
+
+    /** @return iterable<string, array{int, int, int}> */
+    public static function additions(): iterable
+    {
+        yield 'small' => [1, 2, 3];
+    }
 }

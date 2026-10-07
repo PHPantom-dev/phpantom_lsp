@@ -1343,4 +1343,68 @@ mod tests {
             hover
         );
     }
+
+    /// Find References refreshes the workspace index, and the refresh is
+    /// where a template opened before its controllers were parsed first
+    /// learns the variables they pass, which grows its prologue.  The
+    /// cursor has to be translated into the virtual PHP after that, not
+    /// before, or it lands on whatever the grown prologue pushed under it.
+    #[tokio::test]
+    async fn references_from_a_template_whose_scope_the_refresh_grows() {
+        let (backend, _dir) = create_psr4_workspace(
+            APP_PSR4_COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "app/Controller.php",
+                    "<?php\nnamespace App;\nclass Controller {\n    public function show(): mixed {\n        return view('shop', ['a' => 1, 'b' => 'x', 'c' => 2.0]);\n    }\n}\n",
+                ),
+                (
+                    "resources/views/shop.blade.php",
+                    "<p>{{ $a }} {{ $b }} {{ $c }}</p>\n{{ \\App\\Item::class }}\n",
+                ),
+            ],
+        );
+        let blade_uri = workspace_uri(&backend, "resources/views/shop.blade.php");
+        open_document(
+            &backend,
+            &blade_uri,
+            "blade",
+            &std::fs::read_to_string(workspace_path(&backend, "resources/views/shop.blade.php"))
+                .unwrap(),
+        )
+        .await;
+
+        let locations = backend
+            .references(ReferenceParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: blade_uri.clone(),
+                    },
+                    position: Position {
+                        line: 1,
+                        character: 9,
+                    },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: ReferenceContext {
+                    include_declaration: false,
+                },
+            })
+            .await
+            .unwrap()
+            .unwrap_or_default();
+
+        let in_template: Vec<Range> = locations
+            .iter()
+            .filter(|l| l.uri == blade_uri)
+            .map(|l| l.range)
+            .collect();
+        assert_eq!(
+            in_template,
+            vec![Range::new(Position::new(1, 3), Position::new(1, 12))],
+            "the reference to App\\Item on the template's second line: {locations:?}"
+        );
+    }
 }

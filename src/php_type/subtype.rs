@@ -7,6 +7,17 @@ impl PhpType {
         if self == other {
             return true;
         }
+        // Structural twins are one interned node, so two different unsealed
+        // shapes differ, and one differs from the generic array it widens
+        // to even though `kind()` cannot tell the two apart.
+        if self.as_unsealed_shape().is_some() || other.as_unsealed_shape().is_some() {
+            return false;
+        }
+        // An exact class name is narrower than the `class-string<T>` it
+        // reads as.
+        if self.as_class_name_literal().is_some() != other.as_class_name_literal().is_some() {
+            return false;
+        }
         match (self.kind(), other.kind()) {
             (TypeKind::Named(a), TypeKind::Named(b)) => {
                 Self::short_name_of(a) == Self::short_name_of(b)
@@ -82,6 +93,14 @@ impl PhpType {
     pub fn is_subtype_of(&self, supertype: &PhpType) -> bool {
         // Reflexivity.
         if self == supertype {
+            return true;
+        }
+
+        // A template seen from inside its declaration is still the template
+        // its name spells, whatever its bound says.
+        if let Some((name, _)) = self.as_template_param()
+            && matches!(supertype.raw_kind(), TypeKind::Named(n) if *n == name)
+        {
             return true;
         }
 
@@ -234,6 +253,15 @@ impl PhpType {
             }
         }
 
+        // ── Shape <: shape ──────────────────────────────────────────
+        // Either side may be unsealed, which `kind()` reads as the generic
+        // array it widens to. The rules below would then compare that array
+        // and never see the entries the shape lists, so two shapes are
+        // settled here, entry by entry.
+        if let (Some(sub), Some(wider)) = (self.shape_parts(), supertype.shape_parts()) {
+            return shape_is_subshape(&sub, &wider, &|a, b| a.is_subtype_of(b));
+        }
+
         // ── ArrayShape <: array / iterable ──────────────────────────
         if let TypeKind::ArrayShape(entries) = self.kind() {
             // A shape satisfies a `non-empty-…` supertype only when it
@@ -279,7 +307,7 @@ impl PhpType {
                             // Determine the key's type: named string keys are
                             // literal-string, positional keys are int.
                             let entry_key_type = match &e.key {
-                                Some(k) if k.parse::<i64>().is_ok() => PhpType::int(),
+                                Some(k) if super::is_canonical_int_key(k) => PhpType::int(),
                                 Some(_) => PhpType::string(),
                                 None => PhpType::int(),
                             };
@@ -309,9 +337,17 @@ impl PhpType {
             let base_sub = sub.name.to_ascii_lowercase();
             let base_sup = sup.name.to_ascii_lowercase();
 
+            // A `list` or `non-empty-*` supertype promises something about
+            // the array that a plain one does not: sequential keys, or at
+            // least one entry.
+            let keeps_promises = (!is_list_name(&sup.name) || is_list_name(&sub.name))
+                && (!is_non_empty_array_name(&sup.name) || is_non_empty_array_name(&sub.name));
+
             // Same base or compatible bases (list <: array, etc.)
             let bases_compatible = base_sub == base_sup
-                || (is_array_like_name(&sub.name) && is_array_like_name(&sup.name));
+                || (is_array_like_name(&sub.name)
+                    && is_array_like_name(&sup.name)
+                    && keeps_promises);
 
             if bases_compatible && sub.args.len() == sup.args.len() {
                 return sub
@@ -330,9 +366,7 @@ impl PhpType {
                 && let Some((sub_key, sub_val)) = array_like_key_value(sub)
                 && let Some((sup_key, sup_val)) = array_like_key_value(sup)
             {
-                // A `list` supertype demands sequential integer keys,
-                // which a plain `array` cannot promise.
-                if is_list_name(&sup.name) && !is_list_name(&sub.name) {
+                if !keeps_promises {
                     return false;
                 }
                 return sub_key.is_subtype_of(&sup_key) && sub_val.is_subtype_of(sup_val);
@@ -345,6 +379,16 @@ impl PhpType {
             && let TypeKind::Named(sup) = supertype.kind()
         {
             return matches!(sup.to_ascii_lowercase().as_str(), "array" | "iterable");
+        }
+
+        // Generic array-like <: `T[]`, which promises nothing about its
+        // keys: `non-empty-array<int, Foo> <: Foo[]` when the values fit.
+        if let TypeKind::Generic(g) = self.kind()
+            && is_array_like_name(&g.name)
+            && let TypeKind::Array(inner_sup) = supertype.kind()
+            && let Some(val) = g.args.last()
+        {
+            return val.is_subtype_of(inner_sup);
         }
 
         // ── class-string / interface-string subtyping ───────────────
@@ -426,6 +470,72 @@ impl PhpType {
 // Array-like arity normalisation
 // ---------------------------------------------------------------------------
 
+/// Whether every array the shape `sub` describes is one `wider` describes.
+///
+/// Every entry `sub` lists has to be one `wider` lists, no more optional and
+/// with a value it allows, or else fall under the tail of an unsealed
+/// `wider`. Every entry `wider` requires has to be listed by `sub`; one it
+/// merely allows may still turn up in the tail of an unsealed `sub`, holding
+/// what that tail holds. And the tail of `sub` has to fit the tail of
+/// `wider`, which a sealed shape does not have.
+///
+/// `is_subtype` compares the key and value types of two entries, so that the
+/// structural check and the one that follows the class hierarchy into the
+/// entries answer by the same rules.
+pub(crate) fn shape_is_subshape(
+    sub: &ShapeParts<'_>,
+    wider: &ShapeParts<'_>,
+    is_subtype: &dyn Fn(&PhpType, &PhpType) -> bool,
+) -> bool {
+    // `list{…}` says so outright; a shape tracked from a literal or from
+    // appends says so by holding `0, 1, 2, …` in order, which a tail that
+    // may add keys of its own no longer promises.
+    let sub_is_list = sub.is_list || (sub.tail.is_none() && shape_keys_are_sequential(sub.entries));
+    if wider.is_list && !sub_is_list {
+        return false;
+    }
+    let (Some(keys), Some(wider_keys)) = (
+        runtime_shape_keys(sub.entries),
+        runtime_shape_keys(wider.entries),
+    ) else {
+        return false;
+    };
+
+    let listed_fit = sub.entries.iter().zip(&keys).all(|(entry, key)| {
+        match wider_keys.iter().position(|wider_key| wider_key == key) {
+            Some(index) => {
+                (!entry.optional || wider.entries[index].optional)
+                    && is_subtype(&entry.value_type, &wider.entries[index].value_type)
+            }
+            None => wider.tail.is_some_and(|(tail_key, tail_value)| {
+                is_subtype(&shape_key_type(key), tail_key)
+                    && is_subtype(&entry.value_type, tail_value)
+            }),
+        }
+    });
+    if !listed_fit {
+        return false;
+    }
+
+    let wider_fit = wider.entries.iter().zip(&wider_keys).all(|(entry, key)| {
+        keys.contains(key)
+            || (entry.optional
+                && sub.tail.is_none_or(|(tail_key, tail_value)| {
+                    !is_subtype(&shape_key_type(key), tail_key)
+                        || is_subtype(tail_value, &entry.value_type)
+                }))
+    });
+    if !wider_fit {
+        return false;
+    }
+
+    sub.tail.is_none_or(|(tail_key, tail_value)| {
+        wider.tail.is_some_and(|(wider_key, wider_value)| {
+            is_subtype(tail_key, wider_key) && is_subtype(tail_value, wider_value)
+        })
+    })
+}
+
 /// The `(key, value)` pair an array-like generic implies, whichever arity
 /// it was written at.
 ///
@@ -467,7 +577,7 @@ fn shape_keys_are_sequential(entries: &[ShapeEntry]) -> bool {
         seen_optional |= entry.optional;
         match entry.key.as_deref() {
             None => {}
-            Some(key) if key.parse::<i64>() == Ok(position) => {}
+            Some(key) if super::canonical_int_key(key) == Some(position) => {}
             Some(_) => return false,
         }
     }
@@ -608,6 +718,7 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
                 | "non-falsy-string"
                 | "trait-string"
                 | "enum-string"
+                | "view-string"
                 | "lowercase-string"
                 | "uppercase-string"
                 | "non-empty-lowercase-string"
@@ -842,6 +953,16 @@ pub(crate) fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> 
                     sup_l.as_str(),
                     "string" | "literal-string" | "scalar" | "array-key"
                 ) {
+                    return true;
+                }
+
+                // Whether a literal names a Blade template is settled by
+                // the project's templates, not by the literal's own shape,
+                // and nothing reachable from here knows them. The
+                // diagnostic that does check it against the view index
+                // reports a name no template answers for; structurally,
+                // any literal string is a candidate.
+                if sup_l == "view-string" {
                     return true;
                 }
 

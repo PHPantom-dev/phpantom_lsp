@@ -25,27 +25,51 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
 
     match expr {
         Expression::Match(match_expr) if match_expr.expression.is_true() => {
+            let contains_cursor = |body: &Expression<'_>| {
+                let span = body.span();
+                cursor >= span.start.offset && cursor <= span.end.offset
+            };
+            // An arm runs only after every arm above it failed, and
+            // `default` only after all of them did, so the inverse of
+            // their conditions holds in its body.  The same goes for a
+            // condition, which is tested only once every condition before
+            // it failed.
+            // Built on a copy: a cursor in no condition or body (on a `=>`,
+            // say) must see the scope untouched.
+            let mut failed_scope = scope.clone();
+            let mut default_expr = None;
             for arm in match_expr.arms.iter() {
                 match arm {
                     MatchArm::Expression(expr_arm) => {
-                        let arm_span = expr_arm.expression.span();
-                        if cursor >= arm_span.start.offset && cursor <= arm_span.end.offset {
-                            for condition in expr_arm.conditions.iter() {
-                                apply_condition_narrowing(condition, scope, ctx);
-                            }
+                        if contains_cursor(expr_arm.expression) {
+                            *scope = failed_scope;
+                            apply_match_arm_narrowing(expr_arm, scope, ctx);
                             // Recurse into the arm body for nested patterns.
                             apply_cursor_ternary_narrowing(expr_arm.expression, scope, ctx);
                             return;
                         }
-                    }
-                    MatchArm::Default(def_arm) => {
-                        let arm_span = def_arm.expression.span();
-                        if cursor >= arm_span.start.offset && cursor <= arm_span.end.offset {
-                            apply_cursor_ternary_narrowing(def_arm.expression, scope, ctx);
-                            return;
+                        for condition in expr_arm.conditions.iter() {
+                            if contains_cursor(condition) {
+                                *scope = failed_scope;
+                                apply_cursor_ternary_narrowing(condition, scope, ctx);
+                                return;
+                            }
+                            apply_failed_match_condition_narrowing(
+                                condition,
+                                &mut failed_scope,
+                                ctx,
+                            );
                         }
                     }
+                    MatchArm::Default(def_arm) if contains_cursor(def_arm.expression) => {
+                        default_expr = Some(def_arm.expression);
+                    }
+                    MatchArm::Default(_) => {}
                 }
+            }
+            if let Some(default_expr) = default_expr {
+                *scope = failed_scope;
+                apply_cursor_ternary_narrowing(default_expr, scope, ctx);
             }
         }
         Expression::Conditional(conditional) => {
@@ -55,7 +79,7 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
             // null/false/truthiness guard (`$x !== null`, `isset($x)`, the
             // bare `$x` check) for any variable currently in scope.
             let has_narrowing = {
-                let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
+                let var_names = scope_keys_named_by(conditional.condition, scope);
                 var_names.iter().any(|vn| {
                     narrowing::try_extract_instanceof(conditional.condition, vn).is_some()
                         || narrowing::try_extract_instanceof_with_negation(
@@ -109,6 +133,11 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
                 }
                 Call::NullSafeMethod(mc) => {
                     apply_cursor_ternary_narrowing(mc.object, scope, ctx);
+                    // The arguments only run when the receiver is not null.
+                    let args_span = mc.argument_list.span();
+                    if cursor > args_span.start.offset && cursor < args_span.end.offset {
+                        narrow_nullsafe_call_receiver(mc.object, scope, ctx);
+                    }
                     &mc.argument_list
                 }
                 Call::StaticMethod(_) => return,

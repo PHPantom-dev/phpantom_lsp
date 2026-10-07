@@ -21,7 +21,7 @@ use tower_lsp::lsp_types::{
 
 use crate::Backend;
 use crate::symbol_map::{ClassRefContext, SymbolKind, SymbolMap, SymbolSpan};
-use crate::text_position::{offset_to_position, position_to_offset};
+use crate::text_position::{byte_range_to_lsp_range, offset_to_position, position_to_offset};
 use crate::types::{ClassInfo, FunctionInfo, MethodInfo};
 
 #[derive(Clone)]
@@ -479,7 +479,8 @@ fn build_callable(
     body: Option<(u32, u32)>,
 ) -> Option<PhpCallable> {
     let uri = Url::parse(uri).ok()?;
-    let selection_range = offset_range(content, name_offset, name.len() as u32);
+    let name_start = name_offset as usize;
+    let selection_range = byte_range_to_lsp_range(content, name_start, name_start + name.len());
     let range = Range::new(
         selection_range.start,
         body.map_or(selection_range.end, |(_, end)| {
@@ -544,13 +545,6 @@ fn build_function_callable(
             "offset": function.name_offset,
         }),
         body,
-    )
-}
-
-fn offset_range(content: &str, start: u32, len: u32) -> Range {
-    Range::new(
-        offset_to_position(content, start as usize),
-        offset_to_position(content, start.saturating_add(len) as usize),
     )
 }
 

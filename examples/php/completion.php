@@ -1423,8 +1423,9 @@ class InArrayNarrowingDemo
             $item->crush();                       // narrowed to Scaffolding\Rock
             // MUST NOT appear: peel() (Scaffolding\Banana only)
         } else {
-            $item->peel();                        // excluded Scaffolding\Rock → Scaffolding\Banana
-            // MUST NOT appear: crush() (Scaffolding\Rock only)
+            $item->weigh();                       // still Scaffolding\Rock|Scaffolding\Banana
+            // A Scaffolding\Rock that $rocks does not hold fails the check
+            // too, so failing it rules no class out.
         }
 
         // Guard clause with in_array
@@ -1824,11 +1825,13 @@ class ConditionalReturnDemo
         strtoupper($fromElvis);                    // elvis-operator subject → string
 
         // `preg_replace()` keeps its `null` error branch for a string
-        // subject, where PCRE really can fail, and drops it for an array.
+        // subject, where PCRE really can fail.  An array subject never
+        // comes back `null`: an entry PCRE fails on is left out instead,
+        // so each key it keeps may be missing.
         $masked = preg_replace('/\d/', '*', 'a1b2') ?? '';
         strtoupper($masked);                      // string subject → string|null
         $maskedAll = preg_replace('/\d/', '*', ['a1', 'b2']);
-        strtoupper($maskedAll[0]);                // array subject → array<array-key, string>
+        strtoupper($maskedAll[0] ?? '');          // array subject → array{0?: string, 1?: string}
 
         // A literal pattern says which keys `preg_match()` fills in: the
         // whole match under `0`, every capture group under its number, and
@@ -2783,6 +2786,12 @@ class SpreadOperatorDemo
 
         $everything = [...$penList, ...$pencilList];
         $everything[0]->label();                  // union: Scaffolding\Pen|Scaffolding\Pencil from multiple spreads
+
+        // Entries written beside a spread stay known one by one:
+        // array{sketcher: Scaffolding\Pencil, ...<int, Scaffolding\Pen>}
+        $kit = ['sketcher' => new Scaffolding\Pencil(), ...$penList];
+        $kit['sketcher']->sharpen();              // Scaffolding\Pencil only, not the spread's Pen
+        // Try: $kit['   → offers 'sketcher'
     }
 }
 
@@ -3875,9 +3884,13 @@ class ArrayFuncDemo
         $unique = array_unique($src->labels());
         strtoupper($unique[0]);           // list<string>
 
+        // string|null: the element type rather than mixed, and null for an
+        // empty list.
         $labels = $src->labels();
         $label = array_pop($labels);
-        strtoupper($label);               // string, not mixed
+        if ($label !== null) {
+            strtoupper($label);           // string
+        }
 
         // With no callback, array_filter keeps only the truthy entries, so
         // the null half of the value type is gone.
@@ -4883,6 +4896,7 @@ class GenericAssertNarrowingDemo
         $obj->write();                    // $obj narrowed to Scaffolding\Pen
     }
 
+    /** @param class-string $cls */
     public function demoVariableClass(string $cls, ?Scaffolding\Pen $node): void
     {
         // When the asserted class is a variable that cannot be resolved
@@ -5743,5 +5757,34 @@ class ReconstructedProofDemo
         $qualified = $firstIsQualified ? $first : $second;
 
         return $qualified->namespacePrefix;         // string
+    }
+}
+
+// ── Assignments Inside `match` Arms and Ternary Branches ────────────────────
+//
+// An assignment can sit in the value an arm or branch yields. Each arm is
+// walked against its own copy of the scope and the copies are joined after
+// the expression, so the variable is typed by every arm that assigns it, and
+// by the arms that leave it untouched.
+
+class NestedAssignmentDemo
+{
+    public function matchArm(int $kind): string
+    {
+        match ($kind) {
+            1 => $pen = Scaffolding\makePen(),
+            default => null,
+        };
+
+        // Try: `$pen->` — Scaffolding\Pen members (the `default` arm leaves it unset)
+        return $pen?->color() ?? '';
+    }
+
+    public function ternaryBranch(bool $flag): string
+    {
+        $flag ? $pen = Scaffolding\makePen() : null;
+
+        // Try: `$pen->` — Scaffolding\Pen members (the else branch leaves it unset)
+        return $pen?->color() ?? '';
     }
 }

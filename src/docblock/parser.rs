@@ -348,7 +348,7 @@ impl DocblockInfo {
 const VENDOR_RANKS: u8 = 3;
 
 /// Sort key that puts the most authoritative vendor prefix first.
-fn vendor_rank(tag: &TagInfo) -> u8 {
+pub(crate) fn vendor_rank(tag: &TagInfo) -> u8 {
     match tag.vendor {
         Some(TagVendor::PhpStan) => 0,
         Some(TagVendor::Psalm) => 1,

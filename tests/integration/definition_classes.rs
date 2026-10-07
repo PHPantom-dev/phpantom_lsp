@@ -1251,3 +1251,41 @@ async fn goto_definition_on_the_class_a_phpstan_import_type_names() {
     };
     assert_eq!(location.range.start.line, 3, "got {location:?}");
 }
+
+/// Go-to-definition on a class name follows the import of the `namespace`
+/// block it is written in, not a sibling block's import of the same name.
+#[tokio::test]
+async fn test_goto_definition_follows_the_blocks_own_import() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///blocks.php").unwrap();
+    let text = r#"<?php
+namespace X {
+    class Foo {}
+}
+namespace Y {
+    class Foo {}
+}
+namespace A {
+    use X\Foo;
+    function a(Foo $f): void {}
+}
+namespace B {
+    use Y\Foo;
+    function b(Foo $f): void {}
+}
+"#;
+    open_php(&backend, &uri, text).await;
+
+    for (line, target_line) in [(9, 2), (13, 5)] {
+        let locations =
+            crate::common::definition_locations(goto_definition_at(&backend, &uri, line, 16).await);
+        assert_eq!(
+            locations
+                .iter()
+                .map(|l| l.range.start.line)
+                .collect::<Vec<_>>(),
+            vec![target_line],
+            "`Foo` on line {line} should jump to the class on line {target_line}"
+        );
+    }
+}

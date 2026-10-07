@@ -51,6 +51,7 @@
 
 use std::collections::HashSet;
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
@@ -62,7 +63,7 @@ use crate::scope_collector::{
     collect_hook_scope_with_resolver, hook_body_span,
 };
 
-use super::helpers::make_diagnostic;
+use super::helpers::{SUPERGLOBALS, make_diagnostic};
 
 /// Emit [`mago_syntax::walker::Walker`] overrides that stop traversal at
 /// nested variable scopes (closures, arrow functions, named function
@@ -97,23 +98,6 @@ use offset_guards::{
 /// code actions can match on it.
 pub(crate) const UNKNOWN_VARIABLE_CODE: &str = "unknown_variable";
 
-/// PHP superglobals and auto-defined variables that are always in scope.
-const SUPERGLOBALS: &[&str] = &[
-    "$_GET",
-    "$_POST",
-    "$_SERVER",
-    "$_REQUEST",
-    "$_SESSION",
-    "$_COOKIE",
-    "$_FILES",
-    "$_ENV",
-    "$GLOBALS",
-    "$argc",
-    "$argv",
-    "$http_response_header",
-    "$php_errormsg",
-];
-
 impl Backend {
     /// Collect undefined-variable diagnostics for a single file.
     ///
@@ -127,22 +111,7 @@ impl Backend {
     ) {
         // Gather file-level context for FQN resolution of function and
         // class names inside the by-ref resolver.
-        let file_use_map: std::collections::HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
-
-        // Build a by-ref resolver that uses Backend to look up function
-        // and method signatures.  This lets the scope collector mark
-        // by-ref arguments as writes for user-defined functions, static
-        // methods, and constructors — not just the hardcoded table.
-        let resolver: ByRefResolver<'_> =
-            &|call_kind: &ByRefCallKind<'_>, enclosing_class_name: Option<&str>| {
-                self.resolve_by_ref_positions(
-                    call_kind,
-                    enclosing_class_name,
-                    &file_use_map,
-                    &file_namespace,
-                )
-            };
+        let file_ctx = self.file_context(uri);
 
         with_parsed_program(content, "unknown_variable", |program, content| {
             let mut ctx = DiagnosticCtx {
@@ -153,6 +122,26 @@ impl Backend {
             };
 
             for stmt in program.statements.iter() {
+                // A `namespace` block is a top-level statement, and its
+                // names resolve through its own imports and namespace.
+                let offset = stmt.span().start.offset;
+                let file_use_map = file_ctx.use_map_at(offset);
+                let file_namespace = file_ctx.namespace_at(offset);
+
+                // Build a by-ref resolver that uses Backend to look up
+                // function and method signatures.  This lets the scope
+                // collector mark by-ref arguments as writes for
+                // user-defined functions, static methods, and constructors,
+                // not just the hardcoded table.
+                let resolver: ByRefResolver<'_> =
+                    &|call_kind: &ByRefCallKind<'_>, enclosing_class_name: Option<&str>| {
+                        self.resolve_by_ref_positions(
+                            call_kind,
+                            enclosing_class_name,
+                            file_use_map,
+                            file_namespace,
+                        )
+                    };
                 collect_from_statement(stmt, &mut ctx, Some(&resolver));
             }
 

@@ -12,6 +12,7 @@
 /// context instead, so a caller cannot forget to install them.
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::{Atom, atom};
@@ -52,7 +53,8 @@ thread_local! {
 
     /// When `Some`, memoizes completed body return inference results by
     /// `(FQN, method)`.  Cleared when the owning guard drops, so the memo
-    /// lives exactly as long as one request / one file's diagnostic pass.
+    /// lives as long as one request / one file's diagnostic pass, or the
+    /// whole Blade refresh pass (see [`activate_body_infer_memo`]).
     ///
     /// Without this memo, every call site that needs a method's inferred
     /// return type re-walks the entire method body.  On large legacy
@@ -108,6 +110,20 @@ fn with_body_infer_memo() -> BodyInferMemoGuard {
     crate::type_engine::activate_memo(&BODY_INFER_MEMO)
 }
 
+/// Activate only the body-return-inference memo, for a pass that walks
+/// many files and wants the inferences one file paid for to serve the
+/// rest.
+///
+/// Unlike the other request-scoped memos, this one holds nothing tied to
+/// a particular text buffer: its key is the method and the argument
+/// types, and the body is re-read from the declaring file on a miss.  It
+/// can therefore outlive the per-file [`activate_type_engine_caches`]
+/// scopes nested inside the pass, which leave it alone because nested
+/// activation is a no-op.
+pub(crate) fn activate_body_infer_memo() -> impl Drop {
+    with_body_infer_memo()
+}
+
 // ── Call-site argument frames ───────────────────────────────────────────────
 
 /// Pops the frame it pushed, so an inference that unwinds cannot leave a
@@ -157,6 +173,39 @@ pub(crate) fn call_site_param_types(class_fqn: &str, method_name: &str) -> Optio
 /// time a refinement the arguments decide can still reach a caller.
 pub(crate) fn body_inference_in_progress() -> bool {
     BODY_INFER_DEPTH.with(|cell| cell.get()) > 0
+}
+
+/// A hash of everything about the body-return inferences in progress
+/// that can change what an expression inside them resolves to, or `0`
+/// when none is running.
+///
+/// That is the call-site arguments seeding each body, plus the bodies
+/// being inferred: they decide which nested inferences the re-entry
+/// guard turns away, and how many levels the depth cap still allows.
+/// Two lookups made under the same context reach the same answer, so a
+/// memo keyed on it can serve both.
+pub(crate) fn body_inference_context() -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let depth = BODY_INFER_DEPTH.with(Cell::get);
+    if depth == 0 {
+        return 0;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    depth.hash(&mut hasher);
+    // A set has no order to hash in, so fold each member's own hash
+    // with an order-independent sum.
+    let visited = BODY_INFER_VISITED.with(|set| {
+        set.borrow().iter().fold(0u64, |sum, key| {
+            let mut member = std::collections::hash_map::DefaultHasher::new();
+            key.hash(&mut member);
+            sum.wrapping_add(member.finish())
+        })
+    });
+    visited.hash(&mut hasher);
+    BODY_INFER_ARGS.with(|cell| cell.borrow().hash(&mut hasher));
+    // Never `0`, which stands for "no inference running".
+    hasher.finish() | 1
 }
 
 /// Maximum nesting depth for body return inference chains.
@@ -221,7 +270,7 @@ pub(crate) fn try_infer_body_return_type(
 
 /// Scan a method body for its return type.
 ///
-/// Delegates to [`Backend::infer_return_type_for_function`], which has
+/// Delegates to [`Backend::infer_return_type_at`], which has
 /// the full resolution infrastructure (use maps, namespace resolution,
 /// function loader, class loader with stubs/class index/PSR-4).
 fn infer_body_return_type(
@@ -258,40 +307,13 @@ fn infer_body_return_type(
         // class could not be located (e.g. only known via the AST).
         .or_else(|| backend.symbols.fqn_uri_index.read().get(class_fqn).cloned())?;
 
-    let content = backend.get_file_content(&file_uri)?;
-
-    // Convert method name_offset to a 0-based line number.  The offset
-    // was recorded against the file as it was parsed, which need not be
-    // the content read back here, so count over the bytes rather than
-    // slicing the string: a `\n` byte never appears inside a multi-byte
-    // character, but an offset landing mid-character would panic a
-    // string slice.
-    let offset = method.name_offset as usize;
-    let bytes = content.as_bytes();
-    if offset >= bytes.len() {
+    let content = backend.get_file_content_arc(&file_uri)?;
+    if method.name_offset as usize >= content.len() {
         return None;
     }
-    let func_line = bytes[..offset].iter().filter(|&&b| b == b'\n').count();
-
-    // Walk backwards from the method name to find the function
-    // keyword line (the declaration may start on an earlier line).
-    // infer_return_type_for_function expects the line of the
-    // `function` keyword.
-    let lines: Vec<&str> = content.lines().collect();
-    let mut decl_line = func_line;
-    for i in (0..=func_line).rev() {
-        let trimmed = lines.get(i).map(|l| l.trim()).unwrap_or("");
-        if trimmed.contains("function ")
-            || trimmed.contains("function(")
-            || trimmed.starts_with("function")
-        {
-            decl_line = i;
-            break;
-        }
-        if trimmed.ends_with('}') || trimmed.ends_with(';') {
-            break;
-        }
-    }
+    // Every resolution while the walk below reads the body parses the
+    // declaring file, so share one parse of it with the rest of the pass.
+    let _parse_guard = crate::parser::with_parse_cache_arc(Arc::clone(&content));
 
     // Publish the call site's argument types against the class the
     // walker will report as its own while it reads this body, so the
@@ -311,7 +333,7 @@ fn infer_body_return_type(
         )
     });
 
-    let result = backend.infer_return_type_for_function(&file_uri, &content, decl_line, true)?;
+    let result = backend.infer_return_type_at(&file_uri, &content, method.name_offset, true)?;
 
     // A declaration the caller can fall back on is only worth replacing
     // with a reading the body actually agrees on. `mixed` is the one

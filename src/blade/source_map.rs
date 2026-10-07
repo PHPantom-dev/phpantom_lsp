@@ -56,6 +56,12 @@ fn anchor_at(line_adj: &[(u32, u32)], character: u32, side: AnchorSide) -> (usiz
 }
 
 impl BladeSourceMap {
+    /// Map a Blade position into the virtual PHP.
+    ///
+    /// A column inside template text the preprocessor replaced (a tag name,
+    /// a `{{` opener, a directive keyword, an argument list it skipped) has
+    /// no PHP of its own: it maps to where the replacement ends, never into
+    /// the PHP behind it.
     pub fn blade_to_php(&self, pos: Position) -> Position {
         let line = pos.line as usize;
         let virtual_line = line as u32 + self.prologue_lines;
@@ -75,8 +81,15 @@ impl BladeSourceMap {
             };
         }
 
-        let (_, best_b, best_p) = anchor_at(line_adj, pos.character, AnchorSide::Blade);
-        let char_offset = pos.character.saturating_sub(best_b);
+        let (best_idx, best_b, best_p) = anchor_at(line_adj, pos.character, AnchorSide::Blade);
+        let mut char_offset = pos.character.saturating_sub(best_b);
+
+        // Walk the segment 1:1, but never past where it ends in the PHP: a
+        // replacement is narrower than the text it replaced, and the columns
+        // it has no room for would land in the PHP generated behind it.
+        if let Some((_, next_p)) = line_adj.get(best_idx + 1) {
+            char_offset = char_offset.min(next_p.saturating_sub(best_p));
+        }
 
         Position {
             line: virtual_line,
@@ -171,7 +184,10 @@ impl BladeSourceMap {
 mod tests {
     use super::*;
     use crate::blade::TemplateKind;
-    use crate::blade::preprocessor::{preprocess, preprocess_with_vars};
+    use crate::blade::preprocessor::{
+        ComponentBinding, ComponentParameter, ComponentResolver, ComponentTarget, preprocess,
+        preprocess_with_vars,
+    };
 
     fn at(line: u32, character: u32) -> Position {
         Position { line, character }
@@ -215,6 +231,139 @@ mod tests {
         // Past the last anchor: it applies, with no cap to hold it back.
         assert_eq!(map.blade_to_php(at(0, 25)), at(prologue, 45));
         assert_eq!(map.try_php_to_blade(at(prologue, 45)), Some(at(0, 25)));
+    }
+
+    /// A Blade column inside text that was replaced by generated PHP maps
+    /// to where the replacement ends, the one PHP position the whole span
+    /// lowers to, rather than running into the PHP after it by the
+    /// column's distance into the span.
+    #[test]
+    fn a_blade_column_inside_a_replaced_span_maps_to_the_end_of_the_replacement() {
+        // Blade columns 0..8 became 15 columns of generated PHP, and the
+        // text after them lowered to more generated PHP at column 16.
+        let map = map(vec![vec![
+            (0, 0),
+            (0, 15),
+            (8, 15),
+            (9, 16),
+            (9, 44),
+            (18, 44),
+        ]]);
+        let prologue = map.prologue_lines;
+        for blade_column in 0..=8 {
+            assert_eq!(
+                map.blade_to_php(at(0, blade_column)),
+                at(prologue, 15),
+                "column {blade_column} sits inside the replaced span"
+            );
+        }
+    }
+
+    /// Template text a construct consumed without emitting anything of its
+    /// own (an argument list the preprocessor skips) lowers to the position
+    /// the generated PHP after it starts at, so nothing in it can reach
+    /// into that PHP.
+    #[test]
+    fn a_blade_column_inside_skipped_text_does_not_reach_the_php_after_it() {
+        // `(0, 0), (0, 11), (8, 11)` is the keyword's replacement; the
+        // skipped argument list is Blade columns 8..16, and the suffix
+        // generated once it closes starts at the same PHP column.
+        let map = map(vec![vec![(0, 0), (0, 11), (8, 11), (16, 11), (16, 25)]]);
+        let prologue = map.prologue_lines;
+        for blade_column in 8..16 {
+            assert_eq!(
+                map.blade_to_php(at(0, blade_column)),
+                at(prologue, 11),
+                "column {blade_column} sits inside the skipped argument list"
+            );
+        }
+    }
+
+    /// A segment that is narrower in the PHP than in the template is walked
+    /// 1:1 and held at the next anchor rather than running past it, the way
+    /// the trip back holds a grown one.
+    #[test]
+    fn a_blade_column_in_a_narrowed_segment_stops_at_the_next_anchor() {
+        let map = map(vec![vec![(0, 0), (3, 8), (8, 10), (9, 30)]]);
+        let prologue = map.prologue_lines;
+        assert_eq!(map.blade_to_php(at(0, 3)), at(prologue, 8));
+        assert_eq!(map.blade_to_php(at(0, 4)), at(prologue, 9));
+        assert_eq!(map.blade_to_php(at(0, 5)), at(prologue, 10));
+        assert_eq!(map.blade_to_php(at(0, 7)), at(prologue, 10));
+        assert_eq!(map.blade_to_php(at(0, 8)), at(prologue, 10));
+    }
+
+    /// The tag name of a component tag is replaced wholesale, and whatever
+    /// the tag emits next (a bound attribute's call or assignment) starts
+    /// right behind it, so a column in the name must not land in that.
+    #[test]
+    fn a_column_in_a_component_tag_name_does_not_reach_the_php_the_tag_emits_next() {
+        struct Known;
+        impl ComponentResolver for Known {
+            fn x_component(&self, tag: &str) -> Option<ComponentTarget> {
+                match tag {
+                    "card" => Some(ComponentTarget {
+                        fqn: "App\\View\\Components\\Card".to_string(),
+                        binding: ComponentBinding::Construct(vec![ComponentParameter {
+                            name: "bakery".to_string(),
+                            fallback: None,
+                        }]),
+                    }),
+                    "alert" => Some(ComponentTarget {
+                        fqn: "App\\View\\Components\\Alert".to_string(),
+                        binding: ComponentBinding::Declare,
+                    }),
+                    _ => None,
+                }
+            }
+            fn livewire_component(&self, _: &str) -> Option<ComponentTarget> {
+                None
+            }
+        }
+
+        for tag in [
+            // Unknown to the project: the name becomes a comment, and the
+            // bound attribute behind it a `blade_bound_attr_directive(` call.
+            "<x-panel :author=\"$posts->first()?->author\" heading=\"Latest\">",
+            // A constructor call, whose name becomes a single space, and the
+            // bound attribute that is its argument an assignment.
+            "<x-card :bakery=\"$bakery\">",
+            // A plain first attribute, which the tag's call swallows.
+            "<x-card class=\"mt-4\">",
+            // A component with no signature, declaring a variable.
+            "<x-alert :title=\"$title\">",
+        ] {
+            let (php, map) = preprocess_with_vars(
+                tag,
+                &[],
+                TemplateKind::View,
+                None,
+                Some(&Known),
+                &Default::default(),
+            );
+            let name_len = tag.find(' ').expect("the tag has attributes");
+            let virtual_line = php
+                .lines()
+                .nth(map.prologue_lines as usize)
+                .expect("the tag's line");
+            let start = map.blade_to_php(at(0, 0));
+            for column in 1..name_len {
+                assert_eq!(
+                    map.blade_to_php(at(0, column as u32)),
+                    start,
+                    "column {column} of {tag:?} must map where the tag's start does"
+                );
+            }
+            // The line is ASCII, so a column indexes its characters.
+            assert!(
+                virtual_line
+                    .chars()
+                    .nth(start.character as usize)
+                    .is_none_or(char::is_whitespace),
+                "the tag name of {tag:?} must lower to a position that is not \
+                 generated code: {virtual_line:?}"
+            );
+        }
     }
 
     /// A PHP column inside a stretch of boilerplate the template never

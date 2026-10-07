@@ -1,4 +1,7 @@
-use crate::common::{collect_diagnostics_with, create_test_backend, messages_with_code};
+use crate::common::{
+    collect_diagnostics_with, create_test_backend, create_test_backend_with_full_stubs,
+    messages_with_code,
+};
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
@@ -2323,6 +2326,125 @@ function get_user(): array {
     );
 }
 
+/// An unsealed `@return array{foo: int, ...}` lists `foo`, so what comes
+/// back is held to it however many other entries it also has.
+#[test]
+fn array_returned_from_an_unsealed_shape_return_is_held_to_the_entries_it_lists() {
+    let php = r#"<?php
+/** @return array{foo: int, ...} */
+function ok(): array {
+    return ['foo' => 1, 'bar' => 'anything'];
+}
+
+/** @return array{foo: int, ...} */
+function wrongValue(): array {
+    return ['foo' => []];
+}
+"#;
+    let diags = collect(php);
+    let messages = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("foo: array{}"), "got {messages:?}");
+}
+
+#[test]
+fn array_returned_from_an_unsealed_shape_return_is_held_to_its_tail() {
+    let php = r#"<?php
+/** @return array{foo: int, ...<string, string>} */
+function ok(): array {
+    return ['foo' => 1, 'bar' => 'x'];
+}
+
+/** @return array{foo: int, ...<string, string>} */
+function wrongTail(): array {
+    return ['foo' => 1, 'bar' => []];
+}
+"#;
+    let diags = collect(php);
+    let messages = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("bar: array{}"), "got {messages:?}");
+}
+
+/// A value typed as an unsealed shape that comes back where a typed array is
+/// declared is held to the entries it lists, not to the plain array it
+/// widens to.
+#[test]
+fn an_unsealed_array_returned_as_a_typed_array_is_held_to_the_entries_it_lists() {
+    let php = r#"<?php
+/** @return array{foo: string, ...} */
+function makeOpen(): array { return ['foo' => 'x']; }
+
+/** @return array<string, string> */
+function ok(): array {
+    return makeOpen();
+}
+
+/** @return array<string, int> */
+function wrongValue(): array {
+    return makeOpen();
+}
+"#;
+    let diags = collect(php);
+    let messages = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("array{foo: string, ...<array-key, mixed>}"),
+        "got {messages:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_foreach_key_value_rewriting_every_element() {
+    let php = r#"<?php
+/**
+ * @param array<string, array{string, bool, string}> $pairs
+ * @return array<string, array{string, bool, string, array{'I'}}>
+ */
+function add_flag(array $pairs): array {
+    foreach ($pairs as $cn => $_) {
+        $pairs[$cn][3] = ['I'];
+    }
+    return $pairs;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "A foreach ($arr as $key => $_) that rewrites every element should not join \
+         with the pre-loop shape, got: {diags:?}"
+    );
+}
+
+/// Same as above, iterating the array's keys through `array_keys()`: the
+/// key `array_keys()` hands the loop is the array's own `string` key, not
+/// the `int|string` default for an array key.
+#[test]
+fn no_diagnostic_for_foreach_over_array_keys_rewriting_every_element() {
+    let php = r#"<?php
+/**
+ * @param array<string, array{string, bool, string}> $pairs
+ * @return array<string, array{string, bool, string, array{'I'}}>
+ */
+function add_flag(array $pairs): array {
+    foreach (array_keys($pairs) as $cn) {
+        $pairs[$cn][3] = ['I'];
+    }
+    return $pairs;
+}
+"#;
+    let diags = collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    );
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "A foreach over array_keys($arr) that rewrites every element should keep \
+         the array's string key, got: {diags:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Advanced: real-world patterns with generics and inheritance
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4052,6 +4174,46 @@ function goodEmpty(): array {
     );
 }
 
+// ── An array's type arguments are not a coercion site ───────────────────────
+
+#[test]
+fn flags_int_key_against_string_key_map_without_strict_types() {
+    let php = r#"<?php
+/** @return array<string, string> */
+function f(int $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "PHP never coerces an array's keys or values when it is passed whole, so an \
+         `array<int, string>` should not satisfy `array<string, string>` even in a \
+         file without `declare(strict_types=1)`, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_int_key_against_string_key_map_with_strict_types() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @return array<string, string> */
+function f(int $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "Expected return type error for array<int, string> where array<string, string> \
+         is required under strict_types, got: {diags:?}"
+    );
+}
+
 #[test]
 fn docblock_return_type_of_another_files_function_is_not_borrowed() {
     let backend = create_test_backend();
@@ -4486,5 +4648,327 @@ class Square implements Shape
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "trait and interface members should both resolve on $this, got: {:?}",
         messages_with_code(&diags, "type_mismatch_return")
+    );
+}
+
+// ─── A template parameter named like a class is still the template ─────────
+
+#[test]
+fn class_template_named_like_a_class_is_not_that_class() {
+    let php = r#"<?php
+namespace App;
+
+class T1 {}
+
+/**
+ * @template T1
+ */
+trait Holds {
+    /** @return T1 */
+    public function first() { return null; }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "An unbounded template accepts any value, even beside a class of the same name, got: {diags:?}"
+    );
+}
+
+#[test]
+fn class_template_is_not_a_same_named_class_in_another_namespace_block() {
+    let php = r#"<?php
+namespace A {
+    /**
+     * @template T1
+     */
+    trait Holds {
+        /** @return T1 */
+        public function first() { return null; }
+    }
+}
+namespace B {
+    trait T1 {}
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "The template must not resolve to another block's class, got: {diags:?}"
+    );
+}
+
+#[test]
+fn function_template_named_like_a_class_is_not_that_class() {
+    let php = r#"<?php
+namespace App;
+
+class T2 {}
+
+/**
+ * @template T2
+ * @param T2 $x
+ * @return T2
+ */
+function pass($x) { return null; }
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "An unbounded function template accepts any value, got: {diags:?}"
+    );
+}
+
+#[test]
+fn bounded_template_return_is_checked_against_its_bound() {
+    let php = r#"<?php
+interface Shape {}
+class Circle implements Shape {}
+class Plain {}
+
+/**
+ * @template T of Shape
+ */
+class Holder {
+    /** @return T */
+    public function wrong() { return new Plain(); }
+
+    /** @return T */
+    public function withinBound() { return new Circle(); }
+}
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Only the value outside the bound is flagged, got: {msgs:?}"
+    );
+    assert!(msgs[0].contains("Plain"), "got: {msgs:?}");
+}
+
+/// A Laravel model operator is a name for a class, so it has to be
+/// resolved before the returned and declared types are compared — and
+/// before the message is written. Leaving it until the comparison
+/// reported the operator's own spelling back at the reader, who wrote a
+/// type that does name something.
+///
+/// `static` here is bound to the trait that wrote the annotation, which
+/// is no model at all, so the operator stands for the framework's own
+/// collection.
+#[test]
+fn a_model_operator_is_resolved_before_the_return_type_is_reported() {
+    let php = r#"<?php
+namespace App;
+
+use Illuminate\Database\Eloquent\Collection;
+
+/** @phpstan-require-extends \Illuminate\Database\Eloquent\Model */
+trait HasFactory
+{
+    /** @return collection-of<static> */
+    public static function many(): Collection
+    {
+        return new Collection();
+    }
+
+    /** @return static|Collection */
+    public static function caller(): mixed
+    {
+        return static::many();
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert!(
+        !messages.iter().any(|m| m.contains("collection-of")),
+        "the operator should be resolved, not reported as itself: {messages:?}"
+    );
+}
+
+/// A `@template TFactory of Factory` the class declares is ruled out by
+/// `! $x instanceof Factory` exactly as its bound would be: every value of
+/// the parameter is a `Factory`, which is what the bound says.
+///
+/// One written on a trait and read through `static::` inside that trait
+/// has nothing to bind it, so the alternative reaches narrowing under its
+/// own name. Narrowing kept it, and the return-type check then substituted
+/// the bound and reported a `Factory` the guard had already excluded.
+#[test]
+fn an_instanceof_guard_rules_out_a_template_bounded_by_the_checked_class() {
+    let php = r#"<?php
+namespace App;
+
+class Collection {}
+class Factory {}
+
+/** @template TFactory of Factory */
+trait HasFactory
+{
+    /** @return static|TFactory */
+    public static function make(): static|Collection|Factory
+    {
+        return null;
+    }
+
+    /** @return static|Collection */
+    public static function caller(): static|Collection
+    {
+        $model = static::make();
+
+        if (! $model instanceof Factory) {
+            return $model;
+        }
+
+        return new Collection();
+    }
+}
+"#;
+    let messages: Vec<String> = messages_with_code(&collect(php), "type_mismatch_return")
+        .into_iter()
+        .filter(|m| !m.starts_with("Return type null"))
+        .collect();
+    assert!(
+        messages.is_empty(),
+        "the guard rules the template out, so the return satisfies the declared type: {messages:?}"
+    );
+}
+
+/// A key whose type nobody measured is PHP's whole key domain, so an array
+/// written through it is not held to both `int` and `string`.
+#[test]
+fn a_write_through_an_unknown_key_keeps_the_keys_benevolent() {
+    let php = r#"<?php
+/** @return array<int, string> */
+function typed(mixed $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+/** @return array<int, string> */
+function untyped($k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got: {diags:?}"
+    );
+}
+
+#[test]
+fn a_write_through_a_declared_array_key_is_still_enforced() {
+    let php = r#"<?php
+/** @return array<int, string> */
+function f(int|string $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got: {diags:?}"
+    );
+}
+
+/// A class name can never be a decimal integer, so PHP stores it as the key
+/// it is and an array built by writing through it keeps `class-string` keys.
+#[test]
+fn a_write_through_a_class_string_key_keeps_the_class_string() {
+    let php = r#"<?php
+/**
+ * @param class-string $n
+ * @return array<class-string, string>
+ */
+function f(string $n): array {
+    $mapping = [];
+    $mapping[$n] = 'y';
+    return $mapping;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got: {diags:?}"
+    );
+}
+
+// ─── Multi-namespace files: short names resolve in their own block ─────────
+
+/// A later `namespace` block that reuses an earlier block's short class
+/// names must resolve them against itself, both for `new` and for a
+/// closure literal's native parameter and return hints.
+#[test]
+fn short_names_in_a_later_namespace_block_resolve_against_that_block() {
+    let php = r#"<?php
+namespace First {
+    class A {}
+    class C {}
+}
+
+namespace Second {
+    class A {}
+    class C {}
+    class C2 extends C {}
+
+    function make(): C {
+        return new C;
+    }
+
+    /**
+     * @return \Closure(C2):A
+     */
+    function wrap(): \Closure {
+        return function (C $x): A {
+            return new A;
+        };
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "Short names should resolve against the enclosing namespace block, got: {diags:?}"
+    );
+}
+
+/// A line comment above each `namespace` block (the layout of the ported
+/// Psalm suites) must not hide the block's declaration, or everything in
+/// it resolves against the block before.
+#[test]
+fn a_comment_above_a_namespace_block_does_not_hide_it() {
+    let php = r#"<?php
+// Test: first
+namespace First {
+    class A {}
+    class C {}
+}
+
+// Test: second
+namespace Second {
+    class A {}
+    class C {}
+    class C2 extends C {}
+
+    /**
+     * @param \Closure(C):A $f
+     * @return \Closure(C2):A
+     */
+    function wrap(\Closure $f): \Closure {
+        return function (C $x) use ($f): A {
+            return $f($x);
+        };
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "Short names should resolve against the commented namespace block, got: {diags:?}"
     );
 }

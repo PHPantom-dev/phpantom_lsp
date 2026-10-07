@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use tower_lsp::lsp_types::*;
 
-use super::classify_class_origin;
+use super::{classify_class_origin, path_aliases};
 use crate::Backend;
 use crate::classmap_scanner;
 use crate::composer;
@@ -136,6 +136,7 @@ impl Backend {
             .set_runtime_permission_package(runtime_permissions);
 
         let (vendor_dir, vendor_path) = self.init_autoload_paths(root, composer_json.as_ref());
+        let vendor_paths = path_aliases(&vendor_path);
 
         // ── Build the classmap ──────────────────────────────────────
         let strategy = self.config().indexing.strategy();
@@ -177,7 +178,11 @@ impl Backend {
                 }
                 let filters = self.index_filters();
                 let mut scan = classmap_scanner::scan_workspace_fallback_full(
-                    root, &skip_dirs, &filters, progress,
+                    root,
+                    &skip_dirs,
+                    &filters,
+                    progress,
+                    Some(self.followed_links()),
                 );
 
                 // Merge vendor packages (excluded from the workspace
@@ -192,6 +197,7 @@ impl Backend {
                     &explicit_deps,
                     &filters,
                     progress,
+                    Some(self.followed_links()),
                 );
                 let package_roots = std::mem::take(&mut vendor_scan.package_roots);
 
@@ -282,7 +288,7 @@ impl Backend {
                 let origin = class_origins
                     .get(&fqn)
                     .copied()
-                    .unwrap_or_else(|| classify_class_origin(&path, &vendor_path, &package_roots));
+                    .unwrap_or_else(|| classify_class_origin(&path, &vendor_paths, &package_roots));
                 origins.insert(fqn.clone(), origin);
                 idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
             }
@@ -568,6 +574,7 @@ impl Backend {
             &skip_dirs,
             &self.index_filters(),
             progress,
+            Some(self.followed_links()),
         );
         self.populate_autoload_indices(&scan);
         {
@@ -623,6 +630,7 @@ impl Backend {
             &skip_dirs,
             &self.index_filters(),
             progress,
+            Some(self.followed_links()),
         );
         self.populate_autoload_indices(&scan);
 

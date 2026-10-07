@@ -1,0 +1,15 @@
+// test: extract() with EXTR_SKIP writes only the keys that are not locals yet
+// feature: hover
+// expect_hover: $rx => $rx = 1
+// expect_hover: $ry => $ry = string
+---
+<?php
+
+/** @param array{x: string, y: string} $row */
+function test(array $row, array $data): void {
+    $x = 1;
+    extract($row, EXTR_SKIP);
+    extract($data, EXTR_SKIP);
+    $rx = $x;
+    $ry = $y;<>
+}

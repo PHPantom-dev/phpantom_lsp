@@ -1,0 +1,304 @@
+use crate::common::{
+    create_psr4_workspace, definition_locations, find_references, goto_definition_at,
+    lsp_pos_to_offset, markup_hover_at, open_document, open_php, position_of,
+};
+use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
+
+const COMPOSER: &str = r#"{
+    "require": {"laravel/framework": "^13.0"},
+    "autoload": {"psr-4": {"App\\": "src/"}}
+}"#;
+
+#[tokio::test]
+async fn new_php_translation_buffers_resolve_before_their_first_save() {
+    for (path, group, locale) in [
+        ("lang/en/messages.php", "messages", "en"),
+        ("resources/lang/fr/admin/users.php", "admin/users", "fr"),
+    ] {
+        let source = format!("<?php\n__('{group}.saved');\n__('existing.saved');\n");
+        let existing = "<?php return ['saved' => 'Existing'];";
+        let translation = "<?php\nreturn [\n    'saved' => 'Saved from buffer',\n];\n";
+        let (backend, dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("src/usage.php", &source),
+                ("lang/en/existing.php", existing),
+            ],
+        );
+        let source_uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+        let existing_uri = Url::from_file_path(dir.path().join("lang/en/existing.php")).unwrap();
+        let translation_path = dir.path().join(path);
+        let translation_uri = Url::from_file_path(&translation_path).unwrap();
+        open_php(&backend, &source_uri, &source).await;
+        open_php(&backend, &existing_uri, existing).await;
+
+        assert!(
+            definition_locations(goto_definition_at(&backend, &source_uri, 1, 5).await).is_empty()
+        );
+        open_php(&backend, &translation_uri, translation).await;
+        assert!(!translation_path.exists());
+        assert_eq!(
+            definition_locations(goto_definition_at(&backend, &source_uri, 1, 5).await),
+            vec![Location::new(
+                translation_uri.clone(),
+                Range::new(Position::new(2, 5), Position::new(2, 10)),
+            )],
+            "{path}"
+        );
+        let hover = markup_hover_at(&backend, &source_uri, 1, 5).await;
+        assert!(
+            hover.contains(&format!("`{locale}`: `Saved from buffer`")),
+            "{hover}"
+        );
+        let existing_definitions =
+            definition_locations(goto_definition_at(&backend, &source_uri, 2, 5).await);
+        assert_eq!(existing_definitions.len(), 1);
+        assert_eq!(existing_definitions[0].uri, existing_uri);
+
+        backend
+            .did_close(DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier {
+                    uri: translation_uri,
+                },
+            })
+            .await;
+        assert!(
+            definition_locations(goto_definition_at(&backend, &source_uri, 1, 5).await).is_empty()
+        );
+    }
+}
+
+#[tokio::test]
+async fn json_translation_definitions_and_references_use_exact_key_ranges() {
+    let php = "<?php\n__('Greeting 😀');\ntrans('Greeting 😀');\n";
+    let english = "{\n  \"Other\": \"Greeting 😀\",\n  \"Greeting 😀\": \"Hello\"\n}\n";
+    let french = "{\n\n  \"Greeting 😀\": \"Bonjour\"\n}\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/usage.php", php),
+            ("lang/en.json", english),
+            ("resources/lang/fr.json", french),
+        ],
+    );
+    let php_uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let en_uri = Url::from_file_path(dir.path().join("lang/en.json")).unwrap();
+    let fr_uri = Url::from_file_path(dir.path().join("resources/lang/fr.json")).unwrap();
+    open_php(&backend, &php_uri, php).await;
+    let definitions = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: php_uri.clone(),
+                },
+                position: position_of(php, "Greeting"),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .expect("JSON definitions");
+    let GotoDefinitionResponse::Array(definitions) = definitions else {
+        panic!("expected locales")
+    };
+    assert_eq!(definitions.len(), 2);
+    for definition in &definitions {
+        assert!(definition.uri == en_uri || definition.uri == fr_uri);
+        assert_eq!(definition.range.start, Position::new(2, 3));
+        assert_eq!(definition.range.end, Position::new(2, 14));
+    }
+    for include_declaration in [false, true] {
+        let from_php = find_references(
+            &backend,
+            &php_uri,
+            position_of(php, "Greeting"),
+            include_declaration,
+        )
+        .await;
+        let from_json = find_references(
+            &backend,
+            &fr_uri,
+            position_of(french, "Greeting"),
+            include_declaration,
+        )
+        .await;
+        assert_eq!(from_php.len(), if include_declaration { 4 } else { 2 });
+        assert_eq!(from_json.len(), from_php.len());
+        assert!(from_json.iter().all(|location| from_php.contains(location)));
+    }
+    assert!(
+        find_references(&backend, &en_uri, position_of(english, "Other"), false)
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn json_translation_navigation_reads_unsaved_escaped_keys() {
+    let php = r#"<?php __('Say "hello"');"#;
+    let initial = "{\"old\":\"value\"}";
+    let updated = r#"{
+  "Say \"hello\"": "Bonjour"
+}"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[("src/usage.php", php), ("lang/en.json", initial)],
+    );
+    let php_uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let json_uri = Url::from_file_path(dir.path().join("lang/en.json")).unwrap();
+    open_php(&backend, &php_uri, php).await;
+    open_document(&backend, &json_uri, "json", updated).await;
+    let found = find_references(&backend, &json_uri, position_of(updated, "Say"), true).await;
+    assert_eq!(found.len(), 2, "{found:?}");
+    let declaration = found
+        .iter()
+        .find(|location| location.uri == json_uri)
+        .unwrap();
+    assert_eq!(
+        &updated[lsp_pos_to_offset(updated, declaration.range.start)
+            ..lsp_pos_to_offset(updated, declaration.range.end)],
+        r#"Say \"hello\""#
+    );
+}
+
+#[tokio::test]
+async fn translation_argument_completion_uses_both_language_folders() {
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            (
+                "lang/en/messages.php",
+                "<?php return ['hello'=>'Hello :name :count'];",
+            ),
+            ("resources/lang/fr.json", r#"{"Welcome":"Bonjour :ami"}"#),
+            ("src/usage.php", "<?php"),
+        ],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    for (source, expected) in [
+        ("<?php __('messages.hello', [], '|');", vec!["en", "fr"]),
+        (
+            "<?php use Illuminate\\Support\\Facades\\Lang as L; L::get(locale: '|', key: 'messages.hello');",
+            vec!["en", "fr"],
+        ),
+        (
+            "<?php trans_choice('messages.hello', 2, replace: ['name'=>'Ada', '|' => 1]);",
+            vec!["count"],
+        ),
+        ("<?php __(replace: ['|'], key: 'Welcome');", vec!["ami"]),
+    ] {
+        let at = position_of(source, "|");
+        let php = source.replace('|', "");
+        open_php(&backend, &uri, &php).await;
+        let response = backend
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: at,
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+                context: None,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let items = match response {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>(),
+            expected,
+            "{source}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn translation_hover_and_references_bind_named_keys_and_show_all_locales() {
+    let source = "<?php\n__(locale: 'en', key: 'Welcome');\nLang::get(locale: 'fr', key: 'Welcome');\n__(locale: 'fr');";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/usage.php", source),
+            ("lang/en.json", "{\n\"Welcome\": \"Welcome :name\"\n}"),
+            (
+                "resources/lang/fr.json",
+                "{\n\n\"Welcome\": \"Bonjour :name\"\n}",
+            ),
+        ],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    open_php(&backend, &uri, source).await;
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: position_of(source, "Welcome"),
+            },
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("markdown hover")
+    };
+    assert!(
+        markup.value.contains("`en`: `Welcome :name`"),
+        "{}",
+        markup.value
+    );
+    assert!(markup.value.contains("`fr`: `Bonjour :name`"));
+    assert!(markup.value.contains("/lang/en.json#L2>"));
+    assert!(markup.value.contains("/resources/lang/fr.json#L3>"));
+    assert_eq!(
+        find_references(&backend, &uri, position_of(source, "Welcome"), false)
+            .await
+            .len(),
+        2
+    );
+    assert!(
+        find_references(&backend, &uri, position_of(source, "en'"), false)
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn json_translation_references_decode_php_and_blade_string_escapes() {
+    let php = "<?php\n__('It\\'s open');\n";
+    let blade = "{{ __('It\\'s open') }}\n";
+    let json = r#"{"It's open":"Open"}"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/usage.php", php),
+            ("resources/views/welcome.blade.php", blade),
+            ("resources/lang/en.json", json),
+        ],
+    );
+    let php_uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let blade_uri =
+        Url::from_file_path(dir.path().join("resources/views/welcome.blade.php")).unwrap();
+    let json_uri = Url::from_file_path(dir.path().join("resources/lang/en.json")).unwrap();
+    open_php(&backend, &php_uri, php).await;
+    open_document(&backend, &blade_uri, "blade", blade).await;
+    let found = find_references(&backend, &json_uri, position_of(json, "It's open"), true).await;
+    assert_eq!(found.len(), 3, "{found:?}");
+    assert!(found.iter().any(|location| location.uri == php_uri));
+    assert!(found.iter().any(|location| location.uri == blade_uri
+        && location.range == Range::new(Position::new(0, 7), Position::new(0, 17))));
+    assert_eq!(
+        find_references(&backend, &blade_uri, Position::new(0, 8), false)
+            .await
+            .len(),
+        2
+    );
+}

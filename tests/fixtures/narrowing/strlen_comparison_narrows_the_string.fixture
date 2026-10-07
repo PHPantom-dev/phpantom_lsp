@@ -1,0 +1,19 @@
+// test: a length of zero is the empty string and a positive one is non-empty
+// feature: hover
+// expect_hover: $empty => ''
+// expect_hover: $full => non-empty-string
+---
+<?php
+
+function f(string $s, string $t): void
+{
+    if (mb_strlen($t) !== 0) {
+        $full = $t;
+        echo $full;
+    }
+    if (strlen($s) > 0) {
+        return;
+    }
+    $empty = $s;
+    echo $em<>pty;
+}

@@ -323,8 +323,6 @@ fn resolve_target_classes_expr_inner(
     match expr {
         // ── Keywords that always mean "current class" ────────────
         SubjectExpr::This => {
-            use crate::type_engine::variable::forward_walk;
-
             // `$this` is not available inside static methods.
             if current_class.is_some() && ctx.is_in_static_method {
                 return vec![];
@@ -352,22 +350,24 @@ fn resolve_target_classes_expr_inner(
             // means `$this` is the subclass.  The scope only wins when it is
             // strictly narrower; otherwise it holds the lexically captured
             // `$this` the tag is there to replace.
-            if let Some(override_cls) =
-                super::variable::closure_resolution::find_closure_this_override(ctx)
-            {
+            if let Some(bound) = super::variable::closure_resolution::find_closure_this_types(ctx) {
                 let narrowed = from_scope.filter(|types| {
                     !types.is_empty()
                         && types.iter().all(|rt| {
                             rt.class_info.as_ref().is_some_and(|ci| {
-                                forward_walk::is_subclass_of(
-                                    &ci.fqn(),
-                                    &override_cls.fqn(),
-                                    class_loader,
-                                )
+                                bound.iter().any(|b| {
+                                    b.class_info.as_ref().is_some_and(|bound_cls| {
+                                        crate::class_lookup::is_subclass_of(
+                                            &ci.fqn(),
+                                            &bound_cls.fqn(),
+                                            class_loader,
+                                        )
+                                    })
+                                })
                             })
                         })
                 });
-                return narrowed.unwrap_or_else(|| vec![ResolvedType::from_class(override_cls)]);
+                return narrowed.unwrap_or(bound);
             }
 
             let mut this_types = if let Some(scope_types) = from_scope {
@@ -452,17 +452,14 @@ fn resolve_target_classes_expr_inner(
                     class_loader(&parent_name).into_iter().collect()
                 }
             } else {
-                if let Some(cls) = find_class_by_name(all_classes, class) {
-                    vec![Arc::clone(cls)]
-                } else {
-                    // `Foo::` is a source-level reference: PHP resolves an
-                    // unqualified name against the current namespace before
-                    // the global scope, so a same-namespace class must win
-                    // over a global class of the same short name.
-                    let ns = current_class.and_then(|c| c.file_namespace.as_deref());
-                    let fqn = crate::util::resolve_source_class_name(class, ns, class_loader);
-                    class_loader(&fqn).into_iter().collect()
-                }
+                // `Foo::` is a source-level reference: PHP resolves an
+                // unqualified name against the current namespace before
+                // the global scope, so a same-namespace class must win
+                // over a global class of the same short name.
+                let ns = current_class.and_then(|c| c.file_namespace.as_deref());
+                let fqn =
+                    crate::util::resolve_source_class_name(class, ns, all_classes, class_loader);
+                class_loader(&fqn).into_iter().collect()
             };
 
             // When the member is a static property (starts with `$`),
@@ -529,15 +526,12 @@ fn resolve_target_classes_expr_inner(
         // ── A bare class name, and `new ClassName` without trailing
         //    call parens, are the same reference written two ways ──
         SubjectExpr::ClassName(name) | SubjectExpr::NewExpr { class_name: name } => {
-            if let Some(cls) = find_class_by_name(all_classes, name) {
-                return vec![ResolvedType::from_arc(Arc::clone(cls))];
-            }
             // Both are source-level references: PHP resolves an
             // unqualified name against the current namespace before the
             // global scope, so a same-namespace class must win over a
             // global stub of the same short name.
             let ns = current_class.and_then(|c| c.file_namespace.as_deref());
-            let fqn = crate::util::resolve_source_class_name(name, ns, class_loader);
+            let fqn = crate::util::resolve_source_class_name(name, ns, all_classes, class_loader);
             class_loader(&fqn)
                 .map(ResolvedType::from_arc)
                 .into_iter()
@@ -655,12 +649,27 @@ fn resolve_target_classes_expr_inner(
                 receiver.unwrap_or_else(|| resolve_target_classes_expr(base, access_kind, ctx)),
             );
             let mut arc_results: Vec<Arc<ClassInfo>> = Vec::new();
+            // The generic members of the property's hint, e.g.
+            // `Collection<int, Post>`.  The classes resolved from it carry
+            // only its base name, so each is given its generic spelling
+            // back once narrowing has settled which classes remain.
+            let mut generic_hints: Vec<PhpType> = Vec::new();
             for cls in &base_arcs {
-                let resolved = super::type_resolution::resolve_property_types(
-                    property,
-                    cls,
+                let Some(hint) = resolve_property_type_hint(cls, property, class_loader) else {
+                    continue;
+                };
+                let resolved = super::type_resolution::type_hint_to_classes_typed(
+                    &hint,
+                    &cls.fqn(),
                     all_classes,
                     class_loader,
+                );
+                generic_hints.extend(
+                    hint.unwrap_nullable()
+                        .union_members()
+                        .into_iter()
+                        .filter(|member| matches!(member.kind(), TypeKind::Generic(_)))
+                        .cloned(),
                 );
 
                 ClassInfo::extend_unique_arc(&mut arc_results, resolved);
@@ -722,6 +731,20 @@ fn resolve_target_classes_expr_inner(
                 let mut narrowed = ResolvedType::from_classes(arc_results);
                 if is_intersection {
                     ResolvedType::tag_as_intersection(&mut narrowed);
+                } else if !generic_hints.is_empty() {
+                    for rt in &mut narrowed {
+                        let Some(class) = &rt.class_info else {
+                            continue;
+                        };
+                        let fqn = class.fqn();
+                        if let Some(hint) = generic_hints.iter().find(|hint| {
+                            hint.base_name().is_some_and(|base| {
+                                base == fqn.as_str() || crate::util::short_name(&fqn) == base
+                            })
+                        }) {
+                            rt.type_string = hint.clone();
+                        }
+                    }
                 }
                 narrowed
             }
@@ -910,10 +933,18 @@ fn resolve_target_classes_expr_inner(
                 None
             };
 
-            let candidates = property_raw_type
-                .into_iter()
-                .chain(docblock_type)
-                .chain(ast_type);
+            // The annotation goes first because the walker can lose its
+            // generics on the way through, but a walker type that refines
+            // the annotation is the annotation read further (an `@var
+            // array<T>` whose `T` it knows the bound of, a shape a guard
+            // has narrowed) and describes the value better.
+            let (first, second) = match (docblock_type, ast_type) {
+                (Some(doc), Some(ast)) if ast != doc && ast.is_subtype_of(&doc) => {
+                    (Some(ast), Some(doc))
+                }
+                (doc, ast) => (doc, ast),
+            };
+            let candidates = property_raw_type.into_iter().chain(first).chain(second);
 
             if let Some(resolved) =
                 crate::completion::source::helpers::try_chained_array_access_with_candidates(
@@ -1420,11 +1451,16 @@ fn resolve_this_from_scope(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>>
         return (!from_scope.is_empty()).then_some(from_scope);
     }
 
-    if forward_walk::is_diagnostic_scope_active() && !forward_walk::is_building_scopes() {
+    if forward_walk::is_diagnostic_scope_active()
+        && !forward_walk::is_building_scopes()
+        && forward_walk::scope_snapshots_cover(ctx.cursor_offset)
+    {
         // The snapshot is authoritative here: the walker records `$this`
         // exactly when something narrowed or seeded it, so a miss means
         // there is no proof to find and re-walking would only repeat the
-        // pass that built the snapshot, once per `$this->` site.
+        // pass that built the snapshot, once per `$this->` site.  That
+        // only holds where the walk actually went, which a targeted walk
+        // limits to the bodies it was asked about.
         return forward_walk::lookup_diagnostic_scope("$this", ctx.cursor_offset)
             .filter(|types| !types.is_empty());
     }
@@ -1523,6 +1559,32 @@ fn resolve_class_string_inner_classes(
         }
     }
 
+    // A literal string that names a class is as usable for `::` access as
+    // `class-string<T>` is: PHP resolves the static call through whatever
+    // class name the string holds at runtime, whether or not the analyser
+    // wrapped it in `class-string`. This is what lets a foreach variable
+    // bound to a `Foo::class` array element (a literal `'Foo'`, not a
+    // `class-string<Foo>`, per PHPStan's own reading of such a constant)
+    // still dispatch `$item::method()`.
+    fn literal_string_class_names(ty: &PhpType) -> Vec<String> {
+        match ty.kind() {
+            TypeKind::Literal(literal) => match &**literal {
+                crate::php_type::LiteralValue::String(raw) => {
+                    crate::util::unescape_php_string_literal(raw)
+                        .into_iter()
+                        .collect()
+                }
+                _ => vec![],
+            },
+            TypeKind::Nullable(inner) => literal_string_class_names(inner),
+            TypeKind::Union(members) => members
+                .iter()
+                .flat_map(literal_string_class_names)
+                .collect(),
+            _ => vec![],
+        }
+    }
+
     let mut results = Vec::new();
     for inner in inner_types(ty) {
         let resolved = super::type_resolution::type_hint_to_classes_typed(
@@ -1533,7 +1595,44 @@ fn resolve_class_string_inner_classes(
         );
         ClassInfo::extend_unique_arc(&mut results, resolved);
     }
+    for name in literal_string_class_names(ty) {
+        if let Some(cls) = class_loader(&name) {
+            ClassInfo::extend_unique_arc(&mut results, vec![cls]);
+        }
+    }
     results
+}
+
+/// A member name written as `$variable` — a dynamic method/property
+/// access such as `$obj->$name()`, `Class::$name()`, or their first-class
+/// callable forms — resolves through whatever literal string that
+/// variable holds at the call site: `$name = 'length'; $obj->$name()`
+/// calls `length()` exactly as `$obj->length()` would.
+///
+/// Returns `member` unchanged when it is not a bare `$variable`
+/// reference, or when the variable's resolved type carries no known
+/// literal string value (the caller then keeps its normal, currently
+/// unresolvable, behaviour for a truly dynamic name).
+pub(crate) fn resolve_dynamic_member_name<'a>(
+    member: &'a str,
+    ctx: &ResolutionCtx<'_>,
+) -> std::borrow::Cow<'a, str> {
+    if !member.starts_with('$') || !is_bare_variable(member) {
+        return std::borrow::Cow::Borrowed(member);
+    }
+    resolve_variable_fallback(member, AccessKind::Arrow, ctx)
+        .into_iter()
+        .find_map(|rt| match rt.type_string.kind() {
+            TypeKind::Literal(literal) => match &**literal {
+                crate::php_type::LiteralValue::String(raw) => {
+                    crate::util::unescape_php_string_literal(raw)
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .map(std::borrow::Cow::Owned)
+        .unwrap_or(std::borrow::Cow::Borrowed(member))
 }
 
 /// Resolve a bare `$var` subject to its classes.
@@ -1705,18 +1804,18 @@ pub(in crate::type_engine) fn resolve_static_owner_class(
         // parent — load via class_loader so we get the full parent ClassInfo
         (rctx.class_loader)(&resolved_name)
     } else {
-        find_class_by_name(rctx.all_classes, class)
-            .map(Arc::clone)
-            .or_else(|| (rctx.class_loader)(class))
-            .or_else(|| {
-                resolved_to_arcs(resolve_target_classes(
-                    class,
-                    crate::AccessKind::DoubleColon,
-                    rctx,
-                ))
-                .into_iter()
-                .next()
-            })
+        let ns = rctx.current_class.and_then(|c| c.file_namespace.as_deref());
+        let fqn =
+            crate::util::resolve_source_class_name(class, ns, rctx.all_classes, rctx.class_loader);
+        (rctx.class_loader)(&fqn).or_else(|| {
+            resolved_to_arcs(resolve_target_classes(
+                class,
+                crate::AccessKind::DoubleColon,
+                rctx,
+            ))
+            .into_iter()
+            .next()
+        })
     }
 }
 
