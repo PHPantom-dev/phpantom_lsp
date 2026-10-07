@@ -1001,10 +1001,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b567-the-laravel-examples-analyze-run-reports-a-fourth-error" class="md-nav__link">
+  <a href="#b569-hovering-a-raw-echos-opener-written-without-a-space-shows-the-expression-behind-it" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B567. The Laravel example's <code>analyze</code> run reports a fourth error
+        B569. Hovering a raw echo's opener written without a space shows the expression behind it
       </span>
     </span>
   </a>
@@ -1740,10 +1740,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b567-the-laravel-examples-analyze-run-reports-a-fourth-error" class="md-nav__link">
+  <a href="#b569-hovering-a-raw-echos-opener-written-without-a-space-shows-the-expression-behind-it" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B567. The Laravel example's <code>analyze</code> run reports a fourth error
+        B569. Hovering a raw echo's opener written without a space shows the expression behind it
       </span>
     </span>
   </a>
@@ -1987,20 +1987,27 @@ gets the diagnostic.</p>
 <code>mergeConfigFrom()</code> calls are already read, which is as deterministic as
 the merged files are.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
-<h3 id="b567-the-laravel-examples-analyze-run-reports-a-fourth-error">B567. The Laravel example's <code>analyze</code> run reports a fourth error<a class="headerlink" href="#b567-the-laravel-examples-analyze-run-reports-a-fourth-error" title="Permanent link">&para;</a></h3>
+<h3 id="b569-hovering-a-raw-echos-opener-written-without-a-space-shows-the-expression-behind-it">B569. Hovering a raw echo's opener written without a space shows the expression behind it<a class="headerlink" href="#b569-hovering-a-raw-echos-opener-written-without-a-space-shows-the-expression-behind-it" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<p><code>phpantom_lsp analyze --project-root examples/laravel</code> is documented in
-<code>docs/CONTRIBUTING.md</code> to report exactly the three deliberate mistakes in
-<code>app/Demo.php</code>. It also reports <code>Unused variable '$rowLabel'</code> at
-<code>resources/views/admin/users/index.blade.php:36</code>. The template assigns
-<code>$rowLabel</code> in <code>@php</code> and reads it only in a <code>:data-label</code> binding on a
-plain <code>&lt;tr&gt;</code>, which Blade no longer analyses as PHP now that only <code>&lt;x-…&gt;</code>
-component tags evaluate bound attributes, so the variable is unused as far
-as the engine can tell. The comment above the line still says the
-expression is real PHP.</p>
-<p><strong>Fix:</strong> Make the demo say what it means: put the bound attributes on a
-component tag the example project defines, or read <code>$rowLabel</code> where Blade
-does evaluate it. Then the run is back to three errors.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>{!!$html!!}
+</code></pre></div>
+<p>Hovering the <code>{!!</code> shows the hover of <code>$html</code>. <code>{!! $html !!}</code> shows nothing
+there, and the <code>{{</code> of <code>{{$html}}</code> shows <code>e()</code>.</p>
+<p><code>{!!</code> becomes <code>echo</code>, and <code>BladeSourceMap::blade_to_php</code> maps the opener's
+columns to where that replacement ends. With the usual space the PHP there is
+whitespace, but without it the replacement ends on the first column of the
+expression, so the map cannot tell the generated <code>echo</code> from the template's
+own text. The <code>{{</code> case never reaches the map: <code>blade_echo_delimiter_hover</code>
+(<code>src/blade/echo_delimiter.rs</code>) answers it first and has nothing for <code>{!!</code> or
+<code>!!}</code>, although the comment above the hover handler in <code>src/server.rs</code> says
+it covers <code>{!!</code>.</p>
+<p><strong>Fix:</strong> Answer the raw-echo delimiters in <code>blade_echo_delimiter_hover</code> and
+<code>blade_echo_delimiter_definition</code> the way <code>{{</code> is answered, so the opener
+describes itself instead of falling through to the map. Mapping a column
+inside any opener to a column of its replacement would cover every opener at
+once, but it moves what <code>analyze_template_use_block</code>
+(<code>src/blade/use_block.rs</code>) reads from the start of a line, so check that
+first.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
@@ -2018,23 +2025,23 @@ through <code>Backend::use_block_for</code> with the block the cursor is in, as 
 completion does.</p>
 <h3 id="b554-value-and-name-on-an-enum-read-as-string-not-as-its-cases-values">B554. <code>-&gt;value</code> and <code>-&gt;name</code> on an enum read as <code>string</code>, not as its cases' values<a class="headerlink" href="#b554-value-and-name-on-an-enum-read-as-string-not-as-its-cases-values" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">enum Suit: string { case Hearts = &#39;hearts&#39;; case Spades = &#39;spades&#39;; }</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">/** @param value-of&lt;Suit&gt; $value */</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">function take(string $value): void {}</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">take($suit-&gt;value);  // reported: expects &#39;hearts&#39;|&#39;spades&#39;, got string</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">final class Card</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">{</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">    public function __construct(private Suit $suit) {}</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="x">    /** @return value-of&lt;Suit&gt; */</span>
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="x">    public function suitValue(): string</span>
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="x">    {</span>
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="x">        return $this-&gt;suit-&gt;value; // reported: string is incompatible with &#39;hearts&#39;|&#39;spades&#39;</span>
-<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="x">    }</span>
-<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">enum Suit: string { case Hearts = &#39;hearts&#39;; case Spades = &#39;spades&#39;; }</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">/** @param value-of&lt;Suit&gt; $value */</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">function take(string $value): void {}</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">take($suit-&gt;value);  // reported: expects &#39;hearts&#39;|&#39;spades&#39;, got string</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">final class Card</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">{</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">    public function __construct(private Suit $suit) {}</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="x">    /** @return value-of&lt;Suit&gt; */</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="x">    public function suitValue(): string</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="x">    {</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="x">        return $this-&gt;suit-&gt;value; // reported: string is incompatible with &#39;hearts&#39;|&#39;spades&#39;</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="x">    }</span>
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="x">}</span>
 </code></pre></div>
 <p>The inheritance merge (<code>src/inheritance/mod.rs</code>, where it refines a backed
 enum's <code>value</code> property) narrows <code>BackedEnum::$value</code> from <code>int|string</code> to
@@ -2055,8 +2062,8 @@ handle), keep the backing type.</p>
 (<code>phpdoc_advanced_fallback_value_of_template_enum.php</code>).</p>
 <h3 id="b556-moving-a-class-out-of-a-braced-global-namespace-block-writes-an-unbracketed-namespace">B556. Moving a class out of a braced global <code>namespace { }</code> block writes an unbracketed <code>namespace</code><a class="headerlink" href="#b556-moving-a-class-out-of-a-braced-global-namespace-block-writes-an-unbracketed-namespace" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">namespace</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span> <span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">namespace</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span> <span class="p">}</span>
 </code></pre></div>
 <p>Moving <code>Foo</code> to <code>C\Foo</code> inserts <code>namespace C;</code> above the block, and PHP
 refuses a file that mixes bracketed and unbracketed <code>namespace</code>
@@ -2067,7 +2074,7 @@ name after the block's <code>namespace</code> keyword instead, and place the imp
 former global siblings now need in that block.</p>
 <h3 id="b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement">B558. Removing two unused members at the end of a group import breaks the statement<a class="headerlink" href="#b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">use App\Models\{User, Post, Comment};   // only User is used</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">use App\Models\{User, Post, Comment};   // only User is used</span>
 </code></pre></div>
 <p>"Remove all unused imports" and <code>phpantom_lsp fix</code> turn this into
 <code>use App\Models\{User,</code>, dropping the closing <code>};</code>. Each member is removed
@@ -2082,8 +2089,8 @@ two removals share a comma. The removal of a template's <code>@use</code> group
 members (<code>group_member_removal</code>, in the same file) already chooses this way.</p>
 <h3 id="b562-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block">B562. An import written into a <code>namespace</code> block that sits on one line lands after the block<a class="headerlink" href="#b562-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{</span> <span class="k">public</span> <span class="k">function</span> <span class="nf">f</span><span class="p">()</span><span class="o">:</span> <span class="nx">Helper</span> <span class="p">{}</span> <span class="p">}</span> <span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{</span> <span class="k">public</span> <span class="k">function</span> <span class="nf">f</span><span class="p">()</span><span class="o">:</span> <span class="nx">Helper</span> <span class="p">{}</span> <span class="p">}</span> <span class="p">}</span>
 </code></pre></div>
 <p>With <code>B\Helper</code> declared elsewhere, moving <code>B\Foo</code> to <code>C\Foo</code> writes
 <code>use B\Helper;</code> on the line below the block, outside every <code>namespace</code>, and
