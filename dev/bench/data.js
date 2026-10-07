@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791332945101,
+  "lastUpdate": 1791333442832,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -200831,6 +200831,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 2.52,
             "range": "± 0.047",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "98a5a56337bf4e9ec8b2cf883f3aae5263c200e3",
+          "message": "Only negate boolean match (true) arm conditions\n\nA match (true) arm fails on every value except `true`, so a failed arm\nonly proves its condition falsy when the condition is boolean. Negating\n`$x => ...` on a ?Foo made $x null below the arm. Both walkers now share\none failed-arm helper that skips conditions that aren't boolean.\n\nThe match value now resolves `default` after every other arm, and builds\neach failed arm's inverse on the earlier arms' narrowing instead of\nreplacing it.",
+          "timestamp": "2026-10-07T02:28:12+02:00",
+          "tree_id": "d242d87a1c87cdfd94fd7cbb668708b35e9f93c8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/98a5a56337bf4e9ec8b2cf883f3aae5263c200e3"
+        },
+        "date": 1791333432315,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 4.136,
+            "range": "± 0.178",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.039,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.092,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.136,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.217,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.231,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 1.025,
+            "range": "± 0.059",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 2.036,
+            "range": "± 0.115",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.098,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.051,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.047,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.051,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 5.27,
+            "range": "± 0.148",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.19,
+            "range": "± 0.013",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.309,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.054,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.046,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.119,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.06,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.052,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.17,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.002,
+            "range": "± 0.032",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.877,
+            "range": "± 0.277",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.013,
+            "range": "± 0.049",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.039,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.038,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 33.251,
+            "range": "± 1.204",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 2.256,
+            "range": "± 0.075",
             "unit": "ms"
           }
         ]
