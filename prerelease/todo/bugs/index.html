@@ -1001,10 +1001,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b569-hovering-a-raw-echos-opener-written-without-a-space-shows-the-expression-behind-it" class="md-nav__link">
+  <a href="#b570-a-raw-echo-written-inside-literal-braces-is-read-as-an-escaped-echo" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B569. Hovering a raw echo's opener written without a space shows the expression behind it
+        B570. A raw echo written inside literal braces is read as an escaped echo
       </span>
     </span>
   </a>
@@ -1740,10 +1740,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b569-hovering-a-raw-echos-opener-written-without-a-space-shows-the-expression-behind-it" class="md-nav__link">
+  <a href="#b570-a-raw-echo-written-inside-literal-braces-is-read-as-an-escaped-echo" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B569. Hovering a raw echo's opener written without a space shows the expression behind it
+        B570. A raw echo written inside literal braces is read as an escaped echo
       </span>
     </span>
   </a>
@@ -1987,27 +1987,25 @@ gets the diagnostic.</p>
 <code>mergeConfigFrom()</code> calls are already read, which is as deterministic as
 the merged files are.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
-<h3 id="b569-hovering-a-raw-echos-opener-written-without-a-space-shows-the-expression-behind-it">B569. Hovering a raw echo's opener written without a space shows the expression behind it<a class="headerlink" href="#b569-hovering-a-raw-echos-opener-written-without-a-space-shows-the-expression-behind-it" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>{!!$html!!}
+<h3 id="b570-a-raw-echo-written-inside-literal-braces-is-read-as-an-escaped-echo">B570. A raw echo written inside literal braces is read as an escaped echo<a class="headerlink" href="#b570-a-raw-echo-written-inside-literal-braces-is-read-as-an-escaped-echo" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>{{!!$html!!}}
 </code></pre></div>
-<p>Hovering the <code>{!!</code> shows the hover of <code>$html</code>. <code>{!! $html !!}</code> shows nothing
-there, and the <code>{{</code> of <code>{{$html}}</code> shows <code>e()</code>.</p>
-<p><code>{!!</code> becomes <code>echo</code>, and <code>BladeSourceMap::blade_to_php</code> maps the opener's
-columns to where that replacement ends. With the usual space the PHP there is
-whitespace, but without it the replacement ends on the first column of the
-expression, so the map cannot tell the generated <code>echo</code> from the template's
-own text. The <code>{{</code> case never reaches the map: <code>blade_echo_delimiter_hover</code>
-(<code>src/blade/echo_delimiter.rs</code>) answers it first and has nothing for <code>{!!</code> or
-<code>!!}</code>, although the comment above the hover handler in <code>src/server.rs</code> says
-it covers <code>{!!</code>.</p>
-<p><strong>Fix:</strong> Answer the raw-echo delimiters in <code>blade_echo_delimiter_hover</code> and
-<code>blade_echo_delimiter_definition</code> the way <code>{{</code> is answered, so the opener
-describes itself instead of falling through to the map. Mapping a column
-inside any opener to a column of its replacement would cover every opener at
-once, but it moves what <code>analyze_template_use_block</code>
-(<code>src/blade/use_block.rs</code>) reads from the start of a line, so check that
-first.</p>
+<p>Blade matches echo tags longest-opening-first, so this is a literal <code>{</code>, a
+raw echo of <code>$html</code>, and a literal <code>}</code>, which is how the preprocessor lowers
+it. Hovering the <code>!!</code> of the raw opener shows the hover of <code>$html</code>, and the
+braces around the echo show <code>e()</code>.</p>
+<p><code>mode_at</code> (<code>src/blade/directive_completion.rs</code>) reads the <code>{{</code> of <code>{{!!</code> as
+an escaped echo opener and scans on to the next <code>}}</code>, so
+<code>blade_echo_delimiter_at</code> (<code>src/blade/echo_delimiter.rs</code>) never sees the raw
+opener inside it. <code>is_echo_start</code> and <code>echo_delimiters</code>
+(<code>src/blade/signature.rs</code>) read it the same way.</p>
+<p><strong>Fix:</strong> Make the three scanners agree with <code>echo::open</code>
+(<code>src/blade/preprocessor/echo.rs</code>): a <code>{{</code> followed by <code>!!</code> is a literal
+brace, and the raw echo starts at the second <code>{</code>. <code>mode_at</code> also feeds the
+component-tag and block-pairing checks (<code>src/blade/component_tags/mod.rs</code>,
+<code>src/blade/blocks.rs</code>) and directive completion, so run those alongside the
+hover tests.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
