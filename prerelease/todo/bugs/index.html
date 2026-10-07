@@ -969,34 +969,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Blade">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b550-a-templates-first-import-lands-inside-the-block-its-first-line-opens" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B550. A template's first import lands inside the block its first line opens
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b551-an-unused-use-import-in-a-template-is-never-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B551. An unused <code>@use</code> import in a template is never reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1060,6 +1032,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B557. A class move plans its sibling imports against the whole file, not the block that declares the class
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B558. Removing two unused members at the end of a group import breaks the statement
       </span>
     </span>
   </a>
@@ -1680,34 +1663,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Blade">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b550-a-templates-first-import-lands-inside-the-block-its-first-line-opens" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B550. A template's first import lands inside the block its first line opens
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b551-an-unused-use-import-in-a-template-is-never-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B551. An unused <code>@use</code> import in a template is never reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1771,6 +1726,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B557. A class move plans its sibling imports against the whole file, not the block that declares the class
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B558. Removing two unused members at the end of a group import breaks the statement
       </span>
     </span>
   </a>
@@ -1903,37 +1869,7 @@ positional entries.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
-<h3 id="b550-a-templates-first-import-lands-inside-the-block-its-first-line-opens">B550. A template's first import lands inside the block its first line opens<a class="headerlink" href="#b550-a-templates-first-import-lands-inside-the-block-its-first-line-opens" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>@if ($user)
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    {{ Carbon::now() }}
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>@endif
-</code></pre></div>
-<p>Completing <code>Carbon</code> writes <code>@use('Carbon\Carbon')</code> after the first line,
-inside the <code>@if</code>. Blade compiles <code>@use</code> to a PHP <code>use</code> statement where it
-stands, and PHP rejects one inside a block, so the view no longer compiles.
-An import that sorts before every existing <code>@use</code> goes to the template's
-start only when that start survives the trip through the source map
-(<code>analyze_template_use_block</code>, <code>src/blade/use_block.rs</code>); a first line
-that opens with <code>{{</code>, a directive, or a component tag does not, because a
-Blade position at the start of a token maps to the end of the PHP it
-lowers to, so the import moves after the line instead. The start of the
-virtual line maps back to the template's start for such a line (it is
-where the generated PHP begins), so the import can be planned there. A
-template that opens with <code>@php</code> or <code>&lt;?php</code> takes the import as a PHP <code>use</code>
-just inside that block, and only a leading directive that lowers to
-nothing at all (<code>@use</code>, <code>@inject</code>) leaves the end of the first line as the
-place. BL1's "Import class" action writes its import through the same
-code.</p>
-<h3 id="b551-an-unused-use-import-in-a-template-is-never-reported">B551. An unused <code>@use</code> import in a template is never reported<a class="headerlink" href="#b551-an-unused-use-import-in-a-template-is-never-reported" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p><code>collect_unused_import_diagnostics</code> reads the virtual PHP, where the
-preprocessor hoisted each <code>@use</code> directive into the prologue as a real
-<code>use</code> statement. The diagnostic's range lands in the prologue, which maps
-to no template position, so it is dropped: a <code>use</code> inside <code>@php</code> is
-reported, a <code>@use</code> directive never is. Report it at the directive's own
-range (the scanner in <code>src/blade/use_directive.rs</code> knows where each one
-is), and teach "Remove unused import" to delete the directive.</p>
+<p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
@@ -1951,23 +1887,23 @@ through <code>Backend::use_block_for</code> with the block the cursor is in, as 
 completion does.</p>
 <h3 id="b554-value-and-name-on-an-enum-read-as-string-not-as-its-cases-values">B554. <code>-&gt;value</code> and <code>-&gt;name</code> on an enum read as <code>string</code>, not as its cases' values<a class="headerlink" href="#b554-value-and-name-on-an-enum-read-as-string-not-as-its-cases-values" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">enum Suit: string { case Hearts = &#39;hearts&#39;; case Spades = &#39;spades&#39;; }</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">/** @param value-of&lt;Suit&gt; $value */</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">function take(string $value): void {}</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">take($suit-&gt;value);  // reported: expects &#39;hearts&#39;|&#39;spades&#39;, got string</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">final class Card</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">{</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">    public function __construct(private Suit $suit) {}</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="x">    /** @return value-of&lt;Suit&gt; */</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="x">    public function suitValue(): string</span>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="x">    {</span>
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="x">        return $this-&gt;suit-&gt;value; // reported: string is incompatible with &#39;hearts&#39;|&#39;spades&#39;</span>
-<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="x">    }</span>
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">enum Suit: string { case Hearts = &#39;hearts&#39;; case Spades = &#39;spades&#39;; }</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">/** @param value-of&lt;Suit&gt; $value */</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">function take(string $value): void {}</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">take($suit-&gt;value);  // reported: expects &#39;hearts&#39;|&#39;spades&#39;, got string</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">final class Card</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">{</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">    public function __construct(private Suit $suit) {}</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">    /** @return value-of&lt;Suit&gt; */</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">    public function suitValue(): string</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">    {</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="x">        return $this-&gt;suit-&gt;value; // reported: string is incompatible with &#39;hearts&#39;|&#39;spades&#39;</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="x">    }</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="x">}</span>
 </code></pre></div>
 <p>The inheritance merge (<code>src/inheritance/mod.rs</code>, where it refines a backed
 enum's <code>value</code> property) narrows <code>BackedEnum::$value</code> from <code>int|string</code> to
@@ -1988,8 +1924,8 @@ handle), keep the backing type.</p>
 (<code>phpdoc_advanced_fallback_value_of_template_enum.php</code>).</p>
 <h3 id="b556-moving-a-class-out-of-a-braced-global-namespace-block-writes-an-unbracketed-namespace">B556. Moving a class out of a braced global <code>namespace { }</code> block writes an unbracketed <code>namespace</code><a class="headerlink" href="#b556-moving-a-class-out-of-a-braced-global-namespace-block-writes-an-unbracketed-namespace" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">namespace</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span> <span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">namespace</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span> <span class="p">}</span>
 </code></pre></div>
 <p>Moving <code>Foo</code> to <code>C\Foo</code> inserts <code>namespace C;</code> above the block, and PHP
 refuses a file that mixes bracketed and unbracketed <code>namespace</code>
@@ -2001,24 +1937,39 @@ former global siblings now need against that block rather than the whole
 file.</p>
 <h3 id="b557-a-class-move-plans-its-sibling-imports-against-the-whole-file-not-the-block-that-declares-the-class">B557. A class move plans its sibling imports against the whole file, not the block that declares the class<a class="headerlink" href="#b557-a-class-move-plans-its-sibling-imports-against-the-whole-file-not-the-block-that-declares-the-class" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">namespace</span> <span class="nx">A</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span> <span class="p">}</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{</span> <span class="k">public</span> <span class="k">function</span> <span class="nf">f</span><span class="p">()</span><span class="o">:</span> <span class="nx">Helper</span> <span class="p">{}</span> <span class="p">}</span> <span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">namespace</span> <span class="nx">A</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span> <span class="p">}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{</span> <span class="k">public</span> <span class="k">function</span> <span class="nf">f</span><span class="p">()</span><span class="o">:</span> <span class="nx">Helper</span> <span class="p">{}</span> <span class="p">}</span> <span class="p">}</span>
 </code></pre></div>
 <p>With <code>B\Helper</code> declared elsewhere, moving <code>B\Foo</code> to <code>C\Foo</code> leaves <code>Helper</code>
 unimported, so it now names <code>C\Helper</code>. <code>sibling_imports_for_move</code>
 (<code>src/rename/class/siblings.rs</code>) gives up when a file declares more than one
 named namespace, since it scans every span of the file against a single old
 namespace. A global block next to one named block slips past that check:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">namespace</span> <span class="p">{</span> <span class="k">function</span> <span class="nf">g</span><span class="p">()</span><span class="o">:</span> <span class="nx">Helper</span> <span class="p">{}</span> <span class="p">}</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span> <span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">namespace</span> <span class="p">{</span> <span class="k">function</span> <span class="nf">g</span><span class="p">()</span><span class="o">:</span> <span class="nx">Helper</span> <span class="p">{}</span> <span class="p">}</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span> <span class="p">}</span>
 </code></pre></div>
 <p>Moving <code>B\Foo</code> to <code>C\Foo</code> appends <code>use B\Helper;</code> after the last block, an
 import for a name the global block never resolved through <code>B</code>, written outside
 every block. Scan only the declaring block, resolve it against the old
 namespace and that block's own imports, place the result with
 <code>analyze_use_block_in</code>, and drop the early return.</p>
+<h3 id="b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement">B558. Removing two unused members at the end of a group import breaks the statement<a class="headerlink" href="#b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">use App\Models\{User, Post, Comment};   // only User is used</span>
+</code></pre></div>
+<p>"Remove all unused imports" and <code>phpantom_lsp fix</code> turn this into
+<code>use App\Models\{User,</code>, dropping the closing <code>};</code>. Each member is removed
+on its own by <code>extend_range_for_group_member</code>
+(<code>src/code_actions/remove_unused_import.rs</code>): a member takes the comma after
+it, or the one before it when it is the last, so <code>Post</code> takes <code>Post,</code> and
+<code>Comment</code> takes <code>, Comment</code>. The two edits overlap, and <code>apply_text_edits</code>
+applies the second against text the first already changed. A member has to
+choose its comma knowing the rest of the batch: the one after it while every
+member before it is removed too, the one before it otherwise. That way no
+two removals share a comma. The removal of a template's <code>@use</code> group
+members (<code>group_member_removal</code>, in the same file) already chooses this way.</p>
 
 
 
