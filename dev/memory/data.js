@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791333202131,
+  "lastUpdate": 1791333679451,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -35495,6 +35495,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 90.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "98a5a56337bf4e9ec8b2cf883f3aae5263c200e3",
+          "message": "Only negate boolean match (true) arm conditions\n\nA match (true) arm fails on every value except `true`, so a failed arm\nonly proves its condition falsy when the condition is boolean. Negating\n`$x => ...` on a ?Foo made $x null below the arm. Both walkers now share\none failed-arm helper that skips conditions that aren't boolean.\n\nThe match value now resolves `default` after every other arm, and builds\neach failed arm's inverse on the earlier arms' narrowing instead of\nreplacing it.",
+          "timestamp": "2026-10-07T02:28:12+02:00",
+          "tree_id": "d242d87a1c87cdfd94fd7cbb668708b35e9f93c8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/98a5a56337bf4e9ec8b2cf883f3aae5263c200e3"
+        },
+        "date": 1791333669829,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.8,
             "unit": "MiB"
           }
         ]
