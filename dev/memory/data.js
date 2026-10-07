@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791332467742,
+  "lastUpdate": 1791333202131,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -35461,6 +35461,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 83.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4477dd9de09e8423e15b461bbaaf035676277061",
+          "message": "A Blade template's first import no longer breaks the view",
+          "timestamp": "2026-10-07T02:19:42+02:00",
+          "tree_id": "1c5e8acad9e9d67e6e9edbc4e4add7408a76f045",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4477dd9de09e8423e15b461bbaaf035676277061"
+        },
+        "date": 1791333189967,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 90.5,
             "unit": "MiB"
           }
         ]
