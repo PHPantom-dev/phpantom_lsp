@@ -2481,6 +2481,25 @@ is a subtype of its enum in <code>is_subtype_of</code>, prints as <code>Enum::CA
 joins back into the enum when every case is present. Narrowing by <code>===</code>
 and <code>instanceof</code> then subtracts cases the way it subtracts union members,
 and a branch that has compared away every case holds <code>never</code>.</p>
+<p>Since <code>value-of&lt;…&gt;</code> over an enum is evaluated, the gap also produces false
+positives. A case passed to a template binds the template to the whole
+enum, so the operator gives every case's value:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">/**</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x"> * @template T of Suit</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x"> * @param T $case</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x"> * @return value-of&lt;T&gt;</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x"> */</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="x">function backingValue(Suit $case) { return $case-&gt;value; }</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="x">/** @param &#39;hearts&#39; $value */</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="x">function acceptsHearts(string $value): void {}</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="x">acceptsHearts(backingValue(Suit::Hearts)); // reported: &#39;spades&#39; does not satisfy &#39;hearts&#39;</span>
+</code></pre></div>
+<p>A case held in a variable loses its value the same way: after <code>$case =
+Suit::Hearts;</code>, <code>acceptsHearts($case-&gt;value)</code> is reported too. Found
+running the php-typing-conformance suite
+(<code>phpdoc_advanced_fallback_value_of_template_enum.php</code>).</p>
 <p>Found porting PHPStan's <code>Rules/Comparison/data/bug-8485.php</code> and <code>Rules/Methods/data/return-type-class-constant.php</code>; both its
 case and its <code>never</code> assertion are <code>// SKIP</code> in the ported copy under
 <code>tests/phpstan_data/</code>.</p>
