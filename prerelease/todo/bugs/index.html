@@ -884,6 +884,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#b550-type-check-functions-only-narrow-when-written-in-lowercase" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B550. Type-check functions only narrow when written in lowercase
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b555-comparing-an-array-to-an-array-literal-with-narrows-neither-branch" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1061,10 +1072,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b557-a-class-move-plans-its-sibling-imports-against-the-whole-file-not-the-block-that-declares-the-class" class="md-nav__link">
+  <a href="#b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B557. A class move plans its sibling imports against the whole file, not the block that declares the class
+        B558. Removing two unused members at the end of a group import breaks the statement
       </span>
     </span>
   </a>
@@ -1072,10 +1083,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement" class="md-nav__link">
+  <a href="#b559-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B558. Removing two unused members at the end of a group import breaks the statement
+        B559. An import written into a <code>namespace</code> block that sits on one line lands after the block
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b560-moving-a-class-out-of-one-section-of-a-file-with-several-unbraced-namespace-statements-into-the-global-namespace-changes-its-namespace" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B560. Moving a class out of one section of a file with several unbraced <code>namespace</code> statements into the global namespace changes its namespace
       </span>
     </span>
   </a>
@@ -1611,6 +1633,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#b550-type-check-functions-only-narrow-when-written-in-lowercase" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B550. Type-check functions only narrow when written in lowercase
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b555-comparing-an-array-to-an-array-literal-with-narrows-neither-branch" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1788,10 +1821,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b557-a-class-move-plans-its-sibling-imports-against-the-whole-file-not-the-block-that-declares-the-class" class="md-nav__link">
+  <a href="#b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B557. A class move plans its sibling imports against the whole file, not the block that declares the class
+        B558. Removing two unused members at the end of a group import breaks the statement
       </span>
     </span>
   </a>
@@ -1799,10 +1832,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement" class="md-nav__link">
+  <a href="#b559-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B558. Removing two unused members at the end of a group import breaks the statement
+        B559. An import written into a <code>namespace</code> block that sits on one line lands after the block
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b560-moving-a-class-out-of-one-section-of-a-file-with-several-unbraced-namespace-statements-into-the-global-namespace-changes-its-namespace" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B560. Moving a class out of one section of a file with several unbraced <code>namespace</code> statements into the global namespace changes its namespace
       </span>
     </span>
   </a>
@@ -1863,6 +1907,17 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
+<h3 id="b550-type-check-functions-only-narrow-when-written-in-lowercase">B550. Type-check functions only narrow when written in lowercase<a class="headerlink" href="#b550-type-check-functions-only-narrow-when-written-in-lowercase" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>PHP function names are case-insensitive, so <code>Is_String($x)</code> and
+<code>IS_RESOURCE($this-&gt;stream)</code> are the same checks as their lowercase
+spellings. The guard table (<code>type_guard_kind_from_name</code> in
+<code>type_engine/types/narrowing/guards.rs</code>), <code>narrows_first_argument</code>, and
+the class-string and member-existence extractors match the name
+case-sensitively, so a mixed-case guard narrows nothing and the branch
+keeps the wide type. The <code>is_a()</code> and <code>in_array()</code> extractors already
+compare case-insensitively. Fold the name to lowercase once where these
+helpers read it (without allocating on the common lowercase path).</p>
 <h3 id="b555-comparing-an-array-to-an-array-literal-with-narrows-neither-branch">B555. Comparing an array to an array literal with <code>===</code> narrows neither branch<a class="headerlink" href="#b555-comparing-an-array-to-an-array-literal-with-narrows-neither-branch" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param list{string} $arr */</span>
@@ -2042,32 +2097,11 @@ refuses a file that mixes bracketed and unbracketed <code>namespace</code>
 declarations. A braced global block has no name for
 <code>namespace_declaration_edits</code> (<code>src/rename/class/mod.rs</code>) to rewrite, so the
 move takes the path for a file that had no <code>namespace</code> at all. Write the new
-name after the block's <code>namespace</code> keyword instead, and plan the imports the
-former global siblings now need against that block rather than the whole
-file.</p>
-<h3 id="b557-a-class-move-plans-its-sibling-imports-against-the-whole-file-not-the-block-that-declares-the-class">B557. A class move plans its sibling imports against the whole file, not the block that declares the class<a class="headerlink" href="#b557-a-class-move-plans-its-sibling-imports-against-the-whole-file-not-the-block-that-declares-the-class" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">namespace</span> <span class="nx">A</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span> <span class="p">}</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{</span> <span class="k">public</span> <span class="k">function</span> <span class="nf">f</span><span class="p">()</span><span class="o">:</span> <span class="nx">Helper</span> <span class="p">{}</span> <span class="p">}</span> <span class="p">}</span>
-</code></pre></div>
-<p>With <code>B\Helper</code> declared elsewhere, moving <code>B\Foo</code> to <code>C\Foo</code> leaves <code>Helper</code>
-unimported, so it now names <code>C\Helper</code>. <code>sibling_imports_for_move</code>
-(<code>src/rename/class/siblings.rs</code>) gives up when a file declares more than one
-named namespace, since it scans every span of the file against a single old
-namespace. A global block next to one named block slips past that check:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">namespace</span> <span class="p">{</span> <span class="k">function</span> <span class="nf">g</span><span class="p">()</span><span class="o">:</span> <span class="nx">Helper</span> <span class="p">{}</span> <span class="p">}</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span> <span class="p">}</span>
-</code></pre></div>
-<p>Moving <code>B\Foo</code> to <code>C\Foo</code> appends <code>use B\Helper;</code> after the last block, an
-import for a name the global block never resolved through <code>B</code>, written outside
-every block. Scan only the declaring block, resolve it against the old
-namespace and that block's own imports, place the result with
-<code>analyze_use_block_in</code>, and drop the early return.</p>
+name after the block's <code>namespace</code> keyword instead, and place the imports the
+former global siblings now need in that block.</p>
 <h3 id="b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement">B558. Removing two unused members at the end of a group import breaks the statement<a class="headerlink" href="#b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">use App\Models\{User, Post, Comment};   // only User is used</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">use App\Models\{User, Post, Comment};   // only User is used</span>
 </code></pre></div>
 <p>"Remove all unused imports" and <code>phpantom_lsp fix</code> turn this into
 <code>use App\Models\{User,</code>, dropping the closing <code>};</code>. Each member is removed
@@ -2080,6 +2114,38 @@ choose its comma knowing the rest of the batch: the one after it while every
 member before it is removed too, the one before it otherwise. That way no
 two removals share a comma. The removal of a template's <code>@use</code> group
 members (<code>group_member_removal</code>, in the same file) already chooses this way.</p>
+<h3 id="b559-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block">B559. An import written into a <code>namespace</code> block that sits on one line lands after the block<a class="headerlink" href="#b559-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{</span> <span class="k">public</span> <span class="k">function</span> <span class="nf">f</span><span class="p">()</span><span class="o">:</span> <span class="nx">Helper</span> <span class="p">{}</span> <span class="p">}</span> <span class="p">}</span>
+</code></pre></div>
+<p>With <code>B\Helper</code> declared elsewhere, moving <code>B\Foo</code> to <code>C\Foo</code> writes
+<code>use B\Helper;</code> on the line below the block, outside every <code>namespace</code>, and
+PHP refuses the file. <code>analyze_use_block_in</code> (<code>src/completion/use_edit.rs</code>)
+puts the first import of a block that has none on the line after its
+<code>namespace</code> line, which is past the block when the block closes on that
+line, and every import planned through it shares the placement. The import
+belongs just after the <code>{</code> or <code>;</code> of the declaration, which <code>UseBlockInfo</code>
+cannot express: its positions are whole lines.</p>
+<h3 id="b560-moving-a-class-out-of-one-section-of-a-file-with-several-unbraced-namespace-statements-into-the-global-namespace-changes-its-namespace">B560. Moving a class out of one section of a file with several unbraced <code>namespace</code> statements into the global namespace changes its namespace<a class="headerlink" href="#b560-moving-a-class-out-of-one-section-of-a-file-with-several-unbraced-namespace-statements-into-the-global-namespace-changes-its-namespace" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">namespace</span> <span class="nx">A</span><span class="p">;</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="k">namespace</span> <span class="nx">B</span><span class="p">;</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="k">class</span> <span class="nc">Bar</span> <span class="p">{}</span>
+</code></pre></div>
+<p>Moving <code>B\Bar</code> to <code>Bar</code> deletes the <code>namespace B;</code> line, and <code>Bar</code> is then
+declared in <code>A</code>, while every reference was rewritten to name the global
+class. Moving <code>A\Foo</code> instead leaves global code ahead of <code>namespace B;</code>,
+which PHP refuses. <code>remove_namespace_edits</code> (<code>src/rename/class/layout.rs</code>)
+treats an unbraced statement as removable whatever follows it, but in a file
+with several sections it is what separates them. Refuse the move the way a
+brace-style <code>namespace</code> is refused, since the sections would have to be
+rewritten as braced blocks.</p>
 
 
 
