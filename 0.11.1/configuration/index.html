@@ -1,0 +1,2391 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.1/configuration/">
+      
+      
+        <link rel="prev" href="../installation/">
+      
+      
+        <link rel="next" href="../cli/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>Configuration Reference - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#configuration-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="./.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Configuration Reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="./.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#phpantomtoml" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>.phpantom.toml</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=".phpantom.toml">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#global-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Global config
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#php" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[php]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[diagnostics]</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[diagnostics]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#diagnosticsignore" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[[diagnostics.ignore]]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#indexing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[indexing]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#semantic_tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[semantic_tokens]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#formatting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[formatting]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phpstan" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[phpstan]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phpcs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[phpcs]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phpmd" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[phpmd]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mago" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[mago]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#laravel" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[laravel]</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[laravel]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#laravelschema" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[laravel.schema]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#laravelmigrations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[laravel.migrations]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#editor-supplied-file-filters" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Editor-supplied file filters
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#code-formatting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Code Formatting
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#indexing-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Indexing Strategy
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Troubleshooting
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#classes-from-other-files-are-not-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Classes from other files are not found
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#phpantomtoml" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>.phpantom.toml</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=".phpantom.toml">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#global-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Global config
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#php" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[php]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[diagnostics]</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[diagnostics]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#diagnosticsignore" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[[diagnostics.ignore]]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#indexing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[indexing]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#semantic_tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[semantic_tokens]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#formatting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[formatting]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phpstan" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[phpstan]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phpcs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[phpcs]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phpmd" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[phpmd]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mago" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[mago]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#laravel" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[laravel]</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[laravel]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#laravelschema" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[laravel.schema]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#laravelmigrations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[laravel.migrations]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#editor-supplied-file-filters" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Editor-supplied file filters
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#code-formatting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Code Formatting
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#indexing-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Indexing Strategy
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Troubleshooting
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#classes-from-other-files-are-not-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Classes from other files are not found
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/configuration.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="configuration-reference">Configuration Reference<a class="headerlink" href="#configuration-reference" title="Permanent link">&para;</a></h1>
+<p>PHPantom works best with Composer projects. It reads <code>composer.json</code> to discover autoload directories and vendor packages, so completions and go-to-definition only surface classes that your autoloader can actually load. Projects without <code>composer.json</code> fall back to scanning every PHP file in the workspace.</p>
+<h2 id="phpantomtoml"><code>.phpantom.toml</code><a class="headerlink" href="#phpantomtoml" title="Permanent link">&para;</a></h2>
+<p>PHPantom supports an optional per-project configuration file. To
+generate a starter config file:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>phpantom_lsp<span class="w"> </span>init
+</code></pre></div>
+<p>On an interactive terminal, this walks through the settings projects
+customize most often (PHP version, indexing strategy, a few diagnostic
+toggles, semantic token mode) and writes only the answers that differ
+from PHPantom's defaults. Press Enter to accept a default and skip a
+question. Run <code>phpantom_lsp init --yes</code> (or pipe stdin, e.g. in a
+script) to skip the prompts and write a minimal <code>.phpantom.toml</code> with
+just a JSON schema directive instead.</p>
+<p>Editors with TOML schema support (Zed, VS Code + Even Better TOML,
+Neovim) provide autocomplete and hover documentation for every option
+via the schema. Only add settings you want to override -- when absent,
+all settings use their defaults. Settings that need a list or a table
+(<code>indexing.exclude</code>, <code>[[diagnostics.ignore]]</code>, per-tool command
+overrides) aren't part of the wizard; add those by hand.</p>
+<h3 id="global-config">Global config<a class="headerlink" href="#global-config" title="Permanent link">&para;</a></h3>
+<p>Settings you want in every project belong in the global config rather
+than in a <code>.phpantom.toml</code> per repository:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>phpantom_lsp<span class="w"> </span>init<span class="w"> </span>--global
+</code></pre></div>
+<p>It lives at <code>$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml</code> (typically
+<code>~/.config/phpantom_lsp/.phpantom.toml</code> on Linux and macOS alike, and
+<code>%APPDATA%\phpantom_lsp\.phpantom.toml</code> on Windows), takes exactly the
+same keys as a project config, and is read first. macOS follows the XDG
+path rather than <code>~/Library/Application Support</code>, which is where a
+command-line tool's config is expected to be, and keeps the path the
+same across a machine you use both platforms on. A project config is
+then merged over it key by key, not wholesale, so a project only has to
+spell out the settings where it differs from your defaults: with
+<code>workspace = true</code> and <code>extra-arguments = true</code> set globally, a project
+that sets only <code>workspace = false</code> still gets <code>extra-arguments</code>.</p>
+<p>Both the global config and a project's own <code>.phpantom.toml</code> are
+watched, and most settings take effect within a couple of seconds of
+saving either file. The exceptions are settings that shape the initial
+workspace scan, such as the PHP version and indexing strategy below --
+those still need a restart to fully apply.</p>
+<p>The full schema is at <a href="https://github.com/PHPantom-dev/phpantom_lsp/blob/main/config-schema.json"><code>config-schema.json</code></a>.</p>
+<h3 id="php"><code>[php]</code><a class="headerlink" href="#php" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>string</td>
+<td>Inferred from composer.json</td>
+<td>Override the detected PHP version (e.g. <code>"8.3"</code>).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="diagnostics"><code>[diagnostics]</code><a class="headerlink" href="#diagnostics" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>unresolved-member-access</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Report <code>-&gt;</code>, <code>?-&gt;</code>, <code>::</code> where the subject is <code>mixed</code> or its type could not be worked out. Useful for type coverage, noisy on untyped codebases.</td>
+</tr>
+<tr>
+<td><code>extra-arguments</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Report calls that pass more arguments than the function accepts.</td>
+</tr>
+<tr>
+<td><code>report-magic-properties</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Report unknown property access on classes with <code>__get</code> when virtual properties are defined. Matches PHPStan's <code>reportMagicProperties</code>.</td>
+</tr>
+<tr>
+<td><code>downgrade-nullable-argument-mismatch</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Downgrade <code>type_mismatch_argument</code> to a warning when the only reason an argument fails to satisfy the parameter is a stray <code>null</code> (every non-null member of the argument's type is already compatible).</td>
+</tr>
+<tr>
+<td><code>workspace</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Compute diagnostics for the whole workspace in the background after startup, so problems appear for files you have not opened. Costs a project-wide sweep every session. Requires the default <code>full</code> indexing strategy.</td>
+</tr>
+<tr>
+<td><code>workspace-external</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Run configured external tools (PHPStan, PHPCS, PHPMD, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when <code>workspace</code> is enabled.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="diagnosticsignore"><code>[[diagnostics.ignore]]</code><a class="headerlink" href="#diagnosticsignore" title="Permanent link">&para;</a></h4>
+<p>Rules that suppress matching diagnostics, similar to PHPStan's
+<code>ignoreErrors</code>. Each rule may constrain by <code>message</code> (regex), <code>path</code>
+(glob relative to workspace root), and/or <code>identifier</code> (diagnostic
+code). A diagnostic is suppressed when it matches every constraint
+present on a rule; omitted constraints match anything.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">[[diagnostics.ignore]]</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;tests/**&quot;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">[[diagnostics.ignore]]</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">identifier</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;deprecated_usage&quot;</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;^Call to deprecated function some_legacy_helper</span><span class="se">\\</span><span class="s2">(</span><span class="se">\\</span><span class="s2">)&quot;</span>
+</code></pre></div>
+<h3 id="indexing"><code>[indexing]</code><a class="headerlink" href="#indexing" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>strategy</code></td>
+<td>string</td>
+<td><code>"full"</code></td>
+<td>Class discovery strategy: <code>"full"</code>, <code>"composer"</code>, <code>"self"</code>, or <code>"none"</code>. See <a href="#indexing-strategy">Indexing Strategy</a> below.</td>
+</tr>
+<tr>
+<td><code>exclude</code></td>
+<td>string[]</td>
+<td><code>[]</code></td>
+<td>Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing <code>/</code> anchors to the root, a trailing <code>/</code> restricts to directories, and a leading <code>!</code> re-includes. Applies to background discovery and to the directories <code>analyze</code> walks. A file you open in the editor, or name outright on the <code>analyze</code> command line, is always served. The <code>_ide_helper.php</code> and <code>_ide_helper_models.php</code> files laravel-ide-helper generates are always skipped; list them with a leading <code>!</code> to index them anyway.</td>
+</tr>
+<tr>
+<td><code>extensions</code></td>
+<td>string[]</td>
+<td><code>[]</code></td>
+<td>Extra file extensions (without the dot) treated as PHP source during workspace discovery, e.g. <code>["module", "inc", "theme"]</code> for Drupal. <code>.php</code> is always included.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[indexing]</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">exclude</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;generated&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;web/sites/default/files&quot;</span><span class="p">]</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">extensions</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;module&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;install&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;theme&quot;</span><span class="p">]</span>
+</code></pre></div>
+<h3 id="semantic_tokens"><code>[semantic_tokens]</code><a class="headerlink" href="#semantic_tokens" title="Permanent link">&para;</a></h3>
+<p>PHPantom defaults to <code>contextual</code> semantic tokens so editor syntax
+highlighting remains in charge of ordinary PHP syntax.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mode</code></td>
+<td>string</td>
+<td><code>"contextual"</code></td>
+<td>Semantic token mode: <code>"contextual"</code>, <code>"full"</code>, or <code>"off"</code>.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"contextual"</code></td>
+<td>Emit only context-sensitive tokens that complement Tree-sitter/TextMate highlighting, such as parameters, PHPDoc template parameters, deprecated references, and static member accesses.</td>
+</tr>
+<tr>
+<td><code>"full"</code></td>
+<td>Emit the complete semantic token stream, including ordinary classes, variables, functions, methods, properties, comments, keywords, attributes, and Blade tokens.</td>
+</tr>
+<tr>
+<td><code>"off"</code></td>
+<td>Return no semantic tokens.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="formatting"><code>[formatting]</code><a class="headerlink" href="#formatting" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pint</code></td>
+<td>string</td>
+<td>unset</td>
+<td>Command or path for Laravel Pint. Unset: auto-detect from <code>require-dev</code>. <code>""</code>: disable.</td>
+</tr>
+<tr>
+<td><code>pint-blade</code></td>
+<td>boolean</td>
+<td>unset</td>
+<td>Whether <code>.blade.php</code> files are formatted by Pint's <code>Pint/laravel_blade</code> rule. Unset: follow the workspace <code>pint.json</code>. <code>true</code>: send them to Pint with <code>--blade</code>. <code>false</code>: never; use the built-in Blade formatter.</td>
+</tr>
+<tr>
+<td><code>blade-php</code></td>
+<td>boolean</td>
+<td>unset</td>
+<td>Whether the built-in Blade formatter also formats the PHP a template carries. Unset: leave every fragment as written. <code>true</code>: format it. No effect on a project whose Blade files go to Pint.</td>
+</tr>
+<tr>
+<td><code>php-cs-fixer</code></td>
+<td>string</td>
+<td>unset</td>
+<td>Command or path for php-cs-fixer. Unset: auto-detect from <code>require-dev</code>. <code>""</code>: disable.</td>
+</tr>
+<tr>
+<td><code>phpcbf</code></td>
+<td>string</td>
+<td>unset</td>
+<td>Command or path for phpcbf. Unset: auto-detect from <code>require-dev</code>. <code>""</code>: disable.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>integer</td>
+<td><code>10000</code></td>
+<td>Max runtime in milliseconds per external formatting tool.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="phpstan"><code>[phpstan]</code><a class="headerlink" href="#phpstan" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>command</code></td>
+<td>string</td>
+<td>unset</td>
+<td>Command or path for PHPStan. Unset: auto-detect via <code>vendor/bin/phpstan</code> (only when the project has a PHPStan config file or <code>composer.json</code> requires <code>phpstan/phpstan</code>, or a Laravel-aware PHPStan extension such as <code>larastan/larastan</code> or <code>calebdw/phpstan-laravel</code>, directly) then <code>$PATH</code>. A Laravel application with neither such an extension nor a config file is left alone entirely, since plain PHPStan misreads the framework. <code>""</code>: disable.</td>
+</tr>
+<tr>
+<td><code>memory-limit</code></td>
+<td>string</td>
+<td><code>"1G"</code></td>
+<td>Memory limit passed to PHPStan via <code>--memory-limit</code>.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>integer</td>
+<td><code>60000</code></td>
+<td>Max runtime in milliseconds before PHPStan is killed.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="phpcs"><code>[phpcs]</code><a class="headerlink" href="#phpcs" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>command</code></td>
+<td>string</td>
+<td>unset</td>
+<td>Command or path for PHPCS. Unset: auto-detect via <code>vendor/bin/phpcs</code> then <code>$PATH</code>. <code>""</code>: disable.</td>
+</tr>
+<tr>
+<td><code>standard</code></td>
+<td>string</td>
+<td>unset</td>
+<td>Coding standard to enforce (e.g. <code>"PSR12"</code>). Unset: PHPCS uses its own default detection.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>integer</td>
+<td><code>30000</code></td>
+<td>Max runtime in milliseconds before PHPCS is killed.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="phpmd"><code>[phpmd]</code><a class="headerlink" href="#phpmd" title="Permanent link">&para;</a></h3>
+<p>PHPMD 3 is required. Earlier versions have a different command line.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>command</code></td>
+<td>string</td>
+<td>unset</td>
+<td>Command or path for PHPMD. Unset: auto-detect via <code>vendor/bin/phpmd</code> then <code>$PATH</code>, only when the project has a PHPMD config file (<code>phpmd.yml</code>, <code>phpmd.xml</code>, <code>.phpmd.yml</code>, <code>phpmd.xml.dist</code>, and the other names PHPMD looks for) or <code>ruleset</code> is set. <code>""</code>: disable.</td>
+</tr>
+<tr>
+<td><code>ruleset</code></td>
+<td>string</td>
+<td>unset</td>
+<td>Ruleset name or file passed via <code>--ruleset</code> (e.g. <code>"cleancode"</code>). Unset: PHPMD uses the config file it finds in the project root.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>integer</td>
+<td><code>30000</code></td>
+<td>Max runtime in milliseconds before PHPMD is killed.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mago"><code>[mago]</code><a class="headerlink" href="#mago" title="Permanent link">&para;</a></h3>
+<p>Mago is only activated when <code>mago.toml</code> exists at the workspace root.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>command</code></td>
+<td>string</td>
+<td>unset</td>
+<td>Command or path for Mago. Unset: auto-detect via <code>vendor/bin/mago</code> (only when <code>composer.json</code> requires <code>carthage-software/mago</code> directly) then <code>$PATH</code>. <code>""</code>: disable.</td>
+</tr>
+<tr>
+<td><code>lint</code></td>
+<td>bool</td>
+<td>unset</td>
+<td>Proxy <code>mago lint</code> diagnostics. Unset: only when <code>mago.toml</code> has a <code>[linter]</code> table.</td>
+</tr>
+<tr>
+<td><code>analyze</code></td>
+<td>bool</td>
+<td>unset</td>
+<td>Proxy <code>mago analyze</code> diagnostics. Unset: only when <code>mago.toml</code> has an <code>[analyzer]</code> table, and on Laravel only when it also wires up an extension.</td>
+</tr>
+<tr>
+<td><code>lint-timeout</code></td>
+<td>integer</td>
+<td><code>30000</code></td>
+<td>Max runtime in milliseconds before <code>mago lint</code> is killed.</td>
+</tr>
+<tr>
+<td><code>analyze-timeout</code></td>
+<td>integer</td>
+<td><code>60000</code></td>
+<td>Max runtime in milliseconds before <code>mago analyze</code> is killed.</td>
+</tr>
+</tbody>
+</table>
+<p>Which of Mago's two diagnostic commands run follows the workspace <code>mago.toml</code>, since a project that uses Mago for one thing rarely wants the others. A <code>mago.toml</code> holding a <code>[formatter]</code> table and nothing else belongs to a project that formats with Mago and checks its code with something else, so neither <code>mago lint</code> nor <code>mago analyze</code> is proxied for it.</p>
+<p>On a Laravel project, <code>mago analyze</code> additionally needs the <code>mago.toml</code> to wire up an extension, either an enabled <code>[extension-hosts.*]</code> entry or a namespaced plugin such as <code>plugins = ["acme/laravel"]</code>. Mago's analyser has no built-in Laravel support, so without one it cannot see through Eloquent or the facades and reports correct code in bulk. Mago's own plugins (<code>stdlib</code>, <code>psl</code>, <code>flow-php</code>, <code>psr-container</code>) do not count, since none of them supplies that knowledge. <code>mago lint</code> is unaffected, as its linter does have a Laravel integration.</p>
+<p>Set <code>lint</code> or <code>analyze</code> explicitly to override all of this in either direction.</p>
+<h3 id="laravel"><code>[laravel]</code><a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h3>
+<h4 id="laravelschema"><code>[laravel.schema]</code><a class="headerlink" href="#laravelschema" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Enable Laravel schema dump scanning for Eloquent model property inference.</td>
+</tr>
+<tr>
+<td><code>paths</code></td>
+<td>string[]</td>
+<td><code>["database/schema"]</code></td>
+<td>Schema dump files or directories to scan, relative to the workspace root.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="laravelmigrations"><code>[laravel.migrations]</code><a class="headerlink" href="#laravelmigrations" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Enable Laravel migration scanning for Eloquent model property inference.</td>
+</tr>
+<tr>
+<td><code>paths</code></td>
+<td>string[]</td>
+<td>unset</td>
+<td>Migration files or directories to scan. Defaults to non-vendor <code>database/migrations</code> directories.</td>
+</tr>
+</tbody>
+</table>
+<p>The file is optional. Unknown keys are silently ignored, so the file is forward-compatible.</p>
+<h2 id="editor-supplied-file-filters">Editor-supplied file filters<a class="headerlink" href="#editor-supplied-file-filters" title="Permanent link">&para;</a></h2>
+<p>Your editor already knows which folders it hides and which extensions it opens as PHP. PHPantom accepts the same two <code>[indexing]</code> lists from the editor over LSP, so that knowledge does not have to be mirrored into <code>.phpantom.toml</code> by hand:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">&quot;indexing&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;exclude&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;generated&quot;</span><span class="p">],</span><span class="w"> </span><span class="nt">&quot;extensions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;module&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>The server reads that shape from <code>initializationOptions</code> at startup and from <code>workspace/didChangeConfiguration</code> when you change your settings mid-session. It is also accepted namespaced under a <code>phpantom</code> key, which is how a client that pushes its whole settings tree sends it.</p>
+<p>A notification that carries no <code>indexing</code> block leaves the filters as they are, since clients re-push their settings for reasons of their own. To clear the filters, send an <code>indexing</code> block with empty lists rather than omitting it.</p>
+<p>A change made mid-session is reconciled against the index built under the previous filters, so neither direction needs a restart: classes under a path you just excluded leave the index, and files a removed exclude or an added extension brings back into scope are picked up by a fresh workspace scan a moment later. That scan is debounced, so a burst of settings changes costs one walk rather than one each. Editing <code>.phpantom.toml</code> is reconciled the same way. A file you have open in the editor is always served, whatever the filters say about it.</p>
+<p>The values mean exactly what the <a href="#indexing"><code>[indexing]</code></a> keys of the same name mean: <code>exclude</code> is gitignore syntax relative to the workspace root, and <code>extensions</code> are extra file extensions (without the dot) treated as PHP source. Only those two keys are read; the indexing strategy stays a project decision.</p>
+<p>Editor settings and <code>.phpantom.toml</code> are two layers of one filter set rather than one overriding the other, so:</p>
+<ul>
+<li>Both lists apply. A path either side excludes is excluded, and an extension either side names is indexed.</li>
+<li>Changing one never drops the other. Reloading <code>.phpantom.toml</code> keeps what the editor sent, and a settings change keeps what the file says.</li>
+<li>A <code>!</code> re-include in <code>.phpantom.toml</code> still wins over an exclude the editor sent, following the usual gitignore rule that the last matching pattern decides. This is how a project keeps one generated file indexed that its contributors happen to hide in their editors.</li>
+</ul>
+<p>The interface is deliberately generic (a list of globs and a list of extensions, never an editor's own setting names), so any client can translate its native settings into it. See <a href="../editor-setup/">Editor Setup</a> for what each editor does with it.</p>
+<h2 id="code-formatting">Code Formatting<a class="headerlink" href="#code-formatting" title="Permanent link">&para;</a></h2>
+<p>PHPantom ships a built-in PHP formatter (mago-formatter) that works out of the box, so <code>textDocument/formatting</code> requests are answered without any setup. The formatter is chosen per project in this order:</p>
+<ol>
+<li><strong>Explicit config wins.</strong> A tool path set under <code>[formatting]</code> in <code>.phpantom.toml</code> (<code>pint</code>, <code>php-cs-fixer</code>, or <code>phpcbf</code>) is always used. Setting a tool to <code>""</code> disables it.</li>
+<li><strong>Composer <code>require-dev</code> wins over the built-in formatter.</strong> If <code>composer.json</code> lists <code>laravel/pint</code>, <code>friendsofphp/php-cs-fixer</code>, or <code>squizlabs/php_codesniffer</code> in <code>require-dev</code>, PHPantom resolves the binary through Composer's bin-dir and runs it as a subprocess. A <code>phpcs.xml</code>, <code>.phpcs.xml</code>, <code>phpcs.xml.dist</code>, or <code>.phpcs.xml.dist</code> file at the workspace root certifies phpcbf the same way, so a project that only pulls <code>squizlabs/php_codesniffer</code> in transitively (e.g. through <code>slevomat/coding-standard</code>) is still detected. These tools discover their own project config (<code>pint.json</code>, <code>.php-cs-fixer.php</code>, <code>.phpcs.xml</code>, etc.) as they normally would.</li>
+<li><strong>Otherwise, the built-in formatter is used.</strong></li>
+</ol>
+<p><strong>Blade templates</strong> are resolved on their own, since only Pint knows how to format one. A <code>.blade.php</code> file goes to Pint when the project's <code>pint.json</code> turns the <code>Pint/laravel_blade</code> rule on (or <code>pint-blade = true</code> asks for it, which also passes <code>--blade</code>), and otherwise to PHPantom's built-in Blade formatter. The built-in formatter reindents the template without changing the content of any line: indentation follows the nesting of directives, HTML and component tags, multi-line attribute lists and values, and brackets left open at the end of a line, using the editor's tab size and spaces-or-tabs setting. The bodies of <code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>, and <code>@php</code> blocks are moved as a unit and keep their own layout; <code>&lt;pre&gt;</code>, <code>&lt;textarea&gt;</code>, and <code>@verbatim</code> contents are left exactly as written, as is anything between <code>{{-- blade-formatter-disable --}}</code> and <code>{{-- blade-formatter-enable --}}</code>. Templates whose indentation is output are never touched: Envoy task files, Markdown mail templates (under <code>resources/views/mail</code>, <code>resources/views/emails</code>, or <code>vendor/mail</code>, or using <code>&lt;x-mail::</code> components), and Laravel Boost guidelines.</p>
+<p>Setting <code>blade-php = true</code> adds a pass that formats the PHP a template carries through the same built-in PHP formatter (and the same <code>mago.toml</code> settings) a <code>.php</code> file gets: <code>@php</code> bodies and <code>&lt;?php</code> islands as statement lists, echoes, <code>&lt;?=</code> islands, and directive arguments as expressions, along with the spacing that is Blade's own rather than PHP's, so <code>@if($a&amp;&amp;$b)</code> becomes <code>@if ($a &amp;&amp; $b)</code> and <code>{{$x}}</code> becomes <code>{{ $x }}</code>. It is opt-in because it changes the content of a line, which the reindenter on its own never does. A fragment written across several lines is formatted where it stands, wrapped for the width the column it sits at actually leaves it. How many lines a fragment takes stays the author's, though: an array broken over several lines is respaced without being joined onto one, and a long line is respaced without being broken up. A fragment the formatter cannot parse is left exactly as written and the rest of the template still formats, and the pass stays out of everything the reindenter leaves alone, plus Alpine and Livewire attribute values, which are JavaScript.</p>
+<p>The built-in formatter defaults to the PER-CS 2.0 style. If a <code>mago.toml</code> is present at the workspace root, its <code>[formatter]</code> table is honoured instead, so PHPantom formats with the same preset and settings your project already uses with the Mago CLI:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># mago.toml</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">[formatter]</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">preset</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;psr-12&quot;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">print-width</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">use-tabs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
+</code></pre></div>
+<p>For the full list of <code>[formatter]</code> options (presets, brace placement, blank-line handling, casing, and the rest), refer to the upstream Mago documentation: <a href="https://mago.carthage.software/latest/en/tools/formatter/configuration-reference">Formatter configuration reference</a>.</p>
+<h2 id="indexing-strategy">Indexing Strategy<a class="headerlink" href="#indexing-strategy" title="Permanent link">&para;</a></h2>
+<p>By default, PHPantom builds a full workspace index: it discovers PHP files, then background-parses user files to populate symbol maps and the reference candidate index. This gives complete cross-file references, implementation lookup, and workspace-wide navigation without per-feature scanning.</p>
+<p>The <code>strategy</code> setting controls this behaviour:</p>
+<table>
+<thead>
+<tr>
+<th>Strategy</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"full"</code> (default)</td>
+<td>Scan PHP files, then background-parse user files to populate symbol and reference indexes.</td>
+</tr>
+<tr>
+<td><code>"composer"</code></td>
+<td>Use Composer's classmap when available, self-scan to fill gaps. Results stay closer to what <code>composer dump-autoload</code> knows about.</td>
+</tr>
+<tr>
+<td><code>"self"</code></td>
+<td>Ignore Composer's classmap entirely and scan every PHP file in the workspace. Discovers all classes regardless of autoloading.</td>
+</tr>
+<tr>
+<td><code>"none"</code></td>
+<td>Use only Composer's classmap with no fallback scanning. The most conservative option.</td>
+</tr>
+</tbody>
+</table>
+<p>Most projects should leave this at the default. Change it to <code>"composer"</code> or <code>"none"</code> only if you want a lighter or more Composer-constrained index.</p>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<h3 id="classes-from-other-files-are-not-found">Classes from other files are not found<a class="headerlink" href="#classes-from-other-files-are-not-found" title="Permanent link">&para;</a></h3>
+<p>PHPantom resolves cross-file classes through the full workspace index by default. If a class exists in your project but PHPantom reports it as unknown, the most common causes are:</p>
+<ol>
+<li>
+<p><strong>The file is excluded from the workspace walk.</strong> Check ignored directories and <code>.gitignore</code> rules. If you explicitly set <code>strategy = "composer"</code> or <code>"none"</code>, classes outside Composer's autoload rules may be skipped.</p>
+</li>
+<li>
+<p><strong>Composer's classmap is stale.</strong> Run <code>composer dump-autoload</code> to regenerate it. PHPantom reads the classmap at startup.</p>
+</li>
+<li>
+<p><strong>The class is in a directory not covered by <code>autoload</code> or <code>autoload-dev</code>.</strong> Check that your <code>composer.json</code> PSR-4 mappings cover the directory where the class lives.</p>
+</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>

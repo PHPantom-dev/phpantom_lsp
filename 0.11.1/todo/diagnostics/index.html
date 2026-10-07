@@ -1,0 +1,2239 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.1/todo/diagnostics/">
+      
+      
+        <link rel="prev" href="../completion/">
+      
+      
+        <link rel="next" href="../external-stubs/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPantom — Diagnostics - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpantom-diagnostics" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — Diagnostics
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#severity-philosophy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Severity philosophy
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d5-external-tool-diagnostic-suppression-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D5. External tool diagnostic suppression actions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d15-unused-parameter-diagnostic" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D15. Unused parameter diagnostic
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="D15. Unused parameter diagnostic">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exclusions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exclusions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d16-unreachable_match_arm-ignores-literal-subject-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D16. <code>unreachable_match_arm</code> ignores literal subject types
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d17-docblock_native_mismatch-only-judges-nullability" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D17. <code>docblock_native_mismatch</code> only judges nullability
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d18-arrayint-t-is-accepted-wherever-a-listt-is-declared" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D18. <code>array&lt;int, T&gt;</code> is accepted wherever a <code>list&lt;T&gt;</code> is declared
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D19. <code>invalid_member_access</code> cannot tell a property read from a write
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d20-foobar-and-foobar-are-the-same-span" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D20. <code>Foo::$bar</code> and <code>Foo::bar</code> are the same span
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D21. A union of an unreachable and a missing member is reported by neither check
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d22-member-provenance-is-recomputed-instead-of-recorded" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D22. Member provenance is recomputed instead of recorded
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D23. A rebound closure's scope is added to the lexical one rather than replacing it
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D24. A <code>match</code> that does not cover every enum case is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d25-two-traits-declaring-the-same-property-with-different-types-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D25. Two traits declaring the same property with different types is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D26. Reading a typed property that nothing initialises is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d27-destructuring-offsets-an-array-cannot-have-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D27. Destructuring offsets an array cannot have is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d28-remove-unreachable-code-is-wired-to-phpstan-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D28. "Remove unreachable code" is wired to PHPStan only
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d29-namespace-and-declare-bodies-break-the-reachability-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D29. <code>namespace</code> and <code>declare</code> bodies break the reachability flow
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#severity-philosophy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Severity philosophy
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d5-external-tool-diagnostic-suppression-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D5. External tool diagnostic suppression actions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d15-unused-parameter-diagnostic" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D15. Unused parameter diagnostic
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="D15. Unused parameter diagnostic">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exclusions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exclusions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d16-unreachable_match_arm-ignores-literal-subject-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D16. <code>unreachable_match_arm</code> ignores literal subject types
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d17-docblock_native_mismatch-only-judges-nullability" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D17. <code>docblock_native_mismatch</code> only judges nullability
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d18-arrayint-t-is-accepted-wherever-a-listt-is-declared" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D18. <code>array&lt;int, T&gt;</code> is accepted wherever a <code>list&lt;T&gt;</code> is declared
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D19. <code>invalid_member_access</code> cannot tell a property read from a write
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d20-foobar-and-foobar-are-the-same-span" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D20. <code>Foo::$bar</code> and <code>Foo::bar</code> are the same span
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D21. A union of an unreachable and a missing member is reported by neither check
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d22-member-provenance-is-recomputed-instead-of-recorded" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D22. Member provenance is recomputed instead of recorded
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D23. A rebound closure's scope is added to the lexical one rather than replacing it
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D24. A <code>match</code> that does not cover every enum case is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d25-two-traits-declaring-the-same-property-with-different-types-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D25. Two traits declaring the same property with different types is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D26. Reading a typed property that nothing initialises is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d27-destructuring-offsets-an-array-cannot-have-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D27. Destructuring offsets an array cannot have is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d28-remove-unreachable-code-is-wired-to-phpstan-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D28. "Remove unreachable code" is wired to PHPStan only
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d29-namespace-and-declare-bodies-break-the-reachability-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D29. <code>namespace</code> and <code>declare</code> bodies break the reachability flow
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/diagnostics.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-diagnostics">PHPantom — Diagnostics<a class="headerlink" href="#phpantom-diagnostics" title="Permanent link">&para;</a></h1>
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
+within the same impact tier.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="severity-philosophy">Severity philosophy<a class="headerlink" href="#severity-philosophy" title="Permanent link">&para;</a></h2>
+<p>PHPantom assigns diagnostic severity based on runtime consequences:</p>
+<table>
+<thead>
+<tr>
+<th>Severity</th>
+<th>Criteria</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Error</strong></td>
+<td>Would crash at runtime. The code is definitively wrong.</td>
+<td>Member access on a scalar type (<code>$int-&gt;foo()</code>). Calling a function that doesn't exist (<code>doesntExist()</code>).</td>
+</tr>
+<tr>
+<td><strong>Warning</strong></td>
+<td>Likely wrong but could work for reasons we can't verify statically. The types are poor but the code might be correct at runtime.</td>
+<td>Accessing a member that doesn't exist on a non-final class (<code>$user-&gt;grantAccess()</code> where <code>User</code> has no such method but a subclass might). Unknown class in a type position (<code>Class 'Foo' not found</code>). Subject type resolved to an unknown class so members can't be verified.</td>
+</tr>
+<tr>
+<td><strong>Hint</strong></td>
+<td>The codebase lacks type information. Off by default or very subtle. Poorly typed PHP is so common that showing these by default would be noise for most users. Anyone who does care about type safety is likely running PHPStan already. Unless our engine becomes very strong, these diagnostics either expose our own inference gaps or bother users who never opted into static analysis.</td>
+<td><code>mixed</code> subject member access (opt-in via <code>unresolved-member-access</code>). Deprecated symbol usage (rendered as strikethrough).</td>
+</tr>
+<tr>
+<td><strong>Information</strong></td>
+<td>Advisory. Something the developer might want to know.</td>
+<td>Unused <code>use</code> import (rendered as dimmed). Unresolved type in a PHPDoc tag.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="d5-external-tool-diagnostic-suppression-actions">D5. External tool diagnostic suppression actions<a class="headerlink" href="#d5-external-tool-diagnostic-suppression-actions" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low (per tool, after proxy exists)</strong></p>
+<p>PHPantom's own inline suppression (<code>// @phpantom-ignore code</code>) has
+shipped. PHPStan suppression is also implemented ("Ignore PHPStan
+error" / "Remove unnecessary @phpstan-ignore"). The PHPCS proxy itself
+has also shipped (<code>src/diagnostics/external/phpcs.rs</code>, <code>[phpcs]</code> config
+section), but nothing wires up a suppression action for it yet. What
+remains is wiring up suppression actions for additional external tool
+proxies:</p>
+<ul>
+<li>PHPCS: <code>// phpcs:ignore [Sniff.Name]</code> or <code>// phpcs:disable</code> /
+  <code>// phpcs:enable</code> blocks. The proxy exists; only the suppression
+  action is missing.</li>
+<li>PHPMD (3.0): <code>#[SuppressWarnings(RuleName::class)]</code> as a PHP
+  attribute on the enclosing class or method, importing
+  <code>PHPMD\Attribute\SuppressWarnings</code> and the rule class. The proxy
+  (<code>src/phpmd.rs</code>, <code>[phpmd]</code> config section) carries the rule name as
+  the diagnostic code; only the suppression action is missing. The
+  rule's class is not in the report, so the action has to map the rule
+  name to its <code>PHPMD\Rule\…</code> class.</li>
+</ul>
+<hr />
+<h2 id="d15-unused-parameter-diagnostic">D15. Unused parameter diagnostic<a class="headerlink" href="#d15-unused-parameter-diagnostic" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Flag function and method parameters that are never read inside the
+body. This was intentionally excluded from D4 (unused variable
+diagnostic) because false positives are common for callbacks, interface
+implementations, and framework conventions (e.g. Laravel event
+listeners) that require specific parameter signatures even when not
+all parameters are used. Users can now silence false positives with
+<code>// @phpantom-ignore unused_parameter</code>.</p>
+<h3 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Function and method parameters (including closures and arrow
+   functions) that are never read inside their body.</li>
+<li>Constructor parameters that are not promoted and never read.</li>
+</ol>
+<h3 id="exclusions">Exclusions<a class="headerlink" href="#exclusions" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Parameters named <code>$_</code> or starting with <code>$_</code> (intentional discard).</li>
+<li>Promoted constructor parameters (they are property assignments).</li>
+<li>Parameters in abstract methods and interface method signatures
+  (no body to check).</li>
+</ul>
+<hr />
+<h2 id="d16-unreachable_match_arm-ignores-literal-subject-types">D16. <code>unreachable_match_arm</code> ignores literal subject types<a class="headerlink" href="#d16-unreachable_match_arm-ignores-literal-subject-types" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>scalar_type_label</code> in <code>src/diagnostics/match_type_errors.rs</code> answers
+<code>None</code> for a literal type (<code>'exception'</code>, <code>42</code>), so a subject the
+resolver typed as one exact value never reaches the arm check and no
+arm is ever reported unreachable. The comment there explains why: a
+literal was as often what survived after resolution lost an
+alternative it could not type as it was a genuine one-value subject,
+and taking the claim without that evidence produced false positives.</p>
+<p>The resolver no longer loses those alternatives. An unresolvable
+branch now widens the union it belongs to instead of dropping out of
+it, so a literal that reaches this diagnostic is a claim the resolver
+stands behind.</p>
+<p><strong>Fix:</strong> Give <code>TypeKind::Literal</code> its scalar kind in
+<code>scalar_type_label</code> and check the resulting arms. Cover the case the
+old comment was guarding against with a test: a subject whose other
+branch cannot be typed must still produce no diagnostic, because it
+now resolves to <code>mixed</code> rather than to the surviving literal.</p>
+<hr />
+<h2 id="d17-docblock_native_mismatch-only-judges-nullability">D17. <code>docblock_native_mismatch</code> only judges nullability<a class="headerlink" href="#d17-docblock_native_mismatch-only-judges-nullability" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param int $name */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function greet(string $name): void {}    // not flagged: int is not string at all</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">/** @param Foo $value */</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">function take(Bar $value): void {}       // not flagged: `Foo` may alias `Bar`</span>
+</code></pre></div>
+<p><code>src/diagnostics/docblock_native_mismatch.rs</code> compares a documented type
+against its native hint on one axis only: whether the annotation admits a
+<code>null</code> the signature rules out. A documented type that is not a subtype of
+the native hint on any <em>other</em> axis (<code>@param int</code> on a <code>string</code>, <code>@return
+array</code> on a <code>: string</code>) stays silent. That is the check PHPStan's
+<code>IncompatiblePhpDocTypeRule</code> performs, and the one the existing
+<code>is_type_compatible</code> in <code>src/diagnostics/type_errors/compatibility.rs</code>
+already has the machinery for.</p>
+<p>Covering it means resolving the documented type's bare names first, since a
+<code>Foo</code> that a <code>@template</code> list or an imported <code>@psalm-type</code> alias stands
+behind may well be the native <code>Bar</code> after resolution. The nullability axis
+sidesteps that today: a name that resolves to something nullable never
+spells <code>null</code> itself, so the check simply does not fire on it.</p>
+<p><strong>Fix:</strong> Resolve the documented type's names against the declaration's own
+<code>@template</code> list, the enclosing class's, and the file's
+<code>@psalm-type</code>/<code>@psalm-import-type</code> tags, then run the comparison through
+<code>is_type_compatible</code> rather than the nullability test alone.</p>
+<hr />
+<h2 id="d18-arrayint-t-is-accepted-wherever-a-listt-is-declared">D18. <code>array&lt;int, T&gt;</code> is accepted wherever a <code>list&lt;T&gt;</code> is declared<a class="headerlink" href="#d18-arrayint-t-is-accepted-wherever-a-listt-is-declared" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/**</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> * @param list&lt;int&gt; $values</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x"> * @return list&lt;int&gt;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x"> */</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">function keep(array $values): array {</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    return array_filter($values, fn ($v) =&gt; $v &gt; 3);  // array&lt;int, int&gt;, not flagged</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>is_type_compatible</code> in <code>src/diagnostics/type_errors/compatibility.rs</code>
+carries an explicit MAYBE hatch for <code>array&lt;int, X&gt;</code> reaching a <code>list&lt;X&gt;</code>
+parameter or return type, on the grounds that PHP codebases spell the two
+interchangeably. The core <code>is_subtype_of</code> already rejects the direction
+(only <code>list&lt;X&gt;</code> satisfies <code>array&lt;int, X&gt;</code>, not the reverse), so the hatch
+is the only thing standing between us and PHPStan's report here.</p>
+<p>Now that <code>array_filter()</code> reports the <code>array&lt;int, T&gt;</code> it actually
+produces, the hatch is what keeps the second half of the over-claim
+alive: a function that hands back an unwrapped filter result still
+passes a declared <code>list&lt;T&gt;</code>.</p>
+<p><strong>Fix:</strong> Drop the <code>array&lt;int, X&gt; → list&lt;X&gt;</code> arm and audit the corpus
+under <code>projects/</code> for what it starts reporting. The arm exists because
+plain <code>array&lt;int, X&gt;</code> is what an unannotated array resolves to in many
+places, so retiring it wants the resolver to answer <code>list&lt;X&gt;</code> for the
+shapes that genuinely are lists (literal arrays, <code>array_values()</code>,
+appended-to locals) first. Pay for it with resolver precision, the same
+way the supertype-where-subtype hatch was retired.</p>
+<hr />
+<h2 id="d19-invalid_member_access-cannot-tell-a-property-read-from-a-write">D19. <code>invalid_member_access</code> cannot tell a property read from a write<a class="headerlink" href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>PHP dispatches an unreachable property to a different magic method
+depending on what is being done to it: <code>__get</code> for a read, <code>__set</code> for a
+write, <code>__isset</code> for <code>isset()</code>, and <code>__unset</code> for <code>unset()</code>. The span the
+visibility check runs on records only that a property was accessed, so
+the check cannot pick the handler that actually applies and treats the
+presence of any of the four as reason enough to stand down.</p>
+<p>The result is a missed report rather than a wrong one. A class that
+declares <code>__set</code> but no <code>__get</code> silences a read it would in fact fatal
+on, and the same holds for every other mismatched pairing.</p>
+<p><strong>Fix:</strong> Carry the operation on the <code>MemberAccess</code> span — read, write,
+<code>isset</code>, <code>unset</code> — the way <code>readonly_writes.rs</code> recovers write targets
+from the AST, and require the handler that matches it. The same
+information would let the readonly check drop its own separate walk.</p>
+<hr />
+<h2 id="d20-foobar-and-foobar-are-the-same-span">D20. <code>Foo::$bar</code> and <code>Foo::bar</code> are the same span<a class="headerlink" href="#d20-foobar-and-foobar-are-the-same-span" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Symbol extraction strips the <code>$</code> from a static property access
+(<code>member_access.rs</code>) and records only a name plus <code>is_static</code>, so a
+static property and a class constant of the same name are
+indistinguishable downstream. Every consumer has to guess a precedence;
+the visibility check tries the constant first.</p>
+<p>Two classes of mistake follow, both needing a class that declares a
+constant and a static property under one name:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Collision {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    private const token = &#39;constant&#39;;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    public static string $token = &#39;property&#39;;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">}</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">echo Collision::$token;   // reported as a private constant</span>
+</code></pre></div>
+<p>and the reverse pairing, where a genuinely unreachable static property
+is passed off as a public constant and nothing is reported.</p>
+<p><strong>Fix:</strong> Record the member kind the syntax actually names — instance
+property, static property, constant, or method — rather than a name and
+a static flag.</p>
+<hr />
+<h2 id="d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check">D21. A union of an unreachable and a missing member is reported by neither check<a class="headerlink" href="#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
+<p><code>Known|Other</code> where <code>Known::$x</code> is private and <code>Other</code> has no <code>$x</code> at all
+fails on every runtime branch, and nothing reports it. Both checks are
+conservative in the same direction and each assumes the other covers what
+it declines to judge: the unknown-member check stays silent because the
+member exists on one branch, and the visibility check stays silent
+because it does not exist on the other.</p>
+<p>A related gap sits one layer earlier: the resolver hands the diagnostics
+only the branches it could load and drops the rest, so neither check can
+see that a union had a branch it failed to resolve. Any verdict that
+wants to distinguish "no branch permits this" from "we could not read
+one of the branches" needs that information preserved.</p>
+<p><strong>Fix:</strong> Give the branches of a resolved union a verdict of their own —
+accessible, inaccessible, missing, unresolved — instead of collapsing
+them to a list of loaded classes, and decide the union once from those.</p>
+<hr />
+<h2 id="d22-member-provenance-is-recomputed-instead-of-recorded">D22. Member provenance is recomputed instead of recorded<a class="headerlink" href="#d22-member-provenance-is-recomputed-instead-of-recorded" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>The inheritance merge knows which class each member it folds in came
+from — <code>merge_traits_into()</code> is handed the host FQN — and drops that on
+the floor. <code>MethodInfo</code>, <code>PropertyInfo</code>, and <code>ConstantInfo</code> have no field
+for it, so the assembled class says what a class <em>has</em> and never who
+declared it.</p>
+<p>Every check that needs the declaring class therefore recomputes it by
+walking the raw hierarchy, and every such walk is a partial
+reimplementation of the merge's own rules. <code>invalid_member_access</code> has
+one, and it is already known to be incomplete: it does not apply
+<code>trait_aliases</code>, so a member a <code>use</code> clause renamed is untraceable and
+the access goes unreported.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">trait Opens { public function open(): void {} }</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">class Vault { use Opens { open as private hidden; } }</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">class Intruder {</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    public function probe(Vault $vault): void</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    {</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">        $vault-&gt;hidden();   // fatal at runtime, reported by nothing</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">    }</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">}</span>
+</code></pre></div>
+<p>The access has to be written inside a class to show the gap. From
+outside every class the check reports anyway, because no scope can reach
+a non-public member whoever declared it, and it falls back to naming the
+receiver when the declaration cannot be traced.</p>
+<p><strong>Fix:</strong> Record the declaring class during the merge and let the checks
+read it, rather than each one re-deriving the merge's rules. The cost is
+a field on every member across the whole index, so it wants measuring
+against the memory the index already uses before it is committed to.</p>
+<hr />
+<h2 id="d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it">D23. A rebound closure's scope is added to the lexical one rather than replacing it<a class="headerlink" href="#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>A closure can run with a different class as its scope than the one it is
+written in — Laravel's <code>Macroable</code>, anything through <code>Closure::bind</code>, and
+anything a <code>@param-closure-this</code> tag describes. The resolver already
+works this out. The visibility check does not read it; it infers from the
+subject text that <code>$this</code>, <code>self</code>, or <code>static</code> names a binding and adds
+the receiver as an <em>additional</em> scope, keeping the enclosing class as
+well.</p>
+<p>Adding rather than replacing is safe in the direction that matters — it
+cannot invent a report — but it hides one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Owner {</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    private static function hidden(): void {}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    public function boot(): void</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    {</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">        Target::macro(&#39;x&#39;, function (): void {</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">            self::hidden();      // fatal: the closure&#39;s scope is Target</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">        });</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">    }</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">}</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="x">class Target extends Owner {</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="x">    /** @param-closure-this static $macro */</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="x">    public static function macro(string $name, callable $macro): void {}</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="x">}</span>
+</code></pre></div>
+<p>The closure is written inside <code>Owner</code>, so the enclosing class permits the
+call, while at runtime the scope is <code>Target</code> and a parent's private
+member is out of reach.</p>
+<p><strong>Fix:</strong> Take the bound class from the resolver, which already computes
+it, and let it replace the enclosing class rather than joining it.
+Inferring a binding from the spelling of the subject is guessing at
+something the type engine has already decided.</p>
+<h2 id="d24-a-match-that-does-not-cover-every-enum-case-is-not-reported">D24. A <code>match</code> that does not cover every enum case is not reported<a class="headerlink" href="#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">enum Suit: string { case Hearts = &#39;H&#39;; case Spades = &#39;S&#39;; }</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">function name(Suit $s): string {</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    return match ($s) {          // should be reported: Suit::Hearts throws UnhandledMatchError</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">        Suit::Spades =&gt; &#39;spades&#39;,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    };</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">}</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">function describe(Suit $s): string {</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">    if ($s-&gt;value === &#39;H&#39;) {</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="x">        return &#39;hearts&#39;;</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="x">    }</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="x">    return match ($s) {          // must stay silent: only Spades reaches here</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="x">        Suit::Spades =&gt; &#39;spades&#39;,</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="x">    };</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="x">}</span>
+</code></pre></div>
+<p>A <code>match</code> with no <code>default</code> arm throws <code>UnhandledMatchError</code> for any subject
+value no arm covers. When the subject resolves to a closed set (an enum, a
+union of enum cases, a <code>bool</code>, or a union of literals), subtract each arm's
+conditions from it and report what is left. PHPStan (<code>match.unhandled</code>),
+Psalm (<code>UnhandledMatchCondition</code>), mago and Qodana all do.</p>
+<p>The second function is part of the job, not a follow-up. The check can only
+stay quiet there if a comparison on a backed enum's <code>-&gt;value</code> narrows the
+enum itself, so <code>$s-&gt;value === 'H'</code> has to remove <code>Suit::Hearts</code> from <code>$s</code>
+on the fall-through path. Without that narrowing the check would be a new
+false positive. PHPStan and Psalm report the second function too, and the
+suite counts that against them.</p>
+<p>Found running the php-typing-conformance suite
+(<code>regressions_backed_enum_value_narrowing.php</code>). A quick fix to add the
+missing arms is <a href="../phpstan-actions/#h16-matchunhandled--add-missing-match-arms">H16</a> (<code>match.unhandled</code>), which could
+then attach to this diagnostic instead of only PHPStan's.</p>
+<h2 id="d25-two-traits-declaring-the-same-property-with-different-types-is-not-reported">D25. Two traits declaring the same property with different types is not reported<a class="headerlink" href="#d25-two-traits-declaring-the-same-property-with-different-types-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">trait Left  { public string $prop; }</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">trait Right { public int $prop; }</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">final class Composed { use Left; use Right; } // fatal: Left and Right define the same property ($prop) in the composition of Composed</span>
+</code></pre></div>
+<p>PHP only allows the same property from two traits (or from a trait and
+the class) when the declarations are compatible: same visibility, same
+type, same <code>readonly</code>ness, and same default. Anything else is a
+compile-time fatal. The inheritance merge already sees both declarations;
+it keeps one and discards the other without comparing them.</p>
+<p>Found running the php-typing-conformance suite
+(<code>regressions_trait_property_type_conflict.php</code>). mago and Phan report it.</p>
+<p><strong>Where to look:</strong> the trait merge in <code>src/inheritance/traits.rs</code>. The
+report could sit beside the missing-method check in
+<code>src/diagnostics/implementation_errors.rs</code>.</p>
+<h2 id="d26-reading-a-typed-property-that-nothing-initialises-is-not-reported">D26. Reading a typed property that nothing initialises is not reported<a class="headerlink" href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">final class User { public string $name; }</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$user = new User();</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">echo $user-&gt;name; // Error: must not be accessed before initialization</span>
+</code></pre></div>
+<p>A typed property without a default starts <em>uninitialized</em>, and reading it
+throws. The declaration-side check is the tractable half: flag a typed,
+non-promoted property with no default that no constructor path assigns.
+Psalm's <code>MissingConstructor</code> works this way. The read-side check needs
+definite-assignment tracking across the constructor and is the harder half.</p>
+<p>Keep it conservative. Frameworks and ORMs hydrate properties by reflection
+(Doctrine entities, serializers, <code>#[Inject]</code>), and a diagnostic that flags
+all of them is a false positive on correct code. Consider exempting classes
+whose properties carry an attribute or an ORM mapping docblock, and put the
+check behind a <code>[diagnostics]</code> toggle if a safe default can't be found.</p>
+<p>Found running the php-typing-conformance suite
+(<code>properties_uninitialized_read.php</code>). Psalm and Qodana report it.</p>
+<h2 id="d27-destructuring-offsets-an-array-cannot-have-is-not-reported">D27. Destructuring offsets an array cannot have is not reported<a class="headerlink" href="#d27-destructuring-offsets-an-array-cannot-have-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @return array&lt;string, int&gt; */</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">function stringKeyed(): array { return [&#39;a&#39; =&gt; 1]; }</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">[$a, $b] = stringKeyed(); // should be reported: offsets 0 and 1 cannot exist on array&lt;string, int&gt;</span>
+</code></pre></div>
+<p><code>[$a, $b] = …</code> reads offsets <code>0</code> and <code>1</code>. When the right-hand side's key type
+excludes them (string keys only, or a shape without those keys), the
+destructure yields <code>null</code> with a warning at runtime. The destructuring
+resolver already reads the key and value types. It could report a
+positional destructure of a string-keyed array, and a keyed one (<code>['x' =&gt; $x]
+= …</code>) of a shape that lacks the key.</p>
+<p>Found running the php-typing-conformance suite
+(<code>regressions_list_destructure_string_key.php</code>). PHPStan and mago report it.</p>
+<h2 id="d28-remove-unreachable-code-is-wired-to-phpstan-only">D28. "Remove unreachable code" is wired to PHPStan only<a class="headerlink" href="#d28-remove-unreachable-code-is-wired-to-phpstan-only" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>The action reads <code>phpstan_tool.last_diags</code> and nothing else
+(<code>code_actions/phpstan/remove_unreachable.rs</code>), so the native
+<code>unreachable_code</code> diagnostic never offers it. Adding the code to the
+trigger is not enough on its own: the resolve step deletes from the
+diagnostic's line to the next closing brace rather than using the
+diagnostic's own range, which</p>
+<ul>
+<li>has nothing to delete for a dead run at the top level of a file, where
+  no closing brace follows;</li>
+<li>ignores the reported span, so it would remove more than was dimmed;</li>
+<li>can swallow a hoisted declaration or a <code>goto</code> label sitting inside the
+  run, both of which the diagnostic deliberately leaves reachable.</li>
+</ul>
+<p><strong>Fix:</strong> Take the range from the diagnostic and carry it through to the
+resolve payload, and let the action accept a native diagnostic rather
+than only a proxied one. Moving the file out of <code>phpstan/</code> is the
+smallest part of it.</p>
+<h2 id="d29-namespace-and-declare-bodies-break-the-reachability-flow">D29. <code>namespace</code> and <code>declare</code> bodies break the reachability flow<a class="headerlink" href="#d29-namespace-and-declare-bodies-break-the-reachability-flow" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p><code>unreachable_code</code> treats a braced <code>namespace</code> and a <code>declare</code> body as
+fresh statement lists rather than as the transparent wrappers they are,
+so reachability neither flows into them nor out of them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">namespace</span> <span class="nx">First</span> <span class="p">{</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="k">return</span><span class="p">;</span>          <span class="c1">// ends the whole file</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="p">}</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="k">namespace</span> <span class="nx">Second</span> <span class="p">{</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="k">echo</span> <span class="s1">&#39;never&#39;</span><span class="p">;</span>    <span class="c1">// not reported</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="p">}</span>
+</code></pre></div>
+<p>and, inside a function:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">return;</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">declare(ticks=1) {</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    echo &#39;never&#39;;    // not reported</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>Neither wrapper is itself a runtime statement, so neither should be
+dimmed, but the state on either side of it has to carry through.</p>
+<p><strong>Fix:</strong> Thread the reachable/unreachable state through both wrappers
+instead of restarting the scan inside them.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>

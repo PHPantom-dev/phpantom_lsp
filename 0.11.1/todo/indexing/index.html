@@ -1,0 +1,2360 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.1/todo/indexing/">
+      
+      
+        <link rel="prev" href="../fix-cli/">
+      
+      
+        <link rel="next" href="../inline-completion/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPantom — Indexing - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpantom-indexing" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — Indexing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#current-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Current state
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#strategy-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Strategy modes
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Strategy modes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#full-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>"full"</code> (default)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#composer" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>"composer"</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#self" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>"self"</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#none" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>"none"</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x2-parallel-file-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X2. Parallel file processing
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="X2. Parallel file processing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#current-state-partial" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Current state (partial)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Remaining work
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-not-rayon" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why not rayon?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-the-classmap-is-not-a-prerequisite" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why the classmap is not a prerequisite
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x6-disk-cache-evaluate-later" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X6. Disk cache (evaluate later)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="X6. Disk cache (evaluate later)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-to-consider" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When to consider
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#format-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Format options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#invalidation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Invalidation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decision-criteria" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Decision criteria
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x7-recency-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X7. Recency tracking
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X12. Say when an exclude hid the class a diagnostic names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x16-composers-own-class-lists-bypass-indexing-exclude" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X16. Composer's own class lists bypass <code>[indexing] exclude</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x14-ask-zed-to-expose-file_scan_exclusions-and-file_types-to-extensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X14. Ask Zed to expose <code>file_scan_exclusions</code> and <code>file_types</code> to extensions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x17-index-the-workspaces-other-folders" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X17. Index the workspace's other folders
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X13. Decide how workspace-wide edits treat excluded files
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#current-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Current state
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#strategy-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Strategy modes
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Strategy modes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#full-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>"full"</code> (default)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#composer" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>"composer"</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#self" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>"self"</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#none" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>"none"</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x2-parallel-file-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X2. Parallel file processing
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="X2. Parallel file processing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#current-state-partial" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Current state (partial)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Remaining work
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-not-rayon" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why not rayon?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-the-classmap-is-not-a-prerequisite" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why the classmap is not a prerequisite
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x6-disk-cache-evaluate-later" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X6. Disk cache (evaluate later)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="X6. Disk cache (evaluate later)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-to-consider" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When to consider
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#format-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Format options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#invalidation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Invalidation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decision-criteria" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Decision criteria
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x7-recency-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X7. Recency tracking
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X12. Say when an exclude hid the class a diagnostic names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x16-composers-own-class-lists-bypass-indexing-exclude" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X16. Composer's own class lists bypass <code>[indexing] exclude</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x14-ask-zed-to-expose-file_scan_exclusions-and-file_types-to-extensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X14. Ask Zed to expose <code>file_scan_exclusions</code> and <code>file_types</code> to extensions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x17-index-the-workspaces-other-folders" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X17. Index the workspace's other folders
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X13. Decide how workspace-wide edits treat excluded files
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/indexing.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-indexing">PHPantom — Indexing<a class="headerlink" href="#phpantom-indexing" title="Permanent link">&para;</a></h1>
+<p>This document covers how PHPantom discovers, parses, and caches class
+definitions across the workspace. The goal is to remain fast and
+lightweight by default while offering progressively richer modes for
+users who want exhaustive workspace intelligence.</p>
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
+within the same impact tier.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="current-state">Current state<a class="headerlink" href="#current-state" title="Permanent link">&para;</a></h2>
+<p>PHPantom has three byte-level scanners (no AST) for early-stage file
+discovery:</p>
+<ol>
+<li><strong>composer-classmap</strong> — parses Composer's <code>autoload_classmap.php</code>
+   into an in-memory <code>HashMap&lt;String, PathBuf&gt;</code>.</li>
+<li><strong>PSR-4 scanner</strong> (<code>find_classes</code>) — walks PSR-4 directories from
+   <code>composer.json</code> and extracts class FQNs with namespace compliance
+   filtering.</li>
+<li><strong>full-scan</strong> (<code>find_symbols</code>) — walks files and extracts classes,
+   standalone functions, <code>define()</code> constants, and top-level <code>const</code>
+   declarations in a single pass.</li>
+</ol>
+<p>These scanners serve three scenarios at startup:</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Class discovery</th>
+<th>Function &amp; constant discovery</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Composer project</strong> (classmap complete)</td>
+<td>composer-classmap</td>
+<td><code>autoload_files.php</code> byte-level scan + lazy parse</td>
+</tr>
+<tr>
+<td><strong>Composer project</strong> (classmap missing/incomplete)</td>
+<td>PSR-4 scanner + vendor packages</td>
+<td><code>autoload_files.php</code> byte-level scan + lazy parse</td>
+</tr>
+<tr>
+<td><strong>No <code>composer.json</code></strong></td>
+<td>full-scan on all workspace files</td>
+<td>full-scan on all workspace files</td>
+</tr>
+<tr>
+<td><strong>Monorepo</strong> (no root <code>composer.json</code>, subprojects found)</td>
+<td>Per-subproject: composer-classmap or PSR-4 + vendor packages. Loose files: full-scan with skip set</td>
+<td>Per-subproject: <code>autoload_files.php</code> byte-level scan + lazy parse. Loose files: full-scan</td>
+</tr>
+</tbody>
+</table>
+<p>The "no <code>composer.json</code>" path is fully lightweight: <code>find_symbols</code>
+populates classmap, <code>autoload_function_index</code>, and
+<code>autoload_constant_index</code> in one pass, and lazy <code>update_ast</code> on first
+access provides complete <code>FunctionInfo</code>/<code>DefineInfo</code>. All directory
+walkers (full-scan, PSR-4 scanner, vendor package scanner, and
+go-to-implementation file collector) use the <code>ignore</code> crate for
+gitignore-aware traversal instead of hardcoded directory name
+filtering. Hidden directories are skipped automatically.</p>
+<p>The monorepo path activates when there is no root <code>composer.json</code> but
+<code>discover_subproject_roots</code> finds subdirectories with their own
+<code>composer.json</code> files. Each subproject is processed through the full
+Composer pipeline (PSR-4, classmap, vendor packages, autoload files)
+and results are merged into the shared backend state. Loose PHP files
+outside subproject trees are picked up by the full-scan walker with a
+skip set that prevents double-scanning subproject directories. See
+the ARCHITECTURE.md Composer Integration section for full details.</p>
+<p>Find References parses files in parallel via <code>std::thread::scope</code>.
+Go-to-Implementation walks classmap files sequentially.</p>
+<hr />
+<h2 id="strategy-modes">Strategy modes<a class="headerlink" href="#strategy-modes" title="Permanent link">&para;</a></h2>
+<p>Four indexing strategies, selectable via <code>.phpantom.toml</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[indexing]</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># &quot;full&quot;     (default) - background-parse all project files for rich intelligence</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># &quot;composer&quot;           - merged classmap + self-scan</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># &quot;self&quot;               - always self-scan, ignore composer classmap</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># &quot;none&quot;               - no proactive scanning</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">strategy</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;full&quot;</span>
+</code></pre></div>
+<h3 id="full-default"><code>"full"</code> (default)<a class="headerlink" href="#full-default" title="Permanent link">&para;</a></h3>
+<p>Background-parse every user PHP file in the workspace after discovery.
+Uses Composer data to guide file discovery when available, falls back
+to scanning all PHP files in the workspace when it is not. Populates
+the uri_classes_index, symbol_maps, the cross-file reference index,
+and all derived indices. Enables workspace symbols, fast
+find-references without on-demand scanning, and rich hover on
+completion items. Vendor files are not background-parsed; they are
+still resolved lazily on demand. Memory usage grows proportionally to
+project size. This is the zero-config experience.</p>
+<h3 id="composer"><code>"composer"</code><a class="headerlink" href="#composer" title="Permanent link">&para;</a></h3>
+<p>Merged classmap + self-scan. Load Composer's classmap (if it exists)
+as a skip set, then self-scan all PSR-4 and vendor directories for
+anything the classmap missed. Whatever the classmap already covers is
+a free performance win; whatever it's missing, we find ourselves. No
+completeness heuristic needed.</p>
+<h3 id="self"><code>"self"</code><a class="headerlink" href="#self" title="Permanent link">&para;</a></h3>
+<p>Always build the classmap ourselves. Ignores <code>autoload_classmap.php</code>
+entirely. Equivalent to the merged approach with an empty skip set.
+For users who prefer PHPantom's own scanner or who are actively
+editing <code>composer.json</code> dependencies.</p>
+<h3 id="none"><code>"none"</code><a class="headerlink" href="#none" title="Permanent link">&para;</a></h3>
+<p>No proactive file scanning. Still uses Composer's classmap if present,
+still resolves classes on demand when the user triggers completion or
+hover, still has embedded stubs. The only difference from <code>"composer"</code>
+is that it never self-scans to fill gaps.</p>
+<hr />
+<h2 id="x2-parallel-file-processing">X2. Parallel file processing<a class="headerlink" href="#x2-parallel-file-processing" title="Permanent link">&para;</a></h2>
+<p><strong>Goal:</strong> Speed up workspace-wide operations (find references,
+go-to-implementation, self-scan, diagnostics) by processing files in
+parallel with priority awareness.</p>
+<p>All prerequisites (<code>RwLock</code>, <code>Arc&lt;String&gt;</code>, <code>Arc&lt;SymbolMap&gt;</code>) are
+complete.</p>
+<h3 id="current-state-partial">Current state (partial)<a class="headerlink" href="#current-state-partial" title="Permanent link">&para;</a></h3>
+<p><code>ensure_workspace_indexed</code> (used by find references) now parses files
+in parallel via two helpers in <code>references/mod.rs</code>:</p>
+<ul>
+<li><strong><code>parse_files_parallel</code></strong> — takes <code>(uri, Option&lt;content&gt;)</code> pairs,
+  loads content via <code>get_file_content</code> when not provided, splits work
+  into chunks, and parses each chunk in a separate OS thread.</li>
+<li><strong><code>parse_paths_parallel</code></strong> — takes <code>(uri, PathBuf)</code> pairs, reads
+  files from disk and parses them in parallel.</li>
+</ul>
+<p>Both use <code>std::thread::scope</code> for structured concurrency (all threads
+join before the function returns). The thread count is capped at
+<code>std::thread::available_parallelism()</code> (typically the number of CPU
+cores). Batches of 2 or fewer files skip threading overhead.</p>
+<p>Transient entry eviction after GTI and find references has been
+removed. Parsed files stay cached in <code>uri_classes_index</code>, <code>symbol_maps</code>,
+<code>use_map</code>, and <code>namespace_map</code> so that subsequent operations benefit
+from the work already done. This trades a small amount of memory for
+faster repeat queries and simpler code.</p>
+<p><strong>Self-scan classmap building</strong> (<code>scan_psr4_directories</code>,
+<code>scan_directories</code>, <code>scan_vendor_packages</code>,
+<code>scan_workspace_fallback_full</code>) now uses a two-phase approach:
+directory walks collect file paths first (single-threaded), then files
+are read and scanned in parallel batches via <code>std::thread::scope</code>.
+Three parallel helpers in <code>classmap_scanner/discovery.rs</code> cover the
+three scan modes: <code>scan_files_parallel_classes</code> (plain classmap),
+<code>scan_files_parallel_psr4</code> (PSR-4 with FQN filtering), and
+<code>scan_files_parallel_full</code> (classes + functions + constants). Small
+batches (≤ 4 files) skip threading overhead.</p>
+<p>The byte-level PHP scanner (<code>find_classes</code>, <code>find_symbols</code>) uses
+<code>memchr</code> SIMD acceleration to skip line comments, block comments,
+single-quoted strings, double-quoted strings, and heredocs/nowdocs
+instead of scanning byte-by-byte. This reduces per-file scanning time
+for files with large docblocks or string literals.</p>
+<p><code>read_for_scan</code> (<code>classmap_scanner/mod.rs</code>) now reads file bytes
+adaptively: files at or above 256 KiB are memory-mapped so the OS page
+cache is shared without a heap copy, and smaller files (the vast
+majority of source files) are read directly into a heap buffer, since
+mapping a small file costs more in page-fault and lock overhead than
+copying it. This closed the gap identified in earlier profiling, where
+mapping every file regardless of size held a process-wide lock that
+serialized concurrent readers.</p>
+<h3 id="remaining-work">Remaining work<a class="headerlink" href="#remaining-work" title="Permanent link">&para;</a></h3>
+<p>The following are deferred to a later sprint:</p>
+<ul>
+<li><strong>Priority-aware scheduling.</strong> Interactive requests (completion,
+  hover, go-to-definition) should preempt batch work. Currently all
+  threads run at equal priority.</li>
+<li><strong>Parallel classmap scanning in <code>find_implementors</code>.</strong> Once the
+  workspace index is ready (the default <code>"full"</code> strategy after
+  startup), <code>find_implementors</code> answers entirely from the <code>gti_index</code>
+  reverse-inheritance index and never reaches the sequential classmap
+  scan below. Phase 3 (reading and parsing classmap files one at a
+  time) only still runs for <code>"composer"</code>/<code>"self"</code>/<code>"none"</code> strategies,
+  for a request that arrives before the background index finishes, or
+  for a target that lives under <code>/vendor/</code> (where the index-ready fast
+  path would filter out the package's own implementations).
+  Parallelizing it requires care because it interleaves reads and
+  writes through <code>class_loader</code> callbacks.</li>
+<li><strong>Parallel autoload file scanning.</strong> The <code>scan_autoload_files</code> work
+  queue is inherently sequential due to <code>require_once</code> chain
+  following, but the initial batch of files could be processed in
+  parallel before following chains.</li>
+</ul>
+<h3 id="why-not-rayon">Why not rayon?<a class="headerlink" href="#why-not-rayon" title="Permanent link">&para;</a></h3>
+<p><code>rayon</code> is the obvious choice for "process N files in parallel" and
+Libretto uses it successfully. But it runs its own thread pool
+separate from tokio's runtime. When rayon saturates all cores on a
+batch scan, tokio's async tasks (completion, hover, signature help)
+get starved for CPU time. There is no clean way to pause a rayon
+batch when a high-priority LSP request arrives.</p>
+<h3 id="why-the-classmap-is-not-a-prerequisite">Why the classmap is not a prerequisite<a class="headerlink" href="#why-the-classmap-is-not-a-prerequisite" title="Permanent link">&para;</a></h3>
+<p>The classmap is a convenience for O(1) class lookup and class name
+completion. But most resolution already works on demand via PSR-4
+(derive path from namespace, check if file exists). Class name
+completion is a minor subset of what users actually trigger. This
+means classmap generation can run at normal priority without blocking
+the user. They can start writing code immediately while the classmap
+builds in the background.</p>
+<hr />
+<h2 id="x6-disk-cache-evaluate-later">X6. Disk cache (evaluate later)<a class="headerlink" href="#x6-disk-cache-evaluate-later" title="Permanent link">&para;</a></h2>
+<p><strong>Goal:</strong> Persist the full index to disk so that restarts don't
+require a full rescan.</p>
+<h3 id="when-to-consider">When to consider<a class="headerlink" href="#when-to-consider" title="Permanent link">&para;</a></h3>
+<p>Only if full background indexing is slow enough on cold start that
+users complain. Given that:</p>
+<ul>
+<li>Mago can lint 45K files in 2 seconds.</li>
+<li>A regex classmap scan over 21K files should be sub-second.</li>
+<li>Full AST parsing of a few thousand user files should take single
+  digit seconds.</li>
+</ul>
+<p>...disk caching may never justify its complexity. The primary use
+case would be memory savings (load from disk on demand instead of
+holding everything in RAM), not startup speed.</p>
+<h3 id="format-options">Format options<a class="headerlink" href="#format-options" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>bincode</code> / <code>postcard</code>: simple, small dependency footprint, tolerant
+  of struct changes (deserialization fails gracefully instead of
+  reading garbage memory). The right default choice.</li>
+<li>SQLite: robust, queryable, but heavier than needed for a flat
+  key-value store.</li>
+</ul>
+<p>Zero-copy formats like <code>rkyv</code> are ruled out. They map serialized bytes
+directly into memory as if they were the original structs, which means
+any struct layout change between versions reads corrupt data. PHPantom's
+internal types change frequently and will continue to do so. A cache
+format that silently produces garbage after an update is worse than no
+cache at all.</p>
+<h3 id="invalidation">Invalidation<a class="headerlink" href="#invalidation" title="Permanent link">&para;</a></h3>
+<p>Store file mtime + content hash per entry. On startup, walk the
+directory, compare mtimes, re-parse only changed files. This is
+Libretto's <code>IncrementalCache</code> approach and it works well.</p>
+<p>The content hash must be the authority; mtime is only a pre-filter
+to skip hashing files that look unchanged. A peer PHP LSP project
+shipped this exact bug: its cache was keyed on <code>mtime + size</code>, so a
+size-preserving edit within the same mtime second served a stale
+index entry. It later switched to <code>blake3(uri || content)</code>.</p>
+<h3 id="decision-criteria">Decision criteria<a class="headerlink" href="#decision-criteria" title="Permanent link">&para;</a></h3>
+<p>Implement disk caching only if:</p>
+<ol>
+<li>Full-mode cold start exceeds 10 seconds on a representative large
+   codebase, AND</li>
+<li>The memory overhead of holding the full index exceeds the 512 MB
+   target, or users on constrained systems report issues.</li>
+</ol>
+<p>If neither condition is met, skip this phase entirely. Simpler is
+better.</p>
+<hr />
+<h2 id="x7-recency-tracking">X7. Recency tracking<a class="headerlink" href="#x7-recency-tracking" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>The current lazy-loading design provides an implicit recency signal:
+classes in <code>uri_classes_index</code> were loaded because the developer interacted with
+their file during this session (hovered, navigated, completed). Source
+tiers 0 (use-imported) and 1 (same-namespace) already capture this
+for the current file's neighborhood. The <code>fqn_uri_index</code> source captures
+cross-file interactions (go-to-definition, hover, or completion that
+triggered a load).</p>
+<p>This implicit signal works because unloaded classes are in a separate
+bucket (classmap/stubs, tier 2) with lower priority. Now that full
+indexing is the default (parsing all files at startup), every class
+appears equally "loaded" and the tier distinction has collapsed. The
+same-namespace tier now contains every class in the namespace, not
+just the ones the developer recently touched.</p>
+<p><strong>When to implement:</strong> Eager/full indexing is now the default, so the
+tier distinction has already collapsed as described above — this is
+ready to implement.</p>
+<p><strong>Design sketch:</strong></p>
+<ol>
+<li>
+<p><strong>Track accepted completions.</strong> When the editor sends
+   <code>completionItem/resolve</code> or the next <code>didChange</code> contains text
+   matching a recently offered completion, record the FQN and a
+   timestamp.</p>
+</li>
+<li>
+<p><strong>Track navigation.</strong> When go-to-definition or hover resolves a
+   class, record the FQN.</p>
+</li>
+<li>
+<p><strong>Score decay.</strong> Use an exponential decay function so that a class
+   used 5 minutes ago scores higher than one used 2 hours ago, but
+   both score higher than one never interacted with.</p>
+</li>
+<li>
+<p><strong>Integration with sort key.</strong> The recency score could replace the
+   source tier dimension (since tier 0/1/2 distinctions become less
+   meaningful with full indexing) or be added as a new dimension
+   between affinity and demotion. The sort_text scheme is documented
+   in <a href="../../ARCHITECTURE/#class-name-sources-and-priority">ARCHITECTURE.md § Class Name Sources and Priority</a>.</p>
+</li>
+<li>
+<p><strong>Persistence.</strong> The recency table can be in-memory only (reset on
+   server restart). Cross-session persistence is a nice-to-have but
+   not essential; the affinity table already provides a good cold-start
+   ordering.</p>
+</li>
+</ol>
+<hr />
+<h2 id="x12-say-when-an-exclude-hid-the-class-a-diagnostic-names">X12. Say when an exclude hid the class a diagnostic names<a class="headerlink" href="#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>An over-broad <code>[indexing] exclude</code> makes real classes unresolvable,
+and the resulting <code>Class 'App\Generated\Foo' not found</code> is
+indistinguishable from a typo: the user's own configuration caused
+it and nothing says so, which reads as a PHPantom bug. When class
+resolution fails, the FQN maps to a PSR-4 path, and that file exists
+on disk but <code>is_excluded_path</code> matches it, extend the message with
+the cause ("defined in <code>src/Generated/Foo.php</code>, which <code>[indexing]
+exclude</code> skips"). The PSR-4 mapping makes the probe a single stat
+plus an already-compiled glob match on the failure path only;
+classmap-only projects get no probe rather than a disk walk.</p>
+<h2 id="x16-composers-own-class-lists-bypass-indexing-exclude">X16. Composer's own class lists bypass <code>[indexing] exclude</code><a class="headerlink" href="#x16-composers-own-class-lists-bypass-indexing-exclude" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>Every workspace walker honours <code>exclude</code>, but three sources write
+straight into <code>fqn_uri_index</code> without consulting it: the Composer
+classmap (<code>parse_autoload_classmap</code>, used under <code>strategy = "composer"</code>
+and <code>"none"</code>), the PSR-0 map (<code>parse_autoload_namespaces</code>), and the
+bootstrap classes <code>vendor/composer</code> requires before any autoloader
+exists. A class any of those name stays resolvable from a path the user
+excluded, so <code>exclude</code> means one thing for a file a walk found and
+another for a file a list named.</p>
+<p>It also costs the mid-session reconciliation some precision. The
+eviction pass applies only the <em>change</em> (a file both the old and the new
+filters exclude is left alone) exactly so an unrelated settings edit
+cannot drop these entries, which leaves one asymmetry: excluding such a
+path mid-session evicts it, while a restart would index it again.
+Filtering the three where they merge into the index makes one rule out
+of two and removes the asymmetry; the cost is one already-compiled glob
+match per entry, skipped outright when no exclude is configured.</p>
+<h2 id="x14-ask-zed-to-expose-file_scan_exclusions-and-file_types-to-extensions">X14. Ask Zed to expose <code>file_scan_exclusions</code> and <code>file_types</code> to extensions<a class="headerlink" href="#x14-ask-zed-to-expose-file_scan_exclusions-and-file_types-to-extensions" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>An upstream request, not a code change here. Zed's extension API serves
+extensions only the <code>language</code>, <code>lsp</code>, and <code>context_servers</code> settings
+categories (the <code>category</code> match in <code>get_settings</code>, <code>extension_host</code>
+crate), so the PHP extension cannot read the editor's own
+<code>file_scan_exclusions</code> or <code>file_types</code> and forward them the way the VS
+Code extension forwards <code>files.exclude</code> and <code>files.associations</code>. Zed
+users therefore have to restate those two lists under
+<code>lsp.phpantom.initialization_options</code>, which
+<a href="../../editor-setup/"><code>editor-setup.md</code></a> documents as the workaround.</p>
+<p>File the request against <code>zed-industries/zed</code> for read access to those
+two settings, then link the issue from that section so users can track
+it. When it lands, the forwarding itself is a small change in Zed's
+official PHP extension, and the manual step in the docs goes away.</p>
+<h2 id="x17-index-the-workspaces-other-folders">X17. Index the workspace's other folders<a class="headerlink" href="#x17-index-the-workspaces-other-folders" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>A multi-root workspace is the one case where the editor already knows
+about PHP source outside a server's root and can say so without the user
+configuring anything, the same way <code>files.exclude</code> and
+<code>files.associations</code> already reach the server. The VS Code extension
+starts one server per workspace folder, each scoped to that folder, so a
+project whose shared library sits in a sibling folder resolves nothing
+across the boundary: the library's classes are missing from completion,
+go-to-definition, and find-references in the project that uses them.
+Intelephense splits a multi-root workspace the same way and asks the user
+to name the sibling explicitly; the folder list is already in front of
+the extension, so nothing needs naming.</p>
+<p>Forwarded through <code>ClientIndexingOptions</code> beside <code>exclude</code> and
+<code>extensions</code>, as a list of absolute directories:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">&quot;indexing&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;include_paths&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;/home/me/work/shared-lib&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p><code>collectIndexFilters</code> fills it from <code>vscode.workspace.workspaceFolders</code>,
+dropping the client's own folder, and the extension re-sends on
+<code>onDidChangeWorkspaceFolders</code> the way it already re-sends on a
+<code>files.exclude</code> change. Because it travels inside the block the extension
+builds in one place, it cannot collide with the <code>phpantom</code> section VS
+Code's <code>synchronize</code> pushes: that blob has no <code>indexing</code> key, so
+<code>ClientIndexingOptions::from_client_settings</code> ignores it and the
+whole-value replacement in <code>set_client_indexing_options</code> stays safe.</p>
+<p>The shape stays generic, so a Zed or Neovim user can hand-write the same
+block for a directory their editor has no concept of.</p>
+<p><strong>Not in scope: a PHPantom setting for arbitrary directories.</strong> VS Code
+has no general setting that names extra source roots, so anything beyond
+the folder list means a <code>phpantom.*</code> setting the user types, which brings
+its own questions (variable and <code>~</code> expansion, a matching
+<code>.phpantom.toml</code> key so <code>analyze</code> sees what the editor sees, whether a
+named path overrides <code>exclude</code>, out-of-workspace watchers, and a document
+selector that covers a folder no client owns). A sibling folder needs
+none of that. File it separately if users ask for it.</p>
+<p><strong>Append to the existing roots slice.</strong> <code>walk_roots</code> already takes a
+roots slice and puts every root in a single <code>ignore</code> walk, which is what
+compiles each shared ancestor <code>.gitignore</code> once instead of once per root.
+Include roots belong in that slice, not in a walk of their own. Its
+attribute-by-depth accounting holds for a root whose files were reached
+through a followed link, pinned by
+<code>walk_roots_attributes_a_followed_link_to_the_root_that_reached_it</code>.</p>
+<p>Putting them in that slice also gets the duplicate protection for free:
+<code>LinkClaims</code> claims every root up front, so a symlink pointing at an
+include folder loses to the include folder's own walk rather than
+indexing the tree a second time under the link's spelling.</p>
+<p><strong>Two folders can still overlap.</strong> The guard above only sees symlinks,
+and VS Code lets a workspace hold both a folder and its parent. An
+include root that is a parent, child, or exact duplicate of another one
+(or of the server's own root) is walked twice, because nothing crossed a
+link to get there. Canonicalize the include roots when they are
+registered and drop the ones contained in another, the same containment
+test <code>LinkClaims::claim</code> already does.</p>
+<p><strong>Switch every walker together.</strong> <code>collect_php_files_gitignore</code>,
+<code>util::collect_php_files</code>, and <code>analyse::collect_php_files</code> each take a
+single root, so only <code>walk_roots</code> is multi-root today. Leaving the serial
+three behind would index classes from an include folder while
+find-references, rename, and go-to-implementation never see them, which
+is the half-wired state the symlink change avoided by moving all four
+walkers at once.</p>
+<p><strong>Fold the "did the inputs widen?" check into one place.</strong> Two entry
+points reconcile a live change, <code>reload_config</code> and
+<code>did_change_configuration</code>, and both compare the compiled filters.
+Include roots make a second input and a second bespoke comparison at each
+site. Replace them with one snapshot of everything that decides what a
+walk finds, so the next input is added once.</p>
+<p><strong>Confirm the watchers before building any.</strong> VS Code limits a
+string-pattern watcher to paths inside the workspace, and a sibling
+folder is inside it, so the <code>**/*.php</code> watchers every session registers
+should already report a change written in one. Verify that and stop
+there. The relative-pattern-per-base machinery followed links need
+(<code>watchable_followed_links</code>, the per-base list in <code>WatchedFileInputs</code>)
+exists for trees that sit outside the workspace altogether, which these
+do not, and server-side registration for such a path is reported not to
+deliver events at all
+(<a href="https://github.com/microsoft/vscode-languageserver-node/issues/1783">vscode-languageserver-node#1783</a>).</p>
+<p><strong>Resolution only: no diagnostics, no edits.</strong> The sibling folder has its
+own server publishing its own diagnostics, so a second pass from this one
+would duplicate every message the user sees on those files. Index an
+include root, resolve into it, and leave publishing and workspace-wide
+edits (rename, fix) to the server that owns the folder. That also keeps
+the extension's per-folder <code>documentSelector</code> as it is: a file opened
+from an include root is served by its own folder's client.</p>
+<h2 id="x13-decide-how-workspace-wide-edits-treat-excluded-files">X13. Decide how workspace-wide edits treat excluded files<a class="headerlink" href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>collect_php_files_gitignore</code> feeds find-references and namespace
+rename, so an excluded tree is invisible to both: a rename can leave
+excluded code calling a name that no longer exists, with no warning.
+That is consistent with what an exclude means, but sharper than
+"background discovery" suggests. Options: (a) keep the behaviour and
+document it under the <code>exclude</code> setting; (b) let correctness
+operations (rename, find-references) ignore <code>[indexing] exclude</code> on
+the grounds that the setting is an index-size and startup-time tool,
+not a statement that the code does not exist; (c) keep the exclusion
+but include a warning in the rename response when excludes are
+configured. Maintainer's call on the semantics; whichever way it
+goes, the chosen behaviour needs a test and a sentence in
+<a href="../../configuration/"><code>configuration.md</code></a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>

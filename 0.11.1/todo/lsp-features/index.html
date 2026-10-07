@@ -1,0 +1,2922 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.1/todo/lsp-features/">
+      
+      
+        <link rel="prev" href="../laravel/">
+      
+      
+        <link rel="next" href="../performance/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPantom — LSP Features - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpantom-lsp-features" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — LSP Features
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#f2-partial-result-streaming-via-progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F2. Partial result streaming via <code>$/progress</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F2. Partial result streaming via $&#x2f;progress">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#streaming-between-existing-phases" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Streaming between existing phases
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prioritising-user-code-within-phase-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Prioritising user code within Phase 3
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#granularity-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Granularity options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#applicable-requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Applicable requests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation-sketch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation sketch
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f7-evaluatable-expression-support-dap-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F7. Evaluatable expression support (DAP integration)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F7. Evaluatable expression support (DAP integration)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-expression-kinds" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Supported expression kinds
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-this-is-cheap" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why this is cheap
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-this-enables" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What this enables
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f11-vs-code-extension" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F11. VS Code extension
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F11. VS Code extension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Approach
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#code-signing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Code signing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f12-intellij-phpstorm-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F12. IntelliJ / PHPStorm plugin
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F12. IntelliJ &#x2f; PHPStorm plugin">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#approach_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Approach
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scope_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-not-use-the-built-in-intellij-lsp-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why not use the built-in IntelliJ LSP API
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f13-homebrew-formula" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F13. Homebrew formula
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F13. Homebrew formula">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#approach_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Approach
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#formula-contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Formula contents
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-this-matters" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why this matters
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f14-helix-upstream-pr" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F14. Helix upstream PR
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F14. Helix upstream PR">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#change" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Change
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Prerequisites
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f15-go-to-declaration" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F15. Go-to-declaration
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F15. Go-to-declaration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#behaviour" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Behaviour
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f16-on-type-brace-de-indent" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F16. On-type <code>}</code> brace de-indent
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F16. On-type } brace de-indent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#behaviour_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Behaviour
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f17-wire-class-move-to-workspacewillrenamefiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F17. Wire class move to <code>workspace/willRenameFiles</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f19-connect-to-a-remotetcp-language-server-vs-code-extension" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F19. Connect to a remote/TCP language server (VS Code extension)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F19. Connect to a remote&#x2f;TCP language server (VS Code extension)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#caveats" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Caveats
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f20-migrate-to-the-maintained-tower-lsp-fork" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F20. Migrate to the maintained <code>tower-lsp</code> fork
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f21-static-typehierarchyprovider-advertisement-depends-on-f20" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F21. Static <code>typeHierarchyProvider</code> advertisement (depends on F20)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f22-merge-a-namespace-onto-one-that-shares-a-class-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F22. Merge a namespace onto one that shares a class name
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f23-rename-a-class-through-its-yamlxml-occurrences" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F23. Rename a class through its YAML/XML occurrences
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#f2-partial-result-streaming-via-progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F2. Partial result streaming via <code>$/progress</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F2. Partial result streaming via $&#x2f;progress">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#streaming-between-existing-phases" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Streaming between existing phases
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prioritising-user-code-within-phase-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Prioritising user code within Phase 3
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#granularity-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Granularity options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#applicable-requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Applicable requests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation-sketch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation sketch
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f7-evaluatable-expression-support-dap-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F7. Evaluatable expression support (DAP integration)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F7. Evaluatable expression support (DAP integration)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-expression-kinds" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Supported expression kinds
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-this-is-cheap" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why this is cheap
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-this-enables" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What this enables
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f11-vs-code-extension" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F11. VS Code extension
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F11. VS Code extension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Approach
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#code-signing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Code signing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f12-intellij-phpstorm-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F12. IntelliJ / PHPStorm plugin
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F12. IntelliJ &#x2f; PHPStorm plugin">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#approach_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Approach
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scope_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-not-use-the-built-in-intellij-lsp-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why not use the built-in IntelliJ LSP API
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f13-homebrew-formula" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F13. Homebrew formula
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F13. Homebrew formula">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#approach_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Approach
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#formula-contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Formula contents
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-this-matters" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why this matters
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f14-helix-upstream-pr" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F14. Helix upstream PR
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F14. Helix upstream PR">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#change" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Change
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Prerequisites
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f15-go-to-declaration" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F15. Go-to-declaration
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F15. Go-to-declaration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#behaviour" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Behaviour
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f16-on-type-brace-de-indent" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F16. On-type <code>}</code> brace de-indent
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F16. On-type } brace de-indent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#behaviour_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Behaviour
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f17-wire-class-move-to-workspacewillrenamefiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F17. Wire class move to <code>workspace/willRenameFiles</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f19-connect-to-a-remotetcp-language-server-vs-code-extension" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F19. Connect to a remote/TCP language server (VS Code extension)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="F19. Connect to a remote&#x2f;TCP language server (VS Code extension)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#caveats" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Caveats
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f20-migrate-to-the-maintained-tower-lsp-fork" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F20. Migrate to the maintained <code>tower-lsp</code> fork
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f21-static-typehierarchyprovider-advertisement-depends-on-f20" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F21. Static <code>typeHierarchyProvider</code> advertisement (depends on F20)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f22-merge-a-namespace-onto-one-that-shares-a-class-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F22. Merge a namespace onto one that shares a class name
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f23-rename-a-class-through-its-yamlxml-occurrences" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F23. Rename a class through its YAML/XML occurrences
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/lsp-features.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-lsp-features">PHPantom — LSP Features<a class="headerlink" href="#phpantom-lsp-features" title="Permanent link">&para;</a></h1>
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
+within the same impact tier.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="f2-partial-result-streaming-via-progress">F2. Partial result streaming via <code>$/progress</code><a class="headerlink" href="#f2-partial-result-streaming-via-progress" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>The LSP spec (3.17) allows requests that return arrays — such as
+<code>textDocument/implementation</code>, <code>textDocument/references</code>,
+<code>workspace/symbol</code>, and even <code>textDocument/completion</code> — to stream
+incremental batches of results via <code>$/progress</code> notifications when both
+sides negotiate a <code>partialResultToken</code>. The final RPC response then
+carries <code>null</code> (all items were already sent through progress).</p>
+<p>This would let PHPantom deliver the <em>first</em> useful results almost
+instantly instead of blocking until every source has been scanned.</p>
+<h3 id="streaming-between-existing-phases">Streaming between existing phases<a class="headerlink" href="#streaming-between-existing-phases" title="Permanent link">&para;</a></h3>
+<p><code>find_implementors</code> already runs five sequential phases (see
+<code>docs/ARCHITECTURE.md</code> § Go-to-Implementation):</p>
+<ol>
+<li><strong>Phase 1 — uri_classes_index</strong> (already-parsed classes in memory) — essentially
+   free. Flush results immediately.</li>
+<li><strong>Phase 2 — fqn_uri_index</strong> (FQN → URI entries not yet in uri_classes_index) —
+   loads individual files. Flush after each batch.</li>
+<li><strong>Phase 3 — classmap files</strong> (Composer classmap, user + vendor mixed)
+   — iterates unique file paths, applies string pre-filter, parses
+   matches. This is the widest phase and the best candidate for
+   within-phase streaming (see below).</li>
+<li><strong>Phase 4 — embedded stubs</strong> (string pre-filter → lazy parse) — flush
+   after stubs are checked.</li>
+<li><strong>Phase 5 — PSR-4 directory walk</strong> (user code only, catches files not
+   in the classmap) — disk I/O + parse per file, good candidate for
+   per-file streaming.</li>
+</ol>
+<p>Each phase boundary is a natural point to flush a <code>$/progress</code> batch,
+so the editor starts populating the results list while heavier phases
+are still running.</p>
+<h3 id="prioritising-user-code-within-phase-3">Prioritising user code within Phase 3<a class="headerlink" href="#prioritising-user-code-within-phase-3" title="Permanent link">&para;</a></h3>
+<p>Phase 3 iterates the Composer classmap, which contains both user and
+vendor entries. Currently they are processed in arbitrary order. A
+simple optimisation: partition classmap file paths into user paths
+(under PSR-4 roots from <code>composer.json</code> <code>autoload</code> / <code>autoload-dev</code>)
+and vendor paths (everything else, typically under <code>vendor/</code>), then
+process user paths first. This way the results most relevant to the
+developer arrive before vendor matches, even within a single phase.</p>
+<h3 id="granularity-options">Granularity options<a class="headerlink" href="#granularity-options" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Per-phase batches</strong> (simplest) — one <code>$/progress</code> notification at
+  each of the five phase boundaries listed above.</li>
+<li><strong>Per-file streaming</strong> — within Phases 3 and 5, emit results as each
+  file is parsed from disk instead of waiting for the entire phase to
+  finish. Phase 3 can iterate hundreds of classmap files and Phase 5
+  recursively walks PSR-4 directories, so per-file flushing would
+  significantly improve perceived latency for large projects.</li>
+<li><strong>Adaptive batching</strong> — collect results for a short window (e.g. 50 ms)
+  then flush, balancing notification overhead against latency.</li>
+</ul>
+<h3 id="applicable-requests">Applicable requests<a class="headerlink" href="#applicable-requests" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Request</th>
+<th>Benefit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>textDocument/implementation</code></td>
+<td>Already scans five phases; each phase's matches can be streamed</td>
+</tr>
+<tr>
+<td><code>textDocument/references</code></td>
+<td>Will need full-project scanning; streaming is essential</td>
+</tr>
+<tr>
+<td><code>workspace/symbol</code></td>
+<td>Searches every known class/function; early batches feel instant</td>
+</tr>
+<tr>
+<td><code>textDocument/completion</code></td>
+<td>Less critical (usually fast), but long chains through vendor code could benefit</td>
+</tr>
+</tbody>
+</table>
+<h3 id="implementation-sketch">Implementation sketch<a class="headerlink" href="#implementation-sketch" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Check whether the client sent a <code>partialResultToken</code> in the request
+   params.</li>
+<li>If yes, create a <code>$/progress</code> sender. After each scan phase (or
+   per-file, depending on granularity), send a
+   <code>ProgressParams { token, value: [items...] }</code> notification.</li>
+<li>Return <code>null</code> as the final response.</li>
+<li>If no token was provided, fall back to the current behaviour: collect
+   everything, return once.</li>
+</ol>
+<hr />
+<h2 id="f7-evaluatable-expression-support-dap-integration">F7. Evaluatable expression support (DAP integration)<a class="headerlink" href="#f7-evaluatable-expression-support-dap-integration" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>Implement <code>textDocument/evaluatableExpression</code> so debuggers (Xdebug
+via DAP) can evaluate expressions under the cursor during a debug
+session. Given a cursor position, the handler returns the expression
+text and range that the debugger should evaluate in the running PHP
+process.</p>
+<h3 id="supported-expression-kinds">Supported expression kinds<a class="headerlink" href="#supported-expression-kinds" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Variables</strong>: <code>$var</code> — return the variable name and its span.</li>
+<li><strong>Property access</strong>: <code>$obj-&gt;prop</code>, <code>$this-&gt;prop</code> — return the full
+  member access expression.</li>
+<li><strong>Array access</strong>: <code>$arr[0]</code>, <code>$arr['key']</code> — return the full
+  subscript expression including brackets.</li>
+<li><strong>Static property access</strong>: <code>Foo::$bar</code> — return the full expression.</li>
+<li><strong>Parameters</strong>: function/method parameters at declaration sites.</li>
+</ul>
+<h3 id="why-this-is-cheap">Why this is cheap<a class="headerlink" href="#why-this-is-cheap" title="Permanent link">&para;</a></h3>
+<p>The symbol map already identifies all of these constructs with precise
+byte ranges. The handler is a thin layer: look up the <code>SymbolSpan</code> at
+the cursor position, check that it's a variable, member access, or
+subscript expression, and return the source text and range. No type
+resolution needed.</p>
+<h3 id="what-this-enables">What this enables<a class="headerlink" href="#what-this-enables" title="Permanent link">&para;</a></h3>
+<p>When a user is debugging PHP with Xdebug and hovers over <code>$user-&gt;name</code>
+in their editor, the editor asks the LSP "what expression is here?"
+and forwards it to the debug adapter for evaluation. Without this
+handler, the editor falls back to selecting the word under the cursor,
+which gives <code>name</code> instead of <code>$user-&gt;name</code> — useless for the
+debugger.</p>
+<hr />
+<h2 id="f11-vs-code-extension">F11. VS Code extension<a class="headerlink" href="#f11-vs-code-extension" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td>High</td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td>Medium-High</td>
+</tr>
+</tbody>
+</table>
+<p>Create a VS Code extension that bundles PHPantom and publishes it to
+the VS Code Marketplace.</p>
+<h3 id="approach">Approach<a class="headerlink" href="#approach" title="Permanent link">&para;</a></h3>
+<p>Fork the <a href="https://github.com/bmewburn/vscode-intelephense">vscode-intelephense</a>
+client extension (MIT-licensed). Intelephense is the #1 PHP extension
+in the VS Code Marketplace, so its <code>package.json</code> represents what
+PHP developers expect from an extension: the settings schema,
+activation events, file associations, categories, and contribution
+points are battle-tested. Starting from this base means we do not
+accidentally omit something users take for granted.</p>
+<p>Strip the proprietary Intelephense server dependency (<code>intelephense</code>
+npm package) and replace it with PHPantom binary management. The
+extension is a thin TypeScript wrapper around <code>vscode-languageclient</code>
+that spawns <code>phpantom_lsp</code> over stdio.</p>
+<p><strong>Cleanup process:</strong> After forking, compare the result against a
+fresh VS Code extension scaffold (<code>yo code</code> generator) to identify
+and remove Intelephense-specific legacy that does not apply to
+PHPantom (licence key commands, telemetry integration, Node.js
+runtime configuration, premium feature gating). The goal is a clean
+extension that inherits the right UX expectations without carrying
+over implementation baggage.</p>
+<h3 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Binary distribution.</strong> Bundle or auto-download the correct
+   pre-built binary for each platform (linux-x64, linux-arm64,
+   darwin-x64, darwin-arm64, win-x64). Use GitHub Releases as the
+   download source.</li>
+<li><strong>Settings surface.</strong> Expose PHPantom's <code>.phpantom.toml</code> settings
+   as VS Code settings (PHP version, diagnostics toggles, indexing
+   strategy).</li>
+<li><strong>Status bar.</strong> Show indexing progress and server status.</li>
+<li><strong>Marketplace listing.</strong> Icon, description, screenshots,
+   categories, keywords.</li>
+<li><strong>CI.</strong> GitHub Actions workflow to build, test, and publish the
+   extension on release.</li>
+</ol>
+<h3 id="code-signing">Code signing<a class="headerlink" href="#code-signing" title="Permanent link">&para;</a></h3>
+<p>macOS and Windows builds must be signed so the OS
+stops flagging PHPantom as malware. This is a prerequisite for the
+VS Code extension (users will not trust an extension that triggers
+Gatekeeper or SmartScreen warnings).</p>
+<ul>
+<li><strong>macOS:</strong> Apple Developer ID certificate, <code>codesign</code>, and
+  <code>notarytool</code> in the release CI workflow.</li>
+<li><strong>Windows:</strong> Authenticode certificate (or Azure Trusted Signing)
+  and <code>signtool</code> in the release CI workflow.</li>
+</ul>
+<hr />
+<h2 id="f12-intellij-phpstorm-plugin">F12. IntelliJ / PHPStorm plugin<a class="headerlink" href="#f12-intellij-phpstorm-plugin" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td>High</td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td>Medium-High</td>
+</tr>
+</tbody>
+</table>
+<p>Create an IntelliJ plugin that depends on
+<a href="https://plugins.jetbrains.com/plugin/23257-lsp4ij">LSP4IJ</a> and
+bundles PHPantom. Publish it to the JetBrains Marketplace. Works in
+all IntelliJ-based IDEs (PHPStorm, IntelliJ IDEA, WebStorm, etc.).</p>
+<h3 id="approach_1">Approach<a class="headerlink" href="#approach_1" title="Permanent link">&para;</a></h3>
+<p>Fork <a href="https://github.com/clojure-lsp/clojure-lsp-intellij">clojure-lsp-intellij</a>
+(MIT-licensed). It is a Kotlin/Gradle plugin that registers a
+language server via lsp4ij's <code>com.redhat.devtools.lsp4ij.server</code>
+extension point. Strip the Clojure-specific parts and replace them
+with PHPantom:</p>
+<ul>
+<li>Register PHPantom as the language server in <code>plugin.xml</code>.</li>
+<li>Map the <code>PHP</code> language and file type via
+  <code>com.redhat.devtools.lsp4ij.languageMapping</code>.</li>
+<li>Bundle or auto-download the PHPantom binary.</li>
+<li>Add a settings page for the binary path and any PHPantom-specific
+  options.</li>
+</ul>
+<h3 id="scope_1">Scope<a class="headerlink" href="#scope_1" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong><code>plugin.xml</code> registration.</strong> Server definition, language
+   mapping, file type mapping (<code>.php</code>, <code>.phtml</code>, <code>.inc</code>).</li>
+<li><strong>Binary management.</strong> Auto-download from GitHub Releases on
+   first run, with a manual path override in settings.</li>
+<li><strong>Settings UI.</strong> Binary path, PHP version override, diagnostic
+   toggles.</li>
+<li><strong>JetBrains Marketplace listing.</strong> Icon, description, plugin
+   compatibility range (2024.2+, matching lsp4ij's requirement).</li>
+<li><strong>CI.</strong> GitHub Actions workflow using <code>gradlew buildPlugin</code> and
+   <code>gradlew publishPlugin</code>.</li>
+</ol>
+<h3 id="why-not-use-the-built-in-intellij-lsp-api">Why not use the built-in IntelliJ LSP API<a class="headerlink" href="#why-not-use-the-built-in-intellij-lsp-api" title="Permanent link">&para;</a></h3>
+<p>IntelliJ's native LSP support (since 2023.2) is only available in
+Ultimate editions and is still limited in capability. LSP4IJ is free,
+works in all editions (including Community), and supports a broader
+set of LSP features. Using lsp4ij also means the plugin works in
+IntelliJ IDEA (for PHP projects opened there) and other JetBrains
+IDEs, not just PHPStorm.</p>
+<hr />
+<h2 id="f13-homebrew-formula">F13. Homebrew formula<a class="headerlink" href="#f13-homebrew-formula" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td>Medium</td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td>Low</td>
+</tr>
+</tbody>
+</table>
+<p>Create a Homebrew formula for PHPantom so users on macOS and Linux
+can install it with <code>brew install phpantom_lsp</code>.</p>
+<h3 id="approach_2">Approach<a class="headerlink" href="#approach_2" title="Permanent link">&para;</a></h3>
+<p>Submit a PR to <a href="https://github.com/Homebrew/homebrew-core">homebrew-core</a>
+with a formula that downloads the pre-built binary from GitHub
+Releases for the current platform. Alternatively, the formula can
+build from source using <code>cargo install</code> if the Homebrew reviewers
+prefer source builds (common for Rust projects).</p>
+<h3 id="formula-contents">Formula contents<a class="headerlink" href="#formula-contents" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Homepage:</strong> <code>https://github.com/PHPantom-dev/phpantom_lsp</code></li>
+<li><strong>Source:</strong> GitHub Releases tarball or <code>cargo install</code> from crates.io.</li>
+<li><strong>Binary:</strong> <code>phpantom_lsp</code></li>
+<li><strong>Test block:</strong> <code>system bin/"phpantom_lsp", "--version"</code></li>
+</ul>
+<h3 id="why-this-matters">Why this matters<a class="headerlink" href="#why-this-matters" title="Permanent link">&para;</a></h3>
+<p>A Homebrew formula is a prerequisite for upstream PRs to editors like
+Helix, which prefer that language servers be installable via a
+package manager. It also simplifies the VS Code extension's binary
+management on macOS (detect Homebrew-installed binary before
+downloading).</p>
+<hr />
+<h2 id="f14-helix-upstream-pr">F14. Helix upstream PR<a class="headerlink" href="#f14-helix-upstream-pr" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td>Low</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Depends on:</strong> F13 (Homebrew formula).</p>
+<p>Submit a PR to the <a href="https://github.com/helix-editor/helix">Helix editor</a>
+adding <code>phpantom_lsp</code> as a language server option in the default
+<code>languages.toml</code>.</p>
+<h3 id="change">Change<a class="headerlink" href="#change" title="Permanent link">&para;</a></h3>
+<p>Add a <code>phpantom</code> server definition and include it in the <code>php</code>
+language entry (alongside <code>intelephense</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[language-server.phpantom]</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;phpantom_lsp&quot;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># In the [[language]] entry for php, add &quot;phpantom&quot; to language-servers.</span>
+</code></pre></div>
+<h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
+<ul>
+<li>F13 (Homebrew formula) should be merged so Helix maintainers can
+  point users at <code>brew install phpantom_lsp</code>.</li>
+<li>Helix maintainers may want a brief README section documenting the
+  server and its feature set.</li>
+</ul>
+<h2 id="f15-go-to-declaration">F15. Go-to-declaration<a class="headerlink" href="#f15-go-to-declaration" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>Implement <code>textDocument/declaration</code> to jump from a concrete method to
+its abstract or interface prototype, complementing the existing
+go-to-definition (which jumps to the concrete implementation) and
+go-to-implementation (which jumps from an interface to concrete classes).</p>
+<h3 id="behaviour">Behaviour<a class="headerlink" href="#behaviour" title="Permanent link">&para;</a></h3>
+<p>When the cursor is on a method call or method name:</p>
+<ol>
+<li>Search for an <strong>interface or abstract class</strong> that declares a method
+   with the same name and is in the inheritance chain of the resolved
+   class.</li>
+<li>If found, jump to the interface/abstract method declaration.</li>
+<li>If no abstract prototype exists, fall back to the same result as
+   go-to-definition.</li>
+</ol>
+<h3 id="implementation">Implementation<a class="headerlink" href="#implementation" title="Permanent link">&para;</a></h3>
+<p>The existing <code>resolve_implementation</code> already does reverse lookups
+(concrete → prototype) via <code>resolve_reverse_implementation</code>. The
+declaration handler can reuse this: for <code>MemberAccess</code> and
+<code>MemberDeclaration</code> symbols, call the reverse-implementation resolver
+first. For class-level symbols, declaration and definition are the
+same.</p>
+<p>Register <code>declaration_provider</code> in <code>server.rs</code> and wire it to a thin
+handler that delegates to the existing infrastructure.</p>
+<h2 id="f16-on-type-brace-de-indent">F16. On-type <code>}</code> brace de-indent<a class="headerlink" href="#f16-on-type-brace-de-indent" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>Extend the existing on-type formatting handler (currently triggered on
+<code>\n</code> for docblock generation) to also trigger on <code>}</code>, automatically
+de-indenting the closing brace to match its opening <code>{</code>.</p>
+<h3 id="behaviour_1">Behaviour<a class="headerlink" href="#behaviour_1" title="Permanent link">&para;</a></h3>
+<p>When the user types <code>}</code>:</p>
+<ol>
+<li>From the <code>}</code> position, scan backward through the document text to
+   find the matching <code>{</code> (tracking brace depth, skipping strings and
+   comments).</li>
+<li>Read the indentation of the line containing the matching <code>{</code>.</li>
+<li>If the <code>}</code> line has more indentation than the <code>{</code> line, return a
+   <code>TextEdit</code> that replaces the leading whitespace on the <code>}</code> line
+   with the <code>{</code> line's indentation.</li>
+</ol>
+<p>This is a pure text-based operation — no AST needed. Register <code>}</code> as
+an additional <code>on_type_formatting_trigger_character</code> alongside the
+existing <code>\n</code>.</p>
+<h2 id="f17-wire-class-move-to-workspacewillrenamefiles">F17. Wire class move to <code>workspace/willRenameFiles</code><a class="headerlink" href="#f17-wire-class-move-to-workspacewillrenamefiles" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Renaming a class's FQN via <code>textDocument/rename</code> already moves the file
+and rewrites references across the project: renaming a class's
+declaration accepts the full FQCN so it can move between namespaces in
+one step, and renaming a namespace segment rewrites every affected
+<code>namespace</code> declaration, <code>use</code> statement, and FQN reference while
+moving the PSR-4 directories to match (see <code>build_class_move_edit</code> in
+<code>src/rename/class.rs</code> and <code>build_namespace_rename_edit</code> in
+<code>src/rename/namespace/</code>). What's still missing is the editor-triggered
+path: when the user renames or moves a PHP file in the editor's file
+tree (rather than through the LSP rename command), nothing updates the
+file's <code>namespace</code> declaration or the workspace's <code>use</code> imports.</p>
+<p>Wire the existing move logic to <code>workspace/willRenameFiles</code> (declared
+via server capabilities <code>workspace.fileOperations.willRename</code>): on a
+file-tree rename/move, recompute the namespace from the destination
+path using the PSR-4 autoload map, and reuse the same reference-rewrite
+machinery to produce the <code>WorkspaceEdit</code>. The companion
+<code>workspace/willCreateFiles</code> can then insert a PSR-4-derived <code>namespace</code>
++ class stub into newly created files.</p>
+<p><strong>References:</strong>
+- Phpactor: <code>MoveClass</code> refactoring in the class-mover package.</p>
+<hr />
+<h2 id="f19-connect-to-a-remotetcp-language-server-vs-code-extension">F19. Connect to a remote/TCP language server (VS Code extension)<a class="headerlink" href="#f19-connect-to-a-remotetcp-language-server-vs-code-extension" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>This task is for the VS Code extension package, not the <code>phpantom_lsp</code>
+server itself. The server can already speak LSP over a TCP socket; the
+gap is purely on the client side, where the editor extensions only ever
+spawn a local binary over stdio. Expose an option in the extension
+(mirroring Phpactor's <code>remote.enabled</code> / <code>remote.host</code> / <code>remote.port</code>)
+to connect to an already-running server instead of spawning one. This
+covers running the server inside a container or on a remote host while
+editing locally.</p>
+<h3 id="scope_2">Scope<a class="headerlink" href="#scope_2" title="Permanent link">&para;</a></h3>
+<p>This is a client-side change in the editor extensions, not the server.
+In the VS Code extension, add <code>phpantom.remote.enabled</code>, <code>.host</code>, and
+<code>.port</code> settings; when enabled, build the language client from a socket
+transport rather than a spawned process. Remote mode is a single shared
+endpoint, so it bypasses the per-folder server model and uses one
+client that matches all PHP documents (the same exception Phpactor's
+extension makes).</p>
+<h3 id="caveats">Caveats<a class="headerlink" href="#caveats" title="Permanent link">&para;</a></h3>
+<p>A remote server has its own filesystem view, so <code>rootUri</code> / workspace
+paths must line up with the paths the server sees (or be remapped).
+Auto-download, version checks, and the per-folder rooting do not apply
+in remote mode.</p>
+<h2 id="f20-migrate-to-the-maintained-tower-lsp-fork">F20. Migrate to the maintained <code>tower-lsp</code> fork<a class="headerlink" href="#f20-migrate-to-the-maintained-tower-lsp-fork" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Very High</strong></p>
+<p><code>tower-lsp</code> 0.20 (our current dependency) is the last release of the
+original crate; it's unmaintained upstream. A maintained fork exists
+as <code>tower-lsp-server</code> (types crate <code>ls-types</code>), actively developed as
+of 2026. Because it's a rename rather than a version bump of the same
+crate, <code>cargo update</code>/routine dependency audits will not surface this
+on their own — nothing shows up as "outdated" since no new <code>tower-lsp</code>
+version is being withheld. It has to be picked up as a deliberate
+migration.</p>
+<p><strong>Does not unblock A16 or F21.</strong> Checked directly against <code>ls-types</code>
+<code>main</code> and upstream <code>lsp-types</code> 0.97.0 source (not just docs): neither
+crate implements <code>SnippetTextEdit</code>/<code>StringValue</code> (tracked upstream at
+<a href="https://github.com/gluon-lang/lsp-types/issues/310">gluon-lang/lsp-types#310</a>,
+still open) or a static <code>type_hierarchy_provider</code> field on
+<code>ServerCapabilities</code> (tracked at
+<a href="https://github.com/gluon-lang/lsp-types/issues/298">gluon-lang/lsp-types#298</a>
+and <a href="https://github.com/tower-lsp-community/ls-types/issues/38">tower-lsp-community/ls-types#38</a>,
+both open). <code>ls-types</code> also removed its generic <code>"proposed"</code> 3.18
+feature flag in 0.0.4 ("only applied to a handful of v3.18 items"), so
+there is no version bump or feature flag on our side that grants either
+type today. Both are real 3.18-spec (<code>@proposed</code>) features, just not
+yet implemented in any Rust LSP-types crate. The remaining motivation
+for this migration is staying on an actively maintained crate — bug
+and security fixes, and a path to 3.18 support once upstream catches
+up — not unblocking a specific feature now. Re-check A16 and F21 for
+upstream progress before assuming this migration alone resolves them.</p>
+<p><strong>The real complexity driver:</strong> <code>ls-types</code>'s <code>Uri</code> is a newtype over
+<code>fluent_uri::Uri&lt;String&gt;</code>, not <code>url::Url</code>. Our code uses <code>Url</code>
+(re-exported from <code>lsp_types</code>) directly in roughly 90 files across
+nearly every module — path manipulation, <code>to_file_path</code>/
+<code>from_file_path</code>, <code>.path()</code>, <code>.join()</code>, and more — and <code>fluent_uri</code>'s
+API does not mirror <code>url::Url</code>'s. This is a project-wide port of the
+document-URI type, not a mechanical import rename. Scope it file by
+file before committing to a single PR; it may need a preparatory
+abstraction (e.g. isolate URI construction/parsing behind a narrow
+internal helper) to keep the blast radius reviewable, and likely
+warrants breaking into more than one PR despite the "one task per PR"
+convention — raise that with the maintainer before starting.</p>
+<p><strong>What to also check:</strong> the fork's public API surface relative to
+<code>tower_lsp::LspService</code>/<code>tower_lsp::lsp_types</code> (import paths, trait
+signatures) to scope the mechanical rename across every file that does
+<code>use tower_lsp::...</code> (grep <code>tower_lsp::</code> for the full list:
+<code>src/lsp_dispatch.rs</code>, <code>src/inlay_hints.rs</code>, <code>src/document_symbols.rs</code>,
+<code>src/folding.rs</code>, <code>src/phpcs.rs</code>, <code>src/fix.rs</code>,
+<code>src/selection_range.rs</code>, <code>src/text_position.rs</code>, and others), plus the
+wire-protocol test harness described in <code>test-porting.md</code> Phase 6B if
+that gets ported around the same time.</p>
+<p><strong>Where to look:</strong> <code>Cargo.toml</code>'s <code>tower-lsp = { version = "0.20", features = ["proposed"] }</code>.</p>
+<h2 id="f21-static-typehierarchyprovider-advertisement-depends-on-f20">F21. Static <code>typeHierarchyProvider</code> advertisement (depends on F20)<a class="headerlink" href="#f21-static-typehierarchyprovider-advertisement-depends-on-f20" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>Type hierarchy (<code>textDocument/prepareTypeHierarchy</code>,
+<code>typeHierarchy/supertypes</code>, <code>typeHierarchy/subtypes</code>) is fully
+implemented (<code>src/type_hierarchy.rs</code>) and registered dynamically via
+<code>client/registerCapability</code> in <code>initialized</code> (<code>server.rs</code>,
+<code>type_hierarchy_registration()</code>), gated on the client declaring
+<code>textDocument.typeHierarchy.dynamicRegistration: true</code>. This works for
+every client that supports dynamic registration, but there is no
+static fallback: <code>lsp-types</code> 0.94.1 (pinned by <code>tower-lsp</code> 0.20, see
+F20) has no <code>type_hierarchy_provider</code> field on <code>ServerCapabilities</code>, so
+a client that supports type hierarchy without dynamic registration —
+or any tool that inspects only the <code>initialize</code> response's static
+capabilities, such as a feature-conformance probe — sees no type
+hierarchy support at all, even though the feature works end-to-end for
+a real editor that does the dynamic-registration round trip.</p>
+<p>The field is still missing after F20, not just before it: neither
+upstream <code>lsp-types</code> nor the maintained <code>tower-lsp-server</code>/<code>ls-types</code>
+fork that F20 migrates to has added <code>type_hierarchy_provider</code> yet
+(tracked at
+<a href="https://github.com/gluon-lang/lsp-types/issues/298">gluon-lang/lsp-types#298</a>
+and <a href="https://github.com/tower-lsp-community/ls-types/issues/38">tower-lsp-community/ls-types#38</a>,
+both open) — so F20 landing is necessary but not sufficient here; this
+also needs the upstream crate to add the field. Once both have
+happened, add static advertisement (<code>Boolean(true)</code> or
+<code>TypeHierarchyOptions</code>) in <code>initialize</code>'s <code>ServerCapabilities</code>,
+conditional on the client <em>not</em> declaring <code>dynamicRegistration: true</code>
+for type hierarchy (avoid double-registering: send either the static
+capability or the dynamic registration, not both, per the client's
+declared support). Also
+verify whether the same version bump exposes <code>diagnostic</code> client
+capabilities more precisely — pull diagnostics (<code>diagnostic_provider</code>
+in <code>server.rs</code>) is unaffected by this gap (it's already advertised
+correctly whenever the client declares <code>textDocument.diagnostic</code>,
+verified by probing <code>initialize</code> directly with that capability set),
+but is worth a quick re-check after the migration in case the newer
+<code>lsp-types</code> changes the shape of that capability struct.</p>
+<p><strong>Where to look:</strong> <code>src/server.rs</code> (<code>initialize</code>, <code>type_hierarchy_registration</code>),
+<code>src/type_hierarchy.rs</code>.</p>
+<hr />
+<h2 id="f22-merge-a-namespace-onto-one-that-shares-a-class-name">F22. Merge a namespace onto one that shares a class name<a class="headerlink" href="#f22-merge-a-namespace-onto-one-that-shares-a-class-name" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>Renaming <code>App\Internal</code> to an <code>App\Support</code> that already exists now
+merges: the files move into the existing directory one at a time
+instead of the source directory being renamed on top of the
+destination. Where the two namespaces declare the same class name
+(<code>App\Internal\Helper</code> and <code>App\Support\Helper</code> both exist), the whole
+rename is refused with a message naming the clash, because the merge
+has no well-defined answer for that name — see
+<code>namespace_merge_conflict</code> in <code>src/rename/namespace/layout.rs</code>.</p>
+<p>Refusing is the safe answer, not the desirable one: a user merging
+twenty files should not be blocked by one clash. What is missing is a
+partial merge that moves everything except the clashing names and
+leaves those behind <em>intact</em>. "Intact" is the hard part and the reason
+this is deferred rather than done:</p>
+<ul>
+<li>The clashing class's file must keep its own <code>namespace</code> declaration,
+  so that file's namespace-declaration edit has to be suppressed while
+  its siblings' are kept. Today the namespace rename rewrites by
+  string prefix over raw text with no per-class granularity.</li>
+<li>Every reference to the clashing FQN (<code>use App\Internal\Helper;</code>,
+  <code>\App\Internal\Helper</code>, and unqualified <code>Helper</code> inside the old
+  namespace) must be left pointing at the old name. Rewriting them is
+  what makes a naive partial merge worse than a refusal: the reference
+  silently resolves to the <em>other</em> class.</li>
+<li>A file holding both a clashing class and a non-clashing one cannot
+  half-move, so it has to be reported as a clash too.</li>
+<li>The classes that do move out of the old namespace stop being
+  namespace-siblings of the ones left behind, so the files left behind
+  need <code>use</code> imports added for them — the same rule
+  <code>build_class_move_edit</code> already applies for a single class move.</li>
+</ul>
+<p>The refusal message should then list only the names that could not
+move, and the response should still carry the edits for everything
+that could.</p>
+<p><strong>Where to look:</strong> <code>src/rename/namespace.rs</code>
+(<code>namespace_merge_conflict</code>, <code>build_namespace_prefix_rename_edit</code>,
+<code>collect_merge_move_ops</code>), <code>src/rename/class.rs</code> (the import-adding
+rule to mirror).</p>
+<h2 id="f23-rename-a-class-through-its-yamlxml-occurrences">F23. Rename a class through its YAML/XML occurrences<a class="headerlink" href="#f23-rename-a-class-through-its-yamlxml-occurrences" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>A fully-qualified class name in a YAML or XML file is found by Find
+References and counted by the declaration CodeLens, but rename leaves
+it alone: <code>find_references_inner</code> drops resource locations in
+<code>ReferenceSearchMode::Rename</code>. Renaming the class therefore leaves the
+config pointing at a name that no longer exists, and <code>move</code> reports the
+leftover through its residual scan rather than fixing it.</p>
+<p>The blocker is that the text at such an occurrence is not always the
+PHP spelling of the name. A YAML double-quoted scalar writes
+<code>"App\\Handler\\Run"</code>, so the span covers doubled separators; an XML
+attribute may carry entity references. Rename plans a single
+replacement string per location and verifies each range spells a whole
+PHP name token before emitting anything, so an escaped occurrence both
+fails verification (dropping the <em>entire</em> rename, including its PHP
+edits, which is what the current exclusion prevents) and would be
+rewritten with single separators, corrupting the document's quoting.</p>
+<p>What is needed is a per-occurrence replacement: the scanner already
+knows the raw text it normalised, so it can record how the name was
+escaped and let the rename re-escape the replacement the same way,
+with verification asking for "a name token in this document's
+escaping" rather than a bare PHP one.</p>
+<p><strong>Where to look:</strong> <code>src/resource_navigation.rs</code> (<code>scan_symbols</code>,
+<code>normalize_fqn</code>), <code>src/references/dispatch.rs</code>
+(<code>find_references_inner</code>), <code>src/rename/validate.rs</code>
+(<code>Expected</code>, <code>is_name_token</code>), <code>src/rename/class.rs</code>
+(<code>build_class_move_edit</code>).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>

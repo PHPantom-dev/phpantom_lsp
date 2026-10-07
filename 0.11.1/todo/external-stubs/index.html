@@ -1,0 +1,3260 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.1/todo/external-stubs/">
+      
+      
+        <link rel="prev" href="../diagnostics/">
+      
+      
+        <link rel="next" href="../fix-cli/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPantom — External Stubs - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpantom-external-stubs" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — External Stubs
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#current-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Current state
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stub-sources-in-priority-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Stub sources (in priority order)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stub sources (in priority order)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-phpantomtoml-stub-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        1. <code>.phpantom.toml</code> stub paths
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-project-level-stubs-from-composer" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2. Project-level stubs from Composer
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-ide-provided-stub-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3. IDE-provided stub path
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-embedded-stubs-current-behaviour" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4. Embedded stubs (current behaviour)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phpstorm-stubs-fast-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        phpstorm-stubs fast path
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e1-project-level-phpstorm-stubs-for-gtd" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E1. Project-level phpstorm-stubs for GTD
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="E1. Project-level phpstorm-stubs for GTD">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Detection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gtd-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        GTD changes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-this-does-not-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What this does NOT change
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#complexity" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Complexity
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e2-project-level-stubs-as-resolution-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E2. Project-level stubs as resolution source
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="E2. Project-level stubs as resolution source">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#priority-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Priority model
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#discovery-known-stub-packages" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Discovery: known stub packages
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#new-indices" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        New indices
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resolution-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Resolution changes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gtd-improvement" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        GTD improvement
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interaction-with-embedded-phpstorm-stubs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Interaction with embedded phpstorm-stubs
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#complexity_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Complexity
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e3-ide-provided-and-phpantomtoml-stub-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E3. IDE-provided and <code>.phpantom.toml</code> stub paths
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="E3. IDE-provided and .phpantom.toml stub paths">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ide-provided-path-via-initializationoptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        IDE-provided path via <code>initializationOptions</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phpantomtoml-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>.phpantom.toml</code> paths
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scanning-and-priority" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scanning and priority
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Use cases
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#complexity_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Complexity
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e4-embedded-stub-override-with-external-stubs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E4. Embedded stub override with external stubs
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="E4. Embedded stub override with external stubs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-spl-iterator-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The SPL iterator problem
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decision-ship-minimal-overlays-prefer-external" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Decision: ship minimal overlays, prefer external
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#complexity_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Complexity
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Open questions
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Open questions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#should-external-stubs-be-scanned-eagerly-or-lazily" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Should external stubs be scanned eagerly or lazily?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-does-this-interact-with-the-classmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        How does this interact with the classmap?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-about-phpstan-extension-installer-and-phpstan-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What about <code>phpstan-extension-installer</code> and PHPStan config?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#building-without-embedded-stubs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Building without embedded stubs
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Summary
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e5-extension-stub-selection-stubs-extensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E5. Extension stub selection (<code>[stubs] extensions</code>)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="E5. Extension stub selection ([stubs] extensions)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#auto-detection-from-composerjson" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Auto-detection from <code>composer.json</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Manual override
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e6-stub-install-prompt-for-non-composer-projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E6. Stub install prompt for non-Composer projects
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e7-stub-based-framework-patches" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E7. Stub-based framework patches
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="E7. Stub-based framework patches">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#motivation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Motivation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-stubs-would-look-like" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What the stubs would look like
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bundled-override-stubs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Bundled override stubs
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#user-provided-override-stubs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        User-provided override stubs
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#migration-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Migration path
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scope-of-the-rust-patch-system-until-then" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scope of the Rust patch system until then
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#current-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Current state
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stub-sources-in-priority-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Stub sources (in priority order)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stub sources (in priority order)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-phpantomtoml-stub-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        1. <code>.phpantom.toml</code> stub paths
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-project-level-stubs-from-composer" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2. Project-level stubs from Composer
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-ide-provided-stub-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3. IDE-provided stub path
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-embedded-stubs-current-behaviour" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4. Embedded stubs (current behaviour)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phpstorm-stubs-fast-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        phpstorm-stubs fast path
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e1-project-level-phpstorm-stubs-for-gtd" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E1. Project-level phpstorm-stubs for GTD
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="E1. Project-level phpstorm-stubs for GTD">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Detection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gtd-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        GTD changes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-this-does-not-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What this does NOT change
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#complexity" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Complexity
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e2-project-level-stubs-as-resolution-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E2. Project-level stubs as resolution source
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="E2. Project-level stubs as resolution source">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#priority-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Priority model
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#discovery-known-stub-packages" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Discovery: known stub packages
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#new-indices" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        New indices
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resolution-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Resolution changes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gtd-improvement" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        GTD improvement
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interaction-with-embedded-phpstorm-stubs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Interaction with embedded phpstorm-stubs
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#complexity_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Complexity
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e3-ide-provided-and-phpantomtoml-stub-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E3. IDE-provided and <code>.phpantom.toml</code> stub paths
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="E3. IDE-provided and .phpantom.toml stub paths">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ide-provided-path-via-initializationoptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        IDE-provided path via <code>initializationOptions</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phpantomtoml-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>.phpantom.toml</code> paths
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scanning-and-priority" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scanning and priority
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Use cases
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#complexity_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Complexity
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e4-embedded-stub-override-with-external-stubs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E4. Embedded stub override with external stubs
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="E4. Embedded stub override with external stubs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-spl-iterator-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The SPL iterator problem
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decision-ship-minimal-overlays-prefer-external" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Decision: ship minimal overlays, prefer external
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#complexity_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Complexity
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Open questions
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Open questions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#should-external-stubs-be-scanned-eagerly-or-lazily" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Should external stubs be scanned eagerly or lazily?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-does-this-interact-with-the-classmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        How does this interact with the classmap?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-about-phpstan-extension-installer-and-phpstan-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What about <code>phpstan-extension-installer</code> and PHPStan config?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#building-without-embedded-stubs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Building without embedded stubs
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Summary
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e5-extension-stub-selection-stubs-extensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E5. Extension stub selection (<code>[stubs] extensions</code>)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="E5. Extension stub selection ([stubs] extensions)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#auto-detection-from-composerjson" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Auto-detection from <code>composer.json</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Manual override
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e6-stub-install-prompt-for-non-composer-projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E6. Stub install prompt for non-Composer projects
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e7-stub-based-framework-patches" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E7. Stub-based framework patches
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="E7. Stub-based framework patches">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#motivation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Motivation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-stubs-would-look-like" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What the stubs would look like
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bundled-override-stubs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Bundled override stubs
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#user-provided-override-stubs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        User-provided override stubs
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#migration-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Migration path
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scope-of-the-rust-patch-system-until-then" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scope of the Rust patch system until then
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/external-stubs.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-external-stubs">PHPantom — External Stubs<a class="headerlink" href="#phpantom-external-stubs" title="Permanent link">&para;</a></h1>
+<p>This document covers how PHPantom can support external PHP stub files
+beyond the built-in phpstorm-stubs embedded in the binary. External
+stubs let users get type information for PHP extensions, framework
+helpers, and IDE-specific annotations that the bundled stubs don't
+cover or that the user wants to override.</p>
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
+within the same impact tier.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="current-state">Current state<a class="headerlink" href="#current-state" title="Permanent link">&para;</a></h2>
+<p>PHPantom embeds JetBrains phpstorm-stubs at compile time via
+<code>build.rs</code>. The stubs are baked into the binary as static string
+arrays and indexed by class, function, and constant name. At runtime,
+<code>find_or_load_class</code> checks the <code>stub_index</code> as a final fallback
+(Phase 3) after <code>uri_classes_index</code>, <code>fqn_uri_index</code>, and PSR-4. Stub files are parsed
+lazily on first access and cached under <code>phpantom-stub://</code> URIs.</p>
+<p>This works well for the PHP standard library but has limitations:</p>
+<ul>
+<li><strong>Version lag.</strong> The embedded stubs are pinned to whatever version
+  of phpstorm-stubs was installed when the binary was built. Users on
+  newer PHP versions or extensions released after the build get no
+  coverage until a PHPantom update ships.</li>
+<li><strong>No extension stubs.</strong> PHP extensions not covered by phpstorm-stubs
+  (or covered poorly) have no resolution path. Common examples:
+  Swoole, OpenSwoole, RoadRunner, event, uv, and various PECL
+  extensions.</li>
+<li><strong>No project-level overrides.</strong> Packages like
+  <code>phpstan/phpstan-extensions</code>, <code>php-stubs/wordpress-stubs</code>,
+  <code>wimg/php-compatibility-stubs</code>, or hand-written project stubs
+  cannot augment or override the built-in definitions.</li>
+<li><strong>No GTD for built-in symbols.</strong> Embedded stubs use synthetic
+  <code>phpantom-stub://</code> URIs with no on-disk file. Go-to-definition
+  returns nothing for <code>array_map</code>, <code>Iterator</code>, <code>PDO</code>, etc. If the
+  user has phpstorm-stubs (or another stub package) installed locally,
+  GTD could navigate to those real files.</li>
+<li><strong>No generic annotations on SPL.</strong> The embedded phpstorm-stubs lack
+  <code>@template</code> annotations on SPL iterator classes. PHPStan maintains
+  its own stub overlays for these. Detecting project-level stubs
+  would let PHPantom pick up richer type information automatically.</li>
+</ul>
+<hr />
+<h2 id="stub-sources-in-priority-order">Stub sources (in priority order)<a class="headerlink" href="#stub-sources-in-priority-order" title="Permanent link">&para;</a></h2>
+<p>External stubs come from four places, listed from highest to lowest
+priority. When the same symbol is defined by multiple sources, the
+first source wins.</p>
+<h3 id="1-phpantomtoml-stub-paths">1. <code>.phpantom.toml</code> stub paths<a class="headerlink" href="#1-phpantomtoml-stub-paths" title="Permanent link">&para;</a></h3>
+<p>The highest-priority source. For projects that need stubs not
+available as Composer packages, or for non-Composer projects
+entirely, <code>.phpantom.toml</code> can list additional directories:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[stubs]</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">paths</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="s2">&quot;./stubs&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="s2">&quot;/opt/company/php-stubs&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="p">]</span>
+</code></pre></div>
+<p>Paths are resolved relative to the workspace root unless absolute.
+Each path is a directory that is scanned recursively for <code>.php</code> files
+at init time.</p>
+<p>This takes top priority because it represents an explicit, deliberate
+choice by the user for this project. If they placed a stub file here,
+they want it to win over everything else.</p>
+<p>Most users will never touch this setting. It exists for non-Composer
+projects, company-internal stubs, hand-written polyfill annotations,
+and overrides where the user knows better than any automated source.</p>
+<h3 id="2-project-level-stubs-from-composer">2. Project-level stubs from Composer<a class="headerlink" href="#2-project-level-stubs-from-composer" title="Permanent link">&para;</a></h3>
+<p>PHP projects commonly install stub packages via Composer as
+<code>require-dev</code> dependencies:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;require-dev&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">&quot;jetbrains/phpstorm-stubs&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;^2025.3&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">&quot;php-stubs/wordpress-stubs&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;^6.0&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">&quot;php-stubs/acf-pro-stubs&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;^6.0&quot;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="p">}</span>
+</code></pre></div>
+<p>These packages land in the vendor directory and contain <code>.php</code> files
+with annotated class/function/constant definitions. Some ship their
+own map files; most are just directories of PHP files.</p>
+<p>This is the primary zero-config mechanism. It requires no PHPantom
+configuration, works with existing Composer workflows, and lets
+projects pin a specific stubs version. When a new PHP version ships
+and the embedded stubs lag behind, <code>composer update
+jetbrains/phpstorm-stubs</code> in the project is all it takes.</p>
+<p><strong>Detection:</strong> During <code>initialized</code>, after loading <code>composer.json</code>
+and the classmap, check <code>vendor/composer/installed.json</code> for known
+stub package patterns (see "Known stub packages" below). Also check
+whether <code>jetbrains/phpstorm-stubs</code> is listed as an installed package.</p>
+<h3 id="3-ide-provided-stub-path">3. IDE-provided stub path<a class="headerlink" href="#3-ide-provided-stub-path" title="Permanent link">&para;</a></h3>
+<p>IDE extensions that bundle PHPantom (Zed, VS Code, Neovim plugin
+packages, etc.) may ship their own stubs directory alongside the
+binary. The extension knows where those stubs live; the user does
+not need to.</p>
+<p>The path is communicated via <code>initializationOptions</code> in the LSP
+<code>initialize</code> request:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">&quot;initializationOptions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">&quot;stubs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/path/to/bundled/stubs&quot;</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="p">}</span>
+</code></pre></div>
+<p>This lets an IDE extension:</p>
+<ul>
+<li>Build PHPantom <strong>without</strong> embedded stubs (empty <code>STUB_FILES</code>
+  array) to produce a smaller binary.</li>
+<li>Bundle phpstorm-stubs (or any stub set) as plain files alongside
+  the binary.</li>
+<li>Get GTD for built-in symbols for free (the stubs are real files).</li>
+<li>Update stubs independently of PHPantom releases.</li>
+</ul>
+<p>The user never configures this path. It is an integration point
+between PHPantom and the extension that wraps it. IDE-provided stubs
+sit below <code>.phpantom.toml</code> and Composer because project-specific
+choices should override what the IDE ships by default.</p>
+<h3 id="4-embedded-stubs-current-behaviour">4. Embedded stubs (current behaviour)<a class="headerlink" href="#4-embedded-stubs-current-behaviour" title="Permanent link">&para;</a></h3>
+<p>The phpstorm-stubs compiled into the binary. Always available as the
+final fallback. Every other source overrides these when they define
+the same symbol.</p>
+<p>When PHPantom is built without embedded stubs, this source is empty
+and effectively skipped.</p>
+<hr />
+<h2 id="phpstorm-stubs-fast-path">phpstorm-stubs fast path<a class="headerlink" href="#phpstorm-stubs-fast-path" title="Permanent link">&para;</a></h2>
+<p><code>jetbrains/phpstorm-stubs</code> gets special treatment regardless of which
+source provides it. The package ships <code>PhpStormStubsMap.php</code>, a
+generated index that maps every class, function, and constant name to
+its file path. PHPantom's <code>build.rs</code> already parses this file at
+compile time. The same parsing logic can run at runtime.</p>
+<p>When phpstorm-stubs is found (in any source: <code>.phpantom.toml</code>,
+Composer vendor, IDE-provided path), PHPantom checks for the presence
+of <code>PhpStormStubsMap.php</code>. If found, it parses the map file to build
+name-to-path indices in a single fast text scan. This is much cheaper
+than directory-walking and byte-level scanning every <code>.php</code> file.</p>
+<p>Other stub packages (wordpress-stubs, extension stubs, hand-written
+stubs) do not ship a map file. These are scanned with the byte-level
+classmap scanner.</p>
+<p>The processing order at init is:</p>
+<ol>
+<li><strong>Map-file indexed stubs first.</strong> Parse <code>PhpStormStubsMap.php</code>
+   from whichever source provides phpstorm-stubs. This populates the
+   external stub indices with the full PHP standard library in one
+   pass.</li>
+<li><strong>Directory-scanned stubs on top.</strong> Scan all other stub
+   directories (wordpress-stubs, custom stubs, etc.) with the
+   byte-level scanner. These insert into the indices only when the
+   key is not already present (respecting source priority) or when
+   they define symbols that phpstorm-stubs does not cover.</li>
+</ol>
+<p>This means phpstorm-stubs always provides the fast baseline, and
+other packages layer additional or overriding definitions on top
+according to their source priority.</p>
+<hr />
+<h2 id="e1-project-level-phpstorm-stubs-for-gtd">E1. Project-level phpstorm-stubs for GTD<a class="headerlink" href="#e1-project-level-phpstorm-stubs-for-gtd" title="Permanent link">&para;</a></h2>
+<p><strong>Goal:</strong> When <code>jetbrains/phpstorm-stubs</code> is installed in the
+project's vendor directory, use those on-disk files for
+go-to-definition on built-in symbols. All other resolution (type
+information, completion, hover) continues to use the embedded stubs.</p>
+<p>This is the smallest useful increment: no new config, no new scanning,
+no priority changes. It solves the most frequent user complaint ("I
+can't Ctrl+Click on <code>array_map</code>").</p>
+<h3 id="detection">Detection<a class="headerlink" href="#detection" title="Permanent link">&para;</a></h3>
+<p>During <code>initialized</code>, after parsing <code>installed.json</code>, check whether
+the <code>jetbrains/phpstorm-stubs</code> package is present. If so, record the
+path to its install directory (e.g.
+<code>vendor/jetbrains/phpstorm-stubs/</code>).</p>
+<p>The stubs ship with <code>PhpStormStubsMap.php</code>, the same file PHPantom's
+<code>build.rs</code> reads at compile time. Parse it at runtime using the same
+<code>parse_section</code> logic to build class/function/constant name-to-path
+maps pointing at the on-disk files.</p>
+<h3 id="gtd-changes">GTD changes<a class="headerlink" href="#gtd-changes" title="Permanent link">&para;</a></h3>
+<p>When go-to-definition resolves a symbol to a <code>phpantom-stub://</code> or
+<code>phpantom-stub-fn://</code> URI (which currently returns <code>None</code> because
+there is no real file), check whether the project-level phpstorm-stubs
+path is available. If so, map the symbol name back to the on-disk
+stub file and return a <code>Location</code> pointing at the declaration.</p>
+<p>Finding the exact line within the stub file can reuse the existing
+member-lookup logic in <code>definition/member/file_lookup.rs</code> (read the
+file, parse it, find the symbol by name/offset).</p>
+<h3 id="what-this-does-not-change">What this does NOT change<a class="headerlink" href="#what-this-does-not-change" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Type resolution still uses the embedded stubs. The on-disk stubs
+  are only consulted for navigation.</li>
+<li>No new config options.</li>
+<li>No scanning of stub files at init (just parsing the map file, which
+  is a single fast text scan).</li>
+</ul>
+<h3 id="complexity">Complexity<a class="headerlink" href="#complexity" title="Permanent link">&para;</a></h3>
+<p>Low. The map-parsing logic already exists in <code>build.rs</code> and can be
+extracted into a shared helper. The GTD fallback is a small addition
+to <code>resolve_class_definition</code> / <code>resolve_function_definition</code>.</p>
+<hr />
+<h2 id="e2-project-level-stubs-as-resolution-source">E2. Project-level stubs as resolution source<a class="headerlink" href="#e2-project-level-stubs-as-resolution-source" title="Permanent link">&para;</a></h2>
+<p><strong>Goal:</strong> Let project-level stub packages override or augment the
+embedded stubs for type resolution, completion, and hover. This is
+where external stubs become a real type-intelligence feature rather
+than just a navigation aid.</p>
+<h3 id="priority-model">Priority model<a class="headerlink" href="#priority-model" title="Permanent link">&para;</a></h3>
+<p>When multiple sources define the same symbol, the highest priority
+source wins:</p>
+<ol>
+<li><strong>User code</strong> (opened files, PSR-4, classmap). Always wins. A
+   user-defined class with the same name as a stub class shadows
+   the stub entirely.</li>
+<li><strong><code>.phpantom.toml</code> stubs.</strong> Explicit user overrides for this
+   project.</li>
+<li><strong>Composer project-level stubs.</strong> Packages from the vendor
+   directory. When a project installs <code>jetbrains/phpstorm-stubs</code> at
+   a newer version than what is embedded, the project version is
+   used.</li>
+<li><strong>IDE-provided stubs</strong> (<code>initializationOptions</code>). The IDE
+   extension's bundled stubs.</li>
+<li><strong>Embedded stubs</strong> (current behaviour). Final fallback.</li>
+</ol>
+<p>This means a project that installs <code>php-stubs/wordpress-stubs</code> gets
+WordPress function/class resolution automatically. A project that
+installs a newer phpstorm-stubs gets updated type information without
+waiting for a PHPantom release. And a user who places a custom stub
+in <code>.phpantom.toml</code> paths can override anything.</p>
+<h3 id="discovery-known-stub-packages">Discovery: known stub packages<a class="headerlink" href="#discovery-known-stub-packages" title="Permanent link">&para;</a></h3>
+<p>Stub packages follow a few conventions:</p>
+<p><strong>Packages with a map file.</strong> <code>jetbrains/phpstorm-stubs</code> ships
+<code>PhpStormStubsMap.php</code>. Parse it to get symbol-to-file mappings.
+This is the fastest path: no directory scanning needed.</p>
+<p><strong>Packages without a map file.</strong> Most stub packages (wordpress-stubs,
+acf-pro-stubs, etc.) are just directories of <code>.php</code> files. These
+need to be scanned using the byte-level classmap/function/constant
+scanner (<code>find_symbols</code> in <code>src/classmap_scanner/lexer.rs</code>, already
+shipped and used for the "no <code>composer.json</code>" full-scan path — see
+indexing.md's Current State). The scan produces name-to-path indices
+just like the autoload file scanner.</p>
+<p><strong>Detection heuristic:</strong> A Composer package is treated as a stub
+package when any of these conditions are true:</p>
+<ul>
+<li>Its package name is <code>jetbrains/phpstorm-stubs</code>.</li>
+<li>Its package name matches <code>php-stubs/*</code> or <code>*-stubs</code>.</li>
+<li>Its <code>composer.json</code> <code>type</code> field is <code>phpstorm-stubs</code> or
+  <code>php-stubs</code> (a convention some packages follow).</li>
+</ul>
+<p>Packages matched by the heuristic are scanned at init and their
+symbols are added to new external stub indices.</p>
+<h3 id="new-indices">New indices<a class="headerlink" href="#new-indices" title="Permanent link">&para;</a></h3>
+<p>Three new maps on <code>Backend</code>, structured identically to the embedded
+stub indices but holding owned data (file paths) instead of static
+string references:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>external_stub_class_index</code></td>
+<td><code>HashMap&lt;String, PathBuf&gt;</code></td>
+<td>Class/interface/trait/enum FQN to stub file path</td>
+</tr>
+<tr>
+<td><code>external_stub_function_index</code></td>
+<td><code>HashMap&lt;String, PathBuf&gt;</code></td>
+<td>Function FQN to stub file path</td>
+</tr>
+<tr>
+<td><code>external_stub_constant_index</code></td>
+<td><code>HashMap&lt;String, PathBuf&gt;</code></td>
+<td>Constant name to stub file path</td>
+</tr>
+</tbody>
+</table>
+<h3 id="resolution-changes">Resolution changes<a class="headerlink" href="#resolution-changes" title="Permanent link">&para;</a></h3>
+<p>Insert a new phase in each resolution chain between user code and
+embedded stubs:</p>
+<p><strong><code>find_or_load_class</code>:</strong></p>
+<ol>
+<li>Phase 0: <code>fqn_class_index</code> (user code, already-parsed files)</li>
+<li>Phase 1: fqn_uri_index</li>
+<li>Phase 2: PSR-4</li>
+<li><strong>Phase 2.5 (new): External stub class index.</strong> Checks the
+   unified external stub index (populated from <code>.phpantom.toml</code>,
+   Composer stubs, and IDE-provided stubs in priority order). Read
+   the file, parse and cache in <code>uri_classes_index</code> under a
+   <code>phpantom-ext-stub://</code> URI.</li>
+<li>Phase 3: Embedded stubs</li>
+</ol>
+<p><strong><code>find_or_load_function</code>:</strong></p>
+<ol>
+<li><code>global_functions</code> (user code + cached results)</li>
+<li><code>autoload_function_index</code> (already populated by the byte-level
+   scanner described in indexing.md's Current State)</li>
+<li><strong>External stub function index (new).</strong> Same unified index.
+   Read the file, parse, cache in <code>global_functions</code>.</li>
+<li><code>stub_function_index</code> (embedded stubs)</li>
+</ol>
+<p><strong>Constants:</strong> Same pattern. External stub constants slot in before
+embedded stub constants.</p>
+<h3 id="gtd-improvement">GTD improvement<a class="headerlink" href="#gtd-improvement" title="Permanent link">&para;</a></h3>
+<p>Since external stubs point at real on-disk files, go-to-definition
+works naturally. The <code>phpantom-ext-stub://</code> URI scheme carries the
+real file path, so GTD resolves to a navigable <code>Location</code>. This
+supersedes the Phase 1 GTD-only approach for any symbol that has
+an external stub (from any source).</p>
+<h3 id="interaction-with-embedded-phpstorm-stubs">Interaction with embedded phpstorm-stubs<a class="headerlink" href="#interaction-with-embedded-phpstorm-stubs" title="Permanent link">&para;</a></h3>
+<p>When <code>jetbrains/phpstorm-stubs</code> is installed at the project level:</p>
+<ul>
+<li>The project-level version takes priority for all symbols it defines.</li>
+<li>Symbols that exist only in the embedded version (because the
+  project-level version is older or has removed entries) still
+  resolve via the embedded fallback.</li>
+<li>This means the user always gets the union of both sets, with the
+  project-level version winning on conflicts.</li>
+</ul>
+<p>When a non-phpstorm-stubs package defines a symbol that also exists
+in the embedded stubs (e.g. <code>wordpress-stubs</code> redefining <code>wpdb</code>),
+the external package wins. This is the correct behaviour: the
+project-specific definition is more accurate than the generic one.</p>
+<h3 id="complexity_1">Complexity<a class="headerlink" href="#complexity_1" title="Permanent link">&para;</a></h3>
+<p>High. This inserts a new phase directly into <code>find_or_load_class</code>,
+<code>find_or_load_function</code>, and the constant lookup chain — the shared
+resolution paths every consumer (diagnostics, completion, hover, GTD)
+goes through — so a mistake in priority ordering or the skip-if-present
+merge logic silently misresolves symbols for all of them. It also adds
+three new indices to <code>Backend</code> and a package-detection heuristic. The
+byte-level scanning infrastructure this needs already shipped as part
+of indexing.md's full-scan path, so this item is no longer blocked on
+it, but wiring the new phase into the core resolver chains correctly
+still requires real familiarity with how those chains are structured.</p>
+<hr />
+<h2 id="e3-ide-provided-and-phpantomtoml-stub-paths">E3. IDE-provided and <code>.phpantom.toml</code> stub paths<a class="headerlink" href="#e3-ide-provided-and-phpantomtoml-stub-paths" title="Permanent link">&para;</a></h2>
+<p><strong>Goal:</strong> Support stub directories provided by IDE extensions (via
+<code>initializationOptions</code>) and by users (via <code>.phpantom.toml</code>). Phase 2
+handles Composer-discovered stubs. This phase adds the remaining two
+external sources.</p>
+<h3 id="ide-provided-path-via-initializationoptions">IDE-provided path via <code>initializationOptions</code><a class="headerlink" href="#ide-provided-path-via-initializationoptions" title="Permanent link">&para;</a></h3>
+<p>IDE extensions that bundle PHPantom can pass a stubs directory in the
+LSP <code>initialize</code> request. PHPantom reads the path from
+<code>initializationOptions.stubs.path</code> and scans it at init. The user
+never sees or configures this.</p>
+<p>This enables a distribution model where the IDE extension:</p>
+<ol>
+<li>Builds PHPantom without embedded stubs (smaller binary).</li>
+<li>Ships phpstorm-stubs as plain files alongside the binary.</li>
+<li>Passes the path at startup.</li>
+</ol>
+<p>Because the stubs are real on-disk files, GTD works out of the box
+with no extra logic. The extension can update stubs independently
+of PHPantom releases.</p>
+<p>The phpstorm-stubs fast path applies here too: if the IDE-provided
+directory contains <code>PhpStormStubsMap.php</code>, parse the map file for
+fast indexed lookup instead of directory scanning.</p>
+<h3 id="phpantomtoml-paths"><code>.phpantom.toml</code> paths<a class="headerlink" href="#phpantomtoml-paths" title="Permanent link">&para;</a></h3>
+<p>For non-Composer projects and for explicit overrides:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[stubs]</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">paths</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="s2">&quot;./stubs&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="s2">&quot;/opt/company/php-stubs&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">]</span>
+</code></pre></div>
+<p>Paths are resolved relative to the workspace root unless absolute.
+Each path is scanned recursively for <code>.php</code> files at init.</p>
+<h3 id="scanning-and-priority">Scanning and priority<a class="headerlink" href="#scanning-and-priority" title="Permanent link">&para;</a></h3>
+<p>All sources use the same byte-level scanner (or the phpstorm-stubs
+map-file fast path when available). The external stub indices are
+populated in priority order, highest first. Each insert is
+skip-if-present, so higher-priority sources win:</p>
+<ol>
+<li><strong><code>.phpantom.toml</code> paths.</strong> Scanned first. Explicit user choices
+   for this project override everything else.</li>
+<li><strong>Composer project-level stubs</strong> (Phase 2). The project's vendor
+   directory.</li>
+<li><strong>IDE-provided stubs</strong> (<code>initializationOptions</code>). The IDE
+   extension's bundled stubs.</li>
+<li><strong>Embedded stubs.</strong> Final fallback (not in the external index;
+   checked separately as the last resolution phase).</li>
+</ol>
+<h3 id="use-cases">Use cases<a class="headerlink" href="#use-cases" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>IDE extension distribution.</strong> A Zed/VS Code extension ships
+  PHPantom + stubs as a single package. No Composer needed. GTD
+  on built-in symbols works immediately.</li>
+<li><strong>Non-Composer projects.</strong> A legacy codebase without <code>composer.json</code>
+  can point at a stubs directory via <code>.phpantom.toml</code>.</li>
+<li><strong>Extension stubs.</strong> Swoole, RoadRunner, or other PECL extension
+  stubs not available as Composer packages.</li>
+<li><strong>Company-internal stubs.</strong> Hand-written type annotations for
+  proprietary code.</li>
+<li><strong>Overrides.</strong> A user who disagrees with a phpstorm-stubs type
+  annotation can place a corrected stub in their <code>.phpantom.toml</code>
+  paths and it wins over everything.</li>
+</ul>
+<h3 id="complexity_2">Complexity<a class="headerlink" href="#complexity_2" title="Permanent link">&para;</a></h3>
+<p>Low (once Phase 2 is done). The scanning is identical. The new work
+is reading <code>initializationOptions</code> during <code>initialize</code>, reading
+<code>.phpantom.toml</code> <code>[stubs]</code> paths, resolving them, and feeding them
+into the existing scanner.</p>
+<hr />
+<h2 id="e4-embedded-stub-override-with-external-stubs">E4. Embedded stub override with external stubs<a class="headerlink" href="#e4-embedded-stub-override-with-external-stubs" title="Permanent link">&para;</a></h2>
+<p><strong>Goal:</strong> When a project-level or global stub defines a symbol with
+richer type annotations than the embedded stub (e.g. <code>@template</code> on
+SPL iterators), use the richer version for type resolution.</p>
+<h3 id="the-spl-iterator-problem">The SPL iterator problem<a class="headerlink" href="#the-spl-iterator-problem" title="Permanent link">&para;</a></h3>
+<p>The embedded phpstorm-stubs lack <code>@template</code> annotations on SPL
+iterator classes (<code>ArrayIterator</code>, <code>FilterIterator</code>,
+<code>RecursiveIteratorIterator</code>, etc.). PHPStan maintains its own stub
+overlays that add these annotations. Without them, <code>foreach</code> over
+an SPL iterator resolves element types as <code>mixed</code>.</p>
+<p>Phase 2 already solves this if the user installs a stub package that
+includes the annotations. Phase 4 addresses the question: should
+PHPantom ship its own SPL overlay stubs, or rely on users to bring
+their own?</p>
+<h3 id="decision-ship-minimal-overlays-prefer-external">Decision: ship minimal overlays, prefer external<a class="headerlink" href="#decision-ship-minimal-overlays-prefer-external" title="Permanent link">&para;</a></h3>
+<ol>
+<li>
+<p><strong>Ship a small set of built-in overlay stubs</strong> for the most
+   impactful SPL classes (10-15 classes). These are embedded in the
+   binary alongside the phpstorm-stubs, but with <code>@template</code>
+   annotations added. They take priority over the base phpstorm-stubs
+   for the classes they cover.</p>
+</li>
+<li>
+<p><strong>External stubs always win.</strong> If any external source
+   (<code>.phpantom.toml</code>, Composer, or IDE-provided) defines the same
+   class, the external version takes priority over both the overlay
+   and the base embedded stub. This means users who install PHPStan's
+   stubs or write their own overlays are never fighting with the
+   built-in ones.</p>
+</li>
+</ol>
+<h3 id="implementation">Implementation<a class="headerlink" href="#implementation" title="Permanent link">&para;</a></h3>
+<p>The overlay stubs can be embedded via <code>build.rs</code> the same way the
+base stubs are. They go into a separate <code>STUB_OVERLAY_CLASS_MAP</code>
+array. At resolution time, when <code>find_or_load_class</code> reaches Phase 3
+(embedded stubs), it checks the overlay map first, then the base map.</p>
+<h3 id="complexity_3">Complexity<a class="headerlink" href="#complexity_3" title="Permanent link">&para;</a></h3>
+<p>Low. The overlay stubs are small hand-written PHP files. The build
+and resolution changes are minor additions to the existing
+infrastructure.</p>
+<hr />
+<h2 id="open-questions">Open questions<a class="headerlink" href="#open-questions" title="Permanent link">&para;</a></h2>
+<h3 id="should-external-stubs-be-scanned-eagerly-or-lazily">Should external stubs be scanned eagerly or lazily?<a class="headerlink" href="#should-external-stubs-be-scanned-eagerly-or-lazily" title="Permanent link">&para;</a></h3>
+<p><strong>Option A: Eager scan, lazy parse (recommended).</strong> At init, run the
+byte-level scanner over all external stub directories to build the
+name-to-path indices. Parse individual files on demand when a symbol
+is first accessed. This is consistent with the approach in Phase 2.5
+of indexing.md (lazy autoload file indexing) and keeps init fast.</p>
+<p><strong>Option B: Fully lazy.</strong> Don't scan at init. When a symbol is not
+found in user code or embedded stubs, search through external stub
+directories on the fly. This has the worst first-access latency and
+makes completion of stub symbols impossible until something triggers
+a scan.</p>
+<p>Option A is the clear winner. The byte-level scan is fast (sub-second
+for typical stub packages) and gives us the name index needed for
+completion.</p>
+<h3 id="how-does-this-interact-with-the-classmap">How does this interact with the classmap?<a class="headerlink" href="#how-does-this-interact-with-the-classmap" title="Permanent link">&para;</a></h3>
+<p>External stub packages installed via Composer may appear in the
+classmap (<code>autoload_classmap.php</code>). This is fine: Phase 1.5 of
+<code>find_or_load_class</code> already handles classmap lookups, and any class
+found there is parsed and cached normally. The external stub index
+serves as a parallel discovery path for stub packages that are
+<code>require-dev</code> dependencies (which may not be in the classmap if the
+user ran <code>composer install --no-dev</code> in production).</p>
+<p>In practice, most stub packages declare their classes in
+<code>autoload.classmap</code> in their own <code>composer.json</code>, so they do appear
+in the generated classmap. The external stub index provides a
+safety net and is also needed for function and constant stubs (which
+the classmap does not cover).</p>
+<h3 id="what-about-phpstan-extension-installer-and-phpstan-config">What about <code>phpstan-extension-installer</code> and PHPStan config?<a class="headerlink" href="#what-about-phpstan-extension-installer-and-phpstan-config" title="Permanent link">&para;</a></h3>
+<p>Some projects configure stub files through <code>phpstan.neon</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>parameters:
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    stubFiles:
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>        - stubs/MyCustomStub.php
+</code></pre></div>
+<p>Reading PHPStan config is out of scope for now. PHPantom is not
+PHPStan and should not parse its configuration. If users want
+PHPantom to see these stubs, they can add the path to
+<code>[stubs] paths</code> in <code>.phpantom.toml</code>. A future iteration could
+optionally read <code>phpstan.neon</code> <code>stubFiles</code> entries as a convenience,
+but it is not a priority.</p>
+<h3 id="building-without-embedded-stubs">Building without embedded stubs<a class="headerlink" href="#building-without-embedded-stubs" title="Permanent link">&para;</a></h3>
+<p>The <code>build.rs</code> script already handles a missing <code>stubs/</code> directory
+gracefully by generating empty arrays. If the automatic GitHub
+fetch fails (e.g. no network access during the build), the binary
+compiles and runs normally; it just has no built-in fallback for
+PHP standard library symbols.</p>
+<p>For this to work, stubs must come from another source. The most
+reliable combinations:</p>
+<ul>
+<li>IDE extension provides stubs via <code>initializationOptions</code> (Phase 3).</li>
+<li>The user's project has <code>jetbrains/phpstorm-stubs</code> in Composer
+  (Phase 2).</li>
+<li>The user points at stubs via <code>.phpantom.toml</code>.</li>
+</ul>
+<p>Any of these is sufficient. Without any external stubs and without
+embedded stubs, built-in symbols would be invisible.</p>
+<hr />
+<h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Goal</th>
+<th>Complexity</th>
+<th>Dependencies</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>E1</td>
+<td>GTD for built-in symbols via project-level phpstorm-stubs</td>
+<td>Low</td>
+<td>None</td>
+</tr>
+<tr>
+<td>E2</td>
+<td>Project-level stubs as a type resolution source</td>
+<td>High</td>
+<td>None (byte-level scanner already shipped)</td>
+</tr>
+<tr>
+<td>E3</td>
+<td>IDE-provided and <code>.phpantom.toml</code> stub paths</td>
+<td>Low</td>
+<td>E2</td>
+</tr>
+<tr>
+<td>E4</td>
+<td>Ship SPL overlay stubs, let external stubs override</td>
+<td>Low</td>
+<td>E2</td>
+</tr>
+<tr>
+<td>E7</td>
+<td>Stub-based framework patches (replace Rust patch system)</td>
+<td>Medium-High</td>
+<td>E2 or E3</td>
+</tr>
+</tbody>
+</table>
+<p>E1 can be done immediately and independently. It provides
+immediate value (GTD on <code>array_map</code>, <code>PDO</code>, <code>Iterator</code>, etc.) with
+minimal code. E2-E4 build on the byte-level scanning infrastructure
+already shipped for the project's own symbol discovery (see
+indexing.md's Current State) and on each other.</p>
+<p>The priority order (<code>.phpantom.toml</code> &gt; Composer &gt; IDE &gt; embedded)
+ensures the user's explicit choices always win. Most users never
+touch <code>.phpantom.toml</code> and get stubs through Composer (automatic) or
+their IDE extension (transparent). The toml paths exist for
+overrides, non-Composer projects, and edge cases.</p>
+<p><code>jetbrains/phpstorm-stubs</code> receives special treatment regardless of
+source: its <code>PhpStormStubsMap.php</code> is parsed for fast indexed lookup
+instead of directory scanning, then other stub packages are scanned
+on top.</p>
+<hr />
+<h2 id="e5-extension-stub-selection-stubs-extensions">E5. Extension stub selection (<code>[stubs] extensions</code>)<a class="headerlink" href="#e5-extension-stub-selection-stubs-extensions" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>Override which PHP extension stubs are loaded. By default PHPantom
+loads core + all commonly bundled extensions, plus any declared in
+the project's <code>composer.json</code> via <code>ext-*</code> keys.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[stubs]</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">extensions</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="s2">&quot;Core&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;standard&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;json&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;mbstring&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;curl&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="s2">&quot;redis&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;imagick&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;mongodb&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="p">]</span>
+</code></pre></div>
+<h3 id="auto-detection-from-composerjson">Auto-detection from <code>composer.json</code><a class="headerlink" href="#auto-detection-from-composerjson" title="Permanent link">&para;</a></h3>
+<p>When <code>extensions</code> is unset, PHPantom reads the <code>require</code> and
+<code>require-dev</code> sections of <code>composer.json</code> and collects every <code>ext-*</code>
+key. These are added on top of the default set. Only <code>composer.json</code>
+is read, not <code>composer.lock</code>. Transitive <code>ext-*</code> requirements from
+dependencies are intentionally ignored.</p>
+<h3 id="manual-override">Manual override<a class="headerlink" href="#manual-override" title="Permanent link">&para;</a></h3>
+<p>When <code>extensions</code> is set, only the listed extensions are loaded and
+auto-detection is skipped. Extension names match the directory names
+in phpstorm-stubs (e.g. <code>"redis"</code>, <code>"imagick"</code>, <code>"swoole"</code>). An
+unrecognised name is silently ignored with a log message.</p>
+<h3 id="implementation_1">Implementation<a class="headerlink" href="#implementation_1" title="Permanent link">&para;</a></h3>
+<p>The build script already embeds all stub files. Filtering happens at
+runtime: when building the stub class/function indices, skip entries
+whose source file path does not start with one of the enabled
+extension directories. This is a simple string prefix check on the
+relative path from <code>STUB_CLASS_MAP</code>.</p>
+<hr />
+<h2 id="e6-stub-install-prompt-for-non-composer-projects">E6. Stub install prompt for non-Composer projects<a class="headerlink" href="#e6-stub-install-prompt-for-non-composer-projects" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>For non-Composer projects, offer to install phpstorm-stubs into the
+project so that go-to-definition works for built-in symbols. The
+answer (<code>true</code> or <code>false</code>) is written to <code>[stubs] install</code> in
+<code>.phpantom.toml</code> so the prompt does not reappear.</p>
+<p>This is not implemented yet. The config writing infrastructure
+(using <code>toml_edit</code> to preserve comments and formatting) is a
+prerequisite.</p>
+<hr />
+<h2 id="e7-stub-based-framework-patches">E7. Stub-based framework patches<a class="headerlink" href="#e7-stub-based-framework-patches" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High · Dependencies: E2 or E3</strong></p>
+<p>Replace the Rust-coded Laravel class patch system
+(<code>virtual_members/laravel/patches.rs</code>) with plain PHP stub files that
+override specific declarations. Instead of patching return types in
+Rust after resolution, ship corrected stubs that the normal stub
+loading pipeline picks up at a higher priority than the framework's
+own declarations.</p>
+<h3 id="motivation">Motivation<a class="headerlink" href="#motivation" title="Permanent link">&para;</a></h3>
+<p>The current patch system (<code>apply_laravel_patches</code>) fixes framework
+type inaccuracies by mutating resolved <code>ClassInfo</code> in Rust code.
+This works but has drawbacks:</p>
+<ul>
+<li><strong>Contributor barrier.</strong> Adding a patch for a new framework (Symfony,
+  WordPress, Drupal) or fixing a Laravel type requires Rust knowledge.</li>
+<li><strong>Maintenance burden.</strong> Framework updates may change signatures;
+  keeping Rust code in sync is harder than updating a PHP stub file.</li>
+<li><strong>Not user-extensible.</strong> Users cannot add their own patches for
+  project-specific quirks without forking PHPantom.</li>
+</ul>
+<p>Stub overrides solve all three. A PHP developer who understands the
+framework can write a corrected stub, submit a PR, and never touch
+Rust. Users can drop override stubs into their <code>.phpantom.toml</code>
+<code>[stubs] paths</code> to fix types locally.</p>
+<h3 id="what-the-stubs-would-look-like">What the stubs would look like<a class="headerlink" href="#what-the-stubs-would-look-like" title="Permanent link">&para;</a></h3>
+<p>For the Conditionable <code>when()</code>/<code>unless()</code> patch, the override stub
+would be:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">namespace Illuminate\Support\Traits;</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">trait Conditionable {</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    /** @return $this */</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">    public function when(mixed $value = null, ?callable $callback = null, ?callable $default = null): mixed {}</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">    /** @return $this */</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">    public function unless(mixed $value = null, ?callable $callback = null, ?callable $default = null): mixed {}</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="x">}</span>
+</code></pre></div>
+<p>For the Eloquent Builder <code>__call</code> patch:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">namespace Illuminate\Database\Eloquent;</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">class Builder {</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    /** @return static */</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">    public function __call(string $method, array $parameters): mixed {}</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">    /** @return static */</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="x">    public static function __callStatic(string $method, array $parameters): mixed {}</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="x">}</span>
+</code></pre></div>
+<p>These are standard PHP stub files. They declare only the members that
+need overriding. The stub loading pipeline merges them at a higher
+priority than the framework's own declarations, so the corrected
+<code>@return</code> types win.</p>
+<h3 id="bundled-override-stubs">Bundled override stubs<a class="headerlink" href="#bundled-override-stubs" title="Permanent link">&para;</a></h3>
+<p>PHPantom would ship a set of override stubs for common frameworks,
+organized by framework:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>stubs/overrides/
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>├── laravel/
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>│   ├── Conditionable.stub.php
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>│   ├── EloquentBuilder.stub.php
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>│   └── ...
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>├── symfony/
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>│   └── ...
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>└── wordpress/
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    └── ...
+</code></pre></div>
+<p>These would be embedded at build time (like phpstorm-stubs today) and
+loaded into the stub index at a priority above vendor stubs but below
+user <code>.phpantom.toml</code> paths. Framework detection (already done for
+Laravel via <code>composer.json</code> inspection) controls which set is loaded.</p>
+<h3 id="user-provided-override-stubs">User-provided override stubs<a class="headerlink" href="#user-provided-override-stubs" title="Permanent link">&para;</a></h3>
+<p>Once E3 lands, users can place their own override stubs in a
+<code>.phpantom.toml</code> <code>[stubs] paths</code> directory. Since user paths have the
+highest priority, they override both bundled overrides and vendor
+stubs. This makes the system fully extensible without code changes.</p>
+<h3 id="migration-path">Migration path<a class="headerlink" href="#migration-path" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Implement E2 or E3 (external stub loading with priority).</li>
+<li>Write override stubs for the patches currently in
+   <code>patches.rs</code> (Builder <code>__call</code>, Conditionable <code>when</code>/<code>unless</code>).</li>
+<li>Add a bundled-overrides loading phase to the stub pipeline,
+   between vendor stubs and user stubs.</li>
+<li>Remove the Rust patch functions from <code>patches.rs</code>.</li>
+<li>Document how to contribute framework override stubs (just PHP,
+   no Rust needed).</li>
+</ol>
+<h3 id="scope-of-the-rust-patch-system-until-then">Scope of the Rust patch system until then<a class="headerlink" href="#scope-of-the-rust-patch-system-until-then" title="Permanent link">&para;</a></h3>
+<p>The current <code>patches.rs</code> module handles the known cases correctly
+and is well-tested. It stays in place until the stub override
+infrastructure from E2/E3 is ready. New patches can still be added
+in Rust in the interim.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>
