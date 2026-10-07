@@ -1083,10 +1083,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b559-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block" class="md-nav__link">
+  <a href="#b562-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B559. An import written into a <code>namespace</code> block that sits on one line lands after the block
+        B562. An import written into a <code>namespace</code> block that sits on one line lands after the block
       </span>
     </span>
   </a>
@@ -1094,10 +1094,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b560-moving-a-class-out-of-one-section-of-a-file-with-several-unbraced-namespace-statements-into-the-global-namespace-changes-its-namespace" class="md-nav__link">
+  <a href="#b563-moving-a-class-that-shares-its-namespace-section-with-other-declarations-changes-their-namespace-too" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B560. Moving a class out of one section of a file with several unbraced <code>namespace</code> statements into the global namespace changes its namespace
+        B563. Moving a class that shares its <code>namespace</code> section with other declarations changes their namespace too
       </span>
     </span>
   </a>
@@ -1832,10 +1832,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b559-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block" class="md-nav__link">
+  <a href="#b562-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B559. An import written into a <code>namespace</code> block that sits on one line lands after the block
+        B562. An import written into a <code>namespace</code> block that sits on one line lands after the block
       </span>
     </span>
   </a>
@@ -1843,10 +1843,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b560-moving-a-class-out-of-one-section-of-a-file-with-several-unbraced-namespace-statements-into-the-global-namespace-changes-its-namespace" class="md-nav__link">
+  <a href="#b563-moving-a-class-that-shares-its-namespace-section-with-other-declarations-changes-their-namespace-too" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B560. Moving a class out of one section of a file with several unbraced <code>namespace</code> statements into the global namespace changes its namespace
+        B563. Moving a class that shares its <code>namespace</code> section with other declarations changes their namespace too
       </span>
     </span>
   </a>
@@ -2114,7 +2114,7 @@ choose its comma knowing the rest of the batch: the one after it while every
 member before it is removed too, the one before it otherwise. That way no
 two removals share a comma. The removal of a template's <code>@use</code> group
 members (<code>group_member_removal</code>, in the same file) already chooses this way.</p>
-<h3 id="b559-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block">B559. An import written into a <code>namespace</code> block that sits on one line lands after the block<a class="headerlink" href="#b559-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block" title="Permanent link">&para;</a></h3>
+<h3 id="b562-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block">B562. An import written into a <code>namespace</code> block that sits on one line lands after the block<a class="headerlink" href="#b562-an-import-written-into-a-namespace-block-that-sits-on-one-line-lands-after-the-block" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="cp">&lt;?php</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{</span> <span class="k">public</span> <span class="k">function</span> <span class="nf">f</span><span class="p">()</span><span class="o">:</span> <span class="nx">Helper</span> <span class="p">{}</span> <span class="p">}</span> <span class="p">}</span>
@@ -2127,25 +2127,23 @@ puts the first import of a block that has none on the line after its
 line, and every import planned through it shares the placement. The import
 belongs just after the <code>{</code> or <code>;</code> of the declaration, which <code>UseBlockInfo</code>
 cannot express: its positions are whole lines.</p>
-<h3 id="b560-moving-a-class-out-of-one-section-of-a-file-with-several-unbraced-namespace-statements-into-the-global-namespace-changes-its-namespace">B560. Moving a class out of one section of a file with several unbraced <code>namespace</code> statements into the global namespace changes its namespace<a class="headerlink" href="#b560-moving-a-class-out-of-one-section-of-a-file-with-several-unbraced-namespace-statements-into-the-global-namespace-changes-its-namespace" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
+<h3 id="b563-moving-a-class-that-shares-its-namespace-section-with-other-declarations-changes-their-namespace-too">B563. Moving a class that shares its <code>namespace</code> section with other declarations changes their namespace too<a class="headerlink" href="#b563-moving-a-class-that-shares-its-namespace-section-with-other-declarations-changes-their-namespace-too" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="cp">&lt;?php</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">namespace</span> <span class="nx">A</span><span class="p">;</span>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span>
 <a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="k">namespace</span> <span class="nx">B</span><span class="p">;</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="k">class</span> <span class="nc">Bar</span> <span class="p">{}</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="k">class</span> <span class="nc">Baz</span> <span class="p">{}</span>
 </code></pre></div>
-<p>Moving <code>B\Bar</code> to <code>Bar</code> deletes the <code>namespace B;</code> line, and <code>Bar</code> is then
-declared in <code>A</code>, while every reference was rewritten to name the global
-class. Moving <code>A\Foo</code> instead leaves global code ahead of <code>namespace B;</code>,
-which PHP refuses. <code>remove_namespace_edits</code> (<code>src/rename/class/layout.rs</code>)
-treats an unbraced statement as removable whatever follows it, but in a file
-with several sections it is what separates them. Refuse the move the way a
-brace-style <code>namespace</code> is refused, since the sections would have to be
-rewritten as braced blocks.</p>
+<p>Moving <code>A\Foo</code> to <code>C\Foo</code> rewrites <code>namespace A;</code> to <code>namespace C;</code>, which makes
+<code>Baz</code> a <code>C\Baz</code> while every reference to <code>A\Baz</code> is left alone, and the file
+moves to the new PSR-4 path with it. Moving <code>A\Foo</code> to <code>Foo</code> removes the
+statement and makes <code>Baz</code> global the same way. <code>namespace_declaration_edits</code>
+(<code>src/rename/class/mod.rs</code>) rewrites or removes the statement of the section
+that declares the class without asking what else the section declares. Refuse
+the move when the section holds any other class-like, function, or constant,
+the way a brace-style <code>namespace</code> is refused.</p>
 
 
 

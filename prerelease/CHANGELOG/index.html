@@ -5015,6 +5015,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Moving a class into the global namespace is refused in a file with several <code>namespace</code> statements.</strong> In the editor or with <code>phpantom_lsp move</code>, the move no longer deletes the class's <code>namespace</code> line, which left the class in another namespace or the file invalid.</li>
 <li><strong>Moving a class imports what its own <code>namespace</code> block used.</strong> In a file with several <code>namespace</code> blocks, moving a class, in the editor or with <code>phpantom_lsp move</code>, now imports the names its block reached through the old namespace, and no longer imports names another block wrote.</li>
 <li><strong>Moving a class changes the right <code>namespace</code> block.</strong> When several <code>namespace</code> blocks in one file each declare a class with the same short name, moving one of them, in the editor or with <code>phpantom_lsp move</code>, no longer rewrites another block's <code>namespace</code>.</li>
 <li><strong>A function added by a watched file is found right away.</strong> A function declared in a file created or changed on disk no longer keeps being reported as undefined while a diagnostic pass or hover is running.</li>
