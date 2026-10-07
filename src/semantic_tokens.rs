@@ -210,7 +210,10 @@ impl Backend {
             if mode == SemanticTokensMode::Full
                 && let Some(blade_content) = self.get_file_content(uri)
             {
-                tokens.extend(Self::collect_blade_tokens(&blade_content));
+                tokens.extend(Self::collect_blade_tokens(
+                    &blade_content,
+                    &self.blade_directives.read(),
+                ));
             }
 
             // Re-sort to interleave Blade tokens with translated PHP tokens.
@@ -927,8 +930,11 @@ impl Backend {
     ///
     /// [`inert_regions`]: crate::blade::signature::inert_regions
     /// [`directive_head`]: crate::blade::directives::directive_head
-    fn collect_blade_tokens(content: &str) -> Vec<AbsoluteToken> {
-        use crate::blade::directives::{DirectiveHead, directive_head, match_directive};
+    fn collect_blade_tokens(
+        content: &str,
+        known: &crate::blade::directives::BladeDirectives,
+    ) -> Vec<AbsoluteToken> {
+        use crate::blade::directives::{DirectiveHead, directive_head};
         use crate::blade::signature::{InertOpener, echo_delimiters, inert_regions, is_echo_start};
 
         let bytes = content.as_bytes();
@@ -955,10 +961,9 @@ impl Backend {
             }
         };
         let directive_at = |at: usize| match directive_head(content, bytes, at, bytes.len()) {
-            DirectiveHead::Named { name, name_end, .. } => (
-                match_directive(name).map(|d| at..at + 1 + d.len()),
-                name_end,
-            ),
+            DirectiveHead::Named { name, name_end, .. } => {
+                (known.builtin(name).map(|d| at..at + 1 + d.len()), name_end)
+            }
             DirectiveHead::None(end)
             | DirectiveHead::Escaped(end)
             | DirectiveHead::LiteralEcho(end) => (None, end),

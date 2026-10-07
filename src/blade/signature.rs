@@ -290,11 +290,16 @@ pub(crate) enum InertOpener {
 }
 
 /// Whether an echo (`{{ … }}`, `{{{ … }}}`, or `{!! … !!}`) opens at `at`.
+///
+/// Blade matches its echo tags longest-opening-first, so in `{{!! … !!}}` the
+/// raw echo opens at the second `{` and the first is a literal brace.
 pub(crate) fn is_echo_start(bytes: &[u8], at: usize) -> bool {
-    bytes[at..].starts_with(b"{{") || bytes[at..].starts_with(b"{!!")
+    let rest = &bytes[at..];
+    (rest.starts_with(b"{{") && !rest.starts_with(b"{{!!")) || rest.starts_with(b"{!!")
 }
 
-/// The opening and closing delimiters of the echo at `at`.
+/// The opening and closing delimiters of the echo [`is_echo_start`] found at
+/// `at`.
 pub(crate) fn echo_delimiters(bytes: &[u8], at: usize) -> (&'static str, &'static str) {
     if bytes[at..].starts_with(b"{{{") {
         ("{{{", "}}}")
@@ -687,6 +692,24 @@ mod tests {
             .into_iter()
             .map(|p| (p.name, p.default))
             .collect()
+    }
+
+    /// Blade matches echo tags longest-opening-first, so in `{{!! … !!}}`
+    /// the raw echo starts at the second `{` and the first is a literal
+    /// brace.
+    #[test]
+    fn a_raw_echo_inside_literal_braces_starts_at_its_second_brace() {
+        let braced = b"{{!!$a!!}}";
+        assert!(!is_echo_start(braced, 0));
+        assert!(is_echo_start(braced, 1));
+        assert_eq!(echo_delimiters(braced, 1), ("{!!", "!!}"));
+
+        for echo in [&b"{{ $a }}"[..], b"{{$a}}", b"{{{ $a }}}", b"{!! $a !!}"] {
+            assert!(is_echo_start(echo, 0), "{}", String::from_utf8_lossy(echo));
+        }
+        // A space keeps `!!` out of the opener, so this is a double negation
+        // inside an escaped echo.
+        assert!(is_echo_start(b"{{ !!$a }}", 0));
     }
 
     #[test]

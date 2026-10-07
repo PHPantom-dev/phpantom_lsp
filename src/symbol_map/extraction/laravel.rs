@@ -114,6 +114,12 @@ pub(super) fn try_emit_laravel_string_span(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
+    if kind == crate::symbol_map::LaravelStringKind::Trans {
+        if let Some(key) = argument_expr_for_parameter(argument_list, "key") {
+            push_laravel_string_span(kind, false, false, key, content, spans);
+        }
+        return;
+    }
     emit_laravel_string_span(kind, false, 0, argument_list, content, spans);
 }
 
@@ -313,6 +319,83 @@ pub(super) fn try_emit_laravel_config_helper_spans(
         content,
         spans,
     );
+}
+
+/// The config keys `expr` writes when it is one of the calls a file's write
+/// spans are read from: the array form of the `config()` helper, and `set()`
+/// on the repository `config()` returns or on the `Config` facade.
+///
+/// The service-provider scan reads a provider's writes through here rather
+/// than building the provider's whole symbol map, so a key a package
+/// declares from its provider instead of a config file (`laravel/sanctum`
+/// adds its guard this way) is judged by the same rules as a project's own.
+pub(crate) fn config_keys_written_by(expr: &Expression<'_>, content: &str) -> Vec<String> {
+    let mut spans = Vec::new();
+    match expr {
+        Expression::Call(Call::Function(call)) => {
+            if let Expression::Identifier(ident) = call.function
+                && strip_fqn_prefix(bytes_to_str(ident.value())).eq_ignore_ascii_case("config")
+            {
+                try_emit_laravel_config_helper_spans(&call.argument_list, content, &mut spans);
+            }
+        }
+        Expression::Call(Call::Method(call)) => {
+            if let ClassLikeMemberSelector::Identifier(method) = &call.method
+                && is_laravel_config_repository_call(call.object, bytes_to_str(method.value))
+            {
+                try_emit_laravel_config_key_span(
+                    bytes_to_str(method.value),
+                    &call.argument_list,
+                    content,
+                    &mut spans,
+                );
+            }
+        }
+        Expression::Call(Call::NullSafeMethod(call)) => {
+            if let ClassLikeMemberSelector::Identifier(method) = &call.method
+                && is_laravel_config_repository_call(call.object, bytes_to_str(method.value))
+            {
+                try_emit_laravel_config_key_span(
+                    bytes_to_str(method.value),
+                    &call.argument_list,
+                    content,
+                    &mut spans,
+                );
+            }
+        }
+        Expression::Call(Call::StaticMethod(call)) => {
+            if let Expression::Identifier(class) = call.class
+                && is_config_facade_name(strip_fqn_prefix(bytes_to_str(class.value())))
+                && let ClassLikeMemberSelector::Identifier(method) = &call.method
+                && is_config_repository_method(bytes_to_str(method.value))
+            {
+                try_emit_laravel_config_key_span(
+                    bytes_to_str(method.value),
+                    &call.argument_list,
+                    content,
+                    &mut spans,
+                );
+            }
+        }
+        _ => {}
+    }
+    spans
+        .into_iter()
+        .filter_map(|span| match span.kind {
+            SymbolKind::LaravelStringKey {
+                key,
+                is_write: true,
+                ..
+            } => Some(key),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether a static call's class, as written, is the `Config` facade.
+pub(super) fn is_config_facade_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("Config")
+        || name.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Config")
 }
 
 /// Apply `push` to each value of `expr`, which Laravel accepts as either a

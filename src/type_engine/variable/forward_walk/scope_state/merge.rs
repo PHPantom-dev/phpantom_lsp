@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use super::proofs::{
@@ -25,8 +26,38 @@ impl ScopeState {
             return false;
         }
         self.locals
-            .iter()
-            .all(|(name, types)| other.locals.get(name).is_some_and(|t| same_types(types, t)))
+            .diff(&other.locals, |_, mine, theirs| match (mine, theirs) {
+                (Some(mine), Some(theirs)) if same_types(mine, theirs) => ControlFlow::Continue(()),
+                _ => ControlFlow::Break(()),
+            })
+            .is_continue()
+    }
+
+    /// The keys whose entries the two scopes do not share: written on
+    /// one path and not the other, written separately on both, or
+    /// flagged [`unresolved`](Self::unresolved) on only one side.  A key
+    /// outside this list holds the same entry on both paths, which a join
+    /// leaves exactly as it is.
+    fn differing_keys(&self, other: &ScopeState) -> Vec<Atom> {
+        let mut keys = Vec::new();
+        let _ = self.locals.diff::<()>(&other.locals, |key, _, _| {
+            keys.push(*key);
+            ControlFlow::Continue(())
+        });
+        let mut flagged = Vec::new();
+        let _ = self
+            .unresolved
+            .diff::<()>(&other.unresolved, |key, mine, theirs| {
+                if mine.is_some() != theirs.is_some() {
+                    flagged.push(*key);
+                }
+                ControlFlow::Continue(())
+            });
+        if !flagged.is_empty() {
+            let seen: crate::atom::AtomSet = keys.iter().copied().collect();
+            keys.extend(flagged.into_iter().filter(|key| !seen.contains(key)));
+        }
+        keys
     }
 
     /// Merge another scope into `self`.
@@ -89,31 +120,29 @@ impl ScopeState {
         // A boolean only still stands for a check if every incoming path
         // agrees on it.  A check one branch established (or reassigned
         // out from under) says nothing about the joined program point.
-        if !self.assertions.is_empty() {
-            self.assertions
-                .retain(|name, checks| other.assertions.get(name) == Some(checks));
+        for key in disagreeing(&self.assertions, &other.assertions) {
+            self.assertions.remove(&key);
         }
 
         // Which non-null proofs the join keeps, and which ones it learns
         // from the two paths disagreeing.  Computed before the locals are
         // unioned below, because both answers read the per-path types.
-        let implications = join_non_null_implications(self, other);
-        let narrowings = join_implied_narrowings(self, other);
+        let differing = self.differing_keys(other);
+        let implications = join_non_null_implications(self, other, &differing);
+        let narrowings = join_implied_narrowings(self, other, &differing);
         let exclusions = join_ruled_out(self, other);
 
         // Likewise for a stored match outcome: a path that never ran the
         // call, or reassigned either half of it, leaves the boolean
         // standing for nothing at the joined point.
-        if !self.preg_outcomes.is_empty() {
-            self.preg_outcomes
-                .retain(|name, outcome| other.preg_outcomes.get(name) == Some(outcome));
+        for key in disagreeing(&self.preg_outcomes, &other.preg_outcomes) {
+            self.preg_outcomes.remove(&key);
         }
 
         // Likewise: a variable only counts as still naming the closure it
         // was assigned when every incoming path assigned it the same one.
-        if !self.closure_captures.is_empty() {
-            self.closure_captures
-                .retain(|name, effects| other.closure_captures.get(name) == Some(effects));
+        for key in disagreeing(&self.closure_captures, &other.closure_captures) {
+            self.closure_captures.remove(&key);
         }
 
         // A key fact holds past the join only where every path left it
@@ -135,8 +164,10 @@ impl ScopeState {
             }
         }
 
-        for (name, other_types) in &other.locals {
-            self.merge_local(name, other_types, other);
+        for name in &differing {
+            if let Some(other_types) = other.locals.get(name) {
+                self.merge_local(name, other_types, other);
+            }
         }
 
         self.non_null_implications = implications;
@@ -152,10 +183,10 @@ impl ScopeState {
         // this side has never seen picks the failure up, so that a
         // later join still knows the entry stands for a gap rather
         // than for a value that could be anything.
-        if other_types.is_empty() && other.unresolved.contains(name) {
+        if other_types.is_empty() && other.unresolved.contains_key(name) {
             if !self.locals.contains_key(name) {
                 self.locals.insert(*name, Vec::new());
-                self.unresolved.insert(*name);
+                self.unresolved.insert(*name, ());
             }
             return;
         }
@@ -165,7 +196,7 @@ impl ScopeState {
         // empty here is a value that could be anything, which is the
         // top of the lattice and so the answer either way.
         let self_lost =
-            self.unresolved.contains(name) && self.locals.get(name).is_some_and(Vec::is_empty);
+            self.unresolved.contains_key(name) && self.locals.get(name).is_some_and(Vec::is_empty);
         if self_lost {
             self.unresolved.remove(name);
             self.locals.insert(*name, Vec::new());
@@ -189,7 +220,7 @@ impl ScopeState {
             .get(name)
             .is_some_and(|existing| same_type_strings(existing, other_types));
 
-        let entry = self.locals.entry(*name).or_default();
+        let entry = self.locals.get_or_insert_default(*name);
 
         // Merge other_types into entry.  When an incoming entry
         // shares a class name with an existing entry but has a
@@ -299,6 +330,22 @@ impl ScopeState {
         // anything.
         ResolvedType::drop_subsumed_entries(entry, !agreed);
     }
+}
+
+/// The entries of `mine` that `theirs` does not hold the same value for: a
+/// proof only holds past a join when every incoming path carries it.
+fn disagreeing<V: PartialEq>(mine: &AtomTrie<V>, theirs: &AtomTrie<V>) -> Vec<Atom> {
+    let mut gone = Vec::new();
+    if mine.is_empty() {
+        return gone;
+    }
+    let _ = mine.diff::<()>(theirs, |key, kept, other| {
+        if kept.is_some() && kept != other {
+            gone.push(*key);
+        }
+        ControlFlow::Continue(())
+    });
+    gone
 }
 
 /// Whether two type lists say the same thing, comparing a shared

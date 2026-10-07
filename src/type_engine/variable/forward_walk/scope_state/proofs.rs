@@ -1,6 +1,8 @@
 //! The proofs a scope carries beside its types, and how two paths' proofs
 //! join: exclusions, non-null implications and implied narrowings.
 
+use std::ops::ControlFlow;
+
 use super::merge::same_types;
 use super::*;
 use crate::type_engine::variable::forward_walk::is_synthetic_key;
@@ -64,22 +66,30 @@ fn path_rules_out(side: &ScopeState, key: &Atom, types: &[ResolvedType]) -> bool
 
 /// The exclusions that survive a join: a value is only known not to be a
 /// class when neither incoming path could have left it as one.
-pub(super) fn join_ruled_out(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<PhpType>> {
+pub(super) fn join_ruled_out(a: &ScopeState, b: &ScopeState) -> ProofMap<Vec<PhpType>> {
     if a.ruled_out.is_empty() || b.ruled_out.is_empty() {
-        return AtomMap::default();
+        return ProofMap::default();
     }
-    let mut joined: AtomMap<Vec<PhpType>> = AtomMap::default();
-    for (key, mine) in &a.ruled_out {
-        let Some(theirs) = b.ruled_out.get(key) else {
-            continue;
+    // An entry both paths still share is its own intersection.
+    let mut joined = a.ruled_out.clone();
+    let mut changed: Vec<(Atom, Vec<PhpType>)> = Vec::new();
+    let _ = a.ruled_out.diff::<()>(&b.ruled_out, |key, mine, theirs| {
+        let both: Vec<PhpType> = match (mine, theirs) {
+            (Some(mine), Some(theirs)) => mine
+                .iter()
+                .filter(|ty| theirs.contains(ty))
+                .cloned()
+                .collect(),
+            _ => Vec::new(),
         };
-        let both: Vec<PhpType> = mine
-            .iter()
-            .filter(|ty| theirs.contains(ty))
-            .cloned()
-            .collect();
-        if !both.is_empty() {
-            joined.insert(*key, both);
+        changed.push((*key, both));
+        ControlFlow::Continue(())
+    });
+    for (key, both) in changed {
+        if both.is_empty() {
+            joined.remove(&key);
+        } else {
+            joined.insert(key, both);
         }
     }
     joined
@@ -107,20 +117,43 @@ fn types_within(narrow: &[ResolvedType], wide: &[ResolvedType]) -> bool {
 
 /// Whether two implied-narrowing maps record the same proofs.
 pub(super) fn same_implied_narrowings(
-    a: &AtomMap<Vec<ImpliedNarrowing>>,
-    b: &AtomMap<Vec<ImpliedNarrowing>>,
+    a: &AtomTrie<Vec<ImpliedNarrowing>>,
+    b: &AtomTrie<Vec<ImpliedNarrowing>>,
 ) -> bool {
     a.len() == b.len()
-        && a.iter().all(|(holder, mine)| {
-            b.get(holder).is_some_and(|theirs| {
-                mine.len() == theirs.len()
-                    && mine.iter().zip(theirs).all(|(p, q)| {
-                        p.key == q.key
-                            && same_types(&p.types, &q.types)
-                            && same_trigger(&p.trigger, &q.trigger)
-                    })
-            })
+        && a.diff(b, |_, mine, theirs| {
+            let same = match (mine, theirs) {
+                (Some(mine), Some(theirs)) => {
+                    mine.len() == theirs.len()
+                        && mine.iter().zip(theirs).all(|(p, q)| {
+                            p.key == q.key
+                                && same_types(&p.types, &q.types)
+                                && same_trigger(&p.trigger, &q.trigger)
+                        })
+                }
+                _ => false,
+            };
+            if same {
+                ControlFlow::Continue(())
+            } else {
+                ControlFlow::Break(())
+            }
         })
+        .is_continue()
+}
+
+/// The holders whose proof lists two maps do not share.
+///
+/// A holder outside this list carries the very same proofs on both paths,
+/// and a proof both paths carry survives the join, so a joined map can
+/// start out as either side's and only revisit these.
+fn differing_holders<V>(a: &AtomTrie<V>, b: &AtomTrie<V>) -> Vec<Atom> {
+    let mut holders = Vec::new();
+    let _ = a.diff::<()>(b, |holder, _, _| {
+        holders.push(*holder);
+        ControlFlow::Continue(())
+    });
+    holders
 }
 
 /// Whether a scope's entry for `key` holds exactly `null` and nothing else.
@@ -184,21 +217,28 @@ fn implication_holds(scope: &ScopeState, holder: &Atom, implied: &Atom) -> bool 
 /// nullable on either side was not written by the branch as a whole (a
 /// loop that assigns it under its own condition, say), and says nothing
 /// about what the other variables did.
-pub(super) fn join_non_null_implications(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<Atom>> {
-    let mut joined: AtomMap<Vec<Atom>> = AtomMap::default();
+///
+/// `differing` lists the keys the two paths do not share an entry for (see
+/// `ScopeState::differing_keys`); every other key holds the same value on
+/// both, and so cannot be one they disagree about.
+pub(super) fn join_non_null_implications(
+    a: &ScopeState,
+    b: &ScopeState,
+    differing: &[Atom],
+) -> ProofMap<Vec<Atom>> {
+    let mut joined = a.non_null_implications.clone();
+    let revisit = differing_holders(&a.non_null_implications, &b.non_null_implications);
+    for holder in &revisit {
+        joined.remove(holder);
+    }
     let mut record = |holder: Atom, implied: Atom| {
-        let entry: &mut Vec<Atom> = joined.entry(holder).or_default();
-        if !entry.contains(&implied) {
-            entry.push(implied);
-        }
+        joined.push_unique(holder, implied, |a, b| a == b);
     };
 
-    for (holder, implieds) in a
-        .non_null_implications
-        .iter()
-        .chain(b.non_null_implications.iter())
-    {
-        for implied in implieds {
+    for holder in &revisit {
+        let mine = a.non_null_implications.get(holder).into_iter().flatten();
+        let theirs = b.non_null_implications.get(holder).into_iter().flatten();
+        for implied in mine.chain(theirs) {
             if implication_holds(a, holder, implied) && implication_holds(b, holder, implied) {
                 record(*holder, *implied);
             }
@@ -209,7 +249,7 @@ pub(super) fn join_non_null_implications(a: &ScopeState, b: &ScopeState) -> Atom
     // which path is the one that left them holding a value.
     let mut non_null_in_a: Vec<Atom> = Vec::new();
     let mut non_null_in_b: Vec<Atom> = Vec::new();
-    for key in a.locals.keys() {
+    for key in differing {
         if is_definitely_null(a, key) {
             if is_definitely_non_null(b, key) {
                 non_null_in_b.push(*key);
@@ -270,19 +310,25 @@ pub(super) fn join_non_null_implications(a: &ScopeState, b: &ScopeState) -> Atom
 /// existed before the branch. A property path or a call key is readable
 /// on both paths whatever either recorded for it, so the path that
 /// narrowed it contributes even when the other left no entry at all.
+///
+/// Only the keys in `differing` can disagree, as for
+/// [`join_non_null_implications`], with one exception: a recorded
+/// exclusion can rule out the very value both paths hold, so the keys
+/// either side has excluded something for are looked at too.
 pub(super) fn join_implied_narrowings(
     a: &ScopeState,
     b: &ScopeState,
-) -> AtomMap<Vec<ImpliedNarrowing>> {
-    let mut joined: AtomMap<Vec<ImpliedNarrowing>> = AtomMap::default();
+    differing: &[Atom],
+) -> ProofMap<Vec<ImpliedNarrowing>> {
+    let mut joined = a.implied_narrowings.clone();
+    let revisit = differing_holders(&a.implied_narrowings, &b.implied_narrowings);
+    for holder in &revisit {
+        joined.remove(holder);
+    }
     let mut record = |holder: Atom, proof: ImpliedNarrowing| {
-        let entry: &mut Vec<ImpliedNarrowing> = joined.entry(holder).or_default();
-        let already = entry
-            .iter()
-            .any(|p| p.key == proof.key && same_trigger(&p.trigger, &proof.trigger));
-        if !already {
-            entry.push(proof);
-        }
+        joined.push_unique(holder, proof, |p, q| {
+            p.key == q.key && same_trigger(&p.trigger, &q.trigger)
+        });
     };
 
     let survives = |side: &ScopeState, holder: &Atom, proof: &ImpliedNarrowing| {
@@ -308,12 +354,10 @@ pub(super) fn join_implied_narrowings(
             .get(&proof.key)
             .is_some_and(|t| same_types(t, &proof.types))
     };
-    for (holder, proofs) in a
-        .implied_narrowings
-        .iter()
-        .chain(b.implied_narrowings.iter())
-    {
-        for proof in proofs {
+    for holder in &revisit {
+        let mine = a.implied_narrowings.get(holder).into_iter().flatten();
+        let theirs = b.implied_narrowings.get(holder).into_iter().flatten();
+        for proof in mine.chain(theirs) {
             if survives(a, holder, proof) && survives(b, holder, proof) {
                 record(*holder, proof.clone());
             }
@@ -326,7 +370,12 @@ pub(super) fn join_implied_narrowings(
     // everything it holds and one walk answers for every trigger that
     // points at it.
     let mut flipped: Vec<(Atom, bool, Vec<ProofTrigger>)> = Vec::new();
-    for key in a.locals.keys() {
+    let excluded = a
+        .ruled_out
+        .keys()
+        .chain(b.ruled_out.keys())
+        .filter(|key| !differing.contains(key));
+    for key in differing.iter().chain(excluded) {
         // Triggers that identify `a` as the path that ran, and ones that
         // identify `b`.
         let (mut from_a, mut from_b) = (Vec::new(), Vec::new());
@@ -389,7 +438,10 @@ pub(super) fn join_implied_narrowings(
     }
     for (holder, taken_is_a, triggers) in flipped {
         let (taken, skipped) = if taken_is_a { (a, b) } else { (b, a) };
-        for (key, types) in &taken.locals {
+        for key in differing {
+            let Some(types) = taken.locals.get(key) else {
+                continue;
+            };
             if *key == holder || types.is_empty() {
                 continue;
             }

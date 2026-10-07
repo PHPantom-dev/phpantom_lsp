@@ -89,13 +89,19 @@ pub(crate) fn test_scope_cache_hits() -> usize {
 
 /// What identifies one "what is the type of `$var` here?" question: the
 /// source it is asked of, the hash of the un-prefixed variable name, the
-/// offset, and the class the question is asked in.
+/// offset, the class the question is asked in, and the
+/// [body-inference context](crate::type_engine::call_resolution::body_inference_context)
+/// it is asked under.
+///
+/// The context is there because a body walked for its return type seeds
+/// its parameters with what the call site passed, so the same variable at
+/// the same offset answers differently for each caller.
 ///
 /// The source is `(pointer, length)` rather than the pointer alone: the
 /// memo outlives any single query, so a freed buffer whose address is
 /// handed straight back to a different one would otherwise read as the
 /// same source.
-type VarQueryKey = ((usize, usize), u64, u32, Atom);
+type VarQueryKey = ((usize, usize), u64, u32, Atom, u64);
 
 /// Build the key identifying one variable query.
 ///
@@ -120,6 +126,7 @@ fn var_query_key(
         hasher.finish(),
         cursor_offset,
         class_name,
+        crate::type_engine::call_resolution::body_inference_context(),
     )
 }
 
@@ -313,20 +320,13 @@ pub(crate) fn resolve_variable_types(
 
     // ── Memo ────────────────────────────────────────────────────
     // Everything below walks the enclosing body from its first
-    // statement, which reaches the same answer every time within one
-    // pass — except inside a body-return inference, where the walk
-    // seeds the body's parameters with what the *call site* passed.
-    // The same variable at the same offset legitimately answers
-    // differently for each caller then, and what decided it is not in
-    // the key, so that walk neither reads the memo nor writes to it.
-    let memoisable = !crate::type_engine::call_resolution::body_inference_in_progress();
-    if memoisable
-        && let Some(hit) = VAR_TYPE_MEMO.with(|cell| {
-            cell.borrow()
-                .as_ref()
-                .and_then(|memo| memo.get(&key).cloned())
-        })
-    {
+    // statement, which reaches the same answer every time the same
+    // question is asked within one pass.
+    if let Some(hit) = VAR_TYPE_MEMO.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|memo| memo.get(&key).cloned())
+    }) {
         return hit;
     }
 
@@ -358,13 +358,11 @@ pub(crate) fn resolve_variable_types(
         )
     });
 
-    if memoisable {
-        VAR_TYPE_MEMO.with(|cell| {
-            if let Some(memo) = cell.borrow_mut().as_mut() {
-                memo.insert(key, resolved.clone());
-            }
-        });
-    }
+    VAR_TYPE_MEMO.with(|cell| {
+        if let Some(memo) = cell.borrow_mut().as_mut() {
+            memo.insert(key, resolved.clone());
+        }
+    });
 
     resolved
 }

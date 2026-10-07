@@ -253,6 +253,15 @@ impl PhpType {
             }
         }
 
+        // ── Shape <: shape ──────────────────────────────────────────
+        // Either side may be unsealed, which `kind()` reads as the generic
+        // array it widens to. The rules below would then compare that array
+        // and never see the entries the shape lists, so two shapes are
+        // settled here, entry by entry.
+        if let (Some(sub), Some(wider)) = (self.shape_parts(), supertype.shape_parts()) {
+            return shape_is_subshape(&sub, &wider, &|a, b| a.is_subtype_of(b));
+        }
+
         // ── ArrayShape <: array / iterable ──────────────────────────
         if let TypeKind::ArrayShape(entries) = self.kind() {
             // A shape satisfies a `non-empty-…` supertype only when it
@@ -313,16 +322,6 @@ impl PhpType {
             // ArrayShape <: T[] — check all values against T.
             if let TypeKind::Array(inner) = supertype.kind() {
                 return entries.iter().all(|e| e.value_type.is_subtype_of(inner));
-            }
-
-            // ArrayShape <: ArrayShape — every key the shape may hold is one
-            // the wider shape allows, with a value it allows, and the wider
-            // shape requires no key the shape may lack.
-            if let TypeKind::ArrayShape(wider) = supertype.kind() {
-                if supertype.is_list_shape() && !is_list {
-                    return false;
-                }
-                return shape_is_subshape(entries, wider);
             }
         }
 
@@ -471,6 +470,72 @@ impl PhpType {
 // Array-like arity normalisation
 // ---------------------------------------------------------------------------
 
+/// Whether every array the shape `sub` describes is one `wider` describes.
+///
+/// Every entry `sub` lists has to be one `wider` lists, no more optional and
+/// with a value it allows, or else fall under the tail of an unsealed
+/// `wider`. Every entry `wider` requires has to be listed by `sub`; one it
+/// merely allows may still turn up in the tail of an unsealed `sub`, holding
+/// what that tail holds. And the tail of `sub` has to fit the tail of
+/// `wider`, which a sealed shape does not have.
+///
+/// `is_subtype` compares the key and value types of two entries, so that the
+/// structural check and the one that follows the class hierarchy into the
+/// entries answer by the same rules.
+pub(crate) fn shape_is_subshape(
+    sub: &ShapeParts<'_>,
+    wider: &ShapeParts<'_>,
+    is_subtype: &dyn Fn(&PhpType, &PhpType) -> bool,
+) -> bool {
+    // `list{…}` says so outright; a shape tracked from a literal or from
+    // appends says so by holding `0, 1, 2, …` in order, which a tail that
+    // may add keys of its own no longer promises.
+    let sub_is_list = sub.is_list || (sub.tail.is_none() && shape_keys_are_sequential(sub.entries));
+    if wider.is_list && !sub_is_list {
+        return false;
+    }
+    let (Some(keys), Some(wider_keys)) = (
+        runtime_shape_keys(sub.entries),
+        runtime_shape_keys(wider.entries),
+    ) else {
+        return false;
+    };
+
+    let listed_fit = sub.entries.iter().zip(&keys).all(|(entry, key)| {
+        match wider_keys.iter().position(|wider_key| wider_key == key) {
+            Some(index) => {
+                (!entry.optional || wider.entries[index].optional)
+                    && is_subtype(&entry.value_type, &wider.entries[index].value_type)
+            }
+            None => wider.tail.is_some_and(|(tail_key, tail_value)| {
+                is_subtype(&shape_key_type(key), tail_key)
+                    && is_subtype(&entry.value_type, tail_value)
+            }),
+        }
+    });
+    if !listed_fit {
+        return false;
+    }
+
+    let wider_fit = wider.entries.iter().zip(&wider_keys).all(|(entry, key)| {
+        keys.contains(key)
+            || (entry.optional
+                && sub.tail.is_none_or(|(tail_key, tail_value)| {
+                    !is_subtype(&shape_key_type(key), tail_key)
+                        || is_subtype(tail_value, &entry.value_type)
+                }))
+    });
+    if !wider_fit {
+        return false;
+    }
+
+    sub.tail.is_none_or(|(tail_key, tail_value)| {
+        wider.tail.is_some_and(|(wider_key, wider_value)| {
+            is_subtype(tail_key, wider_key) && is_subtype(tail_value, wider_value)
+        })
+    })
+}
+
 /// The `(key, value)` pair an array-like generic implies, whichever arity
 /// it was written at.
 ///
@@ -478,25 +543,6 @@ impl PhpType {
 /// `array-key`, and a one-argument `iterable<V>` on `mixed` (a
 /// `Traversable` may yield any key type). Returns `None` for arities that
 /// carry no key/value meaning.
-fn shape_is_subshape(entries: &[ShapeEntry], wider: &[ShapeEntry]) -> bool {
-    let (Some(keys), Some(wider_keys)) = (runtime_shape_keys(entries), runtime_shape_keys(wider))
-    else {
-        return false;
-    };
-    entries.iter().zip(&keys).all(|(entry, key)| {
-        wider_keys
-            .iter()
-            .position(|wider_key| wider_key == key)
-            .is_some_and(|index| {
-                (!entry.optional || wider[index].optional)
-                    && entry.value_type.is_subtype_of(&wider[index].value_type)
-            })
-    }) && wider
-        .iter()
-        .zip(&wider_keys)
-        .all(|(entry, key)| entry.optional || keys.contains(key))
-}
-
 pub(crate) fn array_like_key_value(generic: &GenericType) -> Option<(PhpType, &PhpType)> {
     match generic.args.as_slice() {
         [value] => {

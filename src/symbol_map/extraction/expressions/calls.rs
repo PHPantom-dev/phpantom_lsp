@@ -733,9 +733,7 @@ fn extract_call<'a>(
                     .map(strip_fqn_prefix)
                     .unwrap_or(clean_subject);
                 let laravel_span_start = ctx.spans.len();
-                if (clean_subject.eq_ignore_ascii_case("Config")
-                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Config"))
-                    && is_config_repository_method(&member_name)
+                if is_config_facade_name(clean_subject) && is_config_repository_method(&member_name)
                 {
                     try_emit_laravel_config_key_span(
                         &member_name,

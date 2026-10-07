@@ -1,5 +1,52 @@
 use super::*;
 
+/// The scope keys `expr` can narrow: every variable it names that the
+/// scope holds, and every compound key read through one of them.
+///
+/// Each narrowing extractor recognises its subject in the expression's own
+/// syntax, so a key whose variable the expression never mentions is one no
+/// extractor can match. Testing only these keeps the cost of a condition
+/// proportional to the condition rather than to the scope, which at the top
+/// level of a long script holds every variable assigned so far.
+///
+/// A compound key that is not rooted at a variable (`self::$cache`,
+/// `Config::get()`) is always included, since its spelling names no
+/// variable to look for.
+pub(crate) fn scope_keys_named_by(expr: &Expression<'_>, scope: &ScopeState) -> Vec<Atom> {
+    struct NamedVariables;
+    impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<Atom>> for NamedVariables {
+        fn walk_in_expression(&self, node: &'ast Expression<'arena>, names: &mut Vec<Atom>) {
+            if let Expression::Variable(Variable::Direct(dv)) = node {
+                let name = atom(bytes_to_str(dv.name));
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+    }
+    let mut named = Vec::new();
+    mago_syntax::walker::Walker::walk_expression(&NamedVariables, expr, &mut named);
+
+    let mut keys: Vec<Atom> = named
+        .iter()
+        .filter(|name| scope.locals.contains_key(name))
+        .copied()
+        .collect();
+    for key in scope.locals.compound_keys() {
+        let root = key
+            .strip_prefix('$')
+            .map(|rest| &key[..1 + rest.find(|c: char| !is_name_char(c)).unwrap_or(rest.len())]);
+        if root.is_none_or(|root| named.iter().any(|name| name.as_str() == root)) {
+            keys.push(*key);
+        }
+    }
+    keys
+}
+
+fn is_name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || !c.is_ascii()
+}
+
 /// Extract variable names referenced in instanceof / is_a / get_class
 /// conditions.  This catches variables that are not yet in scope but
 /// are used in guard clauses like `if (!$x instanceof Foo) { return; }`.
@@ -94,13 +141,12 @@ pub(crate) fn is_synthetic_key(key: &str) -> bool {
 /// Called after loop merges and other scope transitions where
 /// condition-based narrowing no longer holds.
 pub(crate) fn strip_synthetic_property_keys(scope: &mut ScopeState) {
-    scope.locals.retain(|key, _| !is_synthetic_key(key));
+    scope.locals.retain_compound(|key| !is_synthetic_key(key));
     // A check on a property path is narrowing too, so a boolean that
     // stands for one is dropped alongside the key it describes.
-    scope.assertions.retain(|_, checks| {
-        checks.retain(|c| !is_synthetic_key(&c.subject));
-        !checks.is_empty()
-    });
+    scope
+        .assertions
+        .retain_items(|c| !is_synthetic_key(&c.subject));
 }
 
 /// Keep only the synthetic property/array access keys that *every*
@@ -119,7 +165,7 @@ pub(crate) fn retain_synthetic_keys_common_to_all(
     scope: &mut ScopeState,
     surviving: &[&ScopeState],
 ) {
-    scope.locals.retain(|key, _| {
+    scope.locals.retain_compound(|key| {
         !is_synthetic_key(key) || surviving.iter().all(|s| s.locals.contains_key(key))
     });
 }
@@ -277,36 +323,11 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
             collect_condition_property_keys_inner(bin.lhs, keys);
             collect_condition_property_keys_inner(bin.rhs, keys);
         }
-        // Type guard functions: `is_string($a->foo)`, `is_int($a->foo)`, etc.
+        // Checks on their first argument: `is_string($a->foo)`,
+        // `is_a($a->foo, Foo::class)`, `in_array($a->foo, $list, true)`.
         Expression::Call(Call::Function(func_call)) => {
             if let Expression::Identifier(ident) = func_call.function {
-                let func_name = bytes_to_str(ident.value());
-                let is_type_guard = matches!(
-                    func_name,
-                    "is_array"
-                        | "is_string"
-                        | "is_int"
-                        | "is_integer"
-                        | "is_long"
-                        | "is_float"
-                        | "is_double"
-                        | "is_real"
-                        | "is_bool"
-                        | "is_object"
-                        | "is_numeric"
-                        | "is_callable"
-                        | "is_null"
-                        | "is_scalar"
-                        | "is_a"
-                        | "class_exists"
-                        | "interface_exists"
-                        | "enum_exists"
-                        | "trait_exists"
-                        // A strict `in_array` proves its needle is one of
-                        // the haystack's elements, so the needle is a
-                        // subject the branch narrows like any other.
-                        | "in_array"
-                );
+                let is_type_guard = narrowing::narrows_first_argument(bytes_to_str(ident.value()));
                 if is_type_guard && let Some(first_arg) = func_call.argument_list.arguments.first()
                 {
                     let arg_expr = match first_arg {
@@ -509,9 +530,7 @@ pub(crate) fn collect_condition_var_names_inner(expr: &Expression<'_>, names: &m
                 _ => return,
             };
             if matches!(
-                crate::util::strip_fqn_prefix(func_name)
-                    .to_ascii_lowercase()
-                    .as_str(),
+                crate::ci_map::fold(crate::util::strip_fqn_prefix(func_name)).as_ref(),
                 "is_a"
                     | "get_class"
                     | "class_exists"

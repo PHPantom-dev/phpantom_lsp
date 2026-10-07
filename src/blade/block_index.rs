@@ -190,7 +190,7 @@ impl Backend {
             };
             let entry = Arc::new(IndexedTemplate {
                 uri: uri.clone(),
-                blocks: super::blocks::analyse(&content),
+                blocks: super::blocks::analyse(&content, &self.blade_directives.read()),
             });
             templates.view_by_uri.insert(uri, view.clone());
             templates.add_edges(view, &entry.blocks);
@@ -228,7 +228,7 @@ impl Backend {
         };
         let entry = Arc::new(IndexedTemplate {
             uri: uri.to_string(),
-            blocks: super::blocks::analyse(content),
+            blocks: super::blocks::analyse(content, &self.blade_directives.read()),
         });
         let mut templates = index.templates.write();
         if let Some(previous) = templates.by_view.get(&view).map(Arc::clone) {
@@ -265,7 +265,7 @@ impl Backend {
 
         let mut current = Arc::new(IndexedTemplate {
             uri: uri.to_string(),
-            blocks: super::blocks::analyse(content),
+            blocks: super::blocks::analyse(content, &self.blade_directives.read()),
         });
         loop {
             seen.insert(current.uri.clone());
@@ -427,7 +427,7 @@ impl Backend {
         let Some(content) = self.get_file_content(uri) else {
             return (BlockRole::Fill, Vec::new());
         };
-        let role = super::blocks::analyse(&content)
+        let role = super::blocks::analyse(&content, &self.blade_directives.read())
             .blocks
             .iter()
             .find(|block| block.kind == kind && block.name == name)

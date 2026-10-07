@@ -447,14 +447,14 @@ impl Backend {
         // Read under the guard rather than cloned: the set is small but
         // this runs on every keystroke in a template, and nothing the
         // preprocessor does can write it back.
-        let custom_directives = self.blade_custom_directives.read();
+        let directives = self.blade_directives.read();
         let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
             content,
             &injected.vars,
             crate::blade::template_kind(uri, content),
             injected.this_class.as_deref(),
             Some(&components),
-            &custom_directives,
+            &directives,
         );
         Some(BladeLowering {
             virtual_php: Arc::new(virtual_php),
@@ -1314,6 +1314,22 @@ impl Backend {
                     {
                         any_function_changed = true;
                         changed_names.push(crate::resolution_deps::dep_key(old_fqn));
+                    }
+                }
+            }
+        }
+
+        // A name that failed to resolve before this file declared it must
+        // resolve from now on, so its recorded miss is retired — the same
+        // un-caching the class declarations above get.
+        {
+            let nf_cache = self.symbols.function_not_found_cache.read();
+            if !nf_cache.is_empty() {
+                drop(nf_cache);
+                let mut nf_cache = self.symbols.function_not_found_cache.write();
+                for update in &prepared {
+                    for fqn in &update.new_function_fqns {
+                        nf_cache.remove(fqn);
                     }
                 }
             }

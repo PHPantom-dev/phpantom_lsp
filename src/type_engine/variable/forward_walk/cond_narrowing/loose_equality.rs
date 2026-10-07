@@ -49,7 +49,10 @@ pub(super) fn apply_loose_literal_narrowing(
 /// Apply a non-strict `in_array($x, [...])` check whose haystack holds only
 /// literals, by the same rules as `==` against each of them.
 ///
-/// The strict form is [`apply_in_array_narrowing`]'s.
+/// A needle that was found equals one of the elements, whichever they
+/// are, while one that was not only differs from the values the haystack
+/// is known to hold (see [`values_held_by`]).  The strict form is
+/// [`apply_in_array_narrowing`]'s.
 pub(crate) fn apply_loose_in_array_narrowing<'b>(
     condition: &'b Expression<'b>,
     scope: &mut ScopeState,
@@ -63,14 +66,21 @@ pub(crate) fn apply_loose_in_array_narrowing<'b>(
     let Some(var_name) = expr_to_subject(needle) else {
         return;
     };
-    let Some(element) = resolve_in_array_element_type_fw(haystack, scope, ctx) else {
+    let Some(haystack) = resolve_in_array_haystack_type_fw(haystack, scope, ctx) else {
         return;
     };
-    let literals: Vec<PhpType> = element.union_members().into_iter().cloned().collect();
+    let found = !(inverted ^ negated);
+    let literals: Vec<PhpType> = if found {
+        let Some(element) = haystack.iterable_element_type() else {
+            return;
+        };
+        element.union_members().into_iter().cloned().collect()
+    } else {
+        values_held_by(&haystack)
+    };
     if literals.is_empty() || !literals.iter().all(is_loose_comparand) {
         return;
     }
-    let found = !(inverted ^ negated);
     refine_subject(&var_name, scope, ctx, |ty| {
         if found {
             loosely_equal_part(ty, &literals)

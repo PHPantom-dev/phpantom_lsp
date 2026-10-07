@@ -1398,7 +1398,7 @@ async fn closure_return_type_hint_template_substitution() {
  */
 function transform(array $items, callable $fn): void {}
 
-transform([1, 2, 3], function ($x) { return $x * 2; });
+transform([1, 2, 3], function ($x) { return $x; });
 "#;
     let hints = inlay_hints_for(&backend, &uri, text).await;
     let all: Vec<_> = hints.iter().map(|h| (hint_label(h), h.kind)).collect();
@@ -1417,6 +1417,35 @@ transform([1, 2, 3], function ($x) { return $x * 2; });
         hint_label(return_hints[0]),
         ": 1|2|3",
         "return type hint should be ': 1|2|3' (T substituted from array elements); all: {:?}",
+        all
+    );
+}
+
+#[tokio::test]
+async fn closure_return_type_hint_integer_arithmetic_is_int() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = r#"<?php
+/**
+ * @template T
+ * @param array<T> $items
+ * @param callable(T): T $fn
+ */
+function transform(array $items, callable $fn): void {}
+
+transform([1, 2, 3], function ($x) { return $x * 2; });
+"#;
+    let hints = inlay_hints_for(&backend, &uri, text).await;
+    let all: Vec<_> = hints.iter().map(|h| (hint_label(h), h.kind)).collect();
+    // `$x * 2` over `1|2|3` returns 2, 4 or 6, so the body's own type wins
+    // over the substituted `T`.
+    let return_hint = hints
+        .iter()
+        .find(|h| h.kind == Some(InlayHintKind::TYPE) && hint_label(h).starts_with(':'));
+    assert_eq!(
+        return_hint.map(hint_label).as_deref(),
+        Some(": int"),
+        "all: {:?}",
         all
     );
 }

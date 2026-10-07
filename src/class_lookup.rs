@@ -577,6 +577,22 @@ pub(crate) fn is_subtype_of_typed(
             .any(|m| is_subtype_of_typed(m, supertype, class_loader));
     }
 
+    // ── Shape <: shape ──────────────────────────────────────────
+    // The structural check compared the entries each shape lists and found
+    // them wanting, but it takes the class names in them at face value, so
+    // the comparison is redone with the hierarchy applied to the entries.
+    //
+    // It also has to be answered here, ahead of the generic-array rules
+    // below: they read an array by its `kind()`, which for an unsealed shape
+    // is the generic array it widens to, and every `array{…, ...}` widens to
+    // the same `non-empty-array<array-key, mixed>`. Those rules would call
+    // any two of them subtypes, whatever entries they list.
+    if let (Some(sub), Some(wider)) = (subtype.shape_parts(), supertype.shape_parts()) {
+        return crate::php_type::shape_is_subshape(&sub, &wider, &|a, b| {
+            is_subtype_of_typed(a, b, class_loader)
+        });
+    }
+
     // ── Generic covariance with class-loader awareness ──────────
     // The structural `is_subtype_of` compares generic type params
     // by structural equality, which fails when one side uses a

@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::atom::AtomMap;
 
 use crate::php_type::PhpType;
 use crate::type_engine::variable::forward_walk::ScopeProofs;
@@ -341,7 +340,7 @@ pub(crate) struct VarResolutionCtx<'a> {
     /// Pre-computed top-level scope for resolving `global` variable imports.
     /// When a function body contains `global $x;`, the walker looks up
     /// `$x` in this map to seed the local scope with the top-level type.
-    pub top_level_scope: Option<AtomMap<Vec<crate::types::ResolvedType>>>,
+    pub top_level_scope: Option<crate::type_engine::variable::forward_walk::Locals>,
     /// Match-arm instanceof narrowings: var name → narrowed types.
     /// Empty outside of match(true) arm bodies.
     pub match_arm_narrowing: HashMap<String, Vec<crate::types::ResolvedType>>,

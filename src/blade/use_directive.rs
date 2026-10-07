@@ -7,22 +7,36 @@
 //! real `use` statement.  That prologue has no template text behind it,
 //! and anything the virtual file records there translates back through the
 //! source map to no position at all.  A feature that needs the directive's
-//! position in the template (rewriting the imported name, say) therefore
-//! reads the raw template text with the functions here instead of going
-//! through the lowered PHP.
+//! position in the template (rewriting the imported name, say, or reporting
+//! an import nothing uses) therefore reads the raw template text with the
+//! functions here instead of going through the lowered PHP.
+
+use std::ops::Range;
 
 use super::directives::{DirectiveHead, directive_head};
+use super::preprocessor::build_use_statement;
 use super::signature;
+use crate::diagnostics::use_statements::find_use_member;
 
-/// Every `@use(...)` directive in `content`, as the byte offset of its
-/// argument list and the text of it (the parentheses excluded).
+/// One `@use(...)` directive in a template's text.
+pub(crate) struct UseDirective<'a> {
+    /// The byte range of the whole directive, from its `@` through the `)`
+    /// that closes its argument list.
+    pub(crate) span: Range<usize>,
+    /// The byte offset of the argument list, the parentheses excluded.
+    pub(crate) arguments_at: usize,
+    /// The text of the argument list, the parentheses excluded.
+    pub(crate) arguments: &'a str,
+}
+
+/// Every `@use(...)` directive in `content`.
 ///
 /// Scans the [`signature::inert_regions`]-masked text so a `@use` inside a
 /// Blade comment or a `@php` block reads as inert text rather than a real
 /// directive, and requires [`directives::directive_head`]'s word-boundary
 /// check so a name merely ending in `use` (or `@@use`, its escape) is not
 /// mistaken for the directive either.
-pub(crate) fn use_directive_arguments(content: &str) -> impl Iterator<Item = (usize, &str)> {
+pub(crate) fn use_directives(content: &str) -> impl Iterator<Item = UseDirective<'_>> {
     let masked = signature::mask_inert_regions(content, true);
     let mut searched = 0;
     std::iter::from_fn(move || {
@@ -44,8 +58,38 @@ pub(crate) fn use_directive_arguments(content: &str) -> impl Iterator<Item = (us
             if name != "use" {
                 continue;
             }
-            return Some((open + 1, &content[open + 1..args.end - 1]));
+            return Some(UseDirective {
+                span: at..args.end,
+                arguments_at: open + 1,
+                arguments: &content[open + 1..args.end - 1],
+            });
         }
+    })
+}
+
+/// Where `template` imports `fqn` as `alias` with a `@use` directive: the
+/// byte range of the whole directive, or of the one member that imports it
+/// when the directive is a group import naming several.
+///
+/// A directive matches by the `use` statement the preprocessor hoists it
+/// into, so whichever form it is written in, it answers for the same import
+/// the virtual PHP's import table holds.
+pub(crate) fn find_use_directive(template: &str, fqn: &str, alias: &str) -> Option<Range<usize>> {
+    use_directives(template).find_map(|directive| {
+        let statement = build_use_statement(directive.arguments)?;
+        let member = find_use_member(statement.trim_end_matches(';'), fqn, alias)?;
+        if member.member_count < 2 {
+            return Some(directive.span);
+        }
+        // A group import cannot take the two-argument alias form, so the
+        // statement is the literal behind a `use` keyword, and the member
+        // found in it is found at the same place in the literal.
+        const KEYWORD: &str = "use ";
+        let (literal_at, literal) = first_string_literal(directive.arguments)?;
+        let written = format!("{KEYWORD}{literal}");
+        let member = find_use_member(&written, fqn, alias)?;
+        let at = directive.arguments_at + literal_at - KEYWORD.len();
+        Some(at + member.start..at + member.end)
     })
 }
 
@@ -115,13 +159,16 @@ mod tests {
 
     /// `@@use` is an escaped directive Blade prints as text, `@used` is a
     /// different word, and a bare `@use` with no argument list imports
-    /// nothing; only the real directive is found, at the offset of its
-    /// argument list.
+    /// nothing; only the real directive is found, with its own span and the
+    /// offset of its argument list.
     #[test]
     fn only_a_real_use_directive_yields_its_argument_list() {
         let template = "@@use('A')\n@used('B')\n@use\n@use ('C', 'D')\n";
-        let found: Vec<(usize, &str)> = use_directive_arguments(template).collect();
-        assert_eq!(found, vec![(33, "'C', 'D'")]);
+        let found: Vec<UseDirective> = use_directives(template).collect();
+        assert_eq!(found.len(), 1);
+        assert_eq!(&template[found[0].span.clone()], "@use ('C', 'D')");
+        assert_eq!(found[0].arguments, "'C', 'D'");
+        assert_eq!(found[0].arguments_at, 33);
         assert_eq!(&template[33..33 + "'C', 'D'".len()], "'C', 'D'");
     }
 
@@ -131,10 +178,54 @@ mod tests {
     fn a_commented_out_or_php_block_use_directive_is_not_an_import() {
         let template =
             "{{-- @use('App\\Foo') --}}\n@php\n@use('App\\Bar')\n@endphp\n@use('App\\Baz')\n";
-        let found: Vec<&str> = use_directive_arguments(template)
-            .map(|(_, args)| args)
+        let found: Vec<&str> = use_directives(template)
+            .map(|directive| directive.arguments)
             .collect();
         assert_eq!(found, vec!["'App\\Baz'"]);
+    }
+
+    /// Every form a directive imports in is found by the import it makes:
+    /// the whole directive for a single name, and the one member for a
+    /// group that names several.
+    #[test]
+    fn find_use_directive_answers_for_the_import_the_directive_makes() {
+        let template = "@use('App\\Models\\Post')\n\
+                        @use('App\\Models\\Tag', 'Label')\n\
+                        @use('\\App\\Models\\Comment as Remark')\n\
+                        @use('function App\\Support\\helper')\n\
+                        @use('App\\Models\\{User, Team as Squad}')\n\
+                        @use('App\\Models\\{Only}')\n";
+        let found = |fqn: &str, alias: &str| {
+            find_use_directive(template, fqn, alias).map(|span| &template[span])
+        };
+
+        assert_eq!(
+            found("App\\Models\\Post", "Post"),
+            Some("@use('App\\Models\\Post')")
+        );
+        assert_eq!(
+            found("App\\Models\\Tag", "Label"),
+            Some("@use('App\\Models\\Tag', 'Label')")
+        );
+        assert_eq!(
+            found("App\\Models\\Comment", "Remark"),
+            Some("@use('\\App\\Models\\Comment as Remark')")
+        );
+        assert_eq!(
+            found("App\\Support\\helper", "helper"),
+            Some("@use('function App\\Support\\helper')")
+        );
+        assert_eq!(found("App\\Models\\User", "User"), Some("User"));
+        assert_eq!(found("App\\Models\\Team", "Squad"), Some("Team as Squad"));
+        // A group of one has nothing left to keep.
+        assert_eq!(
+            found("App\\Models\\Only", "Only"),
+            Some("@use('App\\Models\\{Only}')")
+        );
+        // An alias is the name the import binds, so the class's own short
+        // name does not match an aliased import of it.
+        assert_eq!(found("App\\Models\\Tag", "Tag"), None);
+        assert_eq!(found("App\\Models\\Missing", "Missing"), None);
     }
 
     /// The modifier and an inline alias are not part of the name, and the

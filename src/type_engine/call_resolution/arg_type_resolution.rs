@@ -82,7 +82,13 @@ impl<'a, 'ctx> TextArrayFuncArgs<'a, 'ctx> {
 
 impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
     fn arg_raw_type(&self, index: usize) -> Option<PhpType> {
-        Backend::resolve_inline_arg_raw_type(self.arg_text(index)?, self.ctx)
+        let text = self.arg_text(index)?;
+        // The inline resolver only answers for array-like arguments, but
+        // some rules read a scalar one too: `range()`'s bounds and step,
+        // `explode()`'s limit. Like the AST counterpart, anything it
+        // leaves open falls back to the general expression resolver.
+        Backend::resolve_inline_arg_raw_type(text, self.ctx)
+            .or_else(|| Backend::resolve_arg_text_to_type(text, self.ctx))
     }
 
     fn bool_literal(&self, index: usize) -> Option<bool> {

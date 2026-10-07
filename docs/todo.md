@@ -30,19 +30,6 @@ contributor even though it's short.
 
 # Scheduled Sprints
 
-## Sprint 7 — 0.11.0 Blade support
-
-| #    | Item                                                                                                                                                      | Impact      | Complexity  |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-|     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
-| P63  | [Every diagnostic converts its offsets by counting from the top of the file](todo/performance.md#p63-every-diagnostic-converts-its-offsets-by-counting-from-the-top-of-the-file) | High | Low |
-| C14  | [`examples/php` has no demo for an assignment inside a `match` arm or ternary branch](todo/completion.md#c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch) | Low | Low |
-| A47  | [Member actions are missing when the range starts in the indentation](todo/actions.md#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation) | Medium | Low-Medium |
-| L55  | [JSON translation key navigation lands on line 0, not the key](todo/laravel.md#l55-json-translation-key-navigation-lands-on-line-0-not-the-key) | Medium-High | Medium-High |
-| P64  | [A file with one very large scope copies it at every branch](todo/performance.md#p64-a-file-with-one-very-large-scope-copies-it-at-every-branch) | Medium | Medium-High |
-| BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
-|      | **Release 0.11.0**                                                                                                                                        |             |             |
-
 ## Sprint 8 — 1.0 release & IDE extensions
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
@@ -62,7 +49,8 @@ contributor even though it's short.
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
 | E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source) (depends on E1)                             | Medium      | High        |
 | F20 | [Migrate to the maintained `tower-lsp` fork](todo/lsp-features.md#f20-migrate-to-the-maintained-tower-lsp-fork)                                              | Low-Medium  | Very High   |
-| F21 | [Static `typeHierarchyProvider` advertisement](todo/lsp-features.md#f21-static-typehierarchyprovider-advertisement-depends-on-f20) (depends on F20; also needs an upstream `lsp-types` fix) | Low-Medium  | Low         |
+| F21 | [Static `typeHierarchyProvider` advertisement](todo/lsp-features.md#f21-static-typehierarchyprovider-advertisement-depends-on-f20) (depends on F20; also needs an upstream `lsp-types` fix) | Low-Medium  |
+| BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High | Low         |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Backlog
@@ -105,7 +93,6 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
-| D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Medium      |
@@ -116,6 +103,8 @@ unlikely to move the needle for most users.
 | D21 | [A union of an unreachable and a missing member is reported by neither check](todo/diagnostics.md#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check) | Low         | Medium-High |
 | D22 | [Member provenance is recomputed instead of recorded](todo/diagnostics.md#d22-member-provenance-is-recomputed-instead-of-recorded)                                        | Medium      | Medium-High |
 | D23 | [A rebound closure's scope is added to the lexical one rather than replacing it](todo/diagnostics.md#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it) | Low-Medium  | Medium      |
+| D28 | ["Remove unreachable code" is wired to PHPStan only](todo/diagnostics.md#d28-remove-unreachable-code-is-wired-to-phpstan-only)                                              | Low-Medium  | Medium      |
+| D29 | [`namespace` and `declare` bodies break the reachability flow](todo/diagnostics.md#d29-namespace-and-declare-bodies-break-the-reachability-flow)                              | Low         | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium-High |
 | A28 | [Explicit nullable parameter type](todo/actions.md#a28-explicit-nullable-parameter-type-php-84-deprecation) (PHP 8.4 deprecation)                                           | Medium      | Low         |
@@ -166,7 +155,6 @@ unlikely to move the needle for most users.
 | S4  | Named argument awareness in active parameter                                                                                                                                | Low-Medium  | Medium      |
 | S5  | Language construct signature help and hover                                                                                                                                 | Low         | Medium      |
 |     | **[Laravel](todo/laravel.md)**                                                                                                                                              |             |             |
-| L24 | [Translation depth: locales, placeholders, hover, quick-fix](todo/laravel.md#l24-translation-depth-locales-placeholders-hover-quick-fix)                                     | Medium | Medium |
 | L46 | [`->can()` on a user model the receiver does not name](todo/laravel.md#l46-can-on-a-user-model-the-receiver-does-not-name)                                                  | Medium-High | Medium-High |
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Medium      |
 | L56 | [Typed Laravel connection names](todo/laravel.md#l56-typed-laravel-connection-names)                                                                                        | Medium      | Medium      |
@@ -209,6 +197,7 @@ unlikely to move the needle for most users.
 | P3  | Parallel pre-filter in `find_implementors`                                                                                                                                  | Low-Medium  | Medium-High |
 | P50 | [Cache the top-level scope for `global` keyword resolution](todo/performance.md#p50-cache-the-top-level-scope-for-global-keyword-resolution)                                 | Low-Medium  | High        |
 | P65 | [Every call site repeats the full function lookup, hit or miss](todo/performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss) | Low-Medium  | Medium      |
+| P70 | [Diagnostics on a long file find each access's context by scanning](todo/performance.md#p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning) | Low-Medium  | Medium      |
 | P58 | [A member-completion cache hit copies the whole item list](todo/performance.md#p58-a-member-completion-cache-hit-copies-the-whole-item-list)                                | Low         | Low         |
 | P66 | [Stub version filtering rescans a stub file once per symbol it declares](todo/performance.md#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares) | Low         | Low-Medium  |
 | P48 | [Higher-order collection proxy injection repeats work](todo/performance.md#p48-higher-order-collection-proxy-injection-repeats-work)                                        | Low         | Medium      |

@@ -1105,6 +1105,74 @@ config('external.unknown');
     );
 }
 
+/// A package's service provider can add a guard at runtime instead of
+/// shipping a config file for it, the way `laravel/sanctum` adds `sanctum`
+/// from `register()`, and that guard is as real as one `config/auth.php`
+/// declares.
+#[tokio::test]
+async fn a_guard_a_package_provider_writes_is_known() {
+    let composer = r#"{
+    "require": { "laravel/framework": "^12.0" },
+    "autoload": { "psr-4": { "App\\": "app/", "Acme\\Guards\\": "vendor/acme/guards/src/" } }
+}"#;
+    let provider = r#"<?php
+namespace Acme\Guards;
+
+class GuardServiceProvider
+{
+    public function register(): void
+    {
+        config([
+            'auth.guards.token' => array_merge([
+                'driver' => 'token',
+                'provider' => null,
+            ], config('auth.guards.token', [])),
+        ]);
+    }
+}
+"#;
+    let source = r#"<?php
+use Illuminate\Support\Facades\Auth;
+
+Auth::guard('token');
+Auth::guard('token-typo');
+config('auth.guards.token.driver');
+"#;
+    let mut files = workspace_files(source);
+    files.push((
+        "bootstrap/providers.php",
+        "<?php\nreturn [\n    Acme\\Guards\\GuardServiceProvider::class,\n];\n",
+    ));
+    files.push(("vendor/acme/guards/src/GuardServiceProvider.php", provider));
+    let (backend, dir) = create_psr4_workspace(composer, &files);
+    backend.initialized(InitializedParams {}).await;
+    let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: source.to_string(),
+            },
+        })
+        .await;
+
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), source, &mut diagnostics);
+    let invalid = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code)) if code.starts_with("invalid_laravel_")
+            )
+        })
+        .map(|diagnostic| text_in_range(source, diagnostic.range))
+        .collect::<Vec<_>>();
+    assert_eq!(invalid, ["token-typo"]);
+}
+
 #[tokio::test]
 async fn an_undiscovered_resource_subtree_is_not_treated_as_a_closed_empty_set() {
     let source = r#"<?php

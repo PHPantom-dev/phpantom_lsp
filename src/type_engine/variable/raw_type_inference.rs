@@ -31,12 +31,6 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     elements: impl Iterator<Item = &'b ArrayElement<'b>>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    // Maximum number of positional entries to record as a tuple-style
-    // shape. Beyond this the array is almost certainly a homogeneous
-    // collection rather than a fixed-arity tuple, so it is widened to
-    // `list<T>` to avoid unbounded shape growth.
-    const MAX_POSITIONAL_SHAPE_LEN: usize = 32;
-
     let mut builder = LiteralBuilder::default();
     for elem in elements {
         match elem {
@@ -112,6 +106,46 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
         }
     }
     builder.loose_type()
+}
+
+/// Maximum number of positional entries to record as a tuple-style shape.
+/// Beyond this the array is almost certainly a homogeneous collection
+/// rather than a fixed-arity tuple, so it is widened to `list<T>` to avoid
+/// unbounded shape growth.
+const MAX_POSITIONAL_SHAPE_LEN: usize = 32;
+
+/// The shape an array literal builds when every key and value in it is
+/// written out, `value_type` typing each value.
+///
+/// This is the shape [`infer_array_literal_raw_type`] records for the same
+/// literal, for a caller with no scope to resolve the elements against: a
+/// comparison against `[null]` pins its subject to `array{null}`. `None`
+/// when an element is a spread or has a key that is not a literal, when
+/// `value_type` cannot type a value, and for a literal too long to be worth
+/// a shape.
+pub(in crate::type_engine) fn written_array_literal_type<'b>(
+    elements: &[ArrayElement<'b>],
+    value_type: impl Fn(&'b Expression<'b>) -> Option<PhpType>,
+) -> Option<PhpType> {
+    if elements.len() > MAX_POSITIONAL_SHAPE_LEN {
+        return None;
+    }
+    let mut builder = LiteralBuilder::default();
+    for elem in elements {
+        match elem {
+            ArrayElement::KeyValue(kv) => {
+                let key_text = extract_array_key_text(kv.key)?;
+                builder.set_key(key_text, constant_key_type(kv.key), value_type(kv.value)?);
+            }
+            ArrayElement::Value(v) => builder.append(Some(value_type(v.value)?)),
+            ArrayElement::Variadic(_) => return None,
+            ArrayElement::Missing(_) => {}
+        }
+    }
+    let entries = builder.exact?;
+    Some(PhpType::array_shape(
+        entries.into_iter().map(|(_, entry)| entry).collect(),
+    ))
 }
 
 /// Maximum number of distinct alternatives to keep in the element union
@@ -921,7 +955,7 @@ fn walk_closure_body_scope(
     param_name: Option<&str>,
     resolved_param: &[ResolvedType],
     ctx: &VarResolutionCtx<'_>,
-) -> crate::atom::AtomMap<Vec<ResolvedType>> {
+) -> super::forward_walk::Locals {
     let fw_ctx =
         super::forward_walk::ForwardWalkCtx::from_var_ctx(ctx).with_cursor_offset(u32::MAX);
     let mut scope = super::forward_walk::ScopeState::new();

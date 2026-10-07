@@ -23,6 +23,7 @@
 use std::ops::Range;
 
 use super::balance::{Directive, directives, inside};
+use super::directives::BladeDirectives;
 use super::signature::{inert_regions, mask_regions, split_top_level_args};
 
 /// A byte range of the original Blade source.
@@ -292,7 +293,7 @@ impl TemplateBlocks {
 
 /// Read everything the pairing of section and stack names needs from one
 /// template's source.
-pub(crate) fn analyse(content: &str) -> TemplateBlocks {
+pub(crate) fn analyse(content: &str, known: &BladeDirectives) -> TemplateBlocks {
     let mut out = TemplateBlocks::default();
     if !content.contains('@') {
         out.opaque = has_component_tag(content);
@@ -309,7 +310,7 @@ pub(crate) fn analyse(content: &str) -> TemplateBlocks {
         name: directive,
         span: directive_span,
         args,
-    } in directives(&masked)
+    } in directives(&masked, known)
     {
         if let Some((_, renders)) = SECTION_CLOSERS
             .iter()
@@ -539,6 +540,10 @@ fn string_literal_span(content: &str, argument: &str) -> Option<(String, Span)> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn analyse(content: &str) -> TemplateBlocks {
+        super::analyse(content, &BladeDirectives::default())
+    }
 
     /// The blocks of `content` as short strings: `"declare section content"`.
     fn report(content: &str) -> Vec<String> {

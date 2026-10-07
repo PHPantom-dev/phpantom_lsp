@@ -6,6 +6,7 @@
 
 use super::*;
 use std::collections::{HashMap, HashSet};
+use std::ops::ControlFlow;
 
 use crate::atom::bytes_to_str;
 
@@ -444,25 +445,27 @@ pub(crate) fn collect_arglist_variables(
 /// `before` count as changes, but variables in `before` that aren't
 /// in `after` do not (they were just not assigned in the loop body).
 pub(crate) fn scope_has_changes(before: &ScopeState, after: &ScopeState) -> bool {
-    for (name, after_types) in &after.locals {
-        match before.locals.get(name) {
-            None => {
+    let changed = after
+        .locals
+        .diff(&before.locals, |_, after_types, before_types| {
+            let changed = match (after_types, before_types) {
+                // Only in `before`: not assigned in the loop body.
+                (None, _) => false,
                 // New variable assigned in the loop body.
-                if !after_types.is_empty() {
-                    return true;
+                (Some(after_types), None) => !after_types.is_empty(),
+                (Some(after_types), Some(before_types)) => {
+                    after_types.len() != before_types.len()
+                        || after_types
+                            .iter()
+                            .zip(before_types.iter())
+                            .any(|(at, bt)| at.type_string != bt.type_string)
                 }
+            };
+            if changed {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
             }
-            Some(before_types) => {
-                if after_types.len() != before_types.len() {
-                    return true;
-                }
-                for (at, bt) in after_types.iter().zip(before_types.iter()) {
-                    if at.type_string != bt.type_string {
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-    false
+        });
+    changed.is_break()
 }

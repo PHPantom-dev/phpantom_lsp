@@ -72,6 +72,10 @@ class DemoServiceProvider extends BaseDemoServiceProvider
 
     public function boot(): void
     {
+        // Omitting the namespace adds ordinary PHP and JSON translation keys
+        // from this directory, just like those under lang/.
+        $this->loadTranslationsFrom(resource_path('bakery-lang'));
+
         // The morph map replaces the model FQCN with a short alias in every
         // polymorphic `*_type` column.  PHPantom reads the registration from
         // here, so the alias strings elsewhere in the project hover with the

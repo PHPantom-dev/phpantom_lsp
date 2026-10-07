@@ -820,6 +820,20 @@ function foo() {
     }
 
     #[test]
+    fn fully_qualified_compact_suppresses_unused_variable() {
+        let diags = collect(
+            r#"<?php
+namespace App;
+function foo() {
+    $breadcrumb = 'home';
+    return view('page', \compact('breadcrumb'));
+}
+"#,
+        );
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    #[test]
     fn compact_with_array_argument_suppresses_unused_variables() {
         let diags = collect(
             r#"<?php

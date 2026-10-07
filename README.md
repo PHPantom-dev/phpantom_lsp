@@ -54,7 +54,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 <sup>2</sup> Call hierarchy, type hierarchy, go-to implementation / type-definition, code lens.<br>
 <sup>3</sup> Semantic tokens, inlay hints, auto-import, smart select, folding ranges, formatting, document links.<br>
 <sup>4</sup> Undefined and unused variables, type errors, unknown symbols and members, argument counts.<br>
-<sup>5</sup> PHPantom runs PHPStan, PHPCS, and Mago in-server and turns their reports into quick fixes. Phpactor proxies PHPStan, Psalm, and PHP-CS-Fixer, and PHPStorm bundles PHPStan and Psalm runners, but both only relay the errors.<br>
+<sup>5</sup> PHPantom runs PHPStan, PHPCS, PHPMD, and Mago in-server and turns their reports into quick fixes. Phpactor proxies PHPStan, Psalm, and PHP-CS-Fixer, and PHPStorm bundles PHPStan and Psalm runners, but both only relay the errors.<br>
 <sup>6</sup> Conditional return types, type aliases (`@phpstan-type` / `@phpstan-import-type`), pseudo-types, `@mixin`.<br>
 <sup>8</sup> Extract method/function, extract/inline variable, extract constant, extract interface, promote constructor parameter, generate constructor, generate getters/setters, implement interface methods.<br>
 <sup>9</sup> Null-check simplification, string interpolation conversion, converting between arrow functions and closures, and switch statements to match expressions.<br>

@@ -148,3 +148,60 @@ fn an_exclusion_survives_the_join_only_when_both_paths_made_it() {
     a.merge_branch(&b);
     assert_eq!(a.ruled_out.get(&atom("$x")), Some(&vec![foo()]));
 }
+
+#[test]
+fn a_join_with_a_fork_only_changes_what_the_branch_wrote() {
+    let mut a = ScopeState::new();
+    for i in 0..200 {
+        a.set(&format!("$v{i}"), typed(PhpType::string()));
+    }
+    let mut b = a.clone();
+    b.set("$v7", typed(PhpType::int()));
+    b.set("$new", typed(PhpType::int()));
+    b.remove("$v8");
+
+    a.merge_branch(&b);
+
+    let mut joined = type_strings(&a, "$v7");
+    joined.sort();
+    assert_eq!(joined, vec!["int", "string"]);
+    assert_eq!(type_strings(&a, "$new"), vec!["int"]);
+    assert_eq!(type_strings(&a, "$v8"), vec!["string"]);
+    assert_eq!(type_strings(&a, "$v100"), vec!["string"]);
+    assert_eq!(a.locals.len(), 201);
+}
+
+#[test]
+fn reassigning_a_variable_drops_the_proofs_that_read_it() {
+    let mut scope = ScopeState::new();
+    for i in 0..50 {
+        scope.record_non_null_implication(&format!("$h{i}"), vec![atom(&format!("$o{i}"))]);
+    }
+    scope.record_non_null_implication("$period", vec![atom("$agreement->period")]);
+    scope.record_exclusion("$agreement->owner", &foo());
+
+    scope.invalidate_proofs("$agreement");
+
+    assert!(!scope.non_null_implications.contains_key(&atom("$period")));
+    assert!(!scope.ruled_out.contains_key(&atom("$agreement->owner")));
+    assert_eq!(scope.non_null_implications.len(), 50);
+
+    scope.invalidate_proofs("$o3");
+    assert!(!scope.non_null_implications.contains_key(&atom("$h3")));
+    assert!(scope.non_null_implications.contains_key(&atom("$h30")));
+}
+
+#[test]
+fn a_proof_recorded_after_a_fork_is_still_found_by_its_variable() {
+    let mut a = ScopeState::new();
+    a.record_non_null_implication("$h", vec![atom("$x")]);
+    let mut b = a.clone();
+    b.record_non_null_implication("$g", vec![atom("$y")]);
+
+    b.invalidate_proofs("$y");
+    a.invalidate_proofs("$x");
+
+    assert!(!b.non_null_implications.contains_key(&atom("$g")));
+    assert!(b.non_null_implications.contains_key(&atom("$h")));
+    assert!(!a.non_null_implications.contains_key(&atom("$h")));
+}

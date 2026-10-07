@@ -274,10 +274,19 @@ impl FollowedLinks {
     }
 }
 
+/// Paths excluded from discovery whatever the project configures.
+///
+/// `barryvdh/laravel-ide-helper` generates these for editors that cannot
+/// follow Laravel's facades and magic on their own. They redeclare real
+/// framework classes as facade stand-ins without return types, so indexing
+/// them competes with the real declarations and sends the type engine into the
+/// stand-ins' bodies, one of which spans tens of thousands of lines.
+const DEFAULT_EXCLUDES: [&str; 2] = ["_ide_helper.php", "_ide_helper_models.php"];
+
 /// Compiled exclude matcher and extra-extension set for file discovery.
 pub struct IndexFilters {
-    /// Compiled `[indexing] exclude` globs, `None` when no valid
-    /// pattern is configured so the hot path is a single branch.
+    /// Compiled [`DEFAULT_EXCLUDES`] plus `[indexing] exclude` globs,
+    /// `None` without a workspace root to anchor them.
     excludes: Option<Gitignore>,
     /// The raw patterns `excludes` was compiled from, kept only so
     /// [`may_admit_more_than`](Self::may_admit_more_than) can tell a
@@ -297,8 +306,15 @@ impl IndexFilters {
     /// patterns containing `/`; without a workspace root the exclude
     /// list is ignored (extensions still apply).
     pub fn compile(root: Option<&Path>, exclude: &[String], extensions: &[String]) -> Self {
-        let excludes = root.filter(|_| !exclude.is_empty()).and_then(|root| {
+        let excludes = root.and_then(|root| {
             let mut builder = GitignoreBuilder::new(root);
+            // Added first so a `!` re-include in the configured list can
+            // still bring one back.
+            for pattern in DEFAULT_EXCLUDES {
+                builder
+                    .add_line(None, pattern)
+                    .expect("built-in exclude patterns are valid");
+            }
             for pattern in exclude {
                 if let Err(e) = builder.add_line(None, pattern) {
                     eprintln!(
@@ -357,11 +373,14 @@ impl IndexFilters {
     /// Whether a path is excluded, considering its ancestors.
     ///
     /// A file inside an excluded directory is itself excluded, the way
-    /// git never descends into an ignored directory.
+    /// git never descends into an ignored directory. The patterns are
+    /// anchored to the workspace root, so a path outside it (an event from
+    /// another folder of the editor's workspace, a file opened from
+    /// elsewhere) is never excluded; the matcher panics on one.
     pub fn is_excluded_path(&self, path: &Path, is_dir: bool) -> bool {
-        self.excludes
-            .as_ref()
-            .is_some_and(|gi| gi.matched_path_or_any_parents(path, is_dir).is_ignore())
+        self.excludes.as_ref().is_some_and(|gi| {
+            path.starts_with(gi.path()) && gi.matched_path_or_any_parents(path, is_dir).is_ignore()
+        })
     }
 
     /// Whether a file's extension marks it as PHP source: `.php` plus
@@ -473,6 +492,17 @@ mod tests {
         assert!(f.is_excluded_path(&PathBuf::from("/ws/generated/deep/file.php"), false));
     }
 
+    /// The built-in excludes give every workspace a matcher, so asking
+    /// about a file outside the root has to answer rather than trip the
+    /// matcher's assertion that the path is below it.
+    #[test]
+    fn a_path_outside_the_root_is_not_excluded() {
+        let f = filters(&[], &[]);
+        assert!(f.is_excluded_path(&PathBuf::from("/ws/_ide_helper.php"), false));
+        assert!(!f.is_excluded_path(&PathBuf::from("/elsewhere/_ide_helper.php"), false));
+        assert!(!f.is_excluded_path(&PathBuf::from("/elsewhere/src/Foo.php"), false));
+    }
+
     #[test]
     fn invalid_pattern_is_skipped_not_fatal() {
         let f = filters(&["[unclosed", "vendor-extra"], &[]);
@@ -486,6 +516,22 @@ mod tests {
         let f = IndexFilters::compile(None, &strings, &exts);
         assert!(!f.is_excluded_entry(&PathBuf::from("/ws/tests"), true));
         assert!(f.is_php_file(&PathBuf::from("/ws/foo.module")));
+    }
+
+    #[test]
+    fn ide_helper_files_are_excluded_by_default() {
+        let f = filters(&[], &[]);
+        assert!(f.is_excluded_entry(&PathBuf::from("/ws/_ide_helper.php"), false));
+        assert!(f.is_excluded_entry(&PathBuf::from("/ws/_ide_helper_models.php"), false));
+        assert!(f.is_excluded_entry(&PathBuf::from("/ws/app/_ide_helper.php"), false));
+        assert!(!f.is_excluded_entry(&PathBuf::from("/ws/app/Helper.php"), false));
+    }
+
+    #[test]
+    fn default_exclude_can_be_re_included() {
+        let f = filters(&["!_ide_helper_models.php"], &[]);
+        assert!(f.is_excluded_entry(&PathBuf::from("/ws/_ide_helper.php"), false));
+        assert!(!f.is_excluded_entry(&PathBuf::from("/ws/_ide_helper_models.php"), false));
     }
 
     #[test]

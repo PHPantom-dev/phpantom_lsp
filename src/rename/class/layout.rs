@@ -8,9 +8,81 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::composer::psr4_path_for_class;
+use crate::symbol_map::{SymbolKind, SymbolMap, SymbolSpan};
 use crate::text_position::offset_to_position;
+use crate::types::NamespaceSpan;
 
+use super::imports::namespace_owns;
+use super::rewrite::FileRewrite;
 use super::siblings::{SiblingImport, build_sibling_import_edits};
+
+/// The span naming where `fqn` is declared in a file.
+///
+/// A file with several `namespace` blocks can declare the same short name
+/// in more than one of them, so the name alone does not say which
+/// declaration is the class: it has to sit in a block of the namespace
+/// `fqn` names.
+pub(super) fn class_declaration_span<'a>(
+    symbol_map: &'a SymbolMap,
+    blocks: &[NamespaceSpan],
+    fqn: &str,
+) -> Option<&'a SymbolSpan> {
+    let short_name = crate::util::short_name(fqn);
+    symbol_map.spans.iter().find(|span| {
+        matches!(&span.kind, SymbolKind::ClassDeclaration { name }
+            if name.eq_ignore_ascii_case(short_name))
+            && namespace_owns(
+                NamespaceSpan::containing(blocks, span.start)
+                    .and_then(|block| block.namespace.as_deref()),
+                fqn,
+            )
+    })
+}
+
+/// The first declaration `section` holds besides the class named
+/// `class_short_name`, written the way a refusal names it.
+///
+/// A section gives every class-like, function, and `const` it declares the
+/// same namespace, so a move that changes the namespace for the class
+/// changes it for all of them. A class declared again under its own name,
+/// once per branch of a conditional, is the same class and moves with it.
+pub(super) fn section_neighbour(
+    symbol_map: &SymbolMap,
+    content: &str,
+    section: &NamespaceSpan,
+    class_short_name: &str,
+) -> Option<String> {
+    symbol_map
+        .spans
+        .iter()
+        .filter(|span| section.start <= span.start && span.end <= section.end)
+        .find_map(|span| match &span.kind {
+            SymbolKind::ClassDeclaration { name }
+                if !name.eq_ignore_ascii_case(class_short_name) =>
+            {
+                Some(format!("`{name}`"))
+            }
+            SymbolKind::FunctionCall {
+                name,
+                is_definition: true,
+                ..
+            } => Some(format!("`{name}()`")),
+            // `define('NAME', …)` spells the whole name of its constant in a
+            // string, so no `namespace` gives it that name. Its span ends at
+            // the closing quote, which the name of a `const` never touches.
+            SymbolKind::ConstantReference {
+                name,
+                is_definition: true,
+            } if !matches!(
+                content.as_bytes().get(span.end as usize),
+                Some(b'\'' | b'"')
+            ) =>
+            {
+                Some(format!("`{name}`"))
+            }
+            _ => None,
+        })
+}
 
 /// What the source around a `namespace` name turns out to be, once the
 /// move needs to take the whole declaration away rather than rewrite
@@ -286,24 +358,38 @@ pub(super) fn insert_namespace_edit(
     }
 }
 
-/// The edits that take a file's `namespace` statement out when the class
-/// moves into the global namespace.
+/// The edits that take the `namespace` statement of the block `file`
+/// stands for out when the class moves into the global namespace.
 ///
-/// `Ok(None)` when the statement is not one the move knows how to remove.
+/// `Ok(None)` when the statement is not one the move knows how to remove,
+/// and `Err` when taking it out would mean rewriting the file's block
+/// structure: unwrapping a brace block, or turning one of several
+/// statement sections into a block.
 pub(super) fn remove_namespace_edits(
     old_fqn: &str,
     file_uri_str: &str,
-    content: &str,
+    file: &FileRewrite,
     span_start: usize,
     span_end: usize,
     siblings: &[SiblingImport],
 ) -> Result<Option<Vec<TextEdit>>, String> {
+    let content = file.content.as_str();
     match namespace_statement(content, span_start, span_end) {
+        // With several sections, the statement is what keeps this one
+        // apart from its neighbours: without it the class folds into the
+        // section above, and when no section is above, global code is left
+        // ahead of the next `namespace` statement, which PHP refuses.
+        NamespaceStatement::Statement { .. } if file.block.is_some() => Err(format!(
+            "Cannot move `{}` into the global namespace: {} holds several `namespace` \
+             statements, which the move would have to rewrite as brace blocks.",
+            old_fqn,
+            display_uri(file_uri_str)
+        )),
         NamespaceStatement::Statement {
             range,
             absorbed_blank_line,
         } => {
-            let use_block = crate::completion::use_edit::analyze_use_block(content);
+            let use_block = crate::completion::use_edit::analyze_use_block_in(content, file.block);
             // With no import block to sort into, a sibling import lands on
             // the line the removal takes away.  Writing both as one edit
             // keeps them off each other.
@@ -326,7 +412,7 @@ pub(super) fn remove_namespace_edits(
                 new_text,
             }];
             if !inline_siblings {
-                edits.extend(build_sibling_import_edits(content, siblings));
+                edits.extend(build_sibling_import_edits(file, siblings));
             }
             Ok(Some(edits))
         }

@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::completion::use_edit::{
-    UseBlockInfo, analyze_use_block, build_aliased_typed_use_edit, build_aliased_use_edit,
+    UseBlockInfo, analyze_use_block_in, build_aliased_typed_use_edit, build_aliased_use_edit,
 };
 use crate::symbol_map::{ClassRefContext, SymbolKind, SymbolMap, SymbolSpan};
 use crate::text_position::position_to_byte_offset;
@@ -189,7 +189,15 @@ impl Backend {
 
         let namespace = self.namespace_at_offset(uri, cursor_span.start);
         let namespace_spans = self.namespace_spans_for_uri(uri);
-        let use_block = analyze_use_block(content);
+        // The imports go into, and the usages come from, the `namespace`
+        // block the cursor is in.
+        let cursor_block = NamespaceSpan::containing(&namespace_spans, cursor_span.start);
+        let use_block = analyze_use_block_in(
+            content,
+            cursor_block
+                .filter(|_| namespace_spans.len() > 1)
+                .map(|span| (span.start as usize, span.end as usize)),
+        );
         let imports = FileImports {
             content,
             use_block: &use_block,
@@ -197,7 +205,12 @@ impl Backend {
             namespace: &namespace,
         };
 
-        let symbols = self.qualified_symbols(&symbol_map, &file, &namespace_spans, &namespace);
+        let symbols = self.qualified_symbols(
+            &symbol_map,
+            &file,
+            &namespace_spans,
+            cursor_block.map(|span| span.start),
+        );
 
         // ── Import the symbol under the cursor ──────────────────────────
         let Some(cursor_symbol) = symbols
@@ -246,15 +259,16 @@ impl Backend {
         ));
     }
 
-    /// Group every importable reference in `namespace` by the
-    /// fully-qualified name it resolves to, in `use`-block order so a
-    /// batch of imports comes out deterministically sorted.
+    /// Group every importable reference in the `namespace` block starting
+    /// at `block_start` by the fully-qualified name it resolves to, in
+    /// `use`-block order so a batch of imports comes out deterministically
+    /// sorted.
     fn qualified_symbols<'a>(
         &self,
         symbol_map: &'a SymbolMap,
         file: &FileContext,
         namespace_spans: &[NamespaceSpan],
-        namespace: &Option<String>,
+        block_start: Option<u32>,
     ) -> Vec<QualifiedSymbol<'a>> {
         let mut symbols: Vec<QualifiedSymbol<'a>> = Vec::new();
         let mut index: HashMap<(ImportKind, String), usize> = HashMap::new();
@@ -263,7 +277,9 @@ impl Backend {
             let Some((name, kind)) = symbol_name_and_kind(span) else {
                 continue;
             };
-            if self.namespace_at_offset_from_spans(namespace_spans, span.start) != *namespace {
+            if NamespaceSpan::containing(namespace_spans, span.start).map(|block| block.start)
+                != block_start
+            {
                 continue;
             }
             let resolved = file.resolve_name_at(name, span.start);
@@ -292,17 +308,6 @@ impl Backend {
                 .then_with(|| a.fqn.to_lowercase().cmp(&b.fqn.to_lowercase()))
         });
         symbols
-    }
-
-    fn namespace_at_offset_from_spans(
-        &self,
-        spans: &[NamespaceSpan],
-        offset: u32,
-    ) -> Option<String> {
-        spans
-            .iter()
-            .find(|span| offset >= span.start && offset <= span.end)
-            .and_then(|span| span.namespace.clone())
     }
 }
 
@@ -337,16 +342,8 @@ fn plan_import(
                 imports.use_block,
             ),
         }?;
-        // With no existing `use` block every import in a batch inserts at
-        // the same fallback position, and each would prepend the blank
-        // line that separates the block from the `namespace` line.  Only
-        // the first one should.
-        if batch.planned_any
-            && imports.use_block.existing.is_empty()
-            && let Some(first) = import_edits.first_mut()
-            && let Some(rest) = first.new_text.strip_prefix('\n')
-        {
-            first.new_text = rest.to_string();
+        if batch.planned_any {
+            imports.use_block.drop_repeated_separator(&mut import_edits);
         }
         edits.extend(import_edits);
     }

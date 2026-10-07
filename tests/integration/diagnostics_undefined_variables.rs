@@ -394,6 +394,20 @@ function test(): array {
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
+fn no_diagnostic_when_fully_qualified_extract_is_used() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+namespace App;
+function test(array $data): void {
+    \extract($data);
+    echo $name;
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+#[test]
 fn no_diagnostic_when_extract_is_used() {
     let diags = undefined_var_diagnostics(
         r#"<?php

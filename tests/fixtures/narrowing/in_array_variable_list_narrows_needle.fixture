@@ -1,0 +1,14 @@
+// test: a strict in_array against a list held in a variable narrows the needle to its values
+// feature: hover
+// expect_hover: $kept => 'x'|'y'
+// expect_absent: null
+---
+<?php
+
+function check(?string $s): void {
+    $allowed = ['x', 'y'];
+    if (in_array($s, $allowed, true)) {
+        $kept = $s;
+        echo $ke<>pt;
+    }
+}

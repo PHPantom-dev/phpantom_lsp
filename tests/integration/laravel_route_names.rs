@@ -12,13 +12,10 @@
 
 use crate::common::{
     LARAVEL_SRC_COMPOSER, complete_labels_at_opened, create_initialized_psr4_workspace,
-    definition_locations, goto_definition_at, hover_text_at, messages_with_code, position_after,
+    definition_locations, find_references, goto_definition_at, hover_text_at, messages_with_code,
+    position_after,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::{
-    Location, PartialResultParams, ReferenceContext, ReferenceParams, TextDocumentIdentifier,
-    TextDocumentPositionParams, Url, WorkDoneProgressParams,
-};
+use tower_lsp::lsp_types::{Location, Url};
 
 const CONSUMER_PATH: &str = "src/Links.php";
 
@@ -908,21 +905,7 @@ async fn route_references(
 ) -> Vec<(String, u32)> {
     let mut position = position_after(content, needle);
     position.character += 1;
-    let found = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext {
-                include_declaration,
-            },
-        })
-        .await
-        .unwrap()
-        .unwrap_or_default();
+    let found = find_references(backend, &uri, position, include_declaration).await;
     let mut sites: Vec<(String, u32)> = found
         .iter()
         .map(|l| {

@@ -228,6 +228,43 @@ async fn rename_class_move_into_global_namespace_writes_siblings_where_the_names
 }
 
 #[tokio::test]
+async fn plan_class_move_names_the_declaration_in_the_requested_namespace() {
+    // Both blocks declare `Foo`; the class to move is the second one, so
+    // the plan has to be built from its declaration and no other.
+    let backend = Backend::new_test();
+
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A { class Foo {} }\n",
+        "namespace B { class Foo {} }\n",
+        "namespace Usage {\n",
+        "    function a(\\A\\Foo $a, \\B\\Foo $b): void {}\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let ws = backend
+        .plan_class_move("B\\Foo", "C\\Foo")
+        .expect("the move should be planned")
+        .expect("Expected a workspace edit for the class move");
+
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace A { class Foo {} }\n",
+            "namespace C { class Foo {} }\n",
+            "namespace Usage {\n",
+            "    function a(\\A\\Foo $a, \\C\\Foo $b): void {}\n",
+            "}\n",
+        )
+    );
+}
+
+#[tokio::test]
 async fn rename_class_move_into_global_namespace_refuses_a_brace_namespace() {
     // Removing a brace-style declaration means unwrapping the block it
     // opens, so the move says so rather than mangling the file.
@@ -250,6 +287,65 @@ async fn rename_class_move_into_global_namespace_refuses_a_brace_namespace() {
     assert!(
         error.contains("brace block"),
         "The refusal should name the shape it cannot handle; got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_into_global_namespace_refuses_unbraced_namespace_sections() {
+    // Each `namespace` statement ends the section before it, so dropping
+    // one either folds its section into the previous one or leaves global
+    // code ahead of the next `namespace`, which PHP refuses.
+    let backend = Backend::new_test();
+
+    let uri = Url::parse("file:///src/Sections.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A;\n",
+        "\n",
+        "class Foo {}\n",
+        "\n",
+        "namespace B;\n",
+        "\n",
+        "class Bar {}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    for (old_fqn, new_fqn) in [("A\\Foo", "Foo"), ("B\\Bar", "Bar")] {
+        let error = backend
+            .plan_class_move(old_fqn, new_fqn)
+            .expect_err("a section's `namespace` statement cannot simply be dropped");
+        assert!(
+            error.contains("several `namespace` statements"),
+            "Moving `{old_fqn}` should be refused for the shape it cannot handle; got: {error}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn rename_class_move_into_global_namespace_refuses_a_shared_section() {
+    // Dropping the `namespace` statement would put `Baz` in the global
+    // namespace along with the class.
+    let backend = Backend::new_test();
+
+    let uri = Url::parse("file:///src/Widget.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Old;\n",
+        "\n",
+        "class Widget {}\n",
+        "\n",
+        "class Baz {}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let error = backend
+        .plan_class_move("App\\Old\\Widget", "Widget")
+        .expect_err("a class sharing its section cannot leave the namespace alone");
+    assert!(
+        error.contains("`Baz`") && error.contains("in the global namespace too"),
+        "The refusal should name the neighbour and where it would end up; got: {error}"
     );
 }
 

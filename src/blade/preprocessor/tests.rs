@@ -376,7 +376,7 @@ fn test_preprocess_dump_directive_consumes_argument() {
 
 /// The directives a project registered, as the provider scan would have
 /// recorded them.
-fn registered(names: &[(&str, bool)]) -> CustomDirectives {
+fn registered(names: &[(&str, bool)]) -> BladeDirectives {
     let registrations: Vec<super::super::directives::CustomDirective> = names
         .iter()
         .map(
@@ -386,13 +386,13 @@ fn registered(names: &[(&str, bool)]) -> CustomDirectives {
             },
         )
         .collect();
-    CustomDirectives::from_registrations(&registrations)
+    BladeDirectives::from_registrations(&registrations)
 }
 
 /// The wrapped template body of a preprocessed template, without the
 /// prologue — whose marker declarations would otherwise answer a search
 /// for a marker the body never calls.
-fn preprocess_with_directives(content: &str, directives: &CustomDirectives) -> String {
+fn preprocess_with_directives(content: &str, directives: &BladeDirectives) -> String {
     let (php, _) = preprocess_with_vars(content, &[], TemplateKind::View, None, None, directives);
     let body_start = php
         .find("global $errors")
@@ -475,10 +475,27 @@ fn a_registered_condition_without_arguments_is_still_balanced() {
 /// inert markup, with its argument not read as PHP at all.
 #[test]
 fn an_unregistered_directive_stays_masked() {
-    let php = preprocess_with_directives("<p>@datetime($x)</p>", &CustomDirectives::default());
+    let php = preprocess_with_directives("<p>@datetime($x)</p>", &BladeDirectives::default());
     assert!(
         !php.contains("blade_custom_directive") && !php.contains("$x"),
         "an unregistered directive must stay masked: {php}"
+    );
+}
+
+/// A built-in directive the installed compiler predates is the text Blade
+/// leaves it as, so a JSON-LD `"@context"` key on such a Laravel opens no
+/// block for the rest of the template to be parsed inside.
+#[test]
+fn a_built_in_directive_the_compiler_lacks_stays_text() {
+    let has_method = |name: &str| name.eq_ignore_ascii_case("compileIf");
+    let directives = BladeDirectives::new(Some(&has_method), &[]);
+    let php = preprocess_with_directives(
+        "<script type=\"application/ld+json\">{\"@context\": \"https://schema.org\"}</script>",
+        &directives,
+    );
+    assert!(
+        !php.contains("if"),
+        "@context must not lower to anything: {php}"
     );
 }
 
@@ -1299,6 +1316,20 @@ fn test_preprocess_raw_echo_wrapped_in_extra_braces() {
     );
 }
 
+/// An `@` escapes an echo only when it comes directly before the echo's
+/// opener, so the raw echo in `@{{!! $v !!}}` is not escaped: it compiles,
+/// and the `@` and the first brace are text.
+#[test]
+fn test_preprocess_raw_echo_wrapped_in_extra_braces_after_an_at() {
+    let content = "@{{!! $html !!}}";
+    let (php, _) = preprocess(content);
+    assert!(
+        php.contains("echo  $html ;"),
+        "the raw echo after the `@` should still compile: {}",
+        php
+    );
+}
+
 #[test]
 fn test_preprocess_raw_and_escaped_echo_close_independently() {
     let content = "{!! $html !!} and {{ $safe }}";
@@ -1771,6 +1802,27 @@ fn test_preprocess_switch_case_with_class_constant() {
 }
 
 #[test]
+fn test_preprocess_break_and_continue_keep_their_condition() {
+    let content = "@foreach($rows as $row)\n@break($row > 3)\n@continue ($row === 1)\n@continue\n@endforeach\n";
+    let (php, _) = preprocess(content);
+    assert!(
+        php.contains("if ($row > 3) break;"),
+        "@break with a condition should break only when it holds: {}",
+        php
+    );
+    assert!(
+        php.contains("if  ($row === 1) continue;"),
+        "@continue with a condition should continue only when it holds: {}",
+        php
+    );
+    assert!(
+        php.contains(" continue; "),
+        "a bare @continue should emit continue;: {}",
+        php
+    );
+}
+
+#[test]
 fn test_preprocess_session_value_accessible() {
     // $value should be accessible inside @session block
     let content = "@session('status')\n{{ $value }}\n@endsession\n";
@@ -1906,6 +1958,29 @@ fn test_preprocess_use_directive_function_modifier() {
         "@use with a function modifier should emit `use function`: {}",
         php
     );
+}
+
+/// A group import wrapped over several lines is hoisted with its line
+/// breaks, and every line it adds is prologue: counted short, every
+/// position in the template would map that many lines off.
+#[test]
+fn test_preprocess_wrapped_use_directive_keeps_positions_aligned() {
+    use tower_lsp::lsp_types::Position;
+
+    let content = "@use('App\\Models\\{\n    Post,\n    Comment,\n}')\n<p>{{ $title }}</p>\n";
+    let (php, map) = preprocess(content);
+    let title = Position {
+        line: 4,
+        character: 6,
+    };
+    let lowered = map.blade_to_php(title);
+    assert!(
+        php.lines()
+            .nth(lowered.line as usize)
+            .is_some_and(|line| line.contains("$title")),
+        "the template's lines must sit where the map says they do: {php}"
+    );
+    assert_eq!(map.try_php_to_blade(lowered), Some(title));
 }
 
 /// `@inject('metrics', 'App\Services\Metrics')` becomes an inline
@@ -2213,5 +2288,16 @@ fn test_preprocess_props_directive_dynamic_argument_falls_back() {
         php.contains("global $errors, $__env;"),
         "a non-literal @props argument declares nothing: {}",
         php
+    );
+}
+
+/// `:name` on a plain HTML tag is client-side markup that Blade emits
+/// verbatim, so it must not be lowered as PHP.
+#[test]
+fn test_preprocess_bound_attribute_on_plain_html_tag_is_not_php() {
+    let (php, _) = preprocess("<span :class=\"{'is-empty': !selected?.text}\"></span>");
+    assert!(
+        !php.contains("blade_bound_attr_directive("),
+        "a bound attribute on a plain tag is not PHP: {php}"
     );
 }

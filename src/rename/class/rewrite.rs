@@ -7,6 +7,7 @@
 //! locations into edits.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
@@ -19,17 +20,25 @@ use super::imports::{
     pick_collision_alias,
 };
 
-/// One file that references the class, with what its own imports say
-/// about how it reaches the class.
+/// One `namespace` block of a file that references the class, with what
+/// its own imports say about how it reaches the class.
+///
+/// PHP scopes an import to its block, so a file with several blocks is
+/// rewritten one block at a time.
 pub(super) struct FileRewrite {
     /// The text the reference locations index into: for a template, the
-    /// virtual PHP it lowers to.
-    pub(super) content: String,
+    /// virtual PHP it lowers to.  Shared by every block of the file.
+    pub(super) content: Arc<String>,
     /// The URI the file's edits are filed under.
     pub(super) target_uri: Url,
-    /// The file's `alias → FQN` import table.
+    /// The block's namespace.
+    pub(super) namespace: Option<String>,
+    /// The block's byte range, or `None` when the file has only one
+    /// block.
+    pub(super) block: Option<(usize, usize)>,
+    /// The block's `alias → FQN` import table.
     pub(super) use_map: HashMap<String, String>,
-    /// The file's import of the class, when it has one.
+    /// The block's import of the class, when it has one.
     pub(super) import_info: Option<ImportInfo>,
 }
 
@@ -48,31 +57,61 @@ pub(super) struct ReferenceRewrite {
 }
 
 impl Backend {
-    /// Read `uri` and its import table for a rename or move of `old_fqn`.
+    /// Read `uri` and each of its `namespace` blocks' import tables for a
+    /// rename or move of `old_fqn`.  Empty when the file cannot be read.
     ///
     /// Reference locations in a template are recorded against the virtual
     /// PHP it lowers to, so the text behind them is read there too; the
     /// edits are translated back by [`Self::rewrite_template_edits`].
-    pub(super) fn file_rewrite(&self, uri: &str, old_fqn: &str) -> Option<FileRewrite> {
-        let content = self.reference_file_content(uri)?;
-        let target_uri = parse_edit_target_uri(uri)?;
-        let use_map = self
-            .file_imports
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let import_info = find_import_for_fqn(&use_map, old_fqn);
-        Some(FileRewrite {
-            content,
-            target_uri,
-            use_map,
-            import_info,
-        })
+    pub(super) fn file_rewrites(&self, uri: &str, old_fqn: &str) -> Vec<FileRewrite> {
+        let Some(content) = self.reference_file_content_arc(uri) else {
+            return Vec::new();
+        };
+        let Some(target_uri) = parse_edit_target_uri(uri) else {
+            return Vec::new();
+        };
+        self.import_blocks(uri)
+            .into_iter()
+            .map(|block| FileRewrite {
+                content: Arc::clone(&content),
+                target_uri: target_uri.clone(),
+                import_info: find_import_for_fqn(&block.use_map, old_fqn),
+                namespace: block.namespace,
+                block: block.range,
+                use_map: block.use_map,
+            })
+            .collect()
     }
 }
 
+/// Pair each block of a file with the reference locations written in it.
+pub(super) fn locations_by_block<'a, 'l>(
+    blocks: &'a [FileRewrite],
+    locations: &[&'l Location],
+) -> Vec<(&'a FileRewrite, Vec<&'l Location>)> {
+    let mut grouped: Vec<(&FileRewrite, Vec<&Location>)> =
+        blocks.iter().map(|block| (block, Vec::new())).collect();
+    let Some(first) = blocks.first() else {
+        return grouped;
+    };
+    for &loc in locations {
+        let offset = position_to_byte_offset(&first.content, loc.range.start);
+        grouped[FileRewrite::index_at(blocks, offset)].1.push(loc);
+    }
+    grouped
+}
+
 impl FileRewrite {
+    /// The index of the block of `blocks` containing `offset`, or of the
+    /// last block for an offset past every block (e.g. code after its
+    /// closing brace).
+    pub(super) fn index_at(blocks: &[FileRewrite], offset: usize) -> usize {
+        blocks
+            .iter()
+            .position(|block| block.block.is_none_or(|(s, e)| offset >= s && offset <= e))
+            .unwrap_or(blocks.len().saturating_sub(1))
+    }
+
     /// Decide what the file's in-code references become.
     ///
     /// - An import with an explicit alias keeps it, and references through
@@ -126,6 +165,7 @@ impl FileRewrite {
         let info = self.import_info.as_ref()?;
         build_use_statement_edit(
             &self.content,
+            self.block,
             old_fqn,
             &RenameTarget {
                 new_fqn,

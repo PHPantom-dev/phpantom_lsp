@@ -219,11 +219,43 @@ mod tests {
         );
     }
 
+    /// A raw echo's delimiters compile to a bare `echo`, which has no
+    /// declaration to lead to. Go-to-definition on one must answer nothing,
+    /// rather than follow the expression that starts right behind an opener
+    /// written without a space, and the expression itself must still lead
+    /// to where it is declared.
+    #[tokio::test]
+    async fn a_raw_echo_delimiter_leads_nowhere() {
+        let template = "@php($html = '<b>bold</b>')\n{!!$html!!}\n{!! $html !!}\n";
+        let (backend, dir, uri) = workspace(template);
+        open_document(&backend, &uri, "blade", template).await;
+
+        // `(line, column of the opener, column of the closer)`.
+        for (line, opener, closer) in [(1, 0, 8), (2, 0, 10)] {
+            for start in [opener, closer] {
+                for column in start..start + 3 {
+                    assert_eq!(
+                        definition(&backend, &dir, &uri, line, column).await,
+                        None,
+                        "{line}:{column} is a raw echo delimiter, which has no declaration"
+                    );
+                }
+            }
+        }
+
+        // On the `$html` of `{!!$html!!}`.
+        assert_eq!(
+            definition(&backend, &dir, &uri, 1, 5).await.as_deref(),
+            Some("resources/views/page.blade.php")
+        );
+    }
+
     /// A `{{`/`}}` lookalike inside a `{{-- --}}` comment, a `@verbatim`
-    /// block, or an `@`-escaped `@{{ … }}` echo is literal output in all
-    /// three cases, none of it compiling to the `e()` call a genuine echo
-    /// delimiter does. Go-to-definition on any of them must not answer with
-    /// `e()`'s declaration.
+    /// block, or an `@`-escaped `@{{ … }}` echo, and the braces around a raw
+    /// echo written `{{!! … !!}}`, are literal output in all four cases,
+    /// none of it compiling to the `e()` call a genuine echo delimiter does.
+    /// Go-to-definition on any of them must not answer with `e()`'s
+    /// declaration.
     #[tokio::test]
     async fn an_echo_lookalike_outside_a_real_echo_does_not_lead_to_e() {
         let composer = r#"{"autoload": {"psr-4": {"App\\": "app/"}}}"#;
@@ -239,6 +271,10 @@ mod tests {
             ("@verbatim\n{{ 'x' }}\n@endverbatim\n", 1, 0),
             // The `{{` of an `@`-escaped echo.
             ("@{{ 'x' }}\n", 0, 1),
+            // The braces around a raw echo.
+            ("{{!!$html!!}}\n", 0, 0),
+            ("{{!!$html!!}}\n", 0, 12),
+            ("@{{!!$html!!}}\n", 0, 1),
         ] {
             let (backend, dir) = create_psr4_workspace(
                 composer,

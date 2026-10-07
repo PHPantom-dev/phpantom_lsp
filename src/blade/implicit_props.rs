@@ -22,7 +22,7 @@ use std::collections::HashSet;
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
-use crate::blade::directives::CustomDirectives;
+use crate::blade::directives::BladeDirectives;
 use crate::parser::with_parsed_program;
 use crate::scope_collector::{AccessKind, ScopeMap, collect_function_scope};
 
@@ -36,7 +36,7 @@ use super::TemplateKind;
 /// own for it, so nothing about the tag is missing. So are the variables
 /// Blade builds itself (`$slot`, `$attributes`, `$loop`, `$errors`, …),
 /// which no attribute names.
-pub(crate) fn implicit_props(content: &str, custom_directives: &CustomDirectives) -> Vec<String> {
+pub(crate) fn implicit_props(content: &str, directives: &BladeDirectives) -> Vec<String> {
     // Preprocessed *without* injected variables: a name another caller's
     // tag happened to pass is declared in the prologue of the template's
     // own virtual PHP, and reading that copy would make the answer depend
@@ -47,7 +47,7 @@ pub(crate) fn implicit_props(content: &str, custom_directives: &CustomDirectives
         TemplateKind::Component,
         None,
         None,
-        custom_directives,
+        directives,
     );
 
     with_parsed_program(&virtual_php, "blade_implicit_props", |program, _content| {
@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn a_bare_read_is_an_implicit_prop() {
         assert_eq!(
-            implicit_props("<h2>{{ $title }}</h2>\n", &CustomDirectives::default()),
+            implicit_props("<h2>{{ $title }}</h2>\n", &BladeDirectives::default()),
             vec!["title"]
         );
     }
@@ -121,7 +121,7 @@ mod tests {
     fn a_name_the_template_assigns_itself_is_not_a_prop() {
         let blade = "@php($label = strtoupper($title))\n<b>{{ $label }}</b>\n";
         assert_eq!(
-            implicit_props(blade, &CustomDirectives::default()),
+            implicit_props(blade, &BladeDirectives::default()),
             vec!["title"]
         );
     }
@@ -130,7 +130,7 @@ mod tests {
     fn a_declared_prop_is_not_reported_as_implicit() {
         let blade = "@props(['headline', 'level' => 'info'])\n<p>{{ $headline }} {{ $level }} {{ $extra }}</p>\n";
         assert_eq!(
-            implicit_props(blade, &CustomDirectives::default()),
+            implicit_props(blade, &BladeDirectives::default()),
             vec!["extra"]
         );
     }
@@ -139,7 +139,7 @@ mod tests {
     fn an_aware_entry_comes_from_the_parent_component() {
         let blade = "@aware(['theme'])\n<div class=\"{{ $theme }}\">{{ $body }}</div>\n";
         assert_eq!(
-            implicit_props(blade, &CustomDirectives::default()),
+            implicit_props(blade, &BladeDirectives::default()),
             vec!["body"]
         );
     }
@@ -149,7 +149,7 @@ mod tests {
         let blade =
             "@foreach ($rows as $row)\n<li>{{ $loop->index }}: {{ $row }}</li>\n@endforeach\n";
         assert_eq!(
-            implicit_props(blade, &CustomDirectives::default()),
+            implicit_props(blade, &BladeDirectives::default()),
             vec!["rows"]
         );
     }
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn blades_own_component_variables_are_not_props() {
         let blade = "<div {{ $attributes }}>{{ $slot }} {{ $componentName }} {{ $errors }}</div>\n";
-        assert!(implicit_props(blade, &CustomDirectives::default()).is_empty());
+        assert!(implicit_props(blade, &BladeDirectives::default()).is_empty());
     }
 
     /// A bound attribute on a nested tag is a read like any other: the
@@ -166,7 +166,7 @@ mod tests {
     fn an_expression_passed_to_a_nested_tag_is_a_read() {
         let blade = "<x-icon :name=\"$icon\" />\n";
         assert_eq!(
-            implicit_props(blade, &CustomDirectives::default()),
+            implicit_props(blade, &BladeDirectives::default()),
             vec!["icon"]
         );
     }
@@ -175,7 +175,7 @@ mod tests {
     fn reads_are_reported_in_source_order_without_repeats() {
         let blade = "{{ $second }}{{ $first }}{{ $second }}\n";
         assert_eq!(
-            implicit_props(blade, &CustomDirectives::default()),
+            implicit_props(blade, &BladeDirectives::default()),
             vec!["second", "first"]
         );
     }

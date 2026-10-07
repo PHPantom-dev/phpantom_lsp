@@ -187,3 +187,26 @@ fn bulk_remove_collapses_gap_when_unused_import_is_between_used_ones() {
         "<?php\nuse Foo\\Bar;\nuse Quux\\Quuz;\n\nclass Test extends Bar\n{\n    public function make(): Quuz\n    {\n        return new Quuz();\n    }\n}\n"
     );
 }
+
+/// Each `namespace` block's imports are checked against the references in
+/// that block, so an import used only by another block is still unused.
+#[test]
+fn an_import_used_only_in_another_namespace_block_is_unused() {
+    let backend = create_test_backend();
+    let content = concat!(
+        "<?php\n",
+        "namespace A {\n",
+        "    use X\\Foo;\n",
+        "}\n",
+        "namespace B {\n",
+        "    use X\\Foo;\n",
+        "    function b(Foo $f) {}\n",
+        "}\n",
+    );
+    backend.update_ast(URI, content);
+
+    let mut diags = Vec::new();
+    backend.collect_unused_import_diagnostics(URI, content, &mut diags);
+    let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
+    assert_eq!(lines, [2], "only block A's import is unused: {diags:?}");
+}

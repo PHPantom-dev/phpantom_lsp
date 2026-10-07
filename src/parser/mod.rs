@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 
 /// PHP parsing and AST extraction.
@@ -728,76 +729,128 @@ fn extract_string_literal_value(
 
 // ─── Thread-local parse cache ───────────────────────────────────────────────
 //
-// During a single diagnostic pass the file content is immutable and
-// `with_parsed_program` may be called dozens of times for the same
-// content string (once per unique variable subject, plus secondary
-// helpers).  Each call allocates a fresh `LocalArena` arena and re-parses the
-// entire file from scratch.
+// During a single pass (an LSP request, or diagnostics over one file) the
+// file content is immutable and `with_parsed_program` may be called dozens
+// of times for the same content string (once per unique variable subject,
+// plus secondary helpers).  Each call would otherwise allocate a fresh
+// `LocalArena` and re-parse the entire file from scratch.
 //
-// The cache below eliminates that redundancy.  [`with_parse_cache`]
-// stores only the content `String` (cheap allocation, no parsing).
-// The first [`with_parsed_program`] call whose content matches then
-// lazily parses the file, storing the `LocalArena` arena and a raw pointer
-// to the resulting `Program`.  Subsequent calls reuse the cached AST.
+// The cache below eliminates that redundancy.  [`with_parse_cache`] stores
+// only the content (no parsing).  The first [`with_parsed_program`] call
+// whose content matches then lazily parses the file and keeps the arena
+// and the resulting `Program`.  Subsequent calls reuse the cached AST.
 //
-// This lazy approach avoids paying the parse cost when the cache is
-// activated but `with_parsed_program` is never called (e.g. when a
-// diagnostic pass finds no member-access spans to check).
+// A pass also reads other files: inferring the return type of a method
+// declared elsewhere walks that method's body, and every resolution inside
+// the walk parses the declaring file.  A nested [`with_parse_cache`] for a
+// different file therefore registers it alongside the pass's own file, so
+// all of those parses share one AST until the pass ends.  Only the most
+// recently registered few are kept, which bounds what a pass that reaches
+// into many files holds at once.
 //
-// The cache is activated by [`with_parse_cache`] which sets it up at
-// the start of a block and tears it down (via `Drop`) when the block
-// finishes.  Outside that scope `with_parsed_program` behaves exactly
-// as before.
+// The cache is activated by the outermost [`with_parse_cache`], which sets
+// it up at the start of a block and tears it down (via `Drop`) when the
+// block finishes.  Outside that scope `with_parsed_program` parses every
+// time.
 //
 // ## Safety
 //
-// The `Program<'arena>` borrows from the `LocalArena` arena.  Both live
-// inside the `Option<ParseCacheEntry>` stored in the thread-local
-// `RefCell`.  The raw pointer is reconstituted to a reference only
-// while the `RefCell` borrow is held and the entry is `Some`, so the
-// arena is guaranteed to be alive.  The cache entry is cleared (and the
-// arena dropped) by [`ParseCacheGuard::drop`] before any outside code
-// can observe a dangling pointer.
+// The `Program<'arena>` borrows from the `LocalArena` and the content
+// string, both owned by the same [`CachedFile`].  The raw pointer is
+// reconstituted to a reference only through a `&CachedFile`, and a caller
+// holds an `Rc` to the file for as long as it uses the program, so neither
+// eviction nor the guard clearing the cache can free them underneath it.
 
-/// Cached arena + content + parsed program for the current thread.
-///
-/// The entry is created lazily: [`with_parse_cache`] stores only the
-/// content string.  The arena and program are populated on the first
-/// [`with_parsed_program`] call whose content matches.
-struct ParseCacheEntry {
-    /// The source text, shared with the caller that installed the cache
-    /// when it already held it behind an `Arc`.  Must outlive
-    /// `program_ptr`.
+/// How many files besides the pass's own one the cache keeps parsed.
+const MAX_CACHED_OTHER_FILES: usize = 4;
+
+/// One file's content and, once something has asked for it, its AST.
+struct CachedFile {
     content: Arc<String>,
-    /// LocalArena that owns all AST nodes.  `None` until the first
-    /// `with_parsed_program` call triggers a lazy parse.
-    arena: Option<mago_allocator::LocalArena>,
-    /// Raw pointer to the `Program` allocated in `arena`.
-    /// `None` until the first `with_parsed_program` call.
-    /// Reconstituted to `&Program<'_>` only while the `RefCell` borrow
-    /// is held and the entry is `Some`.
-    program_ptr: Option<*const ()>,
+    /// The arena that owns the AST nodes, and a pointer to the `Program`
+    /// allocated in it.  Unset until the first parse of this file.
+    parsed: std::cell::OnceCell<(mago_allocator::LocalArena, *const ())>,
 }
 
-// `ParseCacheEntry` is only ever accessed from the thread that created
-// it (via `thread_local!`), but we store a raw pointer so Rust can't
-// prove `Send`/`Sync` automatically.  The pointer is never shared
-// across threads.
-unsafe impl Send for ParseCacheEntry {}
+impl CachedFile {
+    fn new(content: Arc<String>) -> Rc<Self> {
+        Rc::new(Self {
+            content,
+            parsed: std::cell::OnceCell::new(),
+        })
+    }
+
+    fn holds(&self, content: &str) -> bool {
+        // The pointer comparison includes the length, so a prefix of the
+        // cached text, which starts at the same address, is not mistaken
+        // for the whole of it.
+        std::ptr::eq(self.content.as_str(), content) || self.content.as_str() == content
+    }
+
+    fn program(&self) -> &Program<'_> {
+        let (_, program_ptr) = self.parsed.get_or_init(|| {
+            let arena = mago_allocator::LocalArena::new();
+            let file_id = mago_database::file::FileId::new(b"input.php");
+            let program =
+                mago_syntax::parser::parse_file_content(&arena, file_id, self.content.as_bytes());
+            // The arena's chunks are heap-allocated and do not move when
+            // the arena itself does, so the pointer outlives this move.
+            let program_ptr: *const () = (program as *const Program<'_>).cast();
+            (arena, program_ptr)
+        });
+        // SAFETY: the pointer came from a `&Program` that borrows only
+        // the arena and `self.content`, both owned by `self`, which the
+        // returned reference cannot outlive.
+        unsafe { &*program_ptr.cast::<Program<'_>>() }
+    }
+}
+
+/// The files of the active pass: its own file first, then the other files
+/// it registered, least recently registered first.
+struct ParseCache {
+    files: Vec<Rc<CachedFile>>,
+}
+
+impl ParseCache {
+    fn find(&self, content: &str) -> Option<Rc<CachedFile>> {
+        self.files.iter().find(|file| file.holds(content)).cloned()
+    }
+
+    /// Make `content` available to the pass, evicting the oldest other
+    /// file when that leaves too many.
+    fn register(&mut self, content: &str, to_arc: impl FnOnce() -> Arc<String>) {
+        match self.files.iter().position(|file| file.holds(content)) {
+            Some(0) => {}
+            Some(index) => {
+                let file = self.files.remove(index);
+                self.files.push(file);
+            }
+            None => {
+                if self.files.len() > MAX_CACHED_OTHER_FILES {
+                    self.files.remove(1);
+                }
+                self.files.push(CachedFile::new(to_arc()));
+            }
+        }
+    }
+
+    fn evict(&mut self, file: &Rc<CachedFile>) {
+        self.files.retain(|cached| !Rc::ptr_eq(cached, file));
+    }
+}
 
 thread_local! {
-    static PARSE_CACHE: RefCell<Option<ParseCacheEntry>> = const { RefCell::new(None) };
+    static PARSE_CACHE: RefCell<Option<ParseCache>> = const { RefCell::new(None) };
 }
 
 /// RAII guard that clears the thread-local parse cache on drop.
 ///
 /// Created by [`with_parse_cache`].  Must not be leaked (e.g. via
-/// `std::mem::forget`) — doing so would leave a stale cache entry
-/// that could outlive the original content string.
+/// `std::mem::forget`) — doing so would leave the cache active past the
+/// pass it belongs to.
 pub(crate) struct ParseCacheGuard {
-    /// `true` when this guard owns the cache entry and must clear it
-    /// on drop.  Nested (no-op) guards have `owns_cache = false` and
-    /// leave the entry untouched.
+    /// `true` when this guard owns the cache and must clear it on drop.
+    /// Nested guards have `owns_cache = false` and leave it untouched.
     owns_cache: bool,
 }
 
@@ -971,13 +1024,11 @@ pub(crate) fn try_for_each_if_branch<B>(
 /// // All of them hit the cache instead of re-parsing.
 /// // Guard is dropped here, clearing the cache.
 /// ```
+///
+/// Called while a cache is already active, this adds `content` to it for
+/// the rest of the outer pass and returns a guard that does nothing.
 pub(crate) fn with_parse_cache(content: &str) -> ParseCacheGuard {
-    // If there's already an active cache (nested call), just return a
-    // no-op guard — the outermost guard owns the lifetime.
-    if parse_cache_active() {
-        return ParseCacheGuard { owns_cache: false };
-    }
-    with_parse_cache_arc(Arc::new(content.to_string()))
+    install_parse_cache(content, || Arc::new(content.to_string()))
 }
 
 /// [`with_parse_cache`] for a caller that already holds the content
@@ -986,25 +1037,28 @@ pub(crate) fn with_parse_cache(content: &str) -> ParseCacheGuard {
 /// Every LSP request passes through here, so the copy would otherwise be
 /// paid once per request whether or not anything goes on to parse.
 pub(crate) fn with_parse_cache_arc(content: Arc<String>) -> ParseCacheGuard {
-    if parse_cache_active() {
-        return ParseCacheGuard { owns_cache: false };
-    }
-
-    // Store only the content.  The actual parse is deferred until the
-    // first `with_parsed_program` call that hits the cache.
-    PARSE_CACHE.with(|cell| {
-        *cell.borrow_mut() = Some(ParseCacheEntry {
-            content,
-            arena: None,
-            program_ptr: None,
-        });
-    });
-
-    ParseCacheGuard { owns_cache: true }
+    let text = Arc::clone(&content);
+    install_parse_cache(&text, move || content)
 }
 
-fn parse_cache_active() -> bool {
-    PARSE_CACHE.with(|cell| cell.borrow().is_some())
+fn install_parse_cache(content: &str, to_arc: impl FnOnce() -> Arc<String>) -> ParseCacheGuard {
+    PARSE_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        match cache.as_mut() {
+            Some(cache) => {
+                cache.register(content, to_arc);
+                ParseCacheGuard { owns_cache: false }
+            }
+            None => {
+                // Store only the content.  The parse is deferred until the
+                // first `with_parsed_program` call that asks for it.
+                *cache = Some(ParseCache {
+                    files: vec![CachedFile::new(to_arc())],
+                });
+                ParseCacheGuard { owns_cache: true }
+            }
+        }
+    })
 }
 
 /// Parse `content` with the mago-syntax parser and pass the resulting
@@ -1018,87 +1072,41 @@ fn parse_cache_active() -> bool {
 /// context) and `T::default()` is returned.
 ///
 /// When the thread-local parse cache is active (see
-/// [`with_parse_cache`]) and `content` matches the cached content,
-/// the previously parsed `Program` is reused — no allocation or
-/// parsing occurs.
+/// [`with_parse_cache`]) and holds `content`, the previously parsed
+/// `Program` is reused — no allocation or parsing occurs.
 pub(crate) fn with_parsed_program<T: Default>(
     content: &str,
     method_name: &str,
     f: impl FnOnce(&Program<'_>, &str) -> T,
 ) -> T {
     // ── Fast path: check the thread-local cache ─────────────────
-    // 0 = miss, 1 = content matches but not yet parsed, 2 = ready
-    let cache_state: u8 = PARSE_CACHE.with(|cell| {
-        let borrow = cell.borrow();
-        match borrow.as_ref() {
-            Some(e) if e.content.as_str() == content => {
-                if e.program_ptr.is_some() {
-                    2
-                } else {
-                    1
-                }
-            }
-            _ => 0,
-        }
-    });
+    // The borrow ends before `f` runs, so `f` is free to register more
+    // files or parse others through the cache.
+    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
 
-    if cache_state >= 1 {
+    if let Some(file) = cached {
         // The fast path runs both the lazy mago parse and the extraction
         // closure `f`.  Wrap them in `catch_unwind` — like the slow path
         // below — so a parser or extraction panic doesn't escape and
         // violate this function's "a parser panic doesn't crash the LSP
-        // server" contract.  On panic the poisoned cache entry is evicted
-        // so the next call re-parses from scratch.
+        // server" contract.  On panic the poisoned entry is evicted so the
+        // next call re-parses from scratch.
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // Lazily parse on first access and populate the cache entry.
-            if cache_state == 1 {
-                PARSE_CACHE.with(|cell| {
-                    let mut borrow = cell.borrow_mut();
-                    let entry = borrow.as_mut().unwrap();
-                    let arena = mago_allocator::LocalArena::new();
-                    let file_id = mago_database::file::FileId::new(b"input.php");
-                    // SAFETY: `program` borrows from `arena` and
-                    // `entry.content`.  The arena is moved into
-                    // `entry.arena` immediately after extracting the raw
-                    // pointer — the heap-allocated chunks do not move, so
-                    // the pointer stays valid.  `entry.content` lives
-                    // inside the `RefCell` until the guard is dropped.
-                    let program = mago_syntax::parser::parse_file_content(
-                        &arena,
-                        file_id,
-                        entry.content.as_bytes(),
-                    );
-                    let program_ptr: *const () = (program as *const Program<'_>).cast();
-                    entry.program_ptr = Some(program_ptr);
-                    entry.arena = Some(arena);
-                });
-            }
-
-            PARSE_CACHE.with(|cell| {
-                let borrow = cell.borrow();
-                let entry = borrow.as_ref().unwrap();
-                // SAFETY: `program_ptr` was created from a valid `&Program`
-                // whose backing arena and content string are still alive
-                // inside `entry`.  We hold a `Ref` borrow on the `RefCell`,
-                // so the entry cannot be mutated or dropped while we use
-                // the reference.
-                let program: &Program<'_> =
-                    unsafe { &*(entry.program_ptr.unwrap().cast::<Program<'_>>()) };
-                f(program, entry.content.as_str())
-            })
+            f(file.program(), file.content.as_str())
         }));
 
-        match outcome {
-            Ok(value) => return value,
+        return match outcome {
+            Ok(value) => value,
             Err(_) => {
-                // Evict the poisoned cache entry so the next call re-parses.
                 PARSE_CACHE.with(|cell| {
-                    *cell.borrow_mut() = None;
+                    if let Some(cache) = cell.borrow_mut().as_mut() {
+                        cache.evict(&file);
+                    }
                 });
                 tracing::error!("PHPantom: parser panicked in {}", method_name);
-                return T::default();
+                T::default()
             }
-        }
+        };
     }
 
     // ── Slow path: parse from scratch ───────────────────────────
@@ -1705,5 +1713,72 @@ mod with_parsed_program_tests {
         // And the entry is evicted so subsequent calls still work.
         let ok: bool = with_parsed_program(content, "test", |_program, _content| true);
         assert!(ok, "after eviction the next call must re-parse and succeed");
+    }
+
+    fn program_address(content: &str) -> usize {
+        with_parsed_program(content, "test", |program, _| {
+            std::ptr::from_ref(program) as usize
+        })
+    }
+
+    /// A prefix of the pass's file starts at the same address as the file
+    /// itself, but it is different text and has to be parsed as itself.
+    #[test]
+    fn a_prefix_of_the_cached_file_is_not_handed_the_whole_files_program() {
+        let content = "<?php class Foo {}\nclass Bar {}\n";
+        let _guard = with_parse_cache(content);
+        let prefix = &content[.."<?php class Foo {}".len()];
+
+        let whole = with_parsed_program(content, "test", |program, _| program.statements.len());
+        let (statements, text) = with_parsed_program(prefix, "test", |program, text| {
+            (program.statements.len(), text.len())
+        });
+        assert_eq!(text, prefix.len());
+        assert!(statements < whole, "{statements} statements of {whole}");
+    }
+
+    #[test]
+    fn nested_scope_shares_one_parse_of_another_file_for_the_pass() {
+        let own = "<?php class Own {}";
+        let other = "<?php class Other {}";
+        let _guard = with_parse_cache(own);
+
+        // Registered from inside a parse of the pass's own file, the way a
+        // body inference reaches into a declaring file mid-walk.
+        let first = with_parsed_program(own, "test", |_, _| {
+            let _nested = super::with_parse_cache(other);
+            program_address(other)
+        });
+        assert_ne!(first, 0);
+        assert_eq!(
+            program_address(other),
+            first,
+            "the other file stays parsed after the nested scope ends"
+        );
+    }
+
+    #[test]
+    fn other_files_are_evicted_oldest_first_but_never_the_own_file() {
+        let own = "<?php class Own {}";
+        let _guard = with_parse_cache(own);
+        let own_program = program_address(own);
+
+        let others: Vec<String> = (0..=super::MAX_CACHED_OTHER_FILES)
+            .map(|i| format!("<?php class Other{i} {{}}"))
+            .collect();
+        for other in &others {
+            let _nested = super::with_parse_cache(other);
+        }
+
+        assert_eq!(program_address(own), own_program);
+        let cached = |content: &str| {
+            super::PARSE_CACHE.with(|cell| {
+                cell.borrow()
+                    .as_ref()
+                    .is_some_and(|cache| cache.find(content).is_some())
+            })
+        };
+        assert!(!cached(&others[0]), "the oldest other file was evicted");
+        assert!(others[1..].iter().all(|other| cached(other)));
     }
 }

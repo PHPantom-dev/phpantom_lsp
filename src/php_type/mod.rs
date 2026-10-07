@@ -788,6 +788,24 @@ pub(crate) fn runtime_shape_keys(entries: &[ShapeEntry]) -> Option<Vec<String>> 
     Some(keys)
 }
 
+/// The type of the array key a runtime shape key stands for: the integer or
+/// string literal it spells.
+///
+/// A class-constant key is stored as its spelling, which says nothing about
+/// the key it evaluates to: `Foo::class` is the class's name, and any other
+/// constant is only known to be some `array-key`.
+pub(crate) fn shape_key_type(key: &str) -> PhpType {
+    if is_canonical_int_key(key) {
+        PhpType::literal_int(key)
+    } else if let Some(class) = class_name_key(key) {
+        PhpType::class_string(Some(PhpType::named(atom(class))))
+    } else if class_constant_key(key).is_some() {
+        PhpType::named(atom("array-key"))
+    } else {
+        PhpType::literal_string_value(key)
+    }
+}
+
 impl fmt::Display for LiteralValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -807,6 +825,24 @@ pub struct ShapeEntry {
     pub value_type: PhpType,
     /// Whether this field is optional (`key?: type`).
     pub optional: bool,
+}
+
+/// An array shape read the way two shapes are compared: the entries it
+/// lists, and the tail an unsealed one adds beside them.
+///
+/// [`PhpType::kind`] reads an unsealed shape as the generic array it widens
+/// to, which has lost the entries it lists, so a comparison of shapes goes
+/// through [`PhpType::shape_parts`] instead.
+#[derive(Clone, Copy)]
+pub(crate) struct ShapeParts<'a> {
+    /// The entries the shape lists.
+    pub entries: &'a [ShapeEntry],
+    /// The key and value types of the entries beyond the listed ones when
+    /// the shape is unsealed, `None` when it is sealed.
+    pub tail: Option<(&'a PhpType, &'a PhpType)>,
+    /// Whether the shape promises its keys run `0, 1, 2, …` in order, which
+    /// is what `list{…}` adds to `array{…}`.
+    pub is_list: bool,
 }
 
 /// A single parameter in a callable type specification.
@@ -2581,6 +2617,32 @@ impl PhpType {
             TypeKind::Union(members) => members.iter().find_map(|m| m.known_shape_entries()),
             _ => None,
         }
+    }
+
+    /// This type as an array shape, whether it is sealed or unsealed: the
+    /// entries it lists, and what the entries beyond them are known to be.
+    ///
+    /// `None` for anything that is not itself a shape, nullable and union
+    /// wrappers included.
+    pub(crate) fn shape_parts(&self) -> Option<ShapeParts<'_>> {
+        if let Some(unsealed) = self.as_unsealed_shape() {
+            let TypeKind::ArrayShape(entries) = unsealed.shape.kind() else {
+                return None;
+            };
+            return Some(ShapeParts {
+                entries,
+                tail: Some((&unsealed.key, &unsealed.value)),
+                is_list: unsealed.shape.is_list_shape(),
+            });
+        }
+        let TypeKind::ArrayShape(entries) = self.kind() else {
+            return None;
+        };
+        Some(ShapeParts {
+            entries,
+            tail: None,
+            is_list: self.is_list_shape(),
+        })
     }
 
     /// Return `true` if this type is an array shape (`array{…}`).

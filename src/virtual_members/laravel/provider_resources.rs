@@ -16,7 +16,9 @@ use super::view_data::{SharedViewVar, ViewComposer, ViewDataRegistration, view_d
 use crate::atom::bytes_to_str;
 use crate::ci_map::CiSet;
 use crate::names::OwnedResolvedNames;
-use crate::symbol_map::extraction::laravel::{chain_roots_at_facade, is_laravel_container_expr};
+use crate::symbol_map::extraction::laravel::{
+    chain_roots_at_facade, config_keys_written_by, is_laravel_container_expr,
+};
 
 /// How many `->` links a `Route::…->group(path)` registration may put
 /// between the facade and the `group()` call. `Route::middleware(…)
@@ -132,6 +134,10 @@ pub(crate) struct Alias {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ProviderResources {
     pub config_files: Vec<ProviderResource>,
+    /// Config keys a provider writes at runtime rather than ships in a file,
+    /// in dot notation: `laravel/sanctum` adds its guard with
+    /// `config(['auth.guards.sanctum' => …])` from `register()`.
+    pub config_writes: Vec<String>,
     pub view_dirs: Vec<ProviderResource>,
     pub trans_dirs: Vec<ProviderResource>,
     pub route_files: Vec<PathBuf>,
@@ -168,7 +174,7 @@ pub(crate) struct ProviderResources {
     /// registrations, in registration order.  These name directives the
     /// preprocessor would otherwise mask as comments, and the four members
     /// of a `Blade::if()` family are expanded from the single name recorded
-    /// here (`crate::blade::directives::CustomDirectives`).
+    /// here (`crate::blade::directives::BladeDirectives`).
     pub custom_directives: Vec<crate::blade::directives::CustomDirective>,
     /// `View::share('key', $value)` registrations, which put a variable in
     /// every template's scope.
@@ -192,6 +198,7 @@ pub(crate) struct ProviderResources {
 impl ProviderResources {
     pub fn merge(&mut self, other: ProviderResources) {
         self.config_files.extend(other.config_files);
+        self.config_writes.extend(other.config_writes);
         self.view_dirs.extend(other.view_dirs);
         self.trans_dirs.extend(other.trans_dirs);
         self.route_files.extend(other.route_files);
@@ -435,6 +442,10 @@ pub(crate) fn extract_provider_resources(
     let resolved = OwnedResolvedNames::from_resolved(&NameResolver::new(&arena).resolve(program));
 
     super::helpers::walk_program_expressions(program, &mut |expr| {
+        resources
+            .config_writes
+            .extend(config_keys_written_by(expr, content));
+
         // Any direct use of the `Route` facade means routes are registered
         // from this file rather than only pointed at.
         if let Expression::Call(Call::StaticMethod(sc)) = expr
@@ -684,25 +695,33 @@ pub(crate) fn extract_provider_resources(
 
         let args: Vec<_> = mc.argument_list.arguments.iter().collect();
 
-        // The namespaced `load*From(path, namespace)` registrations differ
-        // only in which list they land in. `loadViewsFrom` is handled
-        // separately below: unlike the other two, it has a published-package
-        // override to check for first.
-        let namespaced: Option<&mut Vec<ProviderResource>> = match method_lower.as_slice() {
+        // Config registrations require a key, while translations can omit
+        // their namespace to add a global path. Views also check for a
+        // published-package override, so they are handled separately below.
+        let registrations: Option<&mut Vec<ProviderResource>> = match method_lower.as_slice() {
             b"mergeconfigfrom" => Some(&mut resources.config_files),
             b"loadtranslationsfrom" => Some(&mut resources.trans_dirs),
             _ => None,
         };
-        if let Some(target) = namespaced {
-            if args.len() >= 2
+        if let Some(target) = registrations {
+            let namespace = match args.get(1).map(|arg| arg.value()) {
+                None | Some(Expression::Literal(Literal::Null(_)))
+                    if method_lower == b"loadtranslationsfrom" =>
+                {
+                    Some("")
+                }
+                Some(arg) => super::helpers::extract_string_literal(arg, content)
+                    .map(|(namespace, _, _)| namespace),
+                None => None,
+            };
+            if !args.is_empty()
+                && let Some(namespace) = namespace
                 && let Some(path) =
                     resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
-                && let Some((ns, _, _)) =
-                    super::helpers::extract_string_literal(args[1].value(), content)
             {
                 target.push(ProviderResource {
                     path,
-                    namespace: ns.to_string(),
+                    namespace: namespace.to_string(),
                 });
             }
         } else if method_lower == b"loadviewsfrom" {
@@ -1790,6 +1809,66 @@ mod tests {
             Path::new("/ws/vendor/livewire/livewire/src").join("../config/livewire.php")
         );
         assert_eq!(resources.config_files[0].namespace, "livewire");
+    }
+
+    #[test]
+    fn config_registrations_require_a_key() {
+        let content = "<?php\n\
+            class AppServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->mergeConfigFrom();\n\
+                    $this->mergeConfigFrom(base_path('config/incomplete.php'));\n\
+                    $this->mergeConfigFrom(base_path('config/null.php'), null);\n\
+                    $this->mergeConfigFrom(base_path('config/bakery.php'), 'bakery');\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/app/Providers/AppServiceProvider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Default::default(),
+        );
+        assert_eq!(
+            resources.config_files,
+            vec![ProviderResource {
+                path: PathBuf::from("/ws/config/bakery.php"),
+                namespace: "bakery".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn records_the_config_keys_a_provider_writes() {
+        // `laravel/sanctum` adds its guard this way rather than in a config
+        // file it merges.  The read nested in the guard's value, and the
+        // read after it, declare nothing.
+        let content = "<?php\n\
+            class SanctumServiceProvider {\n\
+                public function register(): void {\n\
+                    config([\n\
+                        'auth.guards.sanctum' => array_merge(['driver' => 'sanctum'], config('auth.guards.sanctum', [])),\n\
+                    ]);\n\
+                    Config::set('queue.connections.package', ['driver' => 'sync']);\n\
+                    config()->set('mail.mailers.package', []);\n\
+                    config('app.name');\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/vendor/laravel/sanctum/src/SanctumServiceProvider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Default::default(),
+        );
+        assert_eq!(
+            resources.config_writes,
+            [
+                "auth.guards.sanctum",
+                "queue.connections.package",
+                "mail.mailers.package"
+            ]
+        );
     }
 
     #[test]

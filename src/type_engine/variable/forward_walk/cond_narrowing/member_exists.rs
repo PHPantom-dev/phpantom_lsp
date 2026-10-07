@@ -10,7 +10,7 @@ use super::*;
 /// the then-branch of `property_exists($x, 'p') ? $x->p : …` depends on the
 /// proof that `$x->p` exists.
 pub(crate) fn condition_proves_member(condition: &Expression<'_>, scope: &ScopeState) -> bool {
-    let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
+    let var_names = scope_keys_named_by(condition, scope);
     collect_and_chain_operands(condition).iter().any(|operand| {
         var_names
             .iter()
@@ -53,7 +53,7 @@ pub(crate) fn apply_member_exists_narrowing<'b>(
     inverted: bool,
 ) {
     for operand in collect_and_chain_operands(condition) {
-        let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
+        let var_names = scope_keys_named_by(operand, scope);
         for var_name in &var_names {
             let Some((member, is_method, negated)) =
                 narrowing::try_extract_member_exists_guard(operand, var_name)

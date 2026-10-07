@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 use crate::class_lookup::is_subtype_of_typed;
 use crate::php_type::{
-    CallableType, LiteralValue, PhpType, ShapeEntry, TypeKind, int_literal_is_within_range,
-    is_array_like_name,
+    CallableType, LiteralValue, PhpType, ShapeEntry, ShapeParts, TypeKind,
+    int_literal_is_within_range, is_array_like_name, shape_key_type,
 };
 use crate::types::{ClassInfo, Visibility};
 
@@ -54,7 +54,13 @@ fn is_unloadable_short_name(
 /// unknown, so a truthy narrowing that turns a bare `array` into a bare
 /// `non-empty-array` must not start contradicting typed parameters the
 /// unrefined type reached fine.
+///
+/// An unsealed shape is not one, whatever its tail holds: it names the
+/// entries it lists, which the plain array it widens to has lost.
 fn is_bare_array(ty: &PhpType) -> bool {
+    if ty.as_unsealed_shape().is_some() {
+        return false;
+    }
     match ty.kind() {
         TypeKind::Named(name) => !name.eq_ignore_ascii_case("iterable") && is_array_like_name(name),
         TypeKind::Array(inner) => inner.is_mixed(),
@@ -74,17 +80,17 @@ fn is_bare_array(ty: &PhpType) -> bool {
 /// so only a shape can be found short of one.  Whether the argument's
 /// shape can be trusted to be the *whole* array is the caller's call —
 /// this only reports the difference between the two.
+///
+/// Either side may be unsealed; the keys it lists are the ones it holds.
 pub(crate) fn missing_required_shape_keys(arg_type: &PhpType, param_type: &PhpType) -> Vec<String> {
-    let (TypeKind::ArrayShape(arg_entries), TypeKind::ArrayShape(param_entries)) =
-        (arg_type.kind(), param_type.kind())
-    else {
+    let (Some(arg), Some(param)) = (arg_type.shape_parts(), param_type.shape_parts()) else {
         return Vec::new();
     };
 
-    let arg_keys = shape_keys(arg_entries);
-    shape_keys(param_entries)
+    let arg_keys = shape_keys(arg.entries);
+    shape_keys(param.entries)
         .into_iter()
-        .zip(param_entries.iter())
+        .zip(param.entries.iter())
         .filter(|(key, entry)| !entry.optional && !arg_keys.contains(key))
         .map(|(key, _)| key)
         .collect()
@@ -190,6 +196,117 @@ fn shape_keys(entries: &[ShapeEntry]) -> Vec<String> {
             }
         })
         .collect()
+}
+
+/// Whether an array shape passes where another is expected, either of them
+/// possibly unsealed.
+///
+/// Only a key both shapes list can contradict: its value has to fit the
+/// parameter's.  A required key the argument does not list is a MAYBE,
+/// because a shape read off a variable lists the keys we saw assigned, not
+/// every key the array has; the caller reports it for a literal, which does
+/// enumerate them all.
+///
+/// Extra keys on the argument are harmless, since PHP array shapes are open
+/// by convention in most codebases.  The exception is an unsealed
+/// parameter, whose tail says what such an entry looks like: every entry
+/// the parameter does not list, and the tail of an unsealed argument, have
+/// to fit it.
+fn shape_is_compatible(
+    arg: &ShapeParts<'_>,
+    param: &ShapeParts<'_>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    strict_types: bool,
+) -> bool {
+    let arg_keys = shape_keys(arg.entries);
+    let param_keys = shape_keys(param.entries);
+    let listed_fit = param_keys
+        .iter()
+        .zip(param.entries.iter())
+        .all(|(key, pe)| {
+            arg_keys
+                .iter()
+                .position(|arg_key| arg_key == key)
+                .is_none_or(|i| {
+                    is_type_compatible(
+                        &arg.entries[i].value_type,
+                        &pe.value_type,
+                        class_loader,
+                        strict_types,
+                    )
+                })
+        });
+    if !listed_fit {
+        return false;
+    }
+    let Some((tail_key, tail_value)) = param.tail else {
+        return true;
+    };
+
+    // The tail is judged the way the type arguments of an array are: its
+    // keys and values are never coerced to fit, whatever the file's
+    // `strict_types`.  A bare `...` takes any key, so there is no point in
+    // building a type for each entry's key to find that out.
+    let any_key = tail_key.is_array_key();
+    let key_fits = |key: &PhpType| is_type_compatible(key, tail_key, class_loader, true);
+    let value_fits = |value: &PhpType| {
+        tail_value.is_mixed() || is_type_compatible(value, tail_value, class_loader, true)
+    };
+
+    let extras_fit = arg_keys
+        .iter()
+        .zip(arg.entries.iter())
+        .filter(|(key, _)| !param_keys.contains(*key))
+        .all(|(key, entry)| {
+            (any_key || key_fits(&shape_key_type(key))) && value_fits(&entry.value_type)
+        });
+    extras_fit
+        && arg.tail.is_none_or(|(arg_tail_key, arg_tail_value)| {
+            (any_key || key_fits(arg_tail_key)) && value_fits(arg_tail_value)
+        })
+}
+
+/// Whether an array shape, sealed or unsealed, passes where a typed array is
+/// expected.
+///
+/// Every key and value the shape lists is one the array holds, so each has
+/// to fit what the parameter declares, and a shape with no entries at all is
+/// the empty array a `non-empty-*` parameter rejects.  What an unsealed
+/// shape holds beyond them is known only by its tail, which is judged the
+/// way the type arguments of an array are: its keys and values are never
+/// coerced to fit, whatever the file's `strict_types`.
+fn shape_fits_array(
+    arg: &ShapeParts<'_>,
+    demand: &ArrayDemand<'_>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    strict_types: bool,
+) -> bool {
+    if demand.non_empty && arg.entries.is_empty() {
+        return false;
+    }
+    let listed_fit = shape_keys(arg.entries)
+        .iter()
+        .zip(arg.entries)
+        .all(|(key, entry)| {
+            (!demand.list || crate::php_type::is_canonical_int_key(key))
+                && demand.key.is_none_or(|key_type| {
+                    // A key is never coerced to fit, whatever the file's
+                    // `strict_types`: PHP decides it when the array is built.
+                    is_type_compatible(&shape_key_type(key), key_type, class_loader, true)
+                })
+                && demand.value.is_none_or(|value_type| {
+                    is_type_compatible(&entry.value_type, value_type, class_loader, strict_types)
+                })
+        });
+    listed_fit
+        && arg.tail.is_none_or(|(tail_key, tail_value)| {
+            demand
+                .key
+                .is_none_or(|key_type| is_type_compatible(tail_key, key_type, class_loader, true))
+                && demand.value.is_none_or(|value_type| {
+                    is_type_compatible(tail_value, value_type, class_loader, true)
+                })
+        })
 }
 
 /// `arg` seen as its generic ancestor `ancestor_name`, carrying the type
@@ -725,6 +842,28 @@ pub(crate) fn is_type_compatible(
         return true;
     }
 
+    // ── Array shape → array shape ───────────────────────────────
+    // Ahead of the rules below, which read an array by its `kind()`: that
+    // is the generic array an unsealed shape widens to, and judging the
+    // shape by it would never see the entries it lists.
+    if let (Some(arg_shape), Some(param_shape)) = (arg_type.shape_parts(), param_type.shape_parts())
+    {
+        return shape_is_compatible(&arg_shape, &param_shape, class_loader, strict_types);
+    }
+
+    // ── Array shape → typed array ───────────────────────────────
+    // `array{id: string, index: string, body: array}` is accepted where
+    // `array<string, mixed>` or similar is expected: the shape is a more
+    // specific form of the typed array.  Like the rule above, it has to
+    // come before the generic-array rules, which an unsealed shape would
+    // reach as the array it widens to: that array's `mixed` tail swallows
+    // the entries the shape lists.
+    if let Some(arg_shape) = arg_type.shape_parts()
+        && let Some(demand) = ArrayDemand::of(param_type)
+    {
+        return shape_fits_array(&arg_shape, &demand, class_loader, strict_types);
+    }
+
     // ── Bare array ↔ typed array: MAYBE ─────────────────────────
     // A bare `array` is untyped — it *might* satisfy `array<K,V>`,
     // `list<X>`, `T[]`, or an array shape.  We can't prove it wrong.
@@ -1193,81 +1332,6 @@ pub(crate) fn is_type_compatible(
         if is_array_like {
             return true;
         }
-    }
-
-    // ── Array shape → array shape ───────────────────────────────
-    // Only a key both shapes name can contradict: its value has to fit
-    // the parameter's.  Extra keys on the argument are harmless, since
-    // PHP array shapes are open by convention in most codebases.  A
-    // required key the argument does not hold is a MAYBE, because a
-    // shape read off a variable lists the keys we saw assigned, not
-    // every key the array has; the caller reports it for a literal,
-    // which does enumerate them all.
-    if let (TypeKind::ArrayShape(arg_entries), TypeKind::ArrayShape(param_entries)) =
-        (arg_type.kind(), param_type.kind())
-    {
-        let arg_keys = shape_keys(arg_entries);
-        return shape_keys(param_entries)
-            .iter()
-            .zip(param_entries.iter())
-            .all(|(key, pe)| {
-                arg_keys
-                    .iter()
-                    .position(|arg_key| arg_key == key)
-                    .is_none_or(|i| {
-                        is_type_compatible(
-                            &arg_entries[i].value_type,
-                            &pe.value_type,
-                            class_loader,
-                            strict_types,
-                        )
-                    })
-            });
-    }
-
-    // ── ArrayShape → typed array ────────────────────────────────
-    // `array{id: string, index: string, body: array}` is accepted where
-    // `array<string, mixed>` or similar is expected: the shape is a more
-    // specific form of the typed array.  Every key and value the shape
-    // names is one the array holds, so each has to fit what the
-    // parameter declares, and a shape with no entries at all is the
-    // empty array a `non-empty-*` parameter rejects.
-    if let TypeKind::ArrayShape(arg_entries) = arg_type.kind()
-        && let Some(demand) = ArrayDemand::of(param_type)
-    {
-        if demand.non_empty && arg_entries.is_empty() {
-            return false;
-        }
-        let key_fits = |key: &str| {
-            let is_int = crate::php_type::is_canonical_int_key(key);
-            if demand.list && !is_int {
-                return false;
-            }
-            demand.key.is_none_or(|key_type| {
-                let key_value = if is_int {
-                    PhpType::literal_int(key)
-                } else {
-                    PhpType::literal_string_value(key)
-                };
-                // A key is never coerced to fit, whatever the file's
-                // `strict_types`: PHP decides it when the array is built.
-                is_type_compatible(&key_value, key_type, class_loader, true)
-            })
-        };
-        return shape_keys(arg_entries)
-            .iter()
-            .zip(arg_entries.iter())
-            .all(|(key, entry)| {
-                key_fits(key)
-                    && demand.value.is_none_or(|value_type| {
-                        is_type_compatible(
-                            &entry.value_type,
-                            value_type,
-                            class_loader,
-                            strict_types,
-                        )
-                    })
-            });
     }
 
     // ── Typed array → ArrayShape: MAYBE ─────────────────────────

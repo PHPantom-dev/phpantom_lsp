@@ -21,11 +21,16 @@ pub(crate) fn apply_class_match_arm_narrowing<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let classes: Vec<PhpType> = expr_arm
+    // The arm runs when any one condition matches, so a condition that
+    // names no class lets the subject in whatever its class.
+    let Some(classes) = expr_arm
         .conditions
         .iter()
-        .filter_map(|c| narrowing::class_match_condition_class(c))
-        .collect();
+        .map(|c| narrowing::class_match_condition_class(c))
+        .collect::<Option<Vec<PhpType>>>()
+    else {
+        return;
+    };
     if classes.is_empty() {
         return;
     }
@@ -121,6 +126,8 @@ pub(crate) fn apply_condition_narrowing<'b>(
         return;
     }
 
+    let entry_locals = scope.locals.clone();
+
     // Seed property access keys from conditions into the scope so that
     // narrowing functions can find and narrow them.
     seed_property_keys_into_scope(condition, scope, ctx);
@@ -145,7 +152,10 @@ pub(crate) fn apply_condition_narrowing<'b>(
         apply_bool_comparison_narrowing(operand, true, scope, ctx);
     }
 
-    let mut var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
+    let mut var_names: Vec<String> = scope_keys_named_by(condition, scope)
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
     // Include variables from instanceof conditions that may not be in
     // scope yet (e.g. undeclared variables used in instanceof checks).
     for name in collect_condition_var_names(condition) {
@@ -267,7 +277,7 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // Whatever the passes above proved about one value's null, they
     // proved about every value whose null it stands for.  Last, so it
     // sees the narrowed state rather than the state on the way in.
-    apply_non_null_implication_narrowing(scope, ctx);
+    apply_non_null_implication_narrowing(scope, &entry_locals, ctx);
 }
 
 /// Apply inverse narrowing for a single condition expression (not
@@ -288,7 +298,10 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
     // scope yet (e.g. `if (!$foobar instanceof Foobar) { break; }`
     // where `$foobar` was never assigned).  After the guard clause,
     // `$foobar` must be `Foobar`.
-    let mut var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
+    let mut var_names: Vec<String> = scope_keys_named_by(condition, scope)
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
     for name in collect_condition_var_names(condition) {
         if !var_names.contains(&name) {
             var_names.push(name);
@@ -527,6 +540,88 @@ pub(crate) fn apply_condition_narrowing_inverse<'b>(
     apply_condition_narrowing_inverse_operand(condition, scope, ctx);
 }
 
+/// Whether a `match (true)` arm failing on `condition` proves the condition
+/// was falsy, so its inverse narrowing can be applied below the arm.
+///
+/// The arm compares with `===`, so it fails on every value except `true`.
+/// That is the same as "falsy" only when `true` is the condition's sole
+/// truthy value: `$count => …` failing says nothing about `$count`, and
+/// treating it as falsy would narrow an `int` to `0` or a `?Foo` to `null`.
+/// `resolve` is only called when the expression's shape does not already
+/// settle the question.
+pub(crate) fn match_true_condition_is_boolean(
+    condition: &Expression<'_>,
+    resolve: impl FnOnce() -> Vec<ResolvedType>,
+) -> bool {
+    match unwrap_parens(condition) {
+        Expression::Binary(bin) if bin.operator.is_instanceof() || bin.operator.is_logical() => {
+            return true;
+        }
+        Expression::UnaryPrefix(prefix)
+            if prefix.operator.is_not()
+                || matches!(
+                    prefix.operator,
+                    UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..)
+                ) =>
+        {
+            return true;
+        }
+        Expression::Construct(Construct::Isset(_) | Construct::Empty(_)) => return true,
+        _ => {}
+    }
+    let types = resolve();
+    !types.is_empty()
+        && types.iter().all(|resolved| {
+            resolved
+                .type_string
+                .union_members()
+                .into_iter()
+                .all(|t| t.is_bool() || t.is_true() || t.is_false() || t.is_null())
+        })
+}
+
+/// Narrow `scope` to what the body of a `match (true)` arm sees.
+///
+/// The body runs when any one of the arm's conditions is `true`, so it sees
+/// what `a || b` proves rather than what `a && b` would: each condition
+/// narrows its own copy of the scope, and the copies are joined.
+pub(crate) fn apply_match_arm_narrowing<'b>(
+    expr_arm: &'b MatchExpressionArm<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let conditions: Vec<&'b Expression<'b>> = expr_arm.conditions.iter().copied().collect();
+    if let [condition] = conditions.as_slice() {
+        apply_condition_narrowing(condition, scope, ctx);
+        return;
+    }
+    // Seeded before the legs split, as the `||` pass does, so that what a
+    // leg concludes about a member path is checked against what the scope
+    // already knew about it.
+    for condition in &conditions {
+        seed_property_keys_into_scope(condition, scope, ctx);
+    }
+    apply_any_leg_narrowing(&conditions, &[], scope, ctx);
+}
+
+/// Narrow `scope` by one `match (true)` arm condition that was tested and
+/// was not `true`.
+///
+/// That is what the conditions after it are evaluated under, and once every
+/// condition of an arm has failed, what the arms below it run under: none
+/// of the conditions held, so each inverse holds at once.
+pub(crate) fn apply_failed_match_condition_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    if match_true_condition_is_boolean(condition, || {
+        super::super::resolve_rhs_with_scope(condition, scope, ctx)
+    }) {
+        apply_condition_narrowing_inverse(condition, scope, ctx);
+    }
+}
+
 /// The variable overrides a condition establishes for one polarity, ready to
 /// hand to [`VarResolutionCtx::with_match_arm_narrowing`].
 ///
@@ -586,7 +681,11 @@ pub(crate) fn condition_arm_narrowing<'b>(
         }
     }
     for subject in &subjects {
-        let types = resolver(subject);
+        // An enclosing arm's narrowing is what the subject holds here.
+        let types = match ctx.match_arm_narrowing.get(subject) {
+            Some(narrowed) => narrowed.clone(),
+            None => resolver(subject),
+        };
         if !types.is_empty() {
             scope.set(subject, types);
         }
@@ -602,6 +701,10 @@ pub(crate) fn condition_arm_narrowing<'b>(
     } else {
         apply_condition_narrowing_inverse(condition, &mut scope, &walk_ctx);
     }
+    // The holders were seeded above rather than narrowed by the condition,
+    // so the pass that re-applies their proofs has to count every one of
+    // them as new.
+    apply_non_null_implication_narrowing(&mut scope, &Locals::default(), &walk_ctx);
 
     let impossible = scope.unreachable;
     let overrides = scope
@@ -629,6 +732,8 @@ fn apply_condition_narrowing_inverse_operand<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    let entry_locals = scope.locals.clone();
+
     apply_condition_narrowing_inverse_single(condition, scope, ctx);
 
     // `check() === true` failing proves what `!check()` does.
@@ -666,7 +771,7 @@ fn apply_condition_narrowing_inverse_operand<'b>(
     // Whatever the passes above proved about one value's null, they
     // proved about every value whose null it stands for.  Last, so it
     // sees the narrowed state rather than the state on the way in.
-    apply_non_null_implication_narrowing(scope, ctx);
+    apply_non_null_implication_narrowing(scope, &entry_locals, ctx);
 }
 
 /// Build a [`VarResolutionCtx`] from a variable name and forward-walk context.

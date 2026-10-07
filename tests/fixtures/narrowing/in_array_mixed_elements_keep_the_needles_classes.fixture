@@ -1,0 +1,20 @@
+// test: a strict in_array against mixed elements keeps the needle's classes
+// feature: hover
+// An element typed `mixed` could be an object of any class, so equalling
+// one proves nothing about which class the needle is.
+// expect_hover: $kept => $kept = Foo
+// expect_hover: $kept => $kept = Bar
+// expect_hover: $kept => $kept = string
+---
+<?php
+
+class Foo {}
+class Bar {}
+
+/** @param list<mixed> $values */
+function check(Foo|Bar|string $needle, array $values): void {
+    if (in_array($needle, $values, true)) {
+        $kept = $needle;
+        echo $ke<>pt;
+    }
+}

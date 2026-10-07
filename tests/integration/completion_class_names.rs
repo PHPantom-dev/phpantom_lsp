@@ -1638,6 +1638,48 @@ async fn test_auto_import_global_class_when_file_has_namespace() {
     );
 }
 
+/// A namespace block that closes on its own line has no line after it that
+/// is still inside it, so the auto-import goes straight after the `{`.
+#[tokio::test]
+async fn test_auto_import_inside_a_namespace_block_written_on_one_line() {
+    let mut stubs: HashMap<&str, &str> = HashMap::new();
+    stubs.insert(
+        "PDO",
+        "<?php\nclass PDO {\n    public function query(string $q): mixed {}\n}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Db { function f() { new PD; } }\n"
+    );
+    let line = text.lines().nth(1).unwrap();
+    let after_brace = line.find('{').unwrap() as u32 + 1;
+    let cursor = line.find("PD;").unwrap() as u32 + 2;
+
+    let items = complete_at(&backend, &uri, text, 1, cursor).await;
+    let pdo = items
+        .iter()
+        .find(|i| i.label == "PDO")
+        .expect("Should have PDO completion");
+
+    let edits = pdo
+        .additional_text_edits
+        .as_ref()
+        .expect("Global class should get auto-import when file has a namespace");
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].new_text, " use PDO;");
+    assert_eq!(
+        edits[0].range.start,
+        Position {
+            line: 1,
+            character: after_brace,
+        },
+    );
+}
+
 /// Global classes should NOT get an auto-import when the file has no namespace.
 /// (This complements `test_no_auto_import_for_non_namespaced_class`.)
 #[tokio::test]

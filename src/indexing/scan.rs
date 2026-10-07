@@ -184,7 +184,7 @@ impl Backend {
         self.symbols.method_store.write().clear();
         self.symbols.gti_index.write().clear();
         self.symbols.gti_parents_index.write().clear();
-        self.clear_class_not_found_cache();
+        self.clear_not_found_caches();
         self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();
 
@@ -471,7 +471,7 @@ impl Backend {
         // looked up (and cached as "not found") before the phar was
         // scanned can now be resolved.
         if class_count > 0 {
-            self.clear_class_not_found_cache();
+            self.clear_not_found_caches();
         }
 
         tracing::info!(

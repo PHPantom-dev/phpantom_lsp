@@ -3,7 +3,7 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_closure_stub,
     create_test_backend_with_full_stubs, create_test_backend_with_function_stubs,
-    create_test_backend_with_stdclass_stub, hover_at, hover_text,
+    create_test_backend_with_stdclass_stub, hover_at, hover_text, markup_hover_at, open_php,
 };
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
@@ -127,6 +127,38 @@ class Service {
     let text = hover_text(&hover);
     assert!(text.contains("$order"), "should mention $order: {}", text);
     assert!(text.contains("Order"), "should resolve to Order: {}", text);
+}
+
+/// An untyped method's return type is read from its own body, however
+/// its declaration is laid out: several methods sharing the class's line,
+/// or a signature spread over lines with the name below its attribute.
+#[tokio::test]
+async fn hover_variable_from_untyped_method_reads_that_methods_body() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let content = r#"<?php
+class Pen { public function first() { return 1; } public function second() { return new Pen(); } }
+class Ink {
+    #[Deprecated]
+    public
+    function
+    colour(
+    ) {
+        return new Pen();
+    }
+}
+function run(Pen $pen, Ink $ink): void {
+    $second = $pen->second();
+    $colour = $ink->colour();
+}
+"#;
+    open_php(&backend, &uri, content).await;
+
+    let text = markup_hover_at(&backend, &uri, 12, 6).await;
+    assert!(text.contains("Pen"), "should resolve to Pen: {text}");
+
+    let text = markup_hover_at(&backend, &uri, 13, 6).await;
+    assert!(text.contains("Pen"), "should resolve to Pen: {text}");
 }
 
 /// An arrow function's body writes what `return <expr>;` would, so a

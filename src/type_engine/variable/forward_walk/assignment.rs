@@ -3,7 +3,7 @@ use super::*;
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 
-use crate::atom::{Atom, atom, bytes_to_str};
+use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::type_engine::types::narrowing;
 use crate::types::{ClassInfo, ResolvedType};
@@ -746,9 +746,7 @@ pub(crate) fn process_assignment_expr<'b>(
         if !condition_proofs.is_empty() {
             scope
                 .implied_narrowings
-                .entry(atom(&lhs_name))
-                .or_default()
-                .extend(condition_proofs);
+                .update(atom(&lhs_name), |proofs| proofs.extend(condition_proofs));
         }
         // `$period = $agreement?->latestPeriod()` makes `$period`'s null
         // stand for `$agreement`'s, so ruling out one rules out the other.
@@ -1565,9 +1563,9 @@ pub(crate) fn process_assert_narrowing<'b>(
         }
     }
 
-    // Apply assert narrowing to each variable in scope.
+    // Apply assert narrowing to each variable the call names.
     let scope_resolver = scope.snapshot_resolver();
-    let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
+    let var_names = scope_keys_named_by(expr, scope);
     for var_name in var_names {
         let var_ctx = ctx.var_ctx_for_with_scope(
             &var_name,

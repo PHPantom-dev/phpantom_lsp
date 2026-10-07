@@ -34,7 +34,7 @@ impl Backend {
         let Some(source) = self.get_file_content_arc(uri) else {
             return;
         };
-        let own = blocks::analyse(&source);
+        let own = blocks::analyse(&source, &self.blade_directives.read());
         if own.extends.is_empty() || !own.blocks.iter().any(|block| block.role == BlockRole::Fill) {
             // A template that names no layout is rendered by something
             // this cannot see — a controller, an `@include` from anywhere —

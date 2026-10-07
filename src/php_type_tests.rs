@@ -879,6 +879,67 @@ fn unsealed_shape_without_entries_is_the_plain_array() {
 }
 
 #[test]
+fn shape_parts_lists_the_entries_of_a_sealed_or_unsealed_shape() {
+    let sealed = PhpType::parse("array{name: string, age?: int}");
+    let parts = sealed.shape_parts().unwrap();
+    assert_eq!(parts.entries.len(), 2);
+    assert!(parts.tail.is_none());
+    assert!(!parts.is_list);
+
+    let unsealed = PhpType::parse("array{name: string, ...<int, User>}");
+    let parts = unsealed.shape_parts().unwrap();
+    assert_eq!(parts.entries.len(), 1);
+    assert_eq!(parts.entries[0].key.as_deref(), Some("name"));
+    let (tail_key, tail_value) = parts.tail.unwrap();
+    assert_eq!(tail_key.to_string(), "int");
+    assert_eq!(tail_value.to_string(), "User");
+    assert!(!parts.is_list);
+
+    let sealed_list = PhpType::parse("list{string, int}");
+    let parts = sealed_list.shape_parts().unwrap();
+    assert!(parts.tail.is_none());
+    assert!(parts.is_list);
+
+    let unsealed_list = PhpType::parse("list{string, ...<int>}");
+    let parts = unsealed_list.shape_parts().unwrap();
+    assert_eq!(parts.entries.len(), 1);
+    assert_eq!(parts.tail.unwrap().0.to_string(), "int");
+    assert!(parts.is_list);
+}
+
+#[test]
+fn shape_parts_is_none_for_anything_that_is_not_itself_a_shape() {
+    for spelling in [
+        "array<string, int>",
+        "list<int>",
+        "array",
+        "object{name: string}",
+        "?array{name: string}",
+        "array{name: string}|null",
+        "array{...<string, int>}",
+    ] {
+        assert!(
+            PhpType::parse(spelling).shape_parts().is_none(),
+            "{spelling}"
+        );
+    }
+}
+
+#[test]
+fn shape_key_type_is_the_literal_the_key_spells() {
+    assert_eq!(shape_key_type("name").to_string(), "'name'");
+    assert_eq!(shape_key_type("7").to_string(), "7");
+    // A string that merely looks numeric is not an integer key.
+    assert_eq!(shape_key_type("07").to_string(), "'07'");
+    // A class-constant key is stored as its spelling, which is not the key.
+    assert_eq!(
+        shape_key_type("Foo::class").to_string(),
+        "class-string<Foo>"
+    );
+    assert_eq!(shape_key_type("Foo::BAR").to_string(), "array-key");
+}
+
+#[test]
 fn shape_entries_non_shape_returns_none() {
     assert!(PhpType::parse("string").shape_entries().is_none());
     assert!(PhpType::parse("array<int>").shape_entries().is_none());
@@ -2946,6 +3007,133 @@ mod subtype_tests {
         assert!(!is_subtype("list<int>", "non-empty-list<int>"));
         assert!(!is_subtype("array<int>", "list<int>"));
         assert!(!is_subtype("array<int, int>", "list<int>"));
+    }
+
+    /// A shape is compared by the entries it lists whether it is sealed or
+    /// unsealed. `kind()` reads an unsealed one as the generic array it
+    /// widens to, which has lost them, so judging it by that array holds a
+    /// shape that omits a listed key, or gets its value wrong, to nothing.
+    #[test]
+    fn a_shape_is_a_subtype_of_an_unsealed_shape_when_it_fits_the_entries_listed() {
+        let is_subtype =
+            |sub: &str, sup: &str| PhpType::parse(sub).is_subtype_of(&PhpType::parse(sup));
+
+        assert!(is_subtype("array{foo: int}", "array{foo: int, ...}"));
+        assert!(is_subtype(
+            "array{foo: int, bar: string}",
+            "array{foo: int, ...}"
+        ));
+        assert!(is_subtype("array{foo: int}", "array{foo?: int, ...}"));
+        // The key the unsealed shape lists is required, and it is an `int`.
+        assert!(!is_subtype("array{bar: string}", "array{foo: int, ...}"));
+        assert!(!is_subtype("array{}", "array{foo: int, ...}"));
+        assert!(!is_subtype("array{foo: string}", "array{foo: int, ...}"));
+        assert!(!is_subtype("array{foo?: int}", "array{foo: int, ...}"));
+    }
+
+    /// What the unsealed shape does not list lands in its tail.
+    #[test]
+    fn the_entries_an_unsealed_shape_does_not_list_have_to_fit_its_tail() {
+        let is_subtype =
+            |sub: &str, sup: &str| PhpType::parse(sub).is_subtype_of(&PhpType::parse(sup));
+
+        assert!(is_subtype(
+            "array{foo: int, bar: int}",
+            "array{foo: int, ...<string, int>}"
+        ));
+        assert!(!is_subtype(
+            "array{foo: int, bar: string}",
+            "array{foo: int, ...<string, int>}"
+        ));
+        assert!(!is_subtype(
+            "array{foo: int, 5: int}",
+            "array{foo: int, ...<string, int>}"
+        ));
+        assert!(is_subtype(
+            "array{foo: int, bar: string}",
+            "array{foo: int, ...}"
+        ));
+        // A listed key is held to its own type and an unlisted one to the
+        // tail's, not to whichever of the two a widened array would take:
+        // `int|string` fits `bar` as well as `foo`.
+        assert!(is_subtype(
+            "array{foo: int, bar: string}",
+            "array{foo: int, ...<string, string>}"
+        ));
+        assert!(!is_subtype(
+            "array{foo: int, bar: int}",
+            "array{foo: int, ...<string, string>}"
+        ));
+        assert!(!is_subtype(
+            "array{foo: string, bar: string}",
+            "array{foo: int, ...<string, string>}"
+        ));
+    }
+
+    /// A tail may hold more entries than the shape lists, which a sealed
+    /// shape does not allow, and what it holds has to fit the other tail.
+    #[test]
+    fn an_unsealed_shape_is_a_subtype_only_of_an_unsealed_shape_its_tail_fits() {
+        let is_subtype =
+            |sub: &str, sup: &str| PhpType::parse(sub).is_subtype_of(&PhpType::parse(sup));
+
+        assert!(!is_subtype("array{foo: int, ...}", "array{foo: int}"));
+        assert!(is_subtype(
+            "array{foo: int, bar: string, ...}",
+            "array{foo: int, ...}"
+        ));
+        assert!(!is_subtype(
+            "array{foo: string, ...}",
+            "array{foo: int, ...}"
+        ));
+        assert!(is_subtype(
+            "array{foo: int, ...<string, int>}",
+            "array{foo: int, ...<array-key, int>}"
+        ));
+        assert!(!is_subtype(
+            "array{foo: int, ...<string, int>}",
+            "array{foo: int, ...<string, string>}"
+        ));
+        assert!(!is_subtype(
+            "array{foo: int, ...<array-key, int>}",
+            "array{foo: int, ...<string, int>}"
+        ));
+        // The tail may hold `bar` itself, which the other side allows only
+        // as an `int`.
+        assert!(!is_subtype(
+            "array{foo: int, ...<string, string>}",
+            "array{foo: int, bar?: int, ...<string, string>}"
+        ));
+        assert!(is_subtype(
+            "array{foo: int, ...<string, int>}",
+            "array{foo: int, bar?: int, ...<string, int>}"
+        ));
+    }
+
+    /// An unsealed `list{…, ...}` keeps the list promise, so only a list
+    /// satisfies it, and its tail continues the count with `int` keys.
+    #[test]
+    fn an_unsealed_list_is_satisfied_only_by_a_list() {
+        let is_subtype =
+            |sub: &str, sup: &str| PhpType::parse(sub).is_subtype_of(&PhpType::parse(sup));
+
+        assert!(is_subtype("list{string, int}", "list{string, ...<int>}"));
+        assert!(is_subtype("array{string, int}", "list{string, ...<int>}"));
+        assert!(!is_subtype(
+            "list{string, string}",
+            "list{string, ...<int>}"
+        ));
+        assert!(!is_subtype("array{a: string}", "list{string, ...}"));
+        assert!(!is_subtype("array{1: string, 0: int}", "list{string, ...}"));
+        assert!(is_subtype(
+            "list{string, ...<int>}",
+            "list{string|int, ...<int|string>}"
+        ));
+        // Its tail may hold any `int` key, which is not the next index.
+        assert!(!is_subtype(
+            "array{0: string, ...<int, int>}",
+            "list{string, ...<int>}"
+        ));
     }
 
     #[test]

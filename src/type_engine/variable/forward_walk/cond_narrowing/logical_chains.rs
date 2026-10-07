@@ -68,34 +68,52 @@ pub(super) fn apply_disjunct_operand_narrowing<'b>(
         if legs.len() < 2 {
             continue;
         }
-
-        let leg_scopes: Vec<ScopeState> = legs
-            .into_iter()
-            .map(|leg| {
-                let mut leg_scope = scope.clone();
-                apply_condition_narrowing(leg, &mut leg_scope, ctx);
-                drop_leg_answers_the_base_rules_out(&mut leg_scope, scope);
-                leg_scope
-            })
-            .collect();
-
-        let mut joined = leg_scopes[0].clone();
-        for leg_scope in &leg_scopes[1..] {
-            joined.merge_branch(leg_scope);
-        }
-        // A path that could not read a member path at all did not narrow
-        // it, and adopting the one leg that could would claim its answer
-        // for the whole disjunction.
-        let refs: Vec<&ScopeState> = leg_scopes.iter().collect();
-        retain_synthetic_keys_common_to_all(&mut joined, &refs);
-        for subject in pinned {
-            let key = atom(subject);
-            if let Some(types) = scope.locals.get(&key) {
-                joined.locals.insert(key, types.clone());
-            }
-        }
-        *scope = joined;
+        apply_any_leg_narrowing(&legs, pinned, scope, ctx);
     }
+}
+
+/// Narrow `scope` to what holds once any one of `legs` was truthy: each leg
+/// narrows its own copy of the scope, and the copies are joined.
+///
+/// This is the truthy narrowing of `a || b`, and also what the body of a
+/// `match (true)` arm with the conditions `a, b` sees.  The subjects named in
+/// `pinned` keep the type `scope` already gave them (see
+/// [`apply_disjunct_operand_narrowing`]).
+pub(super) fn apply_any_leg_narrowing<'b>(
+    legs: &[&'b Expression<'b>],
+    pinned: &[String],
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let leg_scopes: Vec<ScopeState> = legs
+        .iter()
+        .map(|leg| {
+            let mut leg_scope = scope.clone();
+            apply_condition_narrowing(leg, &mut leg_scope, ctx);
+            drop_leg_answers_the_base_rules_out(&mut leg_scope, scope);
+            leg_scope
+        })
+        .collect();
+    let Some((first, rest)) = leg_scopes.split_first() else {
+        return;
+    };
+
+    let mut joined = first.clone();
+    for leg_scope in rest {
+        joined.merge_branch(leg_scope);
+    }
+    // A path that could not read a member path at all did not narrow
+    // it, and adopting the one leg that could would claim its answer
+    // for the whole disjunction.
+    let refs: Vec<&ScopeState> = leg_scopes.iter().collect();
+    retain_synthetic_keys_common_to_all(&mut joined, &refs);
+    for subject in pinned {
+        let key = atom(subject);
+        if let Some(types) = scope.locals.get(&key) {
+            joined.locals.insert(key, types.clone());
+        }
+    }
+    *scope = joined;
 }
 
 /// Undo what a leg concluded about a subject the branch already knew
@@ -108,13 +126,22 @@ pub(super) fn apply_disjunct_operand_narrowing<'b>(
 /// a `$price` a guard already proved non-null. Joining the `null` it
 /// wrote back in would hand the branch body the very type the guard
 /// removed, so the base's answer stands for that subject instead.
+///
+/// Only the entries the leg rewrote can disagree with the base, so only
+/// those are compared.
 fn drop_leg_answers_the_base_rules_out(leg: &mut ScopeState, base: &ScopeState) {
-    for (name, base_types) in &base.locals {
-        let Some(leg_types) = leg.locals.get(name) else {
-            continue;
-        };
-        if types_are_disjoint(leg_types, base_types) {
-            leg.locals.insert(*name, base_types.clone());
-        }
+    let mut ruled_out: Vec<(Atom, Vec<ResolvedType>)> = Vec::new();
+    let _ = leg
+        .locals
+        .diff::<()>(&base.locals, |name, leg_types, base_types| {
+            if let (Some(leg_types), Some(base_types)) = (leg_types, base_types)
+                && types_are_disjoint(leg_types, base_types)
+            {
+                ruled_out.push((*name, base_types.clone()));
+            }
+            std::ops::ControlFlow::Continue(())
+        });
+    for (name, base_types) in ruled_out {
+        leg.locals.insert(name, base_types);
     }
 }

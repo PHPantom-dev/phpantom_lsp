@@ -130,8 +130,8 @@ fn count_call_subject(expr: &Expression<'_>) -> Option<(String, EmptyValue)> {
     let Expression::Identifier(ident) = call.function else {
         return None;
     };
-    let name = crate::util::strip_fqn_prefix(bytes_to_str(ident.value())).to_ascii_lowercase();
-    let empty = match name.as_str() {
+    let name = crate::ci_map::fold(crate::util::strip_fqn_prefix(bytes_to_str(ident.value())));
+    let empty = match name.as_ref() {
         "count" | "sizeof" => EmptyValue::Array,
         "strlen" | "mb_strlen" => EmptyValue::String,
         _ => return None,
@@ -256,7 +256,78 @@ pub(super) fn strip_literal_from_type(ty: &PhpType, excluded: &PhpType) -> Optio
         let kept = strip_literal_from_type(inner, excluded)?;
         return Some(PhpType::nullable(kept));
     }
+    if let Some(kept) = strip_array_literal_from_shape(ty, excluded) {
+        return kept;
+    }
     (!ty.is_subtype_of(excluded)).then(|| ty.clone())
+}
+
+/// Rule the array literal `excluded` out of the sealed shape `ty`.
+///
+/// A shape holds every combination of the values its entries allow, and
+/// taking one combination away leaves a shape only when the others agree
+/// with it in every entry but one: that entry then loses the literal's
+/// value, which is what `$arr !== [null]` proves about an `array{?string}`.
+/// When two entries can each differ from the literal, what is left is no
+/// longer one shape (`array{int, ?string}` minus `[1, null]` still holds
+/// `[2, null]`), so the shape is kept whole.
+///
+/// The outer `None` means the rule does not apply: either side is not a
+/// sealed shape, `ty` has an optional entry, `excluded` is not one value, or
+/// the keys differ (`===` compares their order too). The inner `None` means
+/// nothing is left.
+fn strip_array_literal_from_shape(ty: &PhpType, excluded: &PhpType) -> Option<Option<PhpType>> {
+    let (TypeKind::ArrayShape(entries), TypeKind::ArrayShape(literal)) =
+        (ty.kind(), excluded.kind())
+    else {
+        return None;
+    };
+    if entries.iter().any(|entry| entry.optional) || !is_single_value(excluded) {
+        return None;
+    }
+    if crate::php_type::runtime_shape_keys(entries)?
+        != crate::php_type::runtime_shape_keys(literal)?
+    {
+        return None;
+    }
+    let mut differing = entries
+        .iter()
+        .zip(literal.iter())
+        .enumerate()
+        .filter(|(_, (entry, value))| !entry.value_type.is_subtype_of(&value.value_type));
+    let Some((index, (entry, value))) = differing.next() else {
+        // Every entry already holds the literal's value.
+        return Some(None);
+    };
+    if differing.next().is_some() {
+        return Some(Some(ty.clone()));
+    }
+    let Some(kept) = strip_literal_from_type(&entry.value_type, &value.value_type) else {
+        return Some(None);
+    };
+    let mut narrowed = entries.to_vec();
+    narrowed[index].value_type = kept;
+    let shape = PhpType::array_shape(narrowed);
+    Some(Some(if ty.is_list_shape() {
+        PhpType::as_list_shape(shape)
+    } else {
+        shape
+    }))
+}
+
+/// Whether `ty` holds exactly one value: a scalar literal, `null`, `true`,
+/// `false`, or a sealed shape whose every entry is one of those.
+pub(super) fn is_single_value(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Literal(_) => true,
+        TypeKind::Named(name) => ["null", "true", "false"]
+            .iter()
+            .any(|keyword| name.eq_ignore_ascii_case(keyword)),
+        TypeKind::ArrayShape(entries) => entries
+            .iter()
+            .all(|entry| !entry.optional && is_single_value(&entry.value_type)),
+        _ => false,
+    }
 }
 
 /// Narrow a `switch` subject to what one of its arms can see.

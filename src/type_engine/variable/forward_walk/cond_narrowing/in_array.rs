@@ -61,7 +61,8 @@ pub(crate) fn apply_array_key_exists_narrowing<'b>(
 /// When `inverted` is false (truthy branch / while body), the variable is
 /// narrowed to the haystack's element type (inclusion).  When `inverted` is
 /// true (else branch / guard clause inverse), the variable is narrowed by
-/// excluding the element type.
+/// excluding the values the haystack's type says it holds
+/// ([`values_held_by`]), not the element type.
 pub(crate) fn apply_in_array_narrowing<'b>(
     condition: &'b Expression<'b>,
     scope: &mut ScopeState,
@@ -73,17 +74,13 @@ pub(crate) fn apply_in_array_narrowing<'b>(
     // Unwrap parentheses and detect negation.
     let (inner, negated) = narrowing::unwrap_condition_negation(condition);
 
-    // Check every variable in scope as the potential needle.
-    let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
+    // Check every variable the condition names as the potential needle.
+    let var_names = scope_keys_named_by(condition, scope);
     for var_name in &var_names {
         if let Some(haystack_expr) = narrowing::try_extract_in_array(inner, var_name) {
-            // Resolve the haystack's type from the scope to extract the
-            // element type.  This replaces the backward scanner's
-            // `resolve_arg_raw_type` with a scope-based lookup.
-            let element_type = resolve_in_array_element_type_fw(haystack_expr, scope, ctx);
-            let element_type = match element_type {
-                Some(et) => et,
-                None => continue,
+            let Some(haystack) = resolve_in_array_haystack_type_fw(haystack_expr, scope, ctx)
+            else {
+                continue;
             };
 
             // Determine whether to include or exclude:
@@ -93,46 +90,41 @@ pub(crate) fn apply_in_array_narrowing<'b>(
             // - inverse + negated  → include
             let should_exclude = inverted ^ negated;
 
-            let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
             let mut results = scope.get(var_name).to_vec();
 
             if should_exclude {
-                // Skip exclusion when it would remove ALL type information.
-                let would_remove_all = {
-                    let mut test = results.clone();
-                    ResolvedType::apply_narrowing(&mut test, |classes| {
-                        narrowing::apply_instanceof_exclusion(&element_type, &var_ctx, classes)
-                    });
-                    test.is_empty()
-                };
-                if !would_remove_all {
-                    ResolvedType::apply_narrowing(&mut results, |classes| {
-                        narrowing::apply_instanceof_exclusion(&element_type, &var_ctx, classes)
-                    });
+                let held = values_held_by(&haystack);
+                if held.is_empty() {
+                    continue;
                 }
-                // `apply_narrowing` only reaches the class layer, so a
-                // needle with no class behind it comes back untouched.
-                // Strict equality is a proof about the value, so failing
-                // it rules out every alternative the haystack's elements
-                // account for: `!in_array($doc, [null, ''], true)` leaves
-                // a `?string` needle holding `string`.
-                for rt in results.iter_mut() {
-                    if rt.class_info.is_some() {
-                        continue;
-                    }
-                    let mut narrowed = rt.type_string.clone();
-                    for member in element_type.union_members() {
-                        match strip_literal_from_type(&narrowed, member) {
-                            Some(kept) => narrowed = kept,
-                            // Excluding everything would leave the needle
-                            // with no type at all, which says less than
-                            // the type it came in with.
-                            None => continue,
+                // Strict equality is a proof about the value, so failing it
+                // rules out every alternative a held value accounts for:
+                // `!in_array($doc, [null, ''], true)` leaves a `?string`
+                // needle holding `string`.  A needle that is nothing but
+                // held values is in a branch that cannot run, which is the
+                // reachability question rather than this one, so it keeps
+                // the type it came in with.
+                results = results
+                    .into_iter()
+                    .filter_map(|mut rt| {
+                        for value in &held {
+                            rt.type_string = strip_literal_from_type(&rt.type_string, value)?;
                         }
-                    }
-                    rt.type_string = narrowed;
-                }
+                        Some(rt)
+                    })
+                    .collect();
             } else {
+                let Some(element_type) = haystack.iterable_element_type() else {
+                    continue;
+                };
+                // An element that could be anything could be an object of
+                // any class, so it proves nothing about the class layer
+                // either: `narrow_value_by_element` draws the same line for
+                // the declared type.
+                if element_type.contains_mixed() || element_type.is_untyped() {
+                    continue;
+                }
+                let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
                 ResolvedType::apply_narrowing(&mut results, |classes| {
                     narrowing::apply_instanceof_inclusion(&element_type, false, &var_ctx, classes)
                 });
@@ -201,10 +193,62 @@ fn narrow_value_by_element(needle: &PhpType, element: &PhpType) -> Option<PhpTyp
     (narrowed != *needle).then_some(narrowed)
 }
 
-/// Resolve the element type of a haystack expression for `in_array`
-/// narrowing, using the forward walker's scope instead of the backward
-/// scanner.
-pub(crate) fn resolve_in_array_element_type_fw(
+/// The values a haystack of type `haystack` is known to hold.
+///
+/// A failed `in_array()` proves the needle is none of the values the
+/// haystack holds, and a type that only bounds its elements names none of
+/// them: a `list<string>` may hold no string at all, and a
+/// `list<AdminUser>` none of the admins the needle could be.  A value is
+/// named by a shape entry that is not optional and holds exactly one value
+/// (`'draft'`, `null`), which is what an array literal or a constant list
+/// resolves to, or by a non-empty array whose every element is that one
+/// value.  A union holds only what each of its alternatives holds.
+pub(super) fn values_held_by(haystack: &PhpType) -> Vec<PhpType> {
+    if let Some(unsealed) = haystack.as_unsealed_shape() {
+        return values_held_by(&unsealed.shape);
+    }
+    match haystack.kind() {
+        TypeKind::ArrayShape(entries) => {
+            let mut held: Vec<PhpType> = Vec::new();
+            for entry in entries.iter() {
+                if !entry.optional
+                    && is_single_value(&entry.value_type)
+                    && !held.contains(&entry.value_type)
+                {
+                    held.push(entry.value_type.clone());
+                }
+            }
+            held
+        }
+        TypeKind::Union(members) => {
+            let Some((first, rest)) = members.split_first() else {
+                return Vec::new();
+            };
+            let mut held = values_held_by(first);
+            for member in rest {
+                if held.is_empty() {
+                    break;
+                }
+                let other = values_held_by(member);
+                held.retain(|value| other.contains(value));
+            }
+            held
+        }
+        _ => match haystack.iterable_element_type() {
+            Some(element) if haystack.is_provably_non_empty() && is_single_value(&element) => {
+                vec![element]
+            }
+            _ => Vec::new(),
+        },
+    }
+}
+
+/// Resolve the type of a haystack expression for `in_array` narrowing,
+/// using the forward walker's scope instead of the backward scanner.
+///
+/// A variable whose scope type has no elements to read (a bare `array`, the
+/// `[]` a list starts out as) is read from its docblock annotation instead.
+pub(crate) fn resolve_in_array_haystack_type_fw(
     haystack_expr: &Expression<'_>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
@@ -215,35 +259,19 @@ pub(crate) fn resolve_in_array_element_type_fw(
         let types = scope.get(&var_name);
         if !types.is_empty() {
             let joined = ResolvedType::types_joined(types);
-            if let Some(elem) = joined.extract_element_type() {
-                return Some(elem.clone());
-            }
-            // Try extracting value type for generic collections.
-            if let Some(val) = joined.extract_value_type(true) {
-                return Some(val.clone());
+            if joined.iterable_element_type().is_some() {
+                return Some(joined);
             }
         }
         // Fall back to docblock annotation.
         let offset = haystack_expr.span().start.offset as usize;
-        let from_docblock =
-            crate::docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_name)
-                .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
-        if let Some(raw) = from_docblock
-            && let Some(elem) = raw.extract_element_type()
-        {
-            return Some(elem.clone());
-        }
-        return None;
+        return crate::docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_name)
+            .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
     }
 
     // For non-variable expressions (method calls, property access, etc.),
     // try resolving via the expression resolution pipeline.
     let scope_resolver = scope.snapshot_resolver();
     let var_ctx = build_var_ctx("", ctx, &scope_resolver);
-    let raw_type =
-        crate::type_engine::variable::resolution::resolve_arg_raw_type(haystack_expr, &var_ctx);
-    // A constant list (`self::APPROVED`, `[Status::ACTIVE, …]`) resolves to
-    // a shape rather than a parameterised array, and its elements are the
-    // shape's values.
-    raw_type.and_then(|t| t.iterable_element_type())
+    crate::type_engine::variable::resolution::resolve_arg_raw_type(haystack_expr, &var_ctx)
 }

@@ -43,6 +43,16 @@ fn collect_slow(php: &str) -> Vec<Diagnostic> {
     )
 }
 
+/// [`collect_slow`] with the full PHP stubs, for code that calls into the
+/// standard library (`fclose()`, `strlen()`).
+fn collect_slow_with_full_stubs(php: &str) -> Vec<Diagnostic> {
+    collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_slow_diagnostics,
+    )
+}
+
 fn has_type_error(diags: &[Diagnostic]) -> bool {
     diags.iter().any(|d| {
         d.code.as_ref().is_some_and(
@@ -10166,6 +10176,92 @@ takesIntCallback(static function (int $key, string $value): string { return $val
     );
 }
 
+/// A `range()` of integer bounds passed straight into `array_map()` hands
+/// the callback ints, so an `int` closure parameter takes them, and a
+/// character range hands it strings.
+#[test]
+fn array_map_over_an_integer_range_accepts_an_int_callback() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace Repro;
+
+final class RangeInt
+{
+    /** @return list<string> */
+    public function labels(int $n): array
+    {
+        return \array_map(static fn (int $i): string => (string) $i, \range(1, $n));
+    }
+
+    /** @return list<int> */
+    public function evens(int $n): array
+    {
+        return \array_values(\array_filter(\range(0, $n, 2), static fn (int $i): bool => $i > 0));
+    }
+
+    /** @return list<string> */
+    public function lastFirst(int $n): array
+    {
+        return \array_map(static fn (int $i): string => (string) $i, \range($n - 1, 0));
+    }
+
+    /** @return list<string> */
+    public function letters(): array
+    {
+        return \array_map(static fn (string $c): string => \strtoupper($c), \range('a', 'e'));
+    }
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A fractional bound or step makes every element of the range a float,
+/// which an `int` callback parameter cannot take under strict types.
+#[test]
+fn array_map_over_a_fractional_range_rejects_an_int_callback() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace Repro;
+
+function floats(): void
+{
+    \array_map(static fn (int $i): int => $i, \range(0.0, 1.0));
+    \array_map(static fn (int $i): int => $i, \range(0, 1, 0.25));
+    \array_map(static fn (int $i): int => $i, \range(1, 2.5));
+    \array_map(static fn (float $f): float => $f, \range(0, 1, 0.25));
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("parameter 1 accepts int, but is passed float")),
+        "{messages:?}"
+    );
+}
+
+/// A quotient is a float unless it comes out even, so a range up to one
+/// may hand the callback floats, whatever its other bound is.
+#[test]
+fn array_map_over_a_range_up_to_a_quotient_rejects_an_int_callback() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace Repro;
+
+function halves(int $n): void
+{
+    \array_map(static fn (int $i): int => $i, \range(0, $n / 2));
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
 /// Parameters are contravariant: a wider, untyped or surplus-ignoring
 /// closure parameter list takes everything the specification passes.
 #[test]
@@ -10442,6 +10538,505 @@ takesConfig(['host' => 'localhost', ...['port' => 3306]]);
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+// ─── Unsealed array shapes ──────────────────────────────────────────────────
+
+/// `array{foo: int, ...}` lists `foo`, so an array literal that does not
+/// have it is short of a required key, the same as for the sealed spelling.
+#[test]
+fn array_literal_missing_a_key_an_unsealed_shape_lists_is_reported() {
+    let php = r#"<?php
+/** @param array{foo: int, ...} $shape */
+function take(array $shape): void {}
+
+take(['buz' => 42.0]);
+take([]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("missing required key 'foo'")),
+        "got {messages:?}"
+    );
+}
+
+#[test]
+fn array_literal_with_the_wrong_value_for_a_key_an_unsealed_shape_lists_is_reported() {
+    let php = r#"<?php
+/** @param array{foo: int, ...} $shape */
+function take(array $shape): void {}
+
+take(['foo' => 'one']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        !messages[0].contains("missing required"),
+        "the key is there, only its value is wrong: {messages:?}"
+    );
+}
+
+/// What an unsealed shape does not list is exactly what its `...` is for,
+/// and an optional key is not required in the first place.
+#[test]
+fn array_literal_satisfying_an_unsealed_shape_is_not_reported() {
+    let php = r#"<?php
+/** @param array{foo: int, ...} $shape */
+function take(array $shape): void {}
+
+/** @param array{foo?: int, ...} $shape */
+function takeOptional(array $shape): void {}
+
+take(['foo' => 1]);
+take(['foo' => 1, 'bar' => 'anything', 7 => null]);
+takeOptional([]);
+takeOptional(['bar' => 1]);
+takeOptional(['foo' => 1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The positional entries of an unsealed `list{…, ...}` are held to their
+/// types like any other listed entry.
+#[test]
+fn array_literal_with_the_wrong_values_for_an_unsealed_list_is_reported() {
+    let php = r#"<?php
+/** @param list{string, int, ...} $values */
+function takeList(array $values): void {}
+
+takeList([1, 'demo', true]);
+takeList(['a', 2, true]);
+takeList(['a', 2]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'demo'"), "got {messages:?}");
+}
+
+/// A literal that does not even start the list is short of the entries the
+/// list shape names, and its `...` does not make up for them.
+#[test]
+fn array_literal_missing_the_entries_an_unsealed_list_lists_is_reported() {
+    let php = r#"<?php
+/** @param list{string, ...} $values */
+function takeList(array $values): void {}
+
+takeList([]);
+takeList(['name' => 'x']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages[0].contains("missing required key '0'"),
+        "got {messages:?}"
+    );
+}
+
+/// The entries an unsealed shape does not list have to be the kind its
+/// `...<K, V>` names. They are never coerced to fit, though the file is not
+/// `strict_types`, since PHP hands the array over as it is.
+#[test]
+fn entries_an_unsealed_shape_does_not_list_have_to_fit_its_tail() {
+    let php = r#"<?php
+/** @param array{foo: int, ...<string, string>} $shape */
+function takeTail(array $shape): void {}
+
+takeTail(['foo' => 1, 'bar' => 'x']);
+takeTail(['foo' => 1, 'bar' => 2]);
+takeTail(['foo' => 1, 5 => 'x']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(messages[0].contains("bar: 2"), "got {messages:?}");
+    assert!(messages[1].contains("5: 'x'"), "got {messages:?}");
+}
+
+#[test]
+fn an_unsealed_list_takes_further_entries_of_its_tail_type() {
+    let php = r#"<?php
+/** @param list{string, ...<string>} $names */
+function takeNames(array $names): void {}
+
+takeNames(['a']);
+takeNames(['a', 'b', 'c']);
+takeNames(['a', 3]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'a', 3"), "got {messages:?}");
+}
+
+/// A shape inferred from a variable lists the keys we saw assigned, which
+/// is a lower bound on what the value has, so only a literal is proof that
+/// a listed key is absent.
+#[test]
+fn a_shape_that_did_not_come_from_a_literal_stays_silent_against_an_unsealed_shape() {
+    let php = r#"<?php
+/** @param array{foo: int, ...} $shape */
+function take(array $shape): void {}
+
+function build(bool $withFoo): void {
+    $config = ['bar' => 'x'];
+    if ($withFoo) {
+        $config['foo'] = 1;
+    }
+    take($config);
+}
+
+$partial = ['bar' => 'x'];
+take($partial);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A function that returns `array{foo: int, ...}` hands over an array whose
+/// `foo` is an `int`, which a parameter that lists `foo` otherwise has to
+/// agree with, whichever of the two is sealed.
+#[test]
+fn an_unsealed_argument_is_held_to_the_entries_it_lists() {
+    let php = r#"<?php
+/** @return array{foo: int, ...} */
+function makeOpen(): array { return ['foo' => 1]; }
+
+/** @param array{foo: array<string>} $shape */
+function takeSealed(array $shape): void {}
+
+/** @param array{foo: array<string>, ...} $shape */
+function takeOpen(array $shape): void {}
+
+/** @param array{foo: int, ...} $shape */
+function takeMatching(array $shape): void {}
+
+takeSealed(makeOpen());
+takeOpen(makeOpen());
+takeMatching(makeOpen());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages[0].contains("expects array{foo: array<string>}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[1].contains("expects array{foo: array<string>, ...<array-key, mixed>}"),
+        "got {messages:?}"
+    );
+}
+
+/// What an unsealed argument holds beyond the entries it lists has to fit
+/// the tail of an unsealed parameter, and a tail that says nothing about
+/// its entries does not contradict one that does.
+#[test]
+fn the_tail_of_an_unsealed_argument_is_held_to_the_tail_of_an_unsealed_parameter() {
+    let php = r#"<?php
+/** @return array{foo: int, ...<string, int>} */
+function makeInts(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, ...} */
+function makeOpen(): array { return ['foo' => 1]; }
+
+/** @param array{foo: int, ...<string, string>} $shape */
+function takeStrings(array $shape): void {}
+
+/** @param array{foo: int, ...<string, int>} $shape */
+function takeInts(array $shape): void {}
+
+takeStrings(makeInts());
+takeStrings(makeOpen());
+takeInts(makeInts());
+takeInts(makeOpen());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("got array{foo: int, ...<string, int>}"),
+        "got {messages:?}"
+    );
+}
+
+/// An unsealed shape is an array, so an object that merely behaves like
+/// one is not accepted for it, the same as for the sealed spelling and
+/// unlike a bare `array`.
+#[test]
+fn an_array_access_object_is_not_an_unsealed_shape() {
+    let php = r#"<?php
+class Bag implements \ArrayAccess
+{
+    public function offsetExists(mixed $offset): bool { return true; }
+    public function offsetGet(mixed $offset): mixed { return null; }
+    public function offsetSet(mixed $offset, mixed $value): void {}
+    public function offsetUnset(mixed $offset): void {}
+}
+
+/** @param array{foo: int, ...} $shape */
+function takeOpen(array $shape): void {}
+
+/** @param array{foo: int} $shape */
+function takeSealed(array $shape): void {}
+
+function takeAny(array $any): void {}
+
+takeOpen(new Bag());
+takeSealed(new Bag());
+takeAny(new Bag());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.ends_with("got Bag") && m.contains("array{foo: int")),
+        "got {messages:?}"
+    );
+}
+
+/// An unsealed shape may be one member of a union, which is judged member
+/// by member like any other.
+#[test]
+fn an_unsealed_shape_inside_a_union_is_held_to_the_entries_it_lists() {
+    let php = r#"<?php
+/** @param array{foo: int, ...}|null $maybe */
+function take(?array $maybe): void {}
+
+take(null);
+take(['foo' => 1, 'bar' => true]);
+take(['foo' => 'x']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("foo: 'x'"), "got {messages:?}");
+}
+
+/// An unsealed argument is held to the entries it lists when it reaches a
+/// typed array, as a sealed one is, and not to the plain array it widens to,
+/// whose `mixed` tail swallows them.
+#[test]
+fn an_unsealed_argument_is_held_to_the_entries_it_lists_by_a_typed_array() {
+    let php = r#"<?php
+/** @return array{foo: string, ...} */
+function makeOpen(): array { return ['foo' => 'x']; }
+
+/** @return array{foo: int, ...} */
+function makeOpenInts(): array { return ['foo' => 1]; }
+
+/** @param array<string, int> $map */
+function takeMap(array $map): void {}
+
+takeMap(makeOpen());
+takeMap(['foo' => 'x']);
+takeMap(makeOpenInts());
+takeMap(['foo' => 1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages[0].contains("got array{foo: string, ...<array-key, mixed>}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[1].contains("foo: 'x'"),
+        "the literal is reported too, got {messages:?}"
+    );
+}
+
+/// The keys an unsealed argument lists are held to the key type of the
+/// parameter, and so is the key of its tail.
+#[test]
+fn the_keys_of_an_unsealed_argument_are_held_to_the_key_type_of_a_typed_array() {
+    let php = r#"<?php
+/** @return array{foo: int, ...} */
+function makeOpen(): array { return ['foo' => 1]; }
+
+/** @return array{0: int, ...} */
+function makeIntKeyed(): array { return [1]; }
+
+/** @return array{foo: int, ...<string, int>} */
+function makeStringTail(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, ...<int, int>} */
+function makeIntTail(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, ...<array-key, int>} */
+function makeAnyKeyTail(): array { return ['foo' => 1]; }
+
+/** @param array<string, int> $map */
+function takeStringKeyed(array $map): void {}
+
+/** @param array<int, int> $map */
+function takeIntKeyed(array $map): void {}
+
+takeStringKeyed(makeOpen());
+takeStringKeyed(makeStringTail());
+takeStringKeyed(makeAnyKeyTail());
+takeStringKeyed(makeIntKeyed());
+takeStringKeyed(makeIntTail());
+takeIntKeyed(makeIntKeyed());
+takeIntKeyed(makeOpen());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(
+        messages[0].contains("got array{0: int, ...<array-key, mixed>}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[1].contains("got array{foo: int, ...<int, int>}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[2].contains("got array{foo: int, ...<array-key, mixed>}"),
+        "got {messages:?}"
+    );
+}
+
+/// What an unsealed argument holds beyond the entries it lists is held to the
+/// value type of the parameter as the values of an array are: never coerced
+/// to fit, whatever the file's `strict_types`.
+#[test]
+fn the_tail_of_an_unsealed_argument_is_held_to_the_value_type_of_a_typed_array() {
+    let php = r#"<?php
+/** @return array{foo: int, ...<string, string>} */
+function makeStrings(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, ...<string, int>} */
+function makeInts(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, ...} */
+function makeOpen(): array { return ['foo' => 1]; }
+
+/** @param array<string, int> $map */
+function takeInts(array $map): void {}
+
+/** @param array<string, string|int> $map */
+function takeBoth(array $map): void {}
+
+/** @param int[] $values */
+function takeSlice(array $values): void {}
+
+takeInts(makeStrings());
+takeInts(makeInts());
+takeInts(makeOpen());
+takeBoth(makeStrings());
+takeSlice(makeStrings());
+takeSlice(makeInts());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("got array{foo: int, ...<string, string>}")),
+        "got {messages:?}"
+    );
+}
+
+/// An unsealed `list{…, ...}` argument is a list, so it satisfies a `list`
+/// parameter, while an unsealed shape that lists a string key is not one.
+#[test]
+fn an_unsealed_argument_is_held_to_the_list_a_typed_array_demands() {
+    let php = r#"<?php
+/** @return list{string, ...<string>} */
+function makeNames(): array { return ['a']; }
+
+/** @return list{int, ...<int>} */
+function makeInts(): array { return [1]; }
+
+/** @return array{name: string, ...} */
+function makeNamed(): array { return ['name' => 'x']; }
+
+/** @param list<string> $names */
+function takeNames(array $names): void {}
+
+takeNames(makeNames());
+takeNames(makeInts());
+takeNames(makeNamed());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages[0].contains("got list{int, ...<int>}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[1].contains("got array{name: string, ...<array-key, mixed>}"),
+        "got {messages:?}"
+    );
+}
+
+/// A value that fits the entries an unsealed argument lists is not reported
+/// because the rest of its type is unknown.
+#[test]
+fn an_unsealed_argument_that_fits_a_typed_array_is_not_reported() {
+    let php = r#"<?php
+/** @return array{foo: int, ...} */
+function makeOpen(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, bar: int, ...<string, int>} */
+function makeTwo(): array { return ['foo' => 1, 'bar' => 2]; }
+
+/** @return list{string, ...} */
+function makeList(): array { return ['a']; }
+
+/** @param array<string, int> $map */
+function takeMap(array $map): void {}
+
+/** @param array<string, int|string> $map */
+function takeMixed(array $map): void {}
+
+/** @param non-empty-array<string, int> $map */
+function takeNonEmpty(array $map): void {}
+
+/** @param array<array-key, mixed> $map */
+function takeAnything(array $map): void {}
+
+function takeBare(array $map): void {}
+
+/** @param list<mixed> $values */
+function takeList(array $values): void {}
+
+takeMap(makeOpen());
+takeMap(makeTwo());
+takeMixed(makeOpen());
+takeNonEmpty(makeOpen());
+takeNonEmpty(makeTwo());
+takeAnything(makeOpen());
+takeBare(makeOpen());
+takeList(makeList());
+takeMap(['foo' => 1, ...makeTwo()]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The listed entries of an unsealed argument are coerced to the value type
+/// of the parameter as those of a sealed shape are, so `strict_types`
+/// decides whether an `int` entry fits a `string` value type.
+#[test]
+fn the_listed_entries_of_an_unsealed_argument_follow_strict_types_like_a_sealed_shapes() {
+    let lenient = r#"<?php
+/** @return array{foo: int} */
+function makeSealed(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, ...} */
+function makeOpen(): array { return ['foo' => 1]; }
+
+/** @param array<string, string> $map */
+function takeStrings(array $map): void {}
+
+takeStrings(makeSealed());
+takeStrings(makeOpen());
+"#;
+    let messages = messages_with_code(&collect(lenient), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+
+    let strict = lenient.replacen("<?php\n", "<?php\ndeclare(strict_types=1);\n", 1);
+    let messages = messages_with_code(&collect(&strict), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
 // ─── List order ─────────────────────────────────────────────────────────────
 
 /// `array_is_list()` is `false` for a literal whose keys are written out
@@ -10536,6 +11131,41 @@ takesItems($items);
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
+}
+
+// ─── Shape keys spelled as class constants ──────────────────────────────────
+
+/// A docblock keeps a key spelled `Slots::FIRST`, which says nothing about
+/// the key it evaluates to, so it is no more a string than an integer. A
+/// `Slots::class` key is a class name, which is a string whatever else.
+#[test]
+fn a_shape_key_spelled_as_a_class_constant_is_not_a_string_to_a_typed_array() {
+    let php = r#"<?php
+class Slots { const FIRST = 0; }
+
+/** @return array{Slots::FIRST: string} */
+function byConstant(): array { return ['a']; }
+
+/** @return array{Slots::class: string} */
+function byClassName(): array { return ['Slots' => 'a']; }
+
+/** @param array<int, string> $items */
+function takeIntKeyed(array $items): void {}
+
+/** @param array<string, string> $items */
+function takeStringKeyed(array $items): void {}
+
+takeIntKeyed(byConstant());
+takeStringKeyed(byConstant());
+takeIntKeyed(byClassName());
+takeStringKeyed(byClassName());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("expects array<int, string>, got array{Slots::class: string}"),
+        "got {messages:?}"
+    );
 }
 
 // ─── Short ternary ──────────────────────────────────────────────────────────
@@ -13090,4 +13720,174 @@ function probe(Method $m): void {
 "#;
     let diags = collect_slow(php);
     assert!(!has_type_error(&diags), "{diags:#?}");
+}
+
+// ─── Type-check functions narrow property accesses (#466) ──────────────────
+
+#[test]
+fn is_resource_narrows_nullable_resource_property() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class IsResource
+{
+    /** @var resource|null */
+    private $stream = null;
+    public function close(): void
+    {
+        if (\is_resource($this->stream)) {
+            \fclose($this->stream);
+        }
+    }
+    public function closeUnqualified(): void
+    {
+        if (is_resource($this->stream)) {
+            fclose($this->stream);
+        }
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "is_resource() should narrow $this->stream to resource: {:?}",
+        messages_with_code(&diags, "type_mismatch_argument")
+    );
+}
+
+#[test]
+fn is_resource_narrows_nullable_resource_local_variable() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+/** @param resource|null $stream */
+function close($stream): void
+{
+    if (\is_resource($stream)) {
+        \fclose($stream);
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "is_resource() should narrow $stream to resource: {:?}",
+        messages_with_code(&diags, "type_mismatch_argument")
+    );
+}
+
+#[test]
+fn negated_is_resource_early_return_narrows_property() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class IsResource
+{
+    /** @var resource|null */
+    private $stream = null;
+    public function close(): void
+    {
+        if (!\is_resource($this->stream)) {
+            return;
+        }
+        \fclose($this->stream);
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "!is_resource() guard clause should narrow $this->stream after it: {:?}",
+        messages_with_code(&diags, "type_mismatch_argument")
+    );
+}
+
+#[test]
+fn nullable_resource_property_outside_guard_still_flagged() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class IsResource
+{
+    /** @var resource|null */
+    private $stream = null;
+    public function close(): void
+    {
+        if (\is_resource($this->stream)) {
+            echo 'open';
+        }
+        \fclose($this->stream);
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        messages.len(),
+        1,
+        "passing the unguarded nullable property should still be flagged: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("null does not satisfy resource"),
+        "unexpected message: {messages:?}"
+    );
+}
+
+#[test]
+fn fully_qualified_type_guard_narrows_property() {
+    // `\is_string($this->name)` names the same guard as `is_string(...)`;
+    // the leading backslash must not hide the property from narrowing.
+    let php = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class Named
+{
+    /** @var string|null */
+    private $name = null;
+    /** @var iterable<int>|null */
+    private $items = null;
+    public function run(): void
+    {
+        if (\is_string($this->name)) {
+            \strlen($this->name);
+        }
+        if (\is_iterable($this->items)) {
+            $this->walk($this->items);
+        }
+    }
+    /** @param iterable<int> $items */
+    private function walk(iterable $items): void {}
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "a fully-qualified type guard should narrow the property: {:?}",
+        messages_with_code(&diags, "type_mismatch_argument")
+    );
+}
+
+#[test]
+fn property_exists_narrows_property_path() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+class Foo {}
+final class Holder
+{
+    private Foo $obj;
+    public function __construct() { $this->obj = new Foo(); }
+    public function read(): void
+    {
+        if (\property_exists($this->obj, 'bar')) {
+            echo $this->obj->bar;
+        }
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'bar' not found")),
+        "property_exists() should prove $this->obj->bar exists: {diags:?}"
+    );
 }

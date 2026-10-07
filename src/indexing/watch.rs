@@ -55,6 +55,7 @@ impl Backend {
         root: &std::path::Path,
     ) -> bool {
         let mut composer_changed = false;
+        let mut translations_changed = false;
         let mut config_changed = false;
         let mut schema_full_rebuild = false;
         let mut migration_changes: Vec<(PathBuf, FileChangeType)> = Vec::new();
@@ -71,6 +72,7 @@ impl Backend {
             let indexed = self.symbol_maps.read();
             let laravel_config = self.config().laravel;
             let filters = self.index_filters();
+            let translations = self.laravel_string_key_cache.read().translations.clone();
             for change in changes.iter() {
                 let path_str = change.uri.path();
                 if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
@@ -130,6 +132,19 @@ impl Backend {
                     continue;
                 }
                 let uri_str = change.uri.to_string();
+                if is_laravel
+                    && !open.contains_key(&uri_str)
+                    && (path_str.contains("/lang/")
+                        || translations
+                            .as_ref()
+                            .is_some_and(|catalog| catalog.contains_uri(&uri_str)))
+                    && change
+                        .uri
+                        .to_file_path()
+                        .is_ok_and(|path| !filters.is_excluded_path(&path, false))
+                {
+                    translations_changed = true;
+                }
                 if crate::resource_navigation::is_resource_document(path_str) {
                     if open.contains_key(&uri_str) {
                         continue;
@@ -194,11 +209,16 @@ impl Backend {
         if php_changes.is_empty()
             && resource_changes.is_empty()
             && !composer_changed
+            && !translations_changed
             && !config_changed
             && !schema_full_rebuild
             && migration_changes.is_empty()
         {
             return false;
+        }
+
+        if translations_changed {
+            self.laravel_string_key_cache.write().translations = None;
         }
 
         if config_changed {
@@ -240,7 +260,7 @@ impl Backend {
                 })
             });
             if self.reindex_files_batch(&php_changes) || touches_config {
-                self.clear_class_not_found_cache();
+                self.clear_not_found_caches();
                 self.clear_resolved_class_cache();
                 self.auth_user_type_cache.write().clear();
                 *self.storage_disk_type_cache.write() = None;
@@ -405,6 +425,7 @@ impl Backend {
         ]);
         if is_laravel {
             patterns.extend([
+                ("**/*.json".to_string(), watch_all),
                 ("**/*.sql".to_string(), watch_all),
                 ("**/config/database.php".to_string(), watch_all),
             ]);
@@ -767,6 +788,26 @@ mod tests {
             backend.resolved_class_cache.read().len(),
             0,
             "a new class declaration must invalidate resolved classes"
+        );
+    }
+
+    /// A function-only file written to disk declares no class, so the
+    /// class caches survive, but a function looked up and missed before
+    /// the file existed must resolve afterwards.
+    #[test]
+    fn function_only_file_events_retire_function_misses() {
+        let dir = tempfile::tempdir().unwrap();
+        let helpers = dir.path().join("helpers.php");
+
+        let backend = Backend::new_test();
+        assert!(backend.find_or_load_function(&["myHelper"]).is_none());
+
+        std::fs::write(&helpers, "<?php function myHelper() {}").unwrap();
+        backend.apply_watched_file_changes(&created_event(&helpers), dir.path());
+
+        assert!(
+            backend.find_or_load_function(&["myHelper"]).is_some(),
+            "the recorded miss must not outlive the declaring file's creation"
         );
     }
 

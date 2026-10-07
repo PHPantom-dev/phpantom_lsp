@@ -1441,6 +1441,590 @@ function label(?int $buy): void {{
     );
 }
 
+const MATCH_BODY_SCAFFOLD: &str = r#"
+class Cat {}
+class Dog {}
+function takesString(string $s): void {}
+function takesBoth(string $a, string $b): string { return $a . $b; }
+function takesDog(Dog $dog): string { return ''; }
+"#;
+
+/// The failed arms narrow the code inside a later arm's body too, not
+/// just the value the `match` produces.
+#[test]
+fn a_default_arm_body_sees_the_inverse_of_the_arms_above_it() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///match_arm_default_body.php";
+    let content = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class MatchTrue
+{
+    public function label(?string $name): string
+    {
+        return match (true) {
+            null === $name => 'none',
+            default => \strtoupper($name),
+        };
+    }
+}
+"#;
+
+    let errors = argument_type_errors(&backend, uri, content);
+    assert!(
+        errors.is_empty(),
+        "the arm above ruled the null out, got: {errors:?}"
+    );
+}
+
+/// Every failed arm contributes its inverse, so the `default` sees all of
+/// them at once and a middle arm sees the ones above it.
+#[test]
+fn each_arm_body_sees_the_inverse_of_every_arm_above_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_three.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a, ?string $b): string {{
+    return match (true) {{
+        null === $a => 'no a',
+        null === $b => takesBoth($a, 'no b'),
+        default => takesBoth($a, $b),
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the arms above ruled both nulls out, got: {errors:?}"
+    );
+}
+
+/// An arm with several conditions failed only when all of them did, so
+/// every one of their inverses holds below it.
+#[test]
+fn every_condition_of_a_failed_arm_holds_inverted_below_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_multi_condition.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a, ?string $b): string {{
+    return match (true) {{
+        null === $a, $b === null => 'missing',
+        default => takesBoth($a, $b),
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(errors.is_empty(), "neither condition held, got: {errors:?}");
+}
+
+/// A failed `instanceof` arm excludes the class it checked.
+#[test]
+fn a_failed_instanceof_arm_excludes_its_class_below_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_instanceof.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(Cat|Dog $pet): string {{
+    return match (true) {{
+        $pet instanceof Cat => 'cat',
+        default => takesDog($pet),
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the arm above ruled the Cat out, got: {errors:?}"
+    );
+}
+
+/// `default` runs only once every other arm failed, wherever it is
+/// written in the list.
+#[test]
+fn a_default_arm_written_first_still_sees_every_other_arm_fail() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_default_first.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a): void {{
+    match (true) {{
+        default => takesString($a),
+        null === $a => null,
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the null arm is tested before the default runs, got: {errors:?}"
+    );
+}
+
+/// Hover inside a later arm reads the same narrowed type the diagnostics
+/// do.
+#[test]
+fn hover_in_a_later_arm_sees_the_inverse_of_the_arms_above_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_hover.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a, Cat|Dog $pet): void {{
+    match (true) {{
+        null === $a, $pet instanceof Cat => null,
+        default =>
+            $a, // <-- here
+    }};
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("string") && !text.contains("?string") && !text.contains("null"),
+        "the arm above ruled the null out, got: {text}"
+    );
+}
+
+/// A `default` written before the hovered arm adds nothing to its narrowing:
+/// only the arms that actually failed above it do.
+#[test]
+fn hover_in_an_arm_below_a_default_sees_the_arms_above_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_hover_after_default.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a): void {{
+    match (true) {{
+        default => null,
+        null === $a => null,
+        true =>
+            $a, // <-- here
+    }};
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("string") && !text.contains("?string") && !text.contains("null"),
+        "the arm above ruled the null out, and the default before it changed nothing, got: {text}"
+    );
+}
+
+/// The failed arms prove nothing about a variable they never tested.
+#[test]
+fn a_failed_arm_does_not_narrow_a_variable_it_did_not_test() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_untested.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a, ?string $b): string {{
+    return match (true) {{
+        null === $a => 'no a',
+        default => takesBoth($a, $b),
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "only `$a` was ruled non-null, got: {errors:?}"
+    );
+    assert!(
+        errors[0].contains("$b"),
+        "the error is about `$b`, got: {errors:?}"
+    );
+}
+
+/// An arm's own condition does not leak into the arms below it: they run
+/// when it failed, not when it held.
+#[test]
+fn an_arm_condition_does_not_narrow_the_arms_below_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_no_leak.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a): void {{
+    match (true) {{
+        $a !== null => takesString($a),
+        default => takesString($a),
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "the default runs only when `$a` is null, got: {errors:?}"
+    );
+}
+
+/// An arm fails on every value other than `true`, so a condition that is
+/// not a boolean proves nothing by failing: `5` fails it as well as `0`.
+#[test]
+fn a_failed_arm_with_a_non_boolean_condition_proves_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_non_boolean.php";
+    let content = format!(
+        r#"<?php
+declare(strict_types=1);
+{MATCH_BODY_SCAFFOLD}
+function label(int $count): void {{
+    match (true) {{
+        $count => null,
+        default => takesString($count),
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.len() == 1 && errors[0].contains("got int"),
+        "`$count` is still any int below the arm, got: {errors:?}"
+    );
+}
+
+/// The same for hover: an object is never `true`, so failing the arm does
+/// not make it `null`.
+#[test]
+fn hover_below_a_failed_non_boolean_arm_keeps_the_type() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_non_boolean_hover.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?Cat $cat): void {{
+    match (true) {{
+        $cat => null,
+        default =>
+            $cat, // <-- here
+    }};
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("Cat"),
+        "an object fails the arm too, so it is not ruled out, got: {text}"
+    );
+}
+
+/// The value of the `match` sees the same narrowing in a `default` written
+/// first.
+#[test]
+fn the_match_value_from_a_default_written_first_sees_the_other_arms_fail() {
+    let backend = create_test_backend();
+    let uri = "file:///match_value_default_first.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a): void {{
+    $label = match (true) {{
+        default => $a,
+        null === $a => 'none',
+    }};
+    takesString($label);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the null arm is tested before the default runs, got: {errors:?}"
+    );
+}
+
+/// Two failed arms that test the same variable both narrow the value of the
+/// `match`, rather than the later one replacing the earlier.
+#[test]
+fn the_match_value_sees_every_failed_arm_on_the_same_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///match_value_two_arms.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(Cat|Dog|null $pet): string {{
+    $dog = match (true) {{
+        $pet instanceof Cat => new Dog(),
+        null === $pet => new Dog(),
+        default => $pet,
+    }};
+    return takesDog($dog);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "both the Cat and the null were ruled out, got: {errors:?}"
+    );
+}
+
+/// An arm runs when *any* of its conditions held, so its body sees what
+/// either of them proves, not what both would.
+#[test]
+fn an_arm_body_sees_what_any_one_of_its_conditions_proves() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_body_any_condition.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(Cat|Dog|null $pet): void {{
+    match (true) {{
+        $pet instanceof Cat, $pet instanceof Dog => takesDog($pet),
+        default => null,
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "the Cat condition alone lets a Cat into the arm, got: {errors:?}"
+    );
+}
+
+/// The value of the `match` reads the arm the same way: a condition on
+/// another variable lets the arm run whatever this one holds.
+#[test]
+fn the_match_value_from_an_arm_with_several_conditions_sees_any_of_them() {
+    let backend = create_test_backend();
+    let uri = "file:///match_value_any_condition.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(Cat|Dog $pet, Cat|Dog $other): string {{
+    $dog = match (true) {{
+        $pet instanceof Dog, $other instanceof Dog => $pet,
+        default => new Dog(),
+    }};
+    return takesDog($dog);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "the arm also runs for a Cat `$pet` when `$other` is the Dog, got: {errors:?}"
+    );
+}
+
+/// A `match ($x::class)` arm with a condition that names no class runs for
+/// whatever class that condition holds, so it does not narrow the subject.
+#[test]
+fn a_class_match_arm_with_a_condition_naming_no_class_does_not_narrow() {
+    let backend = create_test_backend();
+    let uri = "file:///class_match_dynamic_condition.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(Cat|Dog $pet, string $cls): void {{
+    match ($pet::class) {{
+        Dog::class, $cls => takesDog($pet),
+        default => null,
+    }};
+    $dog = match ($pet::class) {{
+        Dog::class, $cls => $pet,
+        default => new Dog(),
+    }};
+    takesDog($dog);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        2,
+        "`$cls` may name the Cat, in the body and in the value, got: {errors:?}"
+    );
+}
+
+/// Hover inside such an arm reads the join of the conditions too, which
+/// still rules out what every one of them rules out.
+#[test]
+fn hover_in_an_arm_with_several_conditions_sees_their_join() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_hover_any_condition.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(Cat|Dog|null $pet): void {{
+    match (true) {{
+        $pet instanceof Cat, $pet instanceof Dog =>
+            $pet, // <-- here
+        default => null,
+    }};
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("Cat") && text.contains("Dog") && !text.contains("null"),
+        "either class can reach the arm, and the null cannot, got: {text}"
+    );
+}
+
+/// The left operand of an `&&` in an arm condition narrows the operands
+/// to its right, as the same condition does in an `if`.
+#[test]
+fn an_and_chain_in_an_arm_condition_narrows_its_later_operands() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_condition_and_chain.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $s): void {{
+    match (true) {{
+        is_string($s) && takesString($s) => null,
+        default => null,
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the left operand ruled the null out, got: {errors:?}"
+    );
+}
+
+/// The same for hover inside the right operand.
+#[test]
+fn hover_in_an_arm_condition_sees_its_and_chain_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_condition_and_chain_hover.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $s): void {{
+    match (true) {{
+        is_string($s) &&
+            $s => null, // <-- here
+        default => null,
+    }};
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("string") && !text.contains("?string") && !text.contains("null"),
+        "the left operand ruled the null out, got: {text}"
+    );
+}
+
+/// A `match` or ternary in the right operand of `&&` starts from what the
+/// left operand proved, in its arm conditions and bodies alike.
+#[test]
+fn a_branch_inside_an_and_operand_sees_the_left_operands_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///match_in_and_operand.php";
+    let content = r#"<?php
+class Foo { public bool $flag = true; }
+function takesFoo(Foo $f): bool { return true; }
+
+function inCondition(?Foo $x): void {
+    $x !== null && match (true) { takesFoo($x) => 1, default => 0 };
+}
+
+function inBody(?Foo $x): void {
+    $x !== null && match (true) { $x->flag => takesFoo($x), default => 0 };
+}
+
+function inTernary(?Foo $x): void {
+    $x !== null && ($x->flag ? takesFoo($x) : false);
+}
+
+function returned(?Foo $x): bool {
+    return $x === null || match (true) { takesFoo($x) => true, default => false };
+}
+"#;
+
+    let errors = argument_type_errors(&backend, uri, content);
+    assert!(
+        errors.is_empty(),
+        "the left operand ruled the null out, got: {errors:?}"
+    );
+}
+
+/// A `match` passed straight into a call narrows its arms the way the
+/// same `match` assigned to a variable first does.
+#[test]
+fn a_match_passed_as_an_argument_sees_its_failed_arms() {
+    let backend = create_test_backend();
+    let uri = "file:///match_value_as_argument.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(Cat|Dog $pet): string {{
+    return takesDog(match (true) {{ $pet instanceof Cat => new Dog(), default => $pet }});
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the arm above ruled the Cat out, got: {errors:?}"
+    );
+}
+
+/// The same with the arm's own condition doing the narrowing.
+#[test]
+fn a_match_passed_as_an_argument_sees_its_arm_conditions() {
+    let backend = create_test_backend();
+    let uri = "file:///match_value_as_argument_own_arm.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a, Cat|Dog $pet): void {{
+    takesString(match (true) {{ $a !== null => $a, default => 'none' }});
+    takesDog(match (true) {{ $pet instanceof Dog => $pet, default => new Dog() }});
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the arm's condition ruled the null out, got: {errors:?}"
+    );
+}
+
 // ─── A helper that bails out on its condition proves the other half ─────────
 
 const BAIL_SCAFFOLD: &str = r#"
@@ -3797,4 +4381,234 @@ function f(?Exception $e): void {
 "#;
     let text = hover_marked(&backend, "file:///or_assignment_narrowing.php", content);
     assert_eq!(text, "```php\n<?php\n$x = Exception\n```");
+}
+
+// ─── Type-check function names are case-insensitive ────────────────────────
+
+/// PHP resolves function names case-insensitively, so a mixed-case type
+/// check is the same check as its lowercase spelling.
+#[test]
+fn a_mixed_case_type_check_narrows_like_the_lowercase_one() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+function f(string|int $x, string|int $y): void {
+    if (Is_String($x)) {
+        $x;
+    }
+    if (\IS_INT($y)) {
+    } else {
+        $y;
+    }
+}
+"#;
+    let uri = "file:///mixed_case_guard.php";
+    let lines: Vec<&str> = content.lines().collect();
+    let hover_line = |line: usize| {
+        let column = lines[line].find('$').unwrap() as u32 + 1;
+        hover_text(&hover_at(&backend, uri, content, line as u32, column).expect("expected hover"))
+            .to_string()
+    };
+    let x = hover_line(3);
+    assert!(
+        x.contains("string") && !x.contains("int"),
+        "expected string, got: {x}"
+    );
+    let y = hover_line(7);
+    assert!(
+        y.contains("string") && !y.contains("int"),
+        "expected string, got: {y}"
+    );
+}
+
+/// A property path is narrowed by a mixed-case check too.
+#[test]
+fn a_mixed_case_type_check_narrows_a_property() {
+    let backend = create_test_backend();
+    let uri = "file:///mixed_case_guard_property.php";
+    let content = r#"<?php
+function takesString(string $s): void {}
+class Holder {
+    public ?string $value = null;
+    public function f(): void {
+        if (IS_STRING($this->value)) {
+            takesString($this->value);
+        }
+    }
+}
+"#;
+
+    let errors = argument_type_errors(&backend, uri, content);
+    assert!(
+        errors.is_empty(),
+        "the check ruled the null out, got: {errors:?}"
+    );
+}
+
+/// The class-string and `array_key_exists()` checks read their names
+/// case-insensitively as well.
+#[test]
+fn mixed_case_class_string_and_key_checks_narrow() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+/** @param array{k?: int} $arr */
+function f(string $name, array $arr): void {
+    if (Class_Exists($name)) {
+        $name;
+    }
+    if (Array_Key_Exists('k', $arr)) {
+        $k = $arr['k'];
+        $k;
+    }
+}
+"#;
+    let uri = "file:///mixed_case_class_string.php";
+    let lines: Vec<&str> = content.lines().collect();
+    let hover_line = |line: usize| {
+        let column = lines[line].find('$').unwrap() as u32 + 1;
+        hover_text(&hover_at(&backend, uri, content, line as u32, column).expect("expected hover"))
+            .to_string()
+    };
+    let name = hover_line(4);
+    assert!(
+        name.contains("class-string"),
+        "expected class-string, got: {name}"
+    );
+    let k = hover_line(8);
+    assert!(
+        k.contains("int") && !k.contains("null"),
+        "expected the key to be present, got: {k}"
+    );
+}
+
+/// So does the member-existence check.
+#[test]
+fn a_mixed_case_member_check_proves_the_member() {
+    let backend = create_test_backend();
+    let uri = "file:///mixed_case_property_exists.php";
+    let content = r#"<?php
+function takesString(string $s): void {}
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (Property_Exists($response, 'message')) {
+        takesString($response->message);
+    }
+}
+"#;
+
+    let diags = slow_diagnostic_messages(&backend, uri, content, "unknown_member");
+    assert!(
+        diags.is_empty(),
+        "the check proves the property exists, got: {diags:?}"
+    );
+}
+
+// ─── Comparing an array to an array literal ────────────────────────────────
+
+/// `$arr === [null]` pins the array to the literal where it holds, and
+/// past an early return rules the only null-element value out.
+#[test]
+fn an_array_literal_comparison_narrows_both_branches() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+function f(?string $val): void {
+    $arr = [$val];
+    if ($arr === [null]) {
+        $arr;
+        return;
+    }
+    $arr;
+}
+"#;
+    let uri = "file:///array_literal_identity.php";
+    let lines: Vec<&str> = content.lines().collect();
+    let hover_line = |line: usize| {
+        let column = lines[line].find('$').unwrap() as u32 + 1;
+        hover_text(&hover_at(&backend, uri, content, line as u32, column).expect("expected hover"))
+            .to_string()
+    };
+    let equal = hover_line(4);
+    assert!(
+        equal.contains("array{null}"),
+        "expected array{{null}}, got: {equal}"
+    );
+    let unequal = hover_line(7);
+    assert!(
+        unequal.contains("array{string}"),
+        "expected array{{string}}, got: {unequal}"
+    );
+}
+
+/// The narrowed array is accepted where the element type it proved is
+/// required.
+#[test]
+fn a_guard_against_an_array_literal_proves_the_remaining_shape() {
+    let backend = create_test_backend();
+    let uri = "file:///array_literal_guard.php";
+    let content = r#"<?php
+/** @param list{string} $arr */
+function takesStringList(array $arr): void {}
+
+function caller(?string $val): void
+{
+    $arr = [$val];
+    if ($arr === [null]) {
+        return;
+    }
+    takesStringList($arr);
+}
+
+function unguarded(?string $val): void
+{
+    $arr = [$val];
+    takesStringList($arr);
+}
+"#;
+
+    let errors = argument_type_errors(&backend, uri, content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "only the unguarded call can pass a null element, got: {errors:?}"
+    );
+}
+
+/// Ruling a literal out of a shape only narrows it when every other entry
+/// already matches the literal: `[1, null]` excluded from
+/// `array{int, ?string}` leaves the null possible beside any other int.
+#[test]
+fn an_array_literal_rules_out_an_entry_only_when_the_rest_are_pinned() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+/**
+ * @param array{1, ?string} $pinned
+ * @param array{int, ?string} $loose
+ */
+function f(array $pinned, array $loose): void {
+    if ($pinned !== [1, null]) {
+        $pinned;
+    }
+    if ($loose !== [1, null]) {
+        $loose;
+    }
+}
+"#;
+    let uri = "file:///array_literal_pinned.php";
+    let lines: Vec<&str> = content.lines().collect();
+    let hover_line = |line: usize| {
+        let column = lines[line].find('$').unwrap() as u32 + 1;
+        hover_text(&hover_at(&backend, uri, content, line as u32, column).expect("expected hover"))
+            .to_string()
+    };
+    let pinned = hover_line(7);
+    assert!(
+        pinned.contains("array{1, string}"),
+        "expected array{{1, string}}, got: {pinned}"
+    );
+    let loose = hover_line(10);
+    assert!(
+        loose.contains("array{int, ?string}") || loose.contains("array{int, string|null}"),
+        "expected the shape unchanged, got: {loose}"
+    );
 }

@@ -200,7 +200,7 @@ impl LanguageServer for Backend {
         // A narrowed exclude list makes classes resolvable that were
         // missing a moment ago, so the negative cache has to go or the
         // editor keeps showing "class not found" for them.
-        self.clear_class_not_found_cache();
+        self.clear_not_found_caches();
 
         self.request_diagnostic_refresh().await;
     }
@@ -255,11 +255,12 @@ impl LanguageServer for Backend {
                 {
                     return Ok(Some(GotoDefinitionResponse::Scalar(location)));
                 }
-                // For Blade files, check if the cursor is on a `{{`/`}}` echo
-                // delimiter first, so go-to-definition agrees with hover on the
-                // same position (the implicit `e()` call) instead of falling
-                // through to the virtual PHP content, where the position maps
-                // to whichever expression happens to start at that offset.
+                // For Blade files, check if the cursor is on an echo delimiter
+                // (`{{`/`}}` or `{!!`/`!!}`) first, so go-to-definition agrees
+                // with hover on the same position (the implicit `e()` call, or
+                // nothing for a raw echo) instead of falling through to the
+                // virtual PHP content, where the position maps to whichever
+                // expression happens to start at that offset.
                 if backend.is_blade_file(uri)
                     && let Some(delimiter_result) =
                         backend.blade_echo_delimiter_definition(uri, position)
@@ -391,10 +392,11 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
 
         self.run_position_request("hover", uri, position, |backend, uri, position| {
-            // For Blade files, check if the cursor is on a `{{` or `{!!` echo
-            // delimiter. If so, return hover for `e()` (escaped echo) or a
-            // raw-echo explanation, rather than falling through to the virtual
-            // PHP content where the position maps into boilerplate.
+            // For Blade files, check if the cursor is on an echo delimiter
+            // (`{{`/`}}` or `{!!`/`!!}`). If so, return hover for `e()`
+            // (escaped echo) or a raw-echo explanation, rather than falling
+            // through to the virtual PHP content where the position maps into
+            // boilerplate or the expression behind the delimiter.
             if backend.is_blade_file(uri)
                 && let Some(hover) = backend.blade_echo_delimiter_hover(uri, position)
             {

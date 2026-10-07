@@ -1,14 +1,20 @@
 mod class_unions;
+mod locals;
 mod merge;
+mod proof_map;
 mod proofs;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+mod trie;
 
 pub(crate) use class_unions::*;
+pub(crate) use locals::Locals;
+pub(crate) use proof_map::ProofMap;
 pub(crate) use proofs::*;
+pub(crate) use trie::AtomTrie;
 
-use crate::atom::{Atom, AtomMap, AtomSet, atom};
+use crate::atom::{Atom, atom};
 use crate::php_type::PhpType;
 use crate::types::ResolvedType;
 
@@ -144,10 +150,10 @@ pub(crate) struct ImpliedNarrowing {
 /// they have to travel with the resolution context to reach it.
 #[derive(Clone, Copy)]
 pub(crate) struct ScopeProofs<'a> {
-    pub assertions: &'a AtomMap<Vec<VarAssertion>>,
-    pub non_null_implications: &'a AtomMap<Vec<Atom>>,
-    pub implied_narrowings: &'a AtomMap<Vec<ImpliedNarrowing>>,
-    pub preg_outcomes: &'a AtomMap<PregOutcome>,
+    pub assertions: &'a ProofMap<Vec<VarAssertion>>,
+    pub non_null_implications: &'a ProofMap<Vec<Atom>>,
+    pub implied_narrowings: &'a ProofMap<Vec<ImpliedNarrowing>>,
+    pub preg_outcomes: &'a ProofMap<PregOutcome>,
 }
 
 impl ScopeProofs<'_> {
@@ -227,14 +233,14 @@ pub(crate) struct ScopeState {
     /// current program point.  Every variable that has been assigned,
     /// declared as a parameter, or bound by a foreach/catch before the
     /// current statement has an entry here.
-    pub locals: AtomMap<Vec<ResolvedType>>,
+    pub locals: Locals,
 
     /// Boolean variable name → the checks its value stands for.
     ///
     /// PHPStan calls these conditional expressions: the boolean carries
     /// the assertion from the expression it was assigned, so testing it
     /// narrows the original subject.
-    pub assertions: AtomMap<Vec<VarAssertion>>,
+    pub assertions: ProofMap<Vec<VarAssertion>>,
 
     /// Scope key → the keys that proving it non-null also proves non-null.
     ///
@@ -248,7 +254,7 @@ pub(crate) struct ScopeState {
     /// check on one of them recover what it implies about the others.
     ///
     /// Either way the proof is one the guard's own condition never names.
-    pub non_null_implications: AtomMap<Vec<Atom>>,
+    pub non_null_implications: ProofMap<Vec<Atom>>,
 
     /// Scope key → the types other keys held on the path that left it
     /// holding a value.
@@ -267,13 +273,13 @@ pub(crate) struct ScopeState {
     /// // … 60 lines on …
     /// if ($original !== null) { $stmt->valueVar->name; }  // still a Variable
     /// ```
-    pub implied_narrowings: AtomMap<Vec<ImpliedNarrowing>>,
+    pub implied_narrowings: ProofMap<Vec<ImpliedNarrowing>>,
 
     /// Variable name → the `preg_match` outcome its value is.
     ///
     /// The same idea as `assertions`, for the one check whose subject is
     /// an out-parameter rather than the tested expression itself.
-    pub preg_outcomes: AtomMap<PregOutcome>,
+    pub preg_outcomes: ProofMap<PregOutcome>,
 
     /// The names whose empty [`Self::locals`] entry stands for a value
     /// the engine failed to work out, rather than one that could be
@@ -285,7 +291,7 @@ pub(crate) struct ScopeState {
     /// path proved; a value we simply could not compute is a gap in our
     /// own analysis, reported where it happened, and has no business
     /// erasing anything.  See [`ScopeState::merge_branch`].
-    pub unresolved: AtomSet,
+    pub unresolved: AtomTrie<()>,
 
     /// Scope key → the classes this path has shown the value is *not*.
     ///
@@ -302,7 +308,7 @@ pub(crate) struct ScopeState {
     /// [`ScopeProofs`]: below the join the exclusion holds only where both
     /// incoming paths made it, which is exactly what the join leaves
     /// behind.
-    pub ruled_out: AtomMap<Vec<PhpType>>,
+    pub ruled_out: ProofMap<Vec<PhpType>>,
 
     /// Variable name → what invoking the closure literal it was last
     /// assigned does to its captures, precomputed at the assignment so a
@@ -312,7 +318,7 @@ pub(crate) struct ScopeState {
     /// Cleared whenever the variable is reassigned or removed (see
     /// [`Self::invalidate_proofs`]), the same as every other proof keyed on
     /// a variable's identity.
-    pub closure_captures: AtomMap<Vec<ClosureCaptureEffect>>,
+    pub closure_captures: AtomTrie<Vec<ClosureCaptureEffect>>,
 
     /// What this path knows about which keys arrays hold; see
     /// [`KeyFacts`]. Boxed and `None` while there is nothing to say, which
@@ -344,14 +350,14 @@ impl ScopeState {
 
     pub fn new() -> Self {
         Self {
-            locals: AtomMap::default(),
-            assertions: AtomMap::default(),
-            non_null_implications: AtomMap::default(),
-            implied_narrowings: AtomMap::default(),
-            preg_outcomes: AtomMap::default(),
-            unresolved: AtomSet::default(),
-            ruled_out: AtomMap::default(),
-            closure_captures: AtomMap::default(),
+            locals: Locals::default(),
+            assertions: ProofMap::default(),
+            non_null_implications: ProofMap::default(),
+            implied_narrowings: ProofMap::default(),
+            preg_outcomes: ProofMap::default(),
+            unresolved: AtomTrie::default(),
+            ruled_out: ProofMap::default(),
+            closure_captures: AtomTrie::default(),
             key_facts: None,
             unreachable: false,
         }
@@ -428,7 +434,7 @@ impl ScopeState {
     /// so passes that iterate the scope's keys (e.g. condition
     /// narrowing) can see it even though no type is known yet.
     pub fn set_empty(&mut self, var_name: &str) {
-        self.locals.entry(atom(var_name)).or_default();
+        self.locals.get_or_insert_default(atom(var_name));
     }
 
     /// Replace whatever was known about a variable with "no type known".
@@ -443,7 +449,7 @@ impl ScopeState {
     pub fn set_unknown(&mut self, var_name: &str) {
         let key = atom(var_name);
         self.locals.insert(key, Vec::new());
-        self.unresolved.insert(key);
+        self.unresolved.insert(key, ());
     }
 
     /// Replace whatever was known about a variable with "could be
@@ -487,7 +493,7 @@ impl ScopeState {
     /// the value the key was recorded against is gone, so whatever was
     /// tracked for it describes the old one.
     pub fn invalidate_dependent_keys(&mut self, var_name: &str) {
-        self.locals.retain(|key, _| {
+        self.locals.retain_compound(|key| {
             !crate::type_engine::types::narrowing::key_reads_variable(key, var_name)
         });
     }
@@ -536,18 +542,17 @@ impl ScopeState {
                     MemberInvalidation::Members { kept } => !kept.iter().any(|k| k == key),
                 }
         };
-        self.locals.retain(|key, _| !reads_receiver(key));
+        self.locals.retain_compound(|key| !reads_receiver(key));
         self.non_null_implications
-            .retain(|_, implied| !implied.iter().any(|k| reads_receiver(k)));
+            .retain_mentioning(receiver, |_, implied| {
+                !implied.iter().any(|k| reads_receiver(k))
+            });
         self.implied_narrowings
-            .retain(|_, narrowed| !narrowed.iter().any(|proof| reads_receiver(&proof.key)));
-        if self.assertions.is_empty() {
-            return;
-        }
-        self.assertions.retain(|_, checks| {
-            checks.retain(|c| !reads_receiver(&c.subject));
-            !checks.is_empty()
-        });
+            .retain_mentioning(receiver, |_, narrowed| {
+                !narrowed.iter().any(|proof| reads_receiver(&proof.key))
+            });
+        self.assertions
+            .retain_items_mentioning(receiver, |c| !reads_receiver(&c.subject));
     }
 
     /// Drop the proofs that writing to `var_name` invalidates: whatever
@@ -565,29 +570,33 @@ impl ScopeState {
         };
         if !self.assertions.is_empty() {
             self.assertions.remove(&key);
-            self.assertions.retain(|_, checks| {
-                checks.retain(|c| !stale(&c.subject));
-                !checks.is_empty()
-            });
+            self.assertions
+                .retain_items_mentioning(var_name, |c| !stale(&c.subject));
         }
         if !self.non_null_implications.is_empty() {
             self.non_null_implications.remove(&key);
             self.non_null_implications
-                .retain(|holder, implied| !stale(holder) && !implied.iter().any(stale));
+                .retain_mentioning(var_name, |holder, implied| {
+                    !stale(holder) && !implied.iter().any(stale)
+                });
         }
         if !self.implied_narrowings.is_empty() {
             self.implied_narrowings.remove(&key);
-            self.implied_narrowings.retain(|holder, narrowed| {
-                !stale(holder) && !narrowed.iter().any(|proof| stale(&proof.key))
-            });
+            self.implied_narrowings
+                .retain_mentioning(var_name, |holder, narrowed| {
+                    !stale(holder) && !narrowed.iter().any(|proof| stale(&proof.key))
+                });
         }
         if !self.preg_outcomes.is_empty() {
             self.preg_outcomes.remove(&key);
             self.preg_outcomes
-                .retain(|holder, outcome| !stale(holder) && !stale(&outcome.matches_var));
+                .retain_mentioning(var_name, |holder, outcome| {
+                    !stale(holder) && !stale(&outcome.matches_var)
+                });
         }
         if !self.ruled_out.is_empty() {
-            self.ruled_out.retain(|subject, _| !stale(subject));
+            self.ruled_out
+                .retain_mentioning(var_name, |subject, _| !stale(subject));
         }
         self.retain_key_facts(
             |subject, key_var| !stale(subject) && *key_var != key,
@@ -697,10 +706,8 @@ impl ScopeState {
     /// See [`Self::ruled_out`] for why the exclusion has to be written
     /// down rather than left to the narrowed type to carry.
     pub fn record_exclusion(&mut self, var_name: &str, excluded: &PhpType) {
-        let entry = self.ruled_out.entry(atom(var_name)).or_default();
-        if !entry.contains(excluded) {
-            entry.push(excluded.clone());
-        }
+        self.ruled_out
+            .push_unique(atom(var_name), excluded.clone(), |a, b| a == b);
     }
 
     /// Record that proving `holder` non-null proves each of `implied`

@@ -150,6 +150,54 @@ fn import_action_inserts_use_statement() {
     assert_eq!(edits[0].new_text, "\nuse Illuminate\\Http\\Request;\n");
 }
 
+/// A block that closes on its `namespace` line has no line after it that
+/// is still inside it, so the import goes straight after the brace.
+#[test]
+fn import_action_writes_the_use_inside_a_namespace_block_written_on_one_line() {
+    let backend = create_test_backend();
+    declare_request(&backend);
+    let uri = "file:///test.php";
+    let content = "<?php\nnamespace App { function a(Request $r) {} }\n";
+    backend.update_ast(uri, content);
+
+    let actions = get_code_actions_in_range(&backend, uri, content, range(1, 27, 34));
+    let action = find_action(&actions, "Import `Illuminate\\Http\\Request`")
+        .expect("expected import action");
+
+    assert_eq!(
+        crate::common::apply_edits(content, &extract_edits(action)),
+        "<?php\nnamespace App { use Illuminate\\Http\\Request; function a(Request $r) {} }\n"
+    );
+}
+
+/// The `use` goes after the brace, not between the name and the brace,
+/// when the brace is written on a line of its own.
+#[test]
+fn import_action_writes_the_use_after_a_brace_on_its_own_line() {
+    let backend = create_test_backend();
+    declare_request(&backend);
+    let uri = "file:///test.php";
+    let content = "<?php\nnamespace App\n{\n    function a(Request $r) {}\n}\n";
+    backend.update_ast(uri, content);
+
+    let actions = get_code_actions_in_range(&backend, uri, content, range(3, 15, 22));
+    let action = find_action(&actions, "Import `Illuminate\\Http\\Request`")
+        .expect("expected import action");
+
+    assert_eq!(
+        crate::common::apply_edits(content, &extract_edits(action)),
+        concat!(
+            "<?php\n",
+            "namespace App\n",
+            "{\n",
+            "\n",
+            "use Illuminate\\Http\\Request;\n",
+            "    function a(Request $r) {}\n",
+            "}\n",
+        )
+    );
+}
+
 /// A different class already imported under the same short name blocks
 /// the import.
 #[test]
@@ -293,5 +341,83 @@ async fn a_request_with_nothing_to_offer_is_answered_with_nothing() {
         actions.is_none(),
         "expected no response, got: {:?}",
         actions.map(|a| titles(&a))
+    );
+}
+
+// ── Several namespace blocks ────────────────────────────────────────────────
+
+/// An import in one `namespace` block does not reach another, so a name
+/// written in the second block is still offered an import, which goes into
+/// that block's own `use` list.
+#[test]
+fn import_action_offered_when_only_another_namespace_block_imports_the_name() {
+    let backend = create_test_backend();
+    declare_request(&backend);
+    let uri = "file:///test.php";
+    let content = concat!(
+        "<?php\n",
+        "namespace A {\n",
+        "    use Illuminate\\Http\\Request;\n",
+        "    function a(Request $r) {}\n",
+        "}\n",
+        "namespace B {\n",
+        "    use Carbon\\Carbon;\n",
+        "    function b(Request $r) {}\n",
+        "}\n",
+    );
+    backend.update_ast(uri, content);
+
+    let actions = get_code_actions_in_range(&backend, uri, content, range(7, 15, 22));
+    let action = find_action(&actions, "Import `Illuminate\\Http\\Request`")
+        .expect("expected an import action in block B");
+    let edits = extract_edits(action);
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].new_text, "use Illuminate\\Http\\Request;\n");
+    assert_eq!(
+        edits[0].range.start.line, 7,
+        "the import belongs in block B's use list, after its Carbon import"
+    );
+}
+
+/// "Import all missing classes" adds each block's imports to that block.
+#[test]
+fn import_all_places_each_import_in_its_own_namespace_block() {
+    let backend = create_test_backend();
+    declare_request(&backend);
+    declare_carbon(&backend);
+    let uri = "file:///test.php";
+    let content = concat!(
+        "<?php\n",
+        "namespace A {\n",
+        "    function a(Request $r, Carbon $c) {}\n",
+        "}\n",
+        "namespace B {\n",
+        "    use Illuminate\\Http\\Request;\n",
+        "    function b(Request $r, Carbon $c) {}\n",
+        "}\n",
+    );
+    backend.update_ast(uri, content);
+
+    let actions = get_code_actions_in_range(&backend, uri, content, range(2, 15, 22));
+    let action = find_action(&actions, "Import all missing classes")
+        .expect("expected the bulk import action");
+    let resolved = crate::common::resolve_action(&backend, uri, content, action);
+    let result = crate::common::apply_edits(content, &extract_edits(&resolved));
+
+    let block_b_start = result.find("namespace B").unwrap();
+    let (block_a, block_b) = result.split_at(block_b_start);
+    assert!(
+        block_a.contains("use Carbon\\Carbon;\n")
+            && block_a.contains("use Illuminate\\Http\\Request;\n"),
+        "block A should import both classes:\n{result}"
+    );
+    assert!(
+        block_b.contains("use Carbon\\Carbon;\n"),
+        "block B should import Carbon:\n{result}"
+    );
+    assert_eq!(
+        block_b.matches("Illuminate\\Http\\Request").count(),
+        1,
+        "block B already imports Request:\n{result}"
     );
 }

@@ -1,0 +1,18 @@
+// test: a failed strict in_array drops only the values its haystack holds on every path
+// feature: hover
+// `$allowed` holds `'a'` whichever branch built it, but `'b'` only on
+// one of them, so only `'a'` is ruled out.
+// expect_hover: $rest => 'b'|'c'
+// expect_absent: 'a'
+---
+<?php
+
+/** @param 'a'|'b'|'c' $grade */
+function pick(string $grade, bool $strict): void
+{
+    $allowed = $strict ? ['a'] : ['a', 'b'];
+    if (!in_array($grade, $allowed, true)) {
+        $rest = $grade;
+        echo $re<>st;
+    }
+}

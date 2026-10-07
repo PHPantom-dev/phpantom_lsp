@@ -11618,10 +11618,10 @@ class Svc {
 }
 
 /// When the variable is a union type and the haystack element type is
-/// one of the union members, the guard clause SHOULD narrow: removing
-/// one union member still leaves the other narrowed correctly.
+/// one of the union members, the guard clause does not rule that member
+/// out: a `Foo` the list does not hold gets past it.
 #[test]
-fn in_array_guard_still_narrows_union_type() {
+fn in_array_guard_keeps_the_element_class_in_a_union() {
     let backend = create_test_backend();
     {
         let mut cfg = backend.config();
@@ -11646,14 +11646,14 @@ class Svc {
         if (in_array($item, $fooList, true)) {
             return;
         }
-        $name = $item->barName;
+        $name = $item->fooName;
     }
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
         diags.is_empty(),
-        "in_array guard should still narrow union types, got: {:?}",
+        "in_array guard should not rule out Foo, got: {:?}",
         diags
     );
 }

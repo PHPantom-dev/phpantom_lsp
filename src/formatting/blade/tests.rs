@@ -803,6 +803,14 @@ fn indentation_does_not_count_unescaped_braces_as_brace_nesting() {
 }
 
 #[test]
+fn indentation_does_not_count_a_raw_echo_inside_literal_braces_as_brace_nesting() {
+    check(
+        "\n<div>\n<p>{{!! $html !!}}</p>\n<p>After</p>\n</div>",
+        "\n<div>\n    <p>{{!! $html !!}}</p>\n    <p>After</p>\n</div>",
+    );
+}
+
+#[test]
 fn indentation_does_not_count_blade_comments_as_brace_nesting() {
     check(
         "\n<div>\n{{-- This is a comment --}}\n<p>After</p>\n</div>",
@@ -1516,6 +1524,16 @@ fn embedded_php_formats_an_echo_expression() {
 #[test]
 fn embedded_php_pads_a_raw_echo() {
     check_embedded("{!!$html!!}\n", "{!! $html !!}\n");
+}
+
+/// Blade matches echo tags longest-opening-first, so `{{!!$html!!}}` is a
+/// literal `{`, a raw echo, and a literal `}`: the raw echo is padded like
+/// any other and the braces around it are left alone, with or without an
+/// `@` in front.
+#[test]
+fn embedded_php_pads_a_raw_echo_inside_literal_braces() {
+    check_embedded("{{!!$html!!}}\n", "{{!! $html !!}}\n");
+    check_embedded("@{{!!$html!!}}\n", "@{{!! $html !!}}\n");
 }
 
 #[test]

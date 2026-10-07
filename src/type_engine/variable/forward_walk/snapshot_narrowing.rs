@@ -93,19 +93,35 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
 ) {
     match expr {
         Expression::Match(match_expr) if match_expr.expression.is_true() => {
+            // Reaching an arm means every arm above it was tested and
+            // failed, so the inverse of each of their conditions holds in
+            // its body, exactly as in an `elseif` chain.  `default` runs
+            // only once every other arm failed, wherever it is written.
+            let mut failed_scope = scope.clone();
+            let mut default_expr = None;
             for arm in match_expr.arms.iter() {
                 match arm {
                     MatchArm::Expression(expr_arm) => {
-                        let mut arm_scope = scope.clone();
+                        let mut arm_scope = failed_scope.clone();
+                        apply_match_arm_narrowing(expr_arm, &mut arm_scope, ctx);
+                        // A condition is itself evaluated only once every
+                        // condition before it failed, so a chain or a
+                        // ternary inside it starts from that.
                         for condition in expr_arm.conditions.iter() {
-                            apply_condition_narrowing(condition, &mut arm_scope, ctx);
+                            record_branch_snapshots(condition, &failed_scope, ctx);
+                            apply_failed_match_condition_narrowing(
+                                condition,
+                                &mut failed_scope,
+                                ctx,
+                            );
                         }
                         record_branch_snapshots(expr_arm.expression, &arm_scope, ctx);
                     }
-                    MatchArm::Default(def_arm) => {
-                        record_branch_snapshots(def_arm.expression, scope, ctx);
-                    }
+                    MatchArm::Default(def_arm) => default_expr = Some(def_arm.expression),
                 }
+            }
+            if let Some(default_expr) = default_expr {
+                record_branch_snapshots(default_expr, &failed_scope, ctx);
             }
             restore_after_branches(expr, scope);
         }
@@ -170,9 +186,25 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                 }
             }
         }
+        // The right operand of `&&` runs only once the left one was truthy,
+        // and that of `||` only once it was falsy, so a ternary or `match`
+        // inside it starts from what that proved, the way
+        // `record_short_circuit_snapshots` reads the operand itself.
         Expression::Binary(bin) => {
             record_match_ternary_snapshots(bin.lhs, scope, ctx);
-            record_match_ternary_snapshots(bin.rhs, scope, ctx);
+            match short_circuit_kind(expr) {
+                Some(kind) if holds_branches(bin.rhs) => {
+                    let mut rhs_scope = scope.clone();
+                    match kind {
+                        ChainKind::And => apply_condition_narrowing(bin.lhs, &mut rhs_scope, ctx),
+                        ChainKind::Or => {
+                            apply_condition_narrowing_inverse(bin.lhs, &mut rhs_scope, ctx)
+                        }
+                    }
+                    record_match_ternary_snapshots(bin.rhs, &rhs_scope, ctx);
+                }
+                _ => record_match_ternary_snapshots(bin.rhs, scope, ctx),
+            }
         }
         // A `throw` is an expression since PHP 8, and the value it throws
         // is built the same way any other is: `throw new Exception($x ? …
@@ -217,6 +249,43 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
             restore_after_branches(expr, scope);
         }
         _ => {}
+    }
+}
+
+/// Whether `expr` holds a ternary or `match` that
+/// [`record_match_ternary_snapshots`] records branch snapshots for, found
+/// through the same expression shapes it descends through.
+///
+/// Narrowing a scope for a short-circuit operand only pays off when there is
+/// a branch inside it to hand the scope to, so this is asked first.
+fn holds_branches(expr: &Expression<'_>) -> bool {
+    let any_argument = |args: &ArgumentList<'_>| {
+        args.arguments
+            .iter()
+            .any(|arg| holds_branches(argument_value(arg)))
+    };
+    match expr {
+        Expression::Match(_) | Expression::Conditional(_) => true,
+        Expression::Assignment(assignment) => holds_branches(assignment.rhs),
+        Expression::Parenthesized(inner) => holds_branches(inner.expression),
+        Expression::Call(call) => match call {
+            Call::Function(fc) => holds_branches(fc.function) || any_argument(&fc.argument_list),
+            Call::Method(mc) => holds_branches(mc.object) || any_argument(&mc.argument_list),
+            Call::NullSafeMethod(mc) => {
+                holds_branches(mc.object) || any_argument(&mc.argument_list)
+            }
+            Call::StaticMethod(sc) => any_argument(&sc.argument_list),
+        },
+        Expression::Instantiation(inst) => inst.argument_list.as_ref().is_some_and(any_argument),
+        Expression::Binary(bin) => holds_branches(bin.lhs) || holds_branches(bin.rhs),
+        Expression::Throw(throw_expr) => holds_branches(throw_expr.exception),
+        Expression::Array(arr) => arr.elements.iter().any(|elem| match elem {
+            ArrayElement::KeyValue(kv) => holds_branches(kv.key) || holds_branches(kv.value),
+            ArrayElement::Value(val) => holds_branches(val.value),
+            ArrayElement::Variadic(v) => holds_branches(v.value),
+            ArrayElement::Missing(_) => false,
+        }),
+        _ => false,
     }
 }
 

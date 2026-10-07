@@ -60,7 +60,10 @@ pub(crate) fn mode_at(content: &str, offset: usize) -> Mode {
                 } else if rest.starts_with("{!!") {
                     mode = Mode::UntilMarkerInCode("!!}");
                     i += 3;
-                } else if rest.starts_with("{{") {
+                } else if rest.starts_with("{{") && !rest.starts_with("{{!!") {
+                    // Not `{{!!`: there the raw echo opens at the second `{`
+                    // and the first is a literal brace, as the preprocessor
+                    // lowers it.
                     mode = Mode::UntilMarkerInCode("}}");
                     i += 2;
                 } else if rest.starts_with("<?xml") {
@@ -83,7 +86,10 @@ pub(crate) fn mode_at(content: &str, offset: usize) -> Mode {
                         // engine, so none of it is PHP.
                         mode = Mode::UntilMarkerRaw("!!}");
                         i += 1 + 3;
-                    } else if after_at.starts_with("{{") {
+                    } else if after_at.starts_with("{{") && !after_at.starts_with("{{!!") {
+                        // Not `{{!!`: the `@` escapes only the echo it comes
+                        // directly before, and there the raw echo opens at
+                        // the second `{`.
                         mode = Mode::UntilMarkerRaw("}}");
                         i += 1 + 2;
                     } else if let Some(directive) = match_directive(after_at) {
@@ -238,6 +244,28 @@ mod tests {
         // The `}}` inside the string must not be treated as the closing
         // `}}` of the echo — the real one is further along.
         assert_eq!(prefix_at(r#"{{ "a}}b" }} @|"#, "}} @"), Some(""));
+    }
+
+    /// Blade matches echo tags longest-opening-first, so in `{{!! … !!}}` the
+    /// raw echo starts at the second `{` and the first is a literal brace,
+    /// with or without an `@` in front: the `@` escapes only the echo it
+    /// comes directly before.
+    #[test]
+    fn a_raw_echo_inside_literal_braces_is_scanned_as_a_raw_echo() {
+        for content in ["{{!!$a!!}}", "@{{!!$a!!}}"] {
+            let inside = content.find('$').unwrap();
+            assert!(
+                mode_at(content, inside) == Mode::UntilMarkerInCode("!!}"),
+                "the code of {content:?} runs to its raw echo's own terminator"
+            );
+        }
+    }
+
+    #[test]
+    fn a_raw_echo_inside_literal_braces_ends_at_its_own_terminator() {
+        // No `}}` follows, so reading the echo as an escaped one would never
+        // end it.
+        assert_eq!(prefix_at("{{!! $a !!} @|", "!!} @"), Some(""));
     }
 
     #[test]

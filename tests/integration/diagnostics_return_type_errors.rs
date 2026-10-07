@@ -2326,6 +2326,74 @@ function get_user(): array {
     );
 }
 
+/// An unsealed `@return array{foo: int, ...}` lists `foo`, so what comes
+/// back is held to it however many other entries it also has.
+#[test]
+fn array_returned_from_an_unsealed_shape_return_is_held_to_the_entries_it_lists() {
+    let php = r#"<?php
+/** @return array{foo: int, ...} */
+function ok(): array {
+    return ['foo' => 1, 'bar' => 'anything'];
+}
+
+/** @return array{foo: int, ...} */
+function wrongValue(): array {
+    return ['foo' => []];
+}
+"#;
+    let diags = collect(php);
+    let messages = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("foo: array{}"), "got {messages:?}");
+}
+
+#[test]
+fn array_returned_from_an_unsealed_shape_return_is_held_to_its_tail() {
+    let php = r#"<?php
+/** @return array{foo: int, ...<string, string>} */
+function ok(): array {
+    return ['foo' => 1, 'bar' => 'x'];
+}
+
+/** @return array{foo: int, ...<string, string>} */
+function wrongTail(): array {
+    return ['foo' => 1, 'bar' => []];
+}
+"#;
+    let diags = collect(php);
+    let messages = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("bar: array{}"), "got {messages:?}");
+}
+
+/// A value typed as an unsealed shape that comes back where a typed array is
+/// declared is held to the entries it lists, not to the plain array it
+/// widens to.
+#[test]
+fn an_unsealed_array_returned_as_a_typed_array_is_held_to_the_entries_it_lists() {
+    let php = r#"<?php
+/** @return array{foo: string, ...} */
+function makeOpen(): array { return ['foo' => 'x']; }
+
+/** @return array<string, string> */
+function ok(): array {
+    return makeOpen();
+}
+
+/** @return array<string, int> */
+function wrongValue(): array {
+    return makeOpen();
+}
+"#;
+    let diags = collect(php);
+    let messages = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("array{foo: string, ...<array-key, mixed>}"),
+        "got {messages:?}"
+    );
+}
+
 #[test]
 fn no_diagnostic_for_foreach_key_value_rewriting_every_element() {
     let php = r#"<?php

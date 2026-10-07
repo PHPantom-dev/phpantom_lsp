@@ -1193,12 +1193,11 @@ fn resolve_hint_keywords(
 /// same way assigning the expression to a variable first would resolve
 /// through the AST-based `resolve_conditional_chain`.
 ///
-/// A full three-part ternary (`$a ? $b : $c`) and arithmetic operators
-/// (`+`, `-`, `*`, …) are deliberately left unanswered here, unless every
-/// operand is a known integer and the result is one too: arithmetic's
-/// result depends on whether its operands are int or float (and `+` alone
-/// can mean array union), which the source text can't decide without
-/// resolving both operands' concrete types.
+/// A full three-part ternary (`$a ? $b : $c`) is left unanswered here, and
+/// so is arithmetic (`+`, `-`, `*`, …) unless every operand resolves to an
+/// integer and no operator can turn the result into a float: arithmetic's
+/// result otherwise depends on whether its operands are int or float (and
+/// `+` alone can mean array union).
 pub(super) fn resolve_operator_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
     if contains_top_level_concat(text) {
         return Some(PhpType::named(atom("string")));
@@ -1214,6 +1213,11 @@ pub(super) fn resolve_operator_type(text: &str, ctx: &ResolutionCtx<'_>) -> Opti
             crate::type_engine::types::const_fold::fold_int_expression(text, &resolve)
         {
             return Some(PhpType::literal_int(value.to_string()));
+        }
+        // An expression over integers whose values are unknown (`$n - 1`)
+        // is still an `int`, as long as no operator can turn it into a float.
+        if crate::type_engine::types::const_fold::is_int_expression(text, &resolve) {
+            return Some(PhpType::int());
         }
     }
     // `??` binds looser than `?:`, so it is split first: the left operand of

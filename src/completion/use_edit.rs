@@ -9,41 +9,30 @@
 //!
 //! A Blade template imports with the `@use` directive instead, and its
 //! directives live in the template's own text rather than in the virtual
-//! PHP the preprocessor lowers it to, so the block it takes is read with
-//! [`analyze_template_use_block`] and written in that syntax.
+//! PHP the preprocessor lowers it to, so the block it takes is read and
+//! written by [`crate::blade::use_block`].
 use std::collections::HashMap;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::blade::source_map::BladeSourceMap;
-use crate::blade::use_directive::{first_string_literal, imported_name, use_directive_arguments};
+use crate::blade::use_block::TemplateUseBlock;
 use crate::diagnostics::use_statements::scan_use_statements;
 use crate::text_position::LineIndex;
+use crate::text_scan::skip_php_comment;
 use crate::util::short_name;
 
-/// Where a Blade template's imports go, in the virtual-PHP coordinates
-/// every edit is planned in.
-///
-/// A template imports with `@use('App\Models\Widget')` on a line of its
-/// own, and a new one is anchored at the **end** of the line it follows:
-/// the directive lowers to nothing, so the start of its line shares a
-/// virtual column with the text that comes after it and the trip back
-/// through the source map cannot tell the two apart.  The end of a line
-/// is unambiguous in both directions.
-#[derive(Debug, Clone)]
-pub(crate) struct TemplateUseBlock {
-    /// The end of the line each existing `@use` sits on, in the order
-    /// [`UseBlockInfo::existing`] lists them.
-    line_ends: Vec<Position>,
-    /// Where an import that precedes every existing one goes: the start of
-    /// the template, or the end of its first line when the template opens
-    /// with a directive of its own, whose line start the virtual PHP
-    /// cannot address.
-    top: Position,
-    /// Whether `top` is the start of a line, so the import is written
-    /// before what stands there rather than after it.
-    top_at_line_start: bool,
+/// Where the first import of a block that has no `use` statement goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FirstImport {
+    /// On a line of its own, starting at this one: the line after the
+    /// `namespace` declaration, or after `<?php` and any `declare`.
+    OwnLine(u32),
+    /// Straight after the `{` or `;` that ends the `namespace` declaration,
+    /// because code follows it on the same line.  The line after it is past
+    /// that code, and past the block itself when the block closes on the
+    /// line.
+    Inline(Position),
 }
 
 /// Information about a file's existing `use` block, used to compute
@@ -55,12 +44,12 @@ pub(crate) struct UseBlockInfo {
     /// used for case-insensitive alphabetical comparison.
     /// Entries are in file order (sorted by line number).
     pub(crate) existing: Vec<(u32, String)>,
-    /// The line to insert at when there are no existing `use` statements.
-    /// Points after the `namespace` declaration, or after `<?php`.
-    pub(crate) fallback_line: u32,
+    /// Where to insert when there are no existing `use` statements.
+    pub(crate) fallback: FirstImport,
     /// Whether the file declares a namespace.  When there are no
     /// existing imports, a blank line is inserted before the first
-    /// `use` statement to separate it from the `namespace` line.
+    /// `use` statement to separate it from the `namespace` line, unless
+    /// the import is written inline after the declaration.
     pub(crate) has_namespace: bool,
     /// The template's own import block, when the file is a Blade
     /// template rather than a PHP file.
@@ -73,7 +62,7 @@ impl UseBlockInfo {
     /// existing imports.
     ///
     /// If there are no existing imports, returns the fallback position
-    /// (after `namespace` or `<?php`).
+    /// (after the `namespace` declaration or `<?php`).
     pub(crate) fn insert_position_for(&self, fqn: &str) -> Position {
         self.insert_position_for_key(&fqn.to_lowercase())
     }
@@ -100,9 +89,9 @@ impl UseBlockInfo {
     /// exists).
     pub(crate) fn insert_position_for_key(&self, key: &str) -> Position {
         if self.existing.is_empty() {
-            return Position {
-                line: self.fallback_line,
-                character: 0,
+            return match self.fallback {
+                FirstImport::OwnLine(line) => Position { line, character: 0 },
+                FirstImport::Inline(position) => position,
             };
         }
 
@@ -157,35 +146,47 @@ impl UseBlockInfo {
         }
     }
 
-    /// Where a new import goes in a Blade template, as the position to
-    /// write at and the text to write there.
-    ///
-    /// The import follows the last directive it sorts behind, written at
-    /// the end of that directive's line, and goes to the top of the
-    /// template when it sorts before all of them.  Anchoring on the line
-    /// that comes *before* the new import rather than the one that comes
-    /// after is what keeps the position addressable in the virtual PHP
-    /// (see [`TemplateUseBlock`]).
-    fn template_insertion(
-        &self,
-        template: &TemplateUseBlock,
-        key: &str,
-        statement: &str,
-    ) -> (Position, String) {
-        let comes_before =
-            |existing: &str| (Self::key_group(existing), existing) < (Self::key_group(key), key);
-        let anchor = self
-            .existing
-            .iter()
-            .zip(&template.line_ends)
-            .filter(|((_, existing), _)| comes_before(existing))
-            .map(|(_, end)| *end)
-            .next_back();
+    /// Whether an import is written right after the `namespace`
+    /// declaration instead of on a line of its own: the block has no
+    /// imports yet, and code follows its declaration on the same line.
+    fn writes_inline(&self) -> bool {
+        self.existing.is_empty() && matches!(self.fallback, FirstImport::Inline(_))
+    }
 
-        match (anchor, template.top_at_line_start) {
-            (Some(end), _) => (end, format!("\n{}", statement)),
-            (None, true) => (template.top, format!("{}\n", statement)),
-            (None, false) => (template.top, format!("\n{}", statement)),
+    /// The text of the edit that writes `statement` at the position
+    /// [`insert_position_for_key`](Self::insert_position_for_key) names.
+    ///
+    /// An import on a line of its own ends with a line break, and `set_off`
+    /// puts a blank line before it to separate it from what precedes.  One
+    /// written inline starts with a space instead, which sets it off from
+    /// the declaration it follows.
+    pub(crate) fn import_text(&self, statement: &str, set_off: bool) -> String {
+        if self.writes_inline() {
+            format!(" {statement}")
+        } else if set_off {
+            format!("\n{statement}\n")
+        } else {
+            format!("{statement}\n")
+        }
+    }
+
+    /// Drop the blank line [`build_use_edit`] puts between the `namespace`
+    /// line and the first import of a block that has none, from an import
+    /// that is not the first of its batch.
+    ///
+    /// Every import of a batch is planned against the same empty block, so
+    /// each would add the separator.  A template's import keeps the line
+    /// break it starts with: there it separates the directive from the
+    /// line it follows.  An import written inline has no separator to
+    /// drop.
+    pub(crate) fn drop_repeated_separator(&self, edits: &mut [TextEdit]) {
+        if self.template.is_some() || !self.existing.is_empty() {
+            return;
+        }
+        for edit in edits {
+            if let Some(rest) = edit.new_text.strip_prefix('\n') {
+                edit.new_text = rest.to_string();
+            }
         }
     }
 
@@ -242,7 +243,7 @@ impl UseBlockInfo {
 ///   - `use Foo\{Bar, Baz};` → `foo\`
 ///
 /// Returns `None` if the line does not look like a use statement.
-fn extract_use_sort_key(line: &str) -> Option<String> {
+pub(crate) fn extract_use_sort_key(line: &str) -> Option<String> {
     let trimmed = line.trim();
     let rest = trimmed
         .strip_prefix("use ")
@@ -292,128 +293,110 @@ fn extract_use_sort_key(line: &str) -> Option<String> {
 /// namespace-level import from a trait `use` inside a class, enum, or
 /// trait body.
 pub(crate) fn analyze_use_block(content: &str) -> UseBlockInfo {
-    let mut namespace_line: Option<u32> = None;
+    analyze_use_block_in(content, None)
+}
 
-    for (i, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        // Match `namespace Foo\Bar;` or `namespace Foo\Bar {`
-        // but not `namespace\something` (which is a different construct).
-        if trimmed.starts_with("namespace ") || trimmed.starts_with("namespace\t") {
-            namespace_line = Some(i as u32);
-        }
-    }
-
+/// [`analyze_use_block`] for one `namespace` block of a file that
+/// declares several, given as its byte range, or for the whole file when
+/// `block` is `None`.
+///
+/// PHP scopes an import to its block, so a new import joins the `use`
+/// statements of the block the code needing it is written in, and goes
+/// right after that block's own `namespace` declaration when it has none.
+pub(crate) fn analyze_use_block_in(content: &str, block: Option<(usize, usize)>) -> UseBlockInfo {
     let index = LineIndex::new(content);
+
+    // The block's range starts at its `namespace` keyword; its imports
+    // follow the `;` or `{` that ends the declaration.
+    let keyword = match block {
+        Some((start, _)) => Some(start),
+        None => last_namespace_keyword(content),
+    };
+    let declaration_end = keyword.and_then(|keyword| namespace_declaration_end(content, keyword));
+
     let existing = scan_use_statements(content)
         .into_iter()
         .filter(|statement| statement.top_level)
+        .filter(|statement| {
+            block.is_none_or(|(start, end)| {
+                statement.keyword_start >= start && statement.keyword_start <= end
+            })
+        })
         .filter_map(|statement| {
             let sort_key = extract_use_sort_key(&content[statement.keyword_start..statement.end])?;
             Some((index.position(statement.line_start).line, sort_key))
         })
         .collect();
 
-    // Fallback: insert after `namespace`, or, with no namespace, on the
-    // first line the file's header leaves free — which is past any
+    // Fallback: insert after the `namespace` declaration, on the next line
+    // or, when code follows the declaration on its own line, straight after
+    // it, since the next line is then past that code.  With no namespace,
+    // on the first line the file's header leaves free — which is past any
     // `declare(strict_types=1)`, since PHP requires that to come first.
-    let fallback_line = match namespace_line {
-        Some(line) => line + 1,
-        None => crate::text_scan::header_insert_line(content),
+    let fallback = match (declaration_end, keyword) {
+        (Some(end), _) if code_follows_on_line(content, end) => {
+            FirstImport::Inline(index.position(end))
+        }
+        (Some(end), _) => FirstImport::OwnLine(index.position(end).line + 1),
+        (None, Some(keyword)) => FirstImport::OwnLine(index.position(keyword).line + 1),
+        (None, None) => FirstImport::OwnLine(crate::text_scan::header_insert_line(content)),
     };
-    let has_namespace = namespace_line.is_some();
 
     UseBlockInfo {
         existing,
-        fallback_line,
-        has_namespace,
+        fallback,
+        has_namespace: keyword.is_some(),
         template: None,
     }
 }
 
-/// [`analyze_use_block`] for a Blade template, read from the template's
-/// own text.
+/// The byte offset of the `namespace` keyword of the last line of
+/// `content` that declares one, which may follow the opening tag.
 ///
-/// A template imports with `@use('App\Models\Widget')`, which the
-/// preprocessor hoists into the virtual PHP's prologue as a real `use`
-/// statement.  Scanning the virtual PHP would therefore place a new import
-/// in the prologue, which no template text stands behind, so the
-/// directives are read from the template with the scanner in
-/// [`crate::blade::use_directive`] instead.
+/// A line starting `namespace\something` is a different construct, the
+/// relative name, and does not count.
+fn last_namespace_keyword(content: &str) -> Option<usize> {
+    let mut found = None;
+    let mut line_start = 0;
+    for line in content.split_inclusive('\n') {
+        let mut code = line.trim_start();
+        if let Some(after_tag) = code.strip_prefix("<?php") {
+            code = after_tag.trim_start();
+        }
+        if code.starts_with("namespace ") || code.starts_with("namespace\t") {
+            found = Some(line_start + line.len() - code.len());
+        }
+        line_start += line.len();
+    }
+    found
+}
+
+/// The byte offset just past the `;` or `{` that ends the `namespace`
+/// declaration whose keyword starts at `keyword`.
 ///
-/// The positions recorded are the *virtual PHP* ones the template's own
-/// lines lower to, because that is the coordinate system every feature
-/// plans its edits in; `src/blade/translate.rs` moves the finished edit
-/// back into the template.  `map` is the template's source map, or `None`
-/// for a template that was never lowered, whose own coordinates are what
-/// the untranslated edit already names.
-pub(crate) fn analyze_template_use_block(
-    template: &str,
-    map: Option<&BladeSourceMap>,
-) -> UseBlockInfo {
-    let to_php = |position: Position| match map {
-        Some(map) => map.blade_to_php(position),
-        None => position,
-    };
-
-    // The end of the line `at` falls on, in the template's coordinates.
-    let line_end_at = |at: usize| {
-        let mut end = template[at..]
-            .find('\n')
-            .map_or(template.len(), |offset| at + offset);
-        if template[..end].ends_with('\r') {
-            end -= 1;
-        }
-        crate::text_position::offset_to_position(template, end)
-    };
-
-    let mut existing: Vec<(u32, String)> = Vec::new();
-    let mut line_ends: Vec<Position> = Vec::new();
-
-    for (arguments_at, arguments) in use_directive_arguments(template) {
-        let Some((_, literal)) = first_string_literal(arguments) else {
-            continue;
+/// `None` when what follows the keyword is not a declaration: only a name
+/// and comments may sit between the keyword and its terminator.
+fn namespace_declaration_end(content: &str, keyword: usize) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut at = keyword + "namespace".len();
+    while let Some(&byte) = bytes.get(at) {
+        at = match byte {
+            b';' | b'{' => return Some(at + 1),
+            b'\\' | b'_' | 0x80.. => at + 1,
+            _ if byte.is_ascii_alphanumeric() || byte.is_ascii_whitespace() => at + 1,
+            _ => skip_php_comment(bytes, at)?,
         };
-        if imported_name(literal).is_none() {
-            continue;
-        }
-        // The literal is a `use` statement's body written as a string, so
-        // the scanner for a PHP import's sort key answers for it verbatim.
-        let Some(sort_key) = extract_use_sort_key(&format!("use {};", literal.trim())) else {
-            continue;
-        };
-
-        // The end of the line the directive closes on, so a multi-line
-        // argument list is followed rather than split.
-        let end = to_php(line_end_at(arguments_at + arguments.len()));
-        existing.push((end.line, sort_key));
-        line_ends.push(end);
     }
+    None
+}
 
-    // A template that opens with a directive of its own lowers its first
-    // columns to nothing, leaving the start of the line sharing a virtual
-    // column with the text after it; the trip back answers the latter, so
-    // the end of that line is what the import is written after instead.
-    let start = Position {
-        line: 0,
-        character: 0,
-    };
-    let top = to_php(start);
-    let top_at_line_start = map.is_none_or(|map| map.try_php_to_blade(top) == Some(start));
-
-    UseBlockInfo {
-        existing,
-        fallback_line: top.line,
-        has_namespace: false,
-        template: Some(TemplateUseBlock {
-            line_ends,
-            top: if top_at_line_start {
-                top
-            } else {
-                to_php(line_end_at(0))
-            },
-            top_at_line_start,
-        }),
-    }
+/// Whether code follows `offset` on its line: anything but blanks and a
+/// `//` or `#` comment, which run to the end of the line.  A block comment
+/// counts, since it may run on past the line.
+fn code_follows_on_line(content: &str, offset: usize) -> bool {
+    let rest = content[offset..].trim_start_matches([' ', '\t', '\r']);
+    let line_comment = rest.starts_with("//") || (rest.starts_with('#') && !rest.starts_with("#["));
+    !(rest.is_empty() || rest.starts_with('\n') || line_comment)
 }
 
 impl Backend {
@@ -423,16 +406,25 @@ impl Backend {
     /// `content` is the text the caller analysed, which for a template is
     /// the virtual PHP it lowers to.  A template's imports were hoisted
     /// into the prologue of that text, so the template itself is scanned
-    /// instead ([`analyze_template_use_block`]).
-    pub(crate) fn use_block_for(&self, uri: &str, content: &str) -> UseBlockInfo {
+    /// instead ([`crate::blade::use_block::analyze_template_use_block`]).
+    ///
+    /// `block` is the byte range of the `namespace` block the import is for
+    /// (see [`ImportBlock`](crate::backend::file_access::ImportBlock)), or
+    /// `None` when the file has only one.
+    pub(crate) fn use_block_for(
+        &self,
+        uri: &str,
+        content: &str,
+        block: Option<(usize, usize)>,
+    ) -> UseBlockInfo {
         if !self.is_blade_file(uri) {
-            return analyze_use_block(content);
+            return analyze_use_block_in(content, block);
         }
         let Some(template) = self.get_file_content_arc(uri) else {
-            return analyze_use_block(content);
+            return analyze_use_block_in(content, block);
         };
         let maps = self.blade_source_maps.read();
-        analyze_template_use_block(&template, maps.get(uri))
+        crate::blade::use_block::analyze_template_use_block(&template, maps.get(uri))
     }
 }
 
@@ -512,31 +504,19 @@ pub(crate) fn build_aliased_use_edit(
     }
 
     if let Some(template) = &use_block.template {
-        let statement = match alias {
-            Some(alias) => format!("@use('{}', '{}')", fqn, alias),
-            None => format!("@use('{}')", fqn),
-        };
-        let (insert_pos, new_text) =
-            use_block.template_insertion(template, &fqn.to_lowercase(), &statement);
-        return Some(vec![TextEdit {
-            range: Range {
-                start: insert_pos,
-                end: insert_pos,
-            },
-            new_text,
-        }]);
+        return Some(vec![template.import_edit(
+            &use_block.existing,
+            &fqn.to_lowercase(),
+            fqn,
+            alias,
+        )]);
     }
 
     let insert_pos = use_block.insert_position_for(fqn);
 
     // When there are no existing imports and the file has a namespace,
-    // prepend a blank line to separate the namespace declaration from
-    // the use block.
-    let prefix = if use_block.existing.is_empty() && use_block.has_namespace {
-        "\n"
-    } else {
-        ""
-    };
+    // a blank line separates the namespace declaration from the use block.
+    let set_off = use_block.existing.is_empty() && use_block.has_namespace;
 
     let statement = match alias {
         Some(alias) => format!("use {} as {};", fqn, alias),
@@ -548,7 +528,7 @@ pub(crate) fn build_aliased_use_edit(
             start: insert_pos,
             end: insert_pos,
         },
-        new_text: format!("{}{}\n", prefix, statement),
+        new_text: use_block.import_text(&statement, set_off),
     }])
 }
 
@@ -592,23 +572,17 @@ pub(crate) fn build_aliased_typed_use_edit(
     }
 
     if let Some(template) = &use_block.template {
-        let statement = match alias {
-            Some(alias) => format!("@use('{} {}', '{}')", kind, fqn, alias),
-            None => format!("@use('{} {}')", kind, fqn),
-        };
-        let (insert_pos, new_text) = use_block.template_insertion(template, &sort_key, &statement);
-        return Some(vec![TextEdit {
-            range: Range {
-                start: insert_pos,
-                end: insert_pos,
-            },
-            new_text,
-        }]);
+        return Some(vec![template.import_edit(
+            &use_block.existing,
+            &sort_key,
+            &format!("{kind} {fqn}"),
+            alias,
+        )]);
     }
 
     let insert_pos = use_block.insert_position_for_key(&sort_key);
 
-    // Prepend a blank line when:
+    // Set the import off with a blank line when:
     // - There are no existing imports at all and the file has a
     //   namespace (separate namespace from the use block), or
     // - This is the first function import and there are already class
@@ -617,12 +591,12 @@ pub(crate) fn build_aliased_typed_use_edit(
         .existing
         .iter()
         .any(|(_, key)| key.starts_with(kind));
-    let separator = if (use_block.existing.is_empty() && use_block.has_namespace)
-        || (!has_kind_imports && use_block.has_class_imports())
-    {
-        "\n"
-    } else {
-        ""
+    let set_off = (use_block.existing.is_empty() && use_block.has_namespace)
+        || (!has_kind_imports && use_block.has_class_imports());
+
+    let statement = match alias {
+        Some(alias) => format!("use {} {} as {};", kind, fqn, alias),
+        None => format!("use {} {};", kind, fqn),
     };
 
     Some(vec![TextEdit {
@@ -630,10 +604,7 @@ pub(crate) fn build_aliased_typed_use_edit(
             start: insert_pos,
             end: insert_pos,
         },
-        new_text: match alias {
-            Some(alias) => format!("{}use {} {} as {};\n", separator, kind, fqn, alias),
-            None => format!("{}use {} {};\n", separator, kind, fqn),
-        },
+        new_text: use_block.import_text(&statement, set_off),
     }])
 }
 

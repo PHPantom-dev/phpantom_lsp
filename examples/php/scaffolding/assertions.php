@@ -283,6 +283,10 @@ function runDemoAssertions(): void
     assert($keyValue['total'] === 9, 'array_sum() over a list<int> is an int');
     assert(array_keys((new Scaffolding\ScaffoldingArrayFunc())->labels()) === [0, 1], 'array_keys() over a list yields int keys');
     assert(array_search('gel', (new Scaffolding\ScaffoldingArrayFunc())->labels()) === 1, 'array_search() over a list yields an int key');
+    $popLabels = (new Scaffolding\ScaffoldingArrayFunc())->labels();
+    assert(array_pop($popLabels) === 'gel', 'array_pop() over a list<string> yields its string element');
+    $noLabels = [];
+    assert(array_pop($noLabels) === null, 'array_pop() over an empty list yields null');
     assert(array_key_first((new Scaffolding\ScaffoldingArrayFunc())->byName()) === 'blue', 'array_key_first() over a string-keyed array yields a string');
     $stringKeyed = array_filter((new Scaffolding\ScaffoldingArrayFunc())->mixedKeys(), fn($key) => is_string($key), ARRAY_FILTER_USE_KEY);
     assert(array_keys($stringKeyed) === ['ink'], 'array_filter() with ARRAY_FILTER_USE_KEY keeps only the keys its callback approves of');
@@ -869,6 +873,7 @@ function runDemoAssertions(): void
 
     assert(preg_replace('/\d/', '*', 'a1b2') === 'a*b*', 'a string subject is replaced into a string');
     assert(preg_replace('/\d/', '*', ['a1', 'b2']) === ['a*', 'b*'], 'an array subject is replaced into an array');
+    assert(preg_replace('/a/u', 'b', ['a', "\xff"]) === ['b'], 'an entry PCRE fails on is left out of the array, rather than the call returning null');
     assert(substr_replace('banana', 'x', 0, 1) === 'xanana', 'a string subject is spliced into a string');
 
     // ── Capture-group shape (preg_match) ─────────────────────────────────
@@ -2079,6 +2084,12 @@ function runDemoAssertions(): void
     assert($reconstructed->eitherPrefix($plainName, $qualifiedName) === 'App\\', 'ruling the first flag out leaves what the second proved');
     assert($reconstructed->eitherPrefix($qualifiedName, $plainName) === 'App\\', 'the first flag holding proves its own subject');
     assert($reconstructed->eitherPrefix($plainName, $plainName) === '', 'neither flag holding leaves the guard');
+
+    $nested = new NestedAssignmentDemo();
+    assert($nested->matchArm(1) === 'black', 'the match arm that assigns $pen types it as a Pen');
+    assert($nested->matchArm(2) === '', 'the default arm leaves $pen unset');
+    assert($nested->ternaryBranch(true) === 'black', 'the ternary branch that assigns $pen types it as a Pen');
+    assert($nested->ternaryBranch(false) === '', 'the else branch leaves $pen unset');
 
     // ── Member visibility ───────────────────────────────────────────────
     // The diagnostics demo claims which members of ScaffoldingVault are out

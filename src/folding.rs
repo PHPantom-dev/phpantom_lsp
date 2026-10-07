@@ -47,7 +47,7 @@ impl Backend {
                 .filter_map(|r| self.translate_folding_range(uri, r))
                 .collect();
             if let Some(raw) = self.get_file_content_arc(uri) {
-                collect_blade_native_folds(&raw, &mut ranges);
+                collect_blade_native_folds(&raw, &self.blade_directives.read(), &mut ranges);
             }
         }
 
@@ -95,10 +95,14 @@ impl Backend {
 /// `@push`/`@endpush`, …) and `<x-component>`…`</x-component>` tag bodies.
 /// Reads the raw Blade source directly, so ranges land in Blade
 /// coordinates without any translation.
-fn collect_blade_native_folds(raw: &str, ranges: &mut Vec<FoldingRange>) {
+fn collect_blade_native_folds(
+    raw: &str,
+    known: &crate::blade::directives::BladeDirectives,
+    ranges: &mut Vec<FoldingRange>,
+) {
     let idx = crate::text_position::LineIndex::new(raw);
 
-    for pair in crate::blade::balance::block_pairs(raw) {
+    for pair in crate::blade::balance::block_pairs(raw, known) {
         ranges.push(range_from_offsets(
             &idx,
             pair.opener.start as u32,

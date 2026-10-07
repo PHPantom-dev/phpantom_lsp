@@ -18,7 +18,10 @@ pub(super) fn array_key_exists_target<'b>(
             let Expression::Identifier(ident) = call.function else {
                 return None;
             };
-            if bytes_to_str(ident.value()).trim_start_matches('\\') != "array_key_exists" {
+            if !bytes_to_str(ident.value())
+                .trim_start_matches('\\')
+                .eq_ignore_ascii_case("array_key_exists")
+            {
                 return None;
             }
             let args: Vec<_> = call.argument_list.arguments.iter().collect();

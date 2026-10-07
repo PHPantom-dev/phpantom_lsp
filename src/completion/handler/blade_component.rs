@@ -292,8 +292,8 @@ impl Backend {
         // can fill a name the template neither defines nor is handed, so
         // reading one is the template declaring an attribute implicitly
         // (see [`crate::blade::implicit_props`]).
-        let custom_directives = self.blade_custom_directives.read();
-        let implicit = crate::blade::implicit_props::implicit_props(&source, &custom_directives);
+        let directives = self.blade_directives.read();
+        let implicit = crate::blade::implicit_props::implicit_props(&source, &directives);
         if implicit.is_empty() {
             return attributes;
         }

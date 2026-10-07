@@ -1,4 +1,4 @@
-// test: a failed strict in_array drops every alternative its elements cover
+// test: a failed strict in_array drops every value the haystack holds
 // feature: hover
 // expect_hover: $definite => string
 // expect_absent: null

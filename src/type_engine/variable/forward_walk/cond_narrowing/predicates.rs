@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::type_engine::variable::raw_type_inference::written_array_literal_type;
+
 /// The subject key an expression names: a plain variable, or the member
 /// path or array offset that stands in for one.
 ///
@@ -281,8 +283,10 @@ pub(crate) fn extract_literal_identity_check(
 /// pin a subject to one exact value.
 ///
 /// A `-1` is a unary minus over a literal rather than a literal of its
-/// own, so the sign is folded back in; anything else that is not written
-/// out as a value in the source has no literal type.
+/// own, so the sign is folded back in, and an array literal whose keys and
+/// values are all written out is the shape it builds (`[null]` is
+/// `array{null}`); anything else that is not written out as a value in the
+/// source has no literal type.
 pub(super) fn literal_comparand_type(expr: &Expression<'_>) -> Option<PhpType> {
     match expr {
         Expression::Parenthesized(paren) => literal_comparand_type(paren.expression),
@@ -315,9 +319,11 @@ pub(super) fn literal_comparand_type(expr: &Expression<'_>) -> Option<PhpType> {
         Expression::Literal(Literal::True(_)) => Some(PhpType::true_()),
         Expression::Literal(Literal::False(_)) => Some(PhpType::false_()),
         _ if is_null_expr(expr) => Some(PhpType::null()),
-        Expression::Array(array) => array.elements.is_empty().then(|| PhpType::parse("array{}")),
+        Expression::Array(array) => {
+            written_array_literal_type(array.elements.as_slice(), literal_comparand_type)
+        }
         Expression::LegacyArray(array) => {
-            array.elements.is_empty().then(|| PhpType::parse("array{}"))
+            written_array_literal_type(array.elements.as_slice(), literal_comparand_type)
         }
         _ => None,
     }

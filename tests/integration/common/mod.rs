@@ -1340,6 +1340,46 @@ pub async fn goto_definition_at(
         .unwrap()
 }
 
+/// Send `textDocument/references` at `position` in a document that is
+/// already open, and return the locations, or none when the server answers
+/// with nothing.
+pub async fn find_references(
+    backend: &Backend,
+    uri: &Url,
+    position: Position,
+    include_declaration: bool,
+) -> Vec<Location> {
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration,
+            },
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default()
+}
+
+/// The messages of the syntax, argument-count, and slow diagnostics
+/// reported on an open Blade template, read against the virtual PHP it
+/// lowers to.
+pub fn template_diagnostics(backend: &Backend, uri: &Url) -> Vec<String> {
+    let virtual_php = backend
+        .blade_virtual_php(uri.as_str())
+        .expect("the template should be preprocessed");
+    let mut diags = Vec::new();
+    backend.collect_syntax_error_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+    backend.collect_argument_count_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+    backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+    diags.into_iter().map(|d| d.message).collect()
+}
+
 /// The "Undefined variable" messages reported on an open Blade template,
 /// read against the virtual PHP it lowers to.
 pub fn blade_undefined_variables(backend: &Backend, uri: &Url) -> Vec<String> {

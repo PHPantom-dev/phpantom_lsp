@@ -354,16 +354,18 @@ fn resolve_var_types(
 
 /// Extract instanceof narrowings from a `match(true)` arm's conditions.
 ///
-/// For each condition like `$var instanceof ClassName`, adds an entry
-/// mapping `"$var"` → the resolved `ClassInfo` for `ClassName`.
-/// Multiple conditions on the same arm are OR-merged (each condition
-/// narrows a potentially different variable).
+/// A condition like `$var instanceof ClassName` maps `"$var"` → the
+/// resolved `ClassInfo` for `ClassName`.  The arm runs when any one of its
+/// conditions holds, so a variable is narrowed only when every condition
+/// names it, to the union of the classes they name: `$p instanceof Cat,
+/// $p instanceof Dog` narrows `$p` to `Cat|Dog`, while `$p instanceof Cat,
+/// $q instanceof Dog` narrows neither.
 fn extract_match_arm_narrowings(
     expr_arm: &MatchExpressionArm<'_>,
     subject_var: Option<&str>,
     ctx: &VarResolutionCtx<'_>,
 ) -> HashMap<String, Vec<ResolvedType>> {
-    let mut overrides: HashMap<String, Vec<ResolvedType>> = HashMap::new();
+    let mut narrowed: Option<(String, Vec<ResolvedType>)> = None;
     for condition in expr_arm.conditions.iter() {
         // `match ($x::class) { Foo::class, Bar::class => … }` — each
         // condition names one class the subject may be, so the arm body
@@ -375,30 +377,37 @@ fn extract_match_arm_narrowings(
             }
             None => extract_instanceof_pair(condition),
         };
-        if let Some((var_name, mut class_type)) = pair {
-            // Resolve the short class name to FQN so that downstream
-            // comparisons and ResolvedType hints carry the fully-qualified name.
-            if let TypeKind::Named(name) = class_type.kind()
-                && let Some(cls) = (ctx.class_loader)(name)
-            {
-                class_type = PhpType::named(cls.fqn());
-            }
-            let resolved = type_resolution::type_hint_to_classes_typed(
-                &class_type,
-                &ctx.current_class.name,
-                ctx.all_classes,
-                ctx.class_loader,
-            );
-            if !resolved.is_empty() {
-                let results = ResolvedType::from_classes_with_hint(resolved, class_type);
-                overrides
-                    .entry(var_name)
-                    .and_modify(|existing| ResolvedType::extend_unique(existing, results.clone()))
-                    .or_insert(results);
-            }
+        // A condition that says nothing this one can read about the
+        // variable the others narrow lets the arm run whatever it holds.
+        let Some((var_name, mut class_type)) = pair else {
+            return HashMap::new();
+        };
+        if narrowed.as_ref().is_some_and(|(name, _)| *name != var_name) {
+            return HashMap::new();
+        }
+        // Resolve the short class name to FQN so that downstream
+        // comparisons and ResolvedType hints carry the fully-qualified name.
+        if let TypeKind::Named(name) = class_type.kind()
+            && let Some(cls) = (ctx.class_loader)(name)
+        {
+            class_type = PhpType::named(cls.fqn());
+        }
+        let resolved = type_resolution::type_hint_to_classes_typed(
+            &class_type,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+        if resolved.is_empty() {
+            return HashMap::new();
+        }
+        let results = ResolvedType::from_classes_with_hint(resolved, class_type);
+        match &mut narrowed {
+            Some((_, existing)) => ResolvedType::extend_unique(existing, results),
+            None => narrowed = Some((var_name, results)),
         }
     }
-    overrides
+    narrowed.into_iter().collect()
 }
 
 /// The narrowing a `match (true)` arm's conditions establish for its body.
@@ -1319,9 +1328,15 @@ fn resolve_rhs_expression_inner<'b>(
             // — the proof a ternary chain carries down its `else` spine,
             // and what makes `default => $x` see the `$x === null` arm.
             let mut carried: HashMap<String, Vec<ResolvedType>> = HashMap::new();
-            for arm in match_expr.arms.iter() {
-                // Create a new context with narrowed variable types so that
-                // the arm expression resolves against the narrowed class.
+            // `default` runs only once every other arm failed, wherever it is
+            // written, so it is resolved last.
+            let (default_arms, expression_arms): (Vec<_>, Vec<_>) = match_expr
+                .arms
+                .iter()
+                .partition(|arm| matches!(arm, MatchArm::Default(_)));
+            for arm in expression_arms.into_iter().chain(default_arms) {
+                // Narrowed variable types, so that the arm expression
+                // resolves against the narrowed class.
                 let mut overrides = carried.clone();
                 if narrows && let MatchArm::Expression(expr_arm) = arm {
                     // The arm's own conditions describe its body more
@@ -1334,24 +1349,37 @@ fn resolve_rhs_expression_inner<'b>(
                         overrides.extend(match_true_arm_narrowings(expr_arm, ctx));
                     }
                 }
-                let arm_ctx =
-                    (!overrides.is_empty()).then(|| ctx.with_match_arm_narrowing(overrides));
-                let effective_ctx = arm_ctx.as_ref().unwrap_or(ctx);
+                // The arm is resolved with the cursor inside it, as a
+                // ternary's branches are: a lookup that has no scope to read
+                // walks to the cursor, and the walk applies the narrowing
+                // the arm runs under there.
                 let arm_expr = arm.expression();
-                let arm_results = resolve_rhs_expression(arm_expr, effective_ctx);
+                let mut arm_ctx = ctx.with_cursor_offset(arm_expr.span().start.offset);
+                if !overrides.is_empty() {
+                    arm_ctx.match_arm_narrowing = overrides;
+                }
+                let arm_results = resolve_rhs_expression(arm_expr, &arm_ctx);
                 ResolvedType::extend_unique(
                     &mut combined,
                     widen_unresolved_branch(arm_expr, arm_results),
                 );
                 if is_true_subject && let MatchArm::Expression(expr_arm) = arm {
-                    // Every condition of this arm was false for the arms
-                    // below it, so all of their inverses hold together.
+                    // Every condition of this arm was not `true` for the
+                    // arms below it, so all of their inverses hold together,
+                    // on top of what the arms above already proved.
                     for condition in expr_arm.conditions.iter() {
-                        carried.extend(
-                            crate::type_engine::variable::forward_walk::condition_narrowing_overrides(
-                                condition, false, ctx,
-                            ),
-                        );
+                        if !super::forward_walk::match_true_condition_is_boolean(condition, || {
+                            resolve_rhs_expression(condition, ctx)
+                        }) {
+                            continue;
+                        }
+                        let carried_ctx = (!carried.is_empty())
+                            .then(|| ctx.with_match_arm_narrowing(carried.clone()));
+                        carried.extend(super::forward_walk::condition_narrowing_overrides(
+                            condition,
+                            false,
+                            carried_ctx.as_ref().unwrap_or(ctx),
+                        ));
                     }
                 }
             }

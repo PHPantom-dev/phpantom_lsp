@@ -578,16 +578,17 @@ impl Backend {
         None
     }
 
-    /// Forget which class names failed to resolve, so names looked up
-    /// before an index was populated are searched again.
+    /// Forget which class and function names failed to resolve, so names
+    /// looked up before an index was populated are searched again.
     ///
     /// Callers reach for this after growing `fqn_uri_index` (a classmap
     /// scan, a phar scan) or when files changed on disk. It also retires
     /// the memoised lookups in
     /// [`class_loader_memo`](crate::class_loader_memo), which would
     /// otherwise keep answering from the negatives just cleared.
-    pub(crate) fn clear_class_not_found_cache(&self) {
+    pub(crate) fn clear_not_found_caches(&self) {
         self.symbols.class_not_found_cache.write().clear();
+        self.symbols.function_not_found_cache.write().clear();
         self.symbols.note_class_lookup_change();
     }
 
@@ -1075,6 +1076,8 @@ impl Backend {
         // of the others later would win instead.
         crate::resolution_deps::record_all(candidates);
 
+        let index_generation = self.symbols.function_index_generation();
+
         // ── Phase 1: Check global_functions (user code + already-cached stubs) ──
         {
             let fmap = self.symbols.global_functions.read();
@@ -1082,6 +1085,18 @@ impl Backend {
                 if let Some((_, info)) = fmap.get(name) {
                     return Some(info.clone());
                 }
+            }
+        }
+
+        // ── Negative cache: skip the fallback phases ──
+        // A call to a function no index carries is re-resolved every time
+        // the forward walker passes it, and Phase 1.75 below walks every
+        // known autoload file per attempt.  Once every candidate spelling
+        // is a recorded miss, the whole chain is skipped.
+        {
+            let nf_cache = self.symbols.function_not_found_cache.read();
+            if !nf_cache.is_empty() && candidates.iter().all(|name| nf_cache.contains(name)) {
+                return None;
             }
         }
 
@@ -1223,6 +1238,28 @@ impl Backend {
             }
         }
 
+        // Cache the negative result so subsequent lookups for the same
+        // unknown function skip the fallback phases.  Another thread may
+        // have parsed a file declaring one of the candidates since Phase 1
+        // (Phase 1.75 skips files it did not parse itself), so re-check
+        // under the write lock: `update_ast` inserts into
+        // `global_functions` before it retires negatives, so either the
+        // declaration is visible here or its retirement runs after us.
+        {
+            let mut nf_cache = self.symbols.function_not_found_cache.write();
+            let fmap = self.symbols.global_functions.read();
+            if let Some((_, info)) = candidates.iter().find_map(|&name| fmap.get(name)) {
+                return Some(info.clone());
+            }
+            drop(fmap);
+            // An index insert since this lookup began may have added the
+            // function after the lookup read the index.
+            if self.symbols.function_index_generation() == index_generation {
+                for &name in candidates {
+                    nf_cache.insert(name);
+                }
+            }
+        }
         None
     }
 
@@ -1975,6 +2012,34 @@ mod tests {
             assert!(func.is_some(), "lookup for {name:?} should resolve");
             assert_eq!(func.unwrap().name, "strlen");
         }
+    }
+
+    #[test]
+    fn function_negative_cache_retires_on_declaration() {
+        let backend = Backend::new_test();
+
+        // A miss records every candidate spelling, case-insensitively…
+        assert!(
+            backend
+                .find_or_load_function(&["App\\myHelper", "myHelper"])
+                .is_none()
+        );
+        let nf_cache = backend.symbols.function_not_found_cache.read();
+        assert!(nf_cache.contains("APP\\MYHELPER"));
+        assert!(nf_cache.contains("MYHELPER"));
+        drop(nf_cache);
+
+        // …but once a parse declares the function, the lookup resolves
+        // instead of answering from the stale negative.
+        backend.update_ast(
+            "file:///helpers.php",
+            "<?php namespace App; function myHelper() {}",
+        );
+        assert!(
+            backend
+                .find_or_load_function(&["App\\myHelper", "myHelper"])
+                .is_some()
+        );
     }
 
     #[test]

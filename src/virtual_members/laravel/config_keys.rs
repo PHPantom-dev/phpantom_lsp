@@ -148,20 +148,33 @@ impl Backend {
     /// value a write stored is opaque, so every path under a written key
     /// is beyond judging as well, and a read of a group above one is as
     /// real as the write.
+    ///
+    /// The writes a registered service provider makes count too, vendor
+    /// providers included: the provider list is as fixed as the config
+    /// files they merge, and `laravel/sanctum` declares its guard this way.
     pub(crate) fn runtime_config_key_covers(&self, key: &str) -> bool {
-        self.laravel_runtime_config_keys
+        let covers = |written: &String| {
+            written == key
+                || written
+                    .strip_prefix(key)
+                    .is_some_and(|rest| rest.starts_with('.'))
+                || key
+                    .strip_prefix(written.as_str())
+                    .is_some_and(|rest| rest.starts_with('.'))
+        };
+        let written_by_project = self
+            .laravel_runtime_config_keys
             .read()
             .values()
             .flatten()
-            .any(|written| {
-                written == key
-                    || written
-                        .strip_prefix(key)
-                        .is_some_and(|rest| rest.starts_with('.'))
-                    || key
-                        .strip_prefix(written.as_str())
-                        .is_some_and(|rest| rest.starts_with('.'))
-            })
+            .any(covers);
+        written_by_project
+            || self
+                .laravel_provider_resources
+                .read()
+                .config_writes
+                .iter()
+                .any(covers)
     }
 
     /// Visit every config file a Laravel project reads, highest precedence

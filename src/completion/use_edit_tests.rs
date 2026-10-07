@@ -5,10 +5,7 @@ use super::*;
 fn find_use_insert_position(content: &str) -> Position {
     let info = analyze_use_block(content);
     if info.existing.is_empty() {
-        Position {
-            line: info.fallback_line,
-            character: 0,
-        }
+        info.insert_position_for_key("")
     } else {
         let last_line = info.existing.last().expect("non-empty checked above").0;
         Position {
@@ -204,7 +201,7 @@ fn fallback_after_namespace_when_no_use() {
     let content = "<?php\nnamespace App;\n\nclass X {}\n";
     let info = analyze_use_block(content);
     assert!(info.existing.is_empty());
-    assert_eq!(info.fallback_line, 2);
+    assert_eq!(info.fallback, FirstImport::OwnLine(2));
 }
 
 #[test]
@@ -212,7 +209,7 @@ fn fallback_after_php_open_tag_when_no_namespace() {
     let content = "<?php\n\nclass X {}\n";
     let info = analyze_use_block(content);
     assert!(info.existing.is_empty());
-    assert_eq!(info.fallback_line, 1);
+    assert_eq!(info.fallback, FirstImport::OwnLine(1));
 }
 
 #[test]
@@ -224,6 +221,114 @@ fn trait_use_inside_class_not_collected() {
     assert_eq!(info.existing[0], (2, "foo\\bar".to_string()));
 }
 
+// ── The first import of a block whose declaration shares its line ──
+
+fn inline_at(line: u32, character: u32) -> FirstImport {
+    FirstImport::Inline(Position { line, character })
+}
+
+#[test]
+fn fallback_inside_a_block_that_closes_on_its_declaration_line() {
+    let info = analyze_use_block("<?php\nnamespace B { class Foo {} }\n");
+    assert!(info.has_namespace);
+    assert_eq!(info.fallback, inline_at(1, 13));
+}
+
+#[test]
+fn fallback_after_a_namespace_statement_with_code_after_it() {
+    let info = analyze_use_block("<?php\nnamespace B; class Foo {}\n");
+    assert_eq!(info.fallback, inline_at(1, 12));
+}
+
+#[test]
+fn fallback_after_a_brace_with_the_block_still_open() {
+    // The block runs on to later lines, but the code after the brace is
+    // on the declaration's line all the same.
+    let info = analyze_use_block("<?php\nnamespace B { class Foo {\n}\n}\n");
+    assert_eq!(info.fallback, inline_at(1, 13));
+}
+
+#[test]
+fn fallback_after_a_namespace_that_follows_the_open_tag() {
+    let info = analyze_use_block("<?php namespace B { class Foo {} }\n");
+    assert!(info.has_namespace);
+    assert_eq!(info.fallback, inline_at(0, 19));
+}
+
+#[test]
+fn fallback_is_the_next_line_for_a_namespace_statement_after_the_open_tag() {
+    let info = analyze_use_block("<?php namespace B;\n\nclass Foo {}\n");
+    assert!(info.has_namespace);
+    assert_eq!(info.fallback, FirstImport::OwnLine(1));
+}
+
+#[test]
+fn fallback_counts_columns_in_utf16_units() {
+    // `Å` is one UTF-16 unit and two UTF-8 bytes.
+    let info = analyze_use_block("<?php\nnamespace Å { class Foo {} }\n");
+    assert_eq!(info.fallback, inline_at(1, 13));
+}
+
+#[test]
+fn fallback_stays_on_the_next_line_when_only_a_line_comment_follows() {
+    for content in [
+        "<?php\nnamespace B; // note\n\nclass Foo {}\n",
+        "<?php\nnamespace B { # note\n    class Foo {}\n}\n",
+        "<?php\nnamespace B {   \n    class Foo {}\n}\n",
+        "<?php\r\nnamespace B;\r\n\r\nclass Foo {}\r\n",
+    ] {
+        let info = analyze_use_block(content);
+        assert_eq!(info.fallback, FirstImport::OwnLine(2), "{content:?}");
+    }
+}
+
+#[test]
+fn fallback_goes_ahead_of_a_block_comment_after_the_declaration() {
+    // The next line may be inside the comment.
+    let info = analyze_use_block("<?php\nnamespace B { /* note\n   more */ class Foo {} }\n");
+    assert_eq!(info.fallback, inline_at(1, 13));
+}
+
+#[test]
+fn fallback_goes_ahead_of_an_attribute_after_the_declaration() {
+    // `#[` opens an attribute, not a comment.
+    let info = analyze_use_block("<?php\nnamespace B; #[Attr] class Foo {}\n");
+    assert_eq!(info.fallback, inline_at(1, 12));
+}
+
+#[test]
+fn fallback_is_the_line_after_a_brace_written_on_its_own_line() {
+    let info = analyze_use_block("<?php\nnamespace B\n{\n    class Foo {}\n}\n");
+    assert_eq!(info.fallback, FirstImport::OwnLine(3));
+}
+
+#[test]
+fn fallback_ignores_a_comment_between_the_name_and_the_brace() {
+    let info = analyze_use_block("<?php\nnamespace B /* ; */ { class Foo {} }\n");
+    assert_eq!(info.fallback, inline_at(1, 21));
+}
+
+#[test]
+fn a_relative_namespace_name_is_not_a_declaration() {
+    let info = analyze_use_block("<?php\nnamespace\\Foo\\bar();\n");
+    assert!(!info.has_namespace);
+    assert_eq!(info.fallback, FirstImport::OwnLine(1));
+}
+
+#[test]
+fn each_block_of_a_file_written_on_one_line_has_its_own_fallback() {
+    let content = "<?php\nnamespace A { class Foo {} } namespace B { class Bar {} }\n";
+    let second = content.find("namespace B").expect("the second block");
+    let first = analyze_use_block_in(
+        content,
+        Some((content.find("namespace A").unwrap(), second)),
+    );
+    let last = analyze_use_block_in(content, Some((second, content.len())));
+
+    assert_eq!(first.fallback, inline_at(1, 13));
+    assert_eq!(last.fallback, inline_at(1, 42));
+}
+
 // ── UseBlockInfo::insert_position_for ───────────────────────────
 
 #[test]
@@ -231,7 +336,7 @@ fn insert_alphabetically_before_first() {
     // Existing: App\Zoo (line 2). Inserting App\Alpha should go before it.
     let info = UseBlockInfo {
         existing: vec![(2, "app\\zoo".to_string())],
-        fallback_line: 1,
+        fallback: FirstImport::OwnLine(1),
         has_namespace: false,
         template: None,
     };
@@ -249,7 +354,7 @@ fn insert_alphabetically_after_last() {
     // Existing: App\Alpha (line 2). Inserting App\Zoo should go after it.
     let info = UseBlockInfo {
         existing: vec![(2, "app\\alpha".to_string())],
-        fallback_line: 1,
+        fallback: FirstImport::OwnLine(1),
         has_namespace: false,
         template: None,
     };
@@ -268,7 +373,7 @@ fn insert_alphabetically_in_the_middle() {
     // Inserting App\Middle should go between them.
     let info = UseBlockInfo {
         existing: vec![(2, "app\\alpha".to_string()), (3, "app\\zoo".to_string())],
-        fallback_line: 1,
+        fallback: FirstImport::OwnLine(1),
         has_namespace: false,
         template: None,
     };
@@ -285,7 +390,7 @@ fn insert_alphabetically_in_the_middle() {
 fn insert_uses_fallback_when_no_existing() {
     let info = UseBlockInfo {
         existing: vec![],
-        fallback_line: 2,
+        fallback: FirstImport::OwnLine(2),
         has_namespace: false,
         template: None,
     };
@@ -304,7 +409,7 @@ fn insert_case_insensitive_comparison() {
     // Inserting App\Middle (mixed case) should still land between them.
     let info = UseBlockInfo {
         existing: vec![(2, "app\\alpha".to_string()), (3, "app\\zoo".to_string())],
-        fallback_line: 1,
+        fallback: FirstImport::OwnLine(1),
         has_namespace: false,
         template: None,
     };
@@ -327,7 +432,7 @@ fn insert_among_three_existing() {
             (3, "c\\c".to_string()),
             (4, "e\\e".to_string()),
         ],
-        fallback_line: 1,
+        fallback: FirstImport::OwnLine(1),
         has_namespace: false,
         template: None,
     };
@@ -401,7 +506,7 @@ fn compat_trait_use_inside_class_not_treated_as_import() {
 fn build_edit_inserts_at_correct_alpha_position() {
     let info = UseBlockInfo {
         existing: vec![(2, "app\\alpha".to_string()), (3, "app\\zoo".to_string())],
-        fallback_line: 1,
+        fallback: FirstImport::OwnLine(1),
         has_namespace: false,
         template: None,
     };
@@ -422,7 +527,7 @@ fn build_edit_inserts_at_correct_alpha_position() {
 fn build_edit_skips_global_class_without_namespace() {
     let info = UseBlockInfo {
         existing: vec![],
-        fallback_line: 1,
+        fallback: FirstImport::OwnLine(1),
         has_namespace: false,
         template: None,
     };
@@ -433,7 +538,7 @@ fn build_edit_skips_global_class_without_namespace() {
 fn build_edit_includes_global_class_with_namespace() {
     let info = UseBlockInfo {
         existing: vec![],
-        fallback_line: 2,
+        fallback: FirstImport::OwnLine(2),
         has_namespace: true,
         template: None,
     };
@@ -447,6 +552,106 @@ fn build_edit_includes_global_class_with_namespace() {
             character: 0
         }
     );
+}
+
+#[test]
+fn build_edit_writes_an_import_inline_after_a_declaration_sharing_its_line() {
+    let info = analyze_use_block("<?php\nnamespace B { class Foo {} }\n");
+    let edits =
+        build_use_edit("B\\Helper", &info, &Some("B".to_string())).expect("should produce edit");
+
+    assert_eq!(edits.len(), 1);
+    // A space keeps the import off the `{`; the one that followed the `{`
+    // already sits between it and `class`.
+    assert_eq!(edits[0].new_text, " use B\\Helper;");
+    assert_eq!(
+        edits[0].range,
+        Range {
+            start: Position {
+                line: 1,
+                character: 13
+            },
+            end: Position {
+                line: 1,
+                character: 13
+            },
+        }
+    );
+}
+
+#[test]
+fn build_edit_writes_an_aliased_import_inline() {
+    let info = analyze_use_block("<?php\nnamespace B; class Foo {}\n");
+    let edits = build_aliased_use_edit("C\\Helper", Some("CHelper"), &info, &Some("B".to_string()))
+        .expect("should produce edit");
+
+    assert_eq!(edits[0].new_text, " use C\\Helper as CHelper;");
+}
+
+#[test]
+fn build_edit_keeps_a_line_of_its_own_when_the_declaration_has_the_line_to_itself() {
+    let info = analyze_use_block("<?php\nnamespace B { // note\n    class Foo {}\n}\n");
+    let edits =
+        build_use_edit("B\\Helper", &info, &Some("B".to_string())).expect("should produce edit");
+
+    assert_eq!(edits[0].new_text, "\nuse B\\Helper;\n");
+    assert_eq!(
+        edits[0].range.start,
+        Position {
+            line: 2,
+            character: 0
+        }
+    );
+}
+
+#[test]
+fn build_edit_does_not_write_inline_beside_existing_imports() {
+    // The block has an import, so the new one is placed by it rather than
+    // by the declaration.
+    let info = analyze_use_block("<?php\nnamespace B {\nuse B\\Alpha;\n    class Foo {}\n}\n");
+    let edits =
+        build_use_edit("B\\Zeta", &info, &Some("B".to_string())).expect("should produce edit");
+
+    assert_eq!(edits[0].new_text, "use B\\Zeta;\n");
+    assert_eq!(
+        edits[0].range.start,
+        Position {
+            line: 3,
+            character: 0
+        }
+    );
+}
+
+#[test]
+fn build_function_and_const_edits_write_inline_without_a_group_separator() {
+    let info = analyze_use_block("<?php\nnamespace B { class Foo {} }\n");
+
+    let function =
+        build_use_function_edit("B\\helper", &info).expect("a namespaced function needs an import");
+    let constant = build_aliased_typed_use_edit("B\\LIMIT", Some("MAX"), "const", &info)
+        .expect("a namespaced constant needs an import");
+
+    assert_eq!(function[0].new_text, " use function B\\helper;");
+    assert_eq!(constant[0].new_text, " use const B\\LIMIT as MAX;");
+    assert_eq!(function[0].range, constant[0].range);
+}
+
+#[test]
+fn a_batch_of_inline_imports_keeps_every_import_in_order() {
+    let info = analyze_use_block("<?php\nnamespace B { class Foo {} }\n");
+    let namespace = Some("B".to_string());
+
+    let mut batch: Vec<TextEdit> = Vec::new();
+    for fqn in ["B\\Alpha", "B\\Beta"] {
+        let mut edits = build_use_edit(fqn, &info, &namespace).expect("should produce edit");
+        if !batch.is_empty() {
+            info.drop_repeated_separator(&mut edits);
+        }
+        batch.extend(edits);
+    }
+
+    let texts: Vec<&str> = batch.iter().map(|edit| edit.new_text.as_str()).collect();
+    assert_eq!(texts, [" use B\\Alpha;", " use B\\Beta;"]);
 }
 
 // ── End-to-end: analyze_use_block + build_use_edit ──────────────
@@ -532,7 +737,7 @@ fn end_to_end_insert_between_existing() {
 fn build_function_edit_skips_global_function() {
     let info = UseBlockInfo {
         existing: vec![],
-        fallback_line: 1,
+        fallback: FirstImport::OwnLine(1),
         has_namespace: false,
         template: None,
     };
@@ -546,7 +751,7 @@ fn build_function_edit_skips_global_function() {
 fn build_function_edit_namespaced_no_existing_imports() {
     let info = UseBlockInfo {
         existing: vec![],
-        fallback_line: 2,
+        fallback: FirstImport::OwnLine(2),
         has_namespace: false,
         template: None,
     };
@@ -659,7 +864,7 @@ fn build_function_edit_alphabetical_among_existing_functions() {
 fn build_function_edit_deeply_namespaced() {
     let info = UseBlockInfo {
         existing: vec![],
-        fallback_line: 3,
+        fallback: FirstImport::OwnLine(3),
         has_namespace: false,
         template: None,
     };
@@ -668,108 +873,5 @@ fn build_function_edit_deeply_namespaced() {
     assert_eq!(
         edits[0].new_text,
         "use function Vendor\\Package\\Sub\\Module\\helper_func;\n"
-    );
-}
-
-// ── analyze_template_use_block + build_use_edit ─────────────────
-
-/// Apply the edits to the template they were planned against, which is
-/// what the editor does once the source map has moved them back.
-fn apply(template: &str, edits: &[TextEdit]) -> String {
-    let offset = |position: Position| {
-        template
-            .split_inclusive('\n')
-            .take(position.line as usize)
-            .map(str::len)
-            .sum::<usize>()
-            + position.character as usize
-    };
-    let mut result = template.to_string();
-    for edit in edits {
-        result.replace_range(
-            offset(edit.range.start)..offset(edit.range.end),
-            &edit.new_text,
-        );
-    }
-    result
-}
-
-/// A template with nothing to sort against takes the import at its top,
-/// written as the directive Blade imports with.
-#[test]
-fn a_templates_first_import_goes_to_the_top_as_a_use_directive() {
-    let template = "<h1>{{ $title }}</h1>\n";
-    let info = analyze_template_use_block(template, None);
-    let edits = build_use_edit("App\\Models\\Widget", &info, &None).expect("an import is needed");
-
-    assert_eq!(
-        apply(template, &edits),
-        "@use('App\\Models\\Widget')\n<h1>{{ $title }}</h1>\n"
-    );
-}
-
-/// The directives already in the template are the block the new one joins,
-/// and it is written at the end of the last line it sorts behind.
-#[test]
-fn a_template_import_sorts_among_the_directives_it_already_has() {
-    let template = "@use('App\\Models\\Account')\n@use('App\\Models\\Zone')\n<p>{{ $x }}</p>\n";
-    let info = analyze_template_use_block(template, None);
-
-    let between = build_use_edit("App\\Models\\Widget", &info, &None).expect("an import is needed");
-    assert_eq!(
-        apply(template, &between),
-        "@use('App\\Models\\Account')\n@use('App\\Models\\Widget')\n\
-         @use('App\\Models\\Zone')\n<p>{{ $x }}</p>\n"
-    );
-
-    let after = build_use_edit("App\\Models\\Zulu", &info, &None).expect("an import is needed");
-    assert_eq!(
-        apply(template, &after),
-        "@use('App\\Models\\Account')\n@use('App\\Models\\Zone')\n\
-         @use('App\\Models\\Zulu')\n<p>{{ $x }}</p>\n"
-    );
-
-    let before =
-        build_use_edit("App\\Models\\Aardvark", &info, &None).expect("an import is needed");
-    assert_eq!(
-        apply(template, &before),
-        "@use('App\\Models\\Aardvark')\n@use('App\\Models\\Account')\n\
-         @use('App\\Models\\Zone')\n<p>{{ $x }}</p>\n"
-    );
-}
-
-/// A function import keeps its modifier inside the directive's literal,
-/// which is how Blade spells one, and still sorts after the classes.
-#[test]
-fn a_template_function_import_keeps_the_modifier_in_the_literal() {
-    let template = "@use('App\\Models\\Widget')\n<p>{{ $x }}</p>\n";
-    let info = analyze_template_use_block(template, None);
-    let edits = build_use_function_edit("App\\Support\\format_price", &info)
-        .expect("a namespaced function needs an import");
-
-    assert_eq!(
-        apply(template, &edits),
-        "@use('App\\Models\\Widget')\n@use('function App\\Support\\format_price')\n\
-         <p>{{ $x }}</p>\n"
-    );
-}
-
-/// The modifier and the alias forms a template may already have are read
-/// as the imports they are, so an equal name is not imported twice.
-#[test]
-fn the_directive_forms_a_template_already_has_are_read_as_imports() {
-    let template = "@use('App\\Models\\Widget as Gadget')\n@use('function App\\Support\\helper')\n";
-    let info = analyze_template_use_block(template, None);
-
-    assert_eq!(
-        info.existing,
-        vec![
-            (0, "app\\models\\widget".to_string()),
-            (1, "function app\\support\\helper".to_string()),
-        ]
-    );
-    assert!(
-        build_use_function_edit("App\\Support\\helper", &info).is_none(),
-        "the function is already imported"
     );
 }

@@ -70,7 +70,7 @@ pub(crate) fn process_receiver_mutation<'b>(
         // overwritten by scanning back through the method.
         let reset: Vec<String> = scope
             .locals
-            .keys()
+            .compound_keys()
             .filter(|key| {
                 let key: &str = key;
                 key != invalidation.subject
@@ -109,7 +109,11 @@ fn forget_static_properties_after_impure_call(
 ) {
     // Checked first: the call lookups below are the expensive half, and
     // most scopes hold no static property at all.
-    if !scope.locals.keys().any(|key| is_static_property_key(key)) {
+    if !scope
+        .locals
+        .compound_keys()
+        .any(|key| is_static_property_key(key))
+    {
         return;
     }
     if !makes_impure_call(expr, scope, ctx) {
@@ -123,7 +127,7 @@ fn forget_static_properties_after_impure_call(
     };
     let keys: Vec<String> = scope
         .locals
-        .keys()
+        .compound_keys()
         .filter(|key| is_static_property_key(key) && written.as_deref() != Some(&***key))
         .map(|key| key.to_string())
         .collect();
@@ -294,7 +298,7 @@ fn forget_stat_cache(scope: &mut ScopeState) {
                 && name[..f.len()].eq_ignore_ascii_case(f)
         })
     };
-    scope.locals.retain(|key, _| !is_stat_call(key));
+    scope.locals.retain_compound(|key| !is_stat_call(key));
 }
 
 /// One subject a statement's calls may have changed.
@@ -451,18 +455,24 @@ fn collect_call_invalidations<'b>(
                 // {…}; call_user_func($cb);`) — either way, what it does
                 // to its captures was already worked out where it was
                 // assigned or is worked out here.
-                if call_invokes_arg_immediately(call, &selector, scope, ctx) {
-                    match arg_expr {
-                        Expression::Closure(closure) => {
+                // Asking the callee is the expensive half, so it is only
+                // asked about an argument that has captures for the answer
+                // to apply.
+                match arg_expr {
+                    Expression::Closure(closure) => {
+                        if call_invokes_arg_immediately(call, &selector, scope, ctx) {
                             collect_closure_invalidations(closure, scope, ctx, out);
                         }
-                        Expression::Variable(Variable::Direct(dv)) => {
-                            apply_stored_closure_effects(scope, bytes_to_str(dv.name), out);
-                        }
-                        _ => collect_call_invalidations(arg_expr, scope, ctx, out),
                     }
-                } else {
-                    collect_call_invalidations(arg_expr, scope, ctx, out);
+                    Expression::Variable(Variable::Direct(dv)) => {
+                        let name = bytes_to_str(dv.name);
+                        if !scope.closure_capture_effects(name).is_empty()
+                            && call_invokes_arg_immediately(call, &selector, scope, ctx)
+                        {
+                            apply_stored_closure_effects(scope, name, out);
+                        }
+                    }
+                    _ => collect_call_invalidations(arg_expr, scope, ctx, out),
                 }
             }
 
@@ -846,7 +856,7 @@ fn scope_reads_through(scope: &ScopeState, subject: &str) -> bool {
     let reads = |key: &str| {
         key != subject && crate::type_engine::types::narrowing::key_reads_variable(key, subject)
     };
-    scope.locals.keys().any(|k| reads(k))
+    scope.locals.compound_keys().any(|k| reads(k))
         || scope
             .assertions
             .values()
@@ -890,7 +900,7 @@ fn untouched_property_keys(
     let prefix = format!("{subject}->");
     let props: Vec<&str> = scope
         .locals
-        .keys()
+        .compound_keys()
         .filter_map(|key| key.strip_prefix(prefix.as_str()))
         .filter(|prop| prop.chars().all(|c| c.is_alphanumeric() || c == '_'))
         .collect();
