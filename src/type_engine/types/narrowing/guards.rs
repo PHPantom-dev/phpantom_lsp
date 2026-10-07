@@ -165,8 +165,8 @@ pub(in crate::type_engine) fn try_extract_member_exists_guard(
 /// Check whether a statement unconditionally exits the current scope.
 ///
 /// A statement unconditionally exits if every code path through it
-/// ends with `return`, `throw`, `continue`, or `break`.  This is used
-/// to detect guard clause patterns like:
+/// ends with `return`, `throw`, `exit`, `continue`, or `break`.  This is
+/// used to detect guard clause patterns like:
 ///
 /// ```text
 /// if (!$var instanceof Foo) {
@@ -177,82 +177,152 @@ pub(in crate::type_engine) fn try_extract_member_exists_guard(
 ///
 /// A call to a function or method declared `never` also exits, which
 /// takes type information rather than the AST alone; [`ExitCtx`] carries
-/// what that lookup needs.
+/// what that lookup needs.  The structural rules live in
+/// [`statement_leaves_block`], shared with the unreachable-code
+/// diagnostic, which asks the same question without types.
 pub(in crate::type_engine) fn statement_unconditionally_exits(
     stmt: &Statement<'_>,
     ctx: &ExitCtx<'_>,
 ) -> bool {
+    statement_leaves_block(stmt, &|expr| expression_is_never_call(expr, ctx))
+}
+
+/// [`statement_unconditionally_exits`] for a statement list: whether
+/// control is gone by the end of it.  See [`statements_leave_block`].
+pub(in crate::type_engine) fn statements_unconditionally_exit<'s>(
+    stmts: impl Iterator<Item = &'s Statement<'s>>,
+    ctx: &ExitCtx<'_>,
+) -> bool {
+    statements_leave_block(stmts, &|expr| expression_is_never_call(expr, ctx))
+}
+
+/// Whether every path through `stmt` leaves the statement list it sits in.
+///
+/// `return`, `throw`, `exit`, `die`, `continue` and `break` leave; so does
+/// a block whose statements do (see [`statements_leave_block`]) and an
+/// `if` whose every branch does, which needs an `else`.  `goto` does not
+/// count: its label may sit further down the same list, in which case the
+/// list keeps running.
+///
+/// `never_call` recognises an expression statement that calls a
+/// `never`-returning function.  That takes types, so a caller with none
+/// to hand passes `&|_| false`.
+pub(crate) fn statement_leaves_block(
+    stmt: &Statement<'_>,
+    never_call: &dyn Fn(&Expression<'_>) -> bool,
+) -> bool {
     match stmt {
-        Statement::Return(_) => true,
-        Statement::Continue(_) => true,
-        Statement::Break(_) => true,
-        // `throw new …;` is parsed as an expression statement
-        // containing a Throw expression.
+        Statement::Return(_) | Statement::Continue(_) | Statement::Break(_) => true,
+        // `throw`, `exit` and `die` are expressions in PHP, so they
+        // reach here wrapped in an expression statement.
         Statement::Expression(es) => {
             matches!(
                 es.expression,
                 Expression::Throw(_)
-                    | Expression::Construct(mago_syntax::cst::Construct::Exit(_))
-                    | Expression::Construct(mago_syntax::cst::Construct::Die(_))
-            ) || expression_is_never_call(es.expression, ctx)
+                    | Expression::Construct(Construct::Exit(_))
+                    | Expression::Construct(Construct::Die(_))
+            ) || never_call(es.expression)
         }
-        // A block exits if any statement in it exits — everything after
-        // the first exiting statement is unreachable, so a trailing
-        // assignment does not make the block fall through.
-        Statement::Block(block) => block
-            .statements
-            .iter()
-            .any(|s| statement_unconditionally_exits(s, ctx)),
+        Statement::Block(block) => statements_leave_block(block.statements.iter(), never_call),
         // An if/else exits if ALL branches exist and ALL exit.
-        Statement::If(if_stmt) => if_body_unconditionally_exits(&if_stmt.body, ctx),
+        Statement::If(if_stmt) => match &if_stmt.body {
+            IfBody::Statement(body) => {
+                statement_leaves_block(body.statement, never_call)
+                    && body
+                        .else_if_clauses
+                        .iter()
+                        .all(|ei| statement_leaves_block(ei.statement, never_call))
+                    && body
+                        .else_clause
+                        .as_ref()
+                        .is_some_and(|ec| statement_leaves_block(ec.statement, never_call))
+            }
+            IfBody::ColonDelimited(body) => {
+                statements_leave_block(body.statements.iter(), never_call)
+                    && body
+                        .else_if_clauses
+                        .iter()
+                        .all(|ei| statements_leave_block(ei.statements.iter(), never_call))
+                    && body
+                        .else_clause
+                        .as_ref()
+                        .is_some_and(|ec| statements_leave_block(ec.statements.iter(), never_call))
+            }
+        },
         _ => false,
     }
 }
 
-/// Check whether an `if` body (including all branches) unconditionally
-/// exits.  This requires:
-///   - The then-body exits, AND
-///   - All elseif bodies exit, AND
-///   - An else clause exists and exits.
-fn if_body_unconditionally_exits(body: &IfBody<'_>, ctx: &ExitCtx<'_>) -> bool {
-    match body {
-        IfBody::Statement(stmt_body) => {
-            if !statement_unconditionally_exits(stmt_body.statement, ctx) {
-                return false;
-            }
-            if !stmt_body
-                .else_if_clauses
-                .iter()
-                .all(|ei| statement_unconditionally_exits(ei.statement, ctx))
-            {
-                return false;
-            }
-            stmt_body
-                .else_clause
-                .as_ref()
-                .is_some_and(|ec| statement_unconditionally_exits(ec.statement, ctx))
+/// Whether control is gone by the end of a statement list.
+///
+/// Everything after the first statement that leaves is unreachable, so a
+/// trailing assignment does not make the list fall through.  A `goto`
+/// label is the exception: it is an entry point, so control can be back
+/// in the list after the exit and run out of its end.  That holds for a
+/// label nested inside a later statement too (see
+/// [`contains_entry_label`]), in which case whether the list ends
+/// reachable is that statement's own answer.
+pub(crate) fn statements_leave_block<'s>(
+    stmts: impl Iterator<Item = &'s Statement<'s>>,
+    never_call: &dyn Fn(&Expression<'_>) -> bool,
+) -> bool {
+    let mut reachable = true;
+    for stmt in stmts {
+        if matches!(stmt, Statement::Label(_)) {
+            reachable = true;
+        } else if reachable || contains_entry_label(stmt) {
+            reachable = !statement_leaves_block(stmt, never_call);
         }
-        IfBody::ColonDelimited(colon_body) => {
-            if !colon_body
-                .statements
-                .iter()
-                .any(|s| statement_unconditionally_exits(s, ctx))
-            {
-                return false;
+    }
+    !reachable
+}
+
+/// Whether a `goto` can land somewhere inside this statement.
+///
+/// PHP lets a jump enter a block, an `if` branch, a `try` or `catch` body
+/// and a `declare` body, but not a loop, a `switch`, a `finally` or another
+/// function, so only the former are searched.
+pub(crate) fn contains_entry_label(stmt: &Statement<'_>) -> bool {
+    let any = |stmts: &[Statement<'_>]| stmts.iter().any(contains_entry_label);
+    match stmt {
+        Statement::Label(_) => true,
+        Statement::Block(block) => any(block.statements.as_slice()),
+        Statement::If(if_stmt) => match &if_stmt.body {
+            IfBody::Statement(body) => {
+                contains_entry_label(body.statement)
+                    || body
+                        .else_if_clauses
+                        .iter()
+                        .any(|ei| contains_entry_label(ei.statement))
+                    || body
+                        .else_clause
+                        .as_ref()
+                        .is_some_and(|ec| contains_entry_label(ec.statement))
             }
-            if !colon_body.else_if_clauses.iter().all(|ei| {
-                ei.statements
-                    .iter()
-                    .any(|s| statement_unconditionally_exits(s, ctx))
-            }) {
-                return false;
+            IfBody::ColonDelimited(body) => {
+                any(body.statements.as_slice())
+                    || body
+                        .else_if_clauses
+                        .iter()
+                        .any(|ei| any(ei.statements.as_slice()))
+                    || body
+                        .else_clause
+                        .as_ref()
+                        .is_some_and(|ec| any(ec.statements.as_slice()))
             }
-            colon_body.else_clause.as_ref().is_some_and(|ec| {
-                ec.statements
+        },
+        Statement::Try(try_stmt) => {
+            any(try_stmt.block.statements.as_slice())
+                || try_stmt
+                    .catch_clauses
                     .iter()
-                    .any(|s| statement_unconditionally_exits(s, ctx))
-            })
+                    .any(|catch| any(catch.block.statements.as_slice()))
         }
+        Statement::Declare(declare) => match &declare.body {
+            DeclareBody::Statement(body) => contains_entry_label(body),
+            DeclareBody::ColonDelimited(body) => any(body.statements.as_slice()),
+        },
+        _ => false,
     }
 }
 
@@ -262,10 +332,9 @@ fn if_body_unconditionally_exits(body: &IfBody<'_>, ctx: &ExitCtx<'_>) -> bool {
 fn then_body_unconditionally_exits(body: &IfBody<'_>, ctx: &ExitCtx<'_>) -> bool {
     match body {
         IfBody::Statement(stmt_body) => statement_unconditionally_exits(stmt_body.statement, ctx),
-        IfBody::ColonDelimited(colon_body) => colon_body
-            .statements
-            .iter()
-            .any(|s| statement_unconditionally_exits(s, ctx)),
+        IfBody::ColonDelimited(colon_body) => {
+            statements_unconditionally_exit(colon_body.statements.iter(), ctx)
+        }
     }
 }
 

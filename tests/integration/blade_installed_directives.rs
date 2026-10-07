@@ -7,7 +7,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_psr4_workspace, open_document};
+    use crate::common::{create_psr4_workspace, open_document, template_diagnostics};
     use phpantom_lsp::Backend;
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
@@ -77,20 +77,10 @@ trait CompilesConditionals
         (backend, dir, uri)
     }
 
-    fn diagnostics(backend: &Backend, uri: &Url) -> Vec<String> {
-        let effective = backend
-            .blade_virtual_php(uri.as_str())
-            .expect("the template should be preprocessed");
-        let mut diags = Vec::new();
-        backend.collect_syntax_error_diagnostics(uri.as_str(), &effective, &mut diags);
-        backend.collect_slow_diagnostics(uri.as_str(), &effective, &mut diags);
-        diags.into_iter().map(|d| d.message).collect()
-    }
-
     #[tokio::test]
     async fn a_directive_the_installed_compiler_lacks_is_text() {
         let (backend, _dir, uri) = start(JSON_LD).await;
-        let reported = diagnostics(&backend, &uri);
+        let reported = template_diagnostics(&backend, &uri);
         assert!(
             reported.is_empty(),
             "\"@context\" is text to this compiler: {reported:?}"
@@ -102,7 +92,7 @@ trait CompilesConditionals
     #[tokio::test]
     async fn a_directive_the_installed_compiler_has_is_still_read() {
         let (backend, _dir, uri) = start("@if (true)\n<p>shown</p>\n").await;
-        let reported = diagnostics(&backend, &uri);
+        let reported = template_diagnostics(&backend, &uri);
         assert!(!reported.is_empty(), "the unclosed @if should be reported");
     }
 

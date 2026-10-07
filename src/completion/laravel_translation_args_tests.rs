@@ -160,3 +160,14 @@ fn translation_argument_completion_handles_nested_calls_and_unknown_replacements
         ["count", "name"]
     );
 }
+
+/// `"\x8b"` decodes to a byte no UTF-8 string can hold, so a replacement
+/// key spelled that way names no placeholder and is passed over rather
+/// than read as text.
+#[test]
+fn translation_argument_completion_skips_an_undecodable_replacement_key() {
+    assert_eq!(
+        labels(r#"<?php __('messages.hello', ["\x8b" => 1, '|' => 2]);"#),
+        ["count", "name"]
+    );
+}

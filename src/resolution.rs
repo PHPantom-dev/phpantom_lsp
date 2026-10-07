@@ -1076,6 +1076,8 @@ impl Backend {
         // of the others later would win instead.
         crate::resolution_deps::record_all(candidates);
 
+        let index_generation = self.symbols.function_index_generation();
+
         // ── Phase 1: Check global_functions (user code + already-cached stubs) ──
         {
             let fmap = self.symbols.global_functions.read();
@@ -1250,8 +1252,12 @@ impl Backend {
                 return Some(info.clone());
             }
             drop(fmap);
-            for &name in candidates {
-                nf_cache.insert(name);
+            // An index insert since this lookup began may have added the
+            // function after the lookup read the index.
+            if self.symbols.function_index_generation() == index_generation {
+                for &name in candidates {
+                    nf_cache.insert(name);
+                }
             }
         }
         None

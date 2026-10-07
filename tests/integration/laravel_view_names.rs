@@ -12,7 +12,7 @@
 
 use crate::common::{
     LARAVEL_APP_COMPOSER, blade_undefined_variables, create_psr4_workspace, definition_locations,
-    find_action, get_code_actions_in_range, goto_definition_at, markup_hover_at,
+    find_action, find_references, get_code_actions_in_range, goto_definition_at, markup_hover_at,
     messages_with_code, open_blade_template, open_php_file, position_of, workspace_path,
 };
 use tower_lsp::LanguageServer;
@@ -807,21 +807,13 @@ async fn view_references_at(
     include_declaration: bool,
 ) -> Vec<(String, u32)> {
     let position = position_of(content, needle);
-    let found = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(position.line, position.character + 2),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext {
-                include_declaration,
-            },
-        })
-        .await
-        .unwrap()
-        .unwrap_or_default();
+    let found = find_references(
+        backend,
+        uri,
+        Position::new(position.line, position.character + 2),
+        include_declaration,
+    )
+    .await;
     let mut sites: Vec<(String, u32)> = found
         .iter()
         .map(|l| {

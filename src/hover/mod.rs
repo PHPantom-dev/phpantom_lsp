@@ -609,10 +609,9 @@ impl Backend {
     /// Where a Laravel string key resolves to, with the path shortened to
     /// start at the `dir` segment its kind is filed under.
     ///
-    /// `config/app.php` and `lang/en/messages.php` read better in a hover
-    /// than the absolute paths they sit at. A file outside that directory
-    /// keeps its path whole rather than being cut at a segment it does
-    /// not have.
+    /// `config/app.php` reads better in a hover than the absolute path it
+    /// sits at. A file outside that directory keeps its path whole rather
+    /// than being cut at a segment it does not have.
     fn resolved_key_location(
         &self,
         kind: &crate::symbol_map::LaravelStringKind,
@@ -620,44 +619,16 @@ impl Backend {
         uri: &str,
         dir: &str,
     ) -> Option<(Url, String)> {
-        let locations =
-            crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key, uri);
-        let location = if matches!(kind, crate::symbol_map::LaravelStringKind::Trans) {
-            self.in_translation_locale(locations)?
-        } else {
-            locations.into_iter().next()?
-        };
+        let location =
+            crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key, uri)
+                .into_iter()
+                .next()?;
         let path = location.uri.path();
         let short_path = match path.rsplit_once(&format!("/{dir}/")) {
             Some((_, rest)) => format!("{dir}/{rest}"),
             None => path.to_string(),
         };
         Some((location.uri, short_path))
-    }
-
-    /// The translation among `locations` the application reads: the one in
-    /// `app.locale`, else in `app.fallback_locale` (both `en` unless
-    /// configured, as in Laravel), else the first.
-    fn in_translation_locale(&self, locations: Vec<Location>) -> Option<Location> {
-        let trees = self.cached_config_trees();
-        let app = trees.iter().find(|(prefix, _)| prefix == "app");
-        let configured = |key: &str| -> String {
-            app.and_then(|(_, tree)| tree.value_at(&[key]))
-                .map(|value| value.as_strings().0)
-                .and_then(|values| values.into_iter().next())
-                .unwrap_or_else(|| "en".to_string())
-        };
-        for locale in [configured("locale"), configured("fallback_locale")] {
-            let dir = format!("/{locale}/");
-            let json = format!("/{locale}.json");
-            if let Some(found) = locations.iter().find(|l| {
-                let path = l.uri.path();
-                path.contains(&dir) || path.ends_with(&json)
-            }) {
-                return Some(found.clone());
-            }
-        }
-        locations.into_iter().next()
     }
 
     /// Build hover content for a Laravel string key (route name, config

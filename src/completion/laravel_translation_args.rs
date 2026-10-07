@@ -8,7 +8,7 @@ use mago_syntax::walker::Walker;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
+use crate::atom::literal_bytes_to_str;
 use crate::completion::source::code_context::{CodeContext, OpenBracket};
 use crate::completion::source::helpers::{split_trailing_ident, trailing_class_name};
 use crate::text_position::{offset_to_position, position_to_offset};
@@ -139,7 +139,7 @@ impl<'a> Walker<'a, 'a, Option<Arguments>> for ArgumentVisitor<'_> {
 
 fn literal<'a>(value: &'a Expression<'_>) -> Option<&'a str> {
     if let Expression::Literal(Literal::String(string)) = value {
-        string.value.map(bytes_to_str)
+        string.value.and_then(literal_bytes_to_str)
     } else {
         None
     }
@@ -213,10 +213,12 @@ impl Backend {
                 }
                 fragment.push(';');
                 let mut args = arguments(&fragment, 7, quote - paren.offset + 7, &call)?;
-                args.string_end = if close.is_some() {
-                    args.string_end + paren.offset - 7
-                } else {
-                    cursor
+                // The fragment's offsets run 7 bytes (`<?php f`) ahead of
+                // the call's own; an end inside that prefix means the
+                // string was not found, and the cursor ends it instead.
+                args.string_end = match args.string_end.checked_sub(7) {
+                    Some(end) if close.is_some() => end + paren.offset,
+                    _ => cursor,
                 };
                 Some(args)
             })?;

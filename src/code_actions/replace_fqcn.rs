@@ -342,16 +342,8 @@ fn plan_import(
                 imports.use_block,
             ),
         }?;
-        // With no existing `use` block every import in a batch inserts at
-        // the same fallback position, and each would prepend the blank
-        // line that separates the block from the `namespace` line.  Only
-        // the first one should.
-        if batch.planned_any
-            && imports.use_block.existing.is_empty()
-            && let Some(first) = import_edits.first_mut()
-            && let Some(rest) = first.new_text.strip_prefix('\n')
-        {
-            first.new_text = rest.to_string();
+        if batch.planned_any {
+            imports.use_block.drop_repeated_separator(&mut import_edits);
         }
         edits.extend(import_edits);
     }

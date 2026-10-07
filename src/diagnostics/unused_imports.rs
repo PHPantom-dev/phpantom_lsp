@@ -360,7 +360,9 @@ fn alias_is_referenced_in_content(
             return true;
         }
 
-        search_from = pos + 1;
+        // Step past the match's first character, which an alias starting
+        // with a non-ASCII letter spells in more than one byte.
+        search_from = pos + content[pos..].chars().next().map_or(1, char::len_utf8);
     }
 
     false
@@ -524,6 +526,23 @@ class Dto {
     #[test]
     fn alias_in_docblock_type_tag_counted() {
         assert!(referenced(" * @param Assert $x\n", "Assert"));
+    }
+
+    /// A match the boundary check rejects is stepped past by a whole
+    /// character, so an alias spelled with a non-ASCII first letter keeps
+    /// the scan on character boundaries rather than slicing inside one.
+    #[test]
+    fn alias_starting_with_a_multibyte_letter_is_scanned_safely() {
+        let content = "use App\\Models\\Øl;\n\nfunction f(): void {}\n";
+        let use_ranges = compute_use_line_ranges(content);
+        assert!(!alias_is_referenced_in_content(
+            content,
+            (0, content.len()),
+            "Øl",
+            &use_ranges,
+            &[]
+        ));
+        assert!(referenced("\\Ølx; new Øl();", "Øl"));
     }
 
     // ── Group import member lookup ──────────────────────────────────

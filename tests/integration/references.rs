@@ -1,10 +1,9 @@
-use crate::common::{create_test_backend, create_test_backend_with_full_stubs, open_php};
+use crate::common::{
+    create_test_backend, create_test_backend_with_full_stubs, find_references, open_php,
+};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::{
-    Location, PartialResultParams, Position, ReferenceContext, ReferenceParams,
-    TextDocumentIdentifier, TextDocumentPositionParams, Url, WorkDoneProgressParams,
-};
+use tower_lsp::lsp_types::{Location, Position, Url};
 
 use std::sync::Arc;
 
@@ -16,23 +15,13 @@ async fn references_at(
     character: u32,
     include_declaration: bool,
 ) -> Vec<Location> {
-    let params = ReferenceParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: ReferenceContext {
-            include_declaration,
-        },
-    };
-
-    backend
-        .references(params)
-        .await
-        .unwrap()
-        .unwrap_or_default()
+    find_references(
+        backend,
+        uri,
+        Position { line, character },
+        include_declaration,
+    )
+    .await
 }
 
 /// Verify that `format!("file://{}", path.display())` and
@@ -3220,24 +3209,8 @@ async fn test_no_references_on_whitespace() {
     open_php(&backend, &uri, text).await;
 
     // Click on empty line — should return None / empty.
-    let params = ReferenceParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 1,
-                character: 0,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: ReferenceContext {
-            include_declaration: true,
-        },
-    };
-
-    let result = backend.references(params).await.unwrap();
     assert!(
-        result.is_none() || result.as_ref().unwrap().is_empty(),
+        references_at(&backend, &uri, 1, 0, true).await.is_empty(),
         "Expected no references on whitespace"
     );
 }

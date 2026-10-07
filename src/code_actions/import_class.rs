@@ -717,22 +717,10 @@ impl Backend {
         chosen_fqns.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
 
         let mut all_edits: Vec<TextEdit> = Vec::new();
-        let mut first = true;
         for fqn in &chosen_fqns {
             if let Some(mut edits) = build_use_edit(fqn, &use_block, file_namespace) {
-                // build_use_edit prepends "\n" when there are no
-                // existing imports and the file has a namespace.  In
-                // a bulk insert every edit sees the same original
-                // use_block, so they all get the prefix.  Strip it
-                // from every edit after the first.
-                if !first {
-                    for e in &mut edits {
-                        if let Some(rest) = e.new_text.strip_prefix('\n') {
-                            e.new_text = rest.to_string();
-                        }
-                    }
-                } else {
-                    first = false;
+                if !all_edits.is_empty() {
+                    use_block.drop_repeated_separator(&mut edits);
                 }
                 all_edits.extend(edits);
             }

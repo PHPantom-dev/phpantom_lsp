@@ -373,11 +373,14 @@ impl IndexFilters {
     /// Whether a path is excluded, considering its ancestors.
     ///
     /// A file inside an excluded directory is itself excluded, the way
-    /// git never descends into an ignored directory.
+    /// git never descends into an ignored directory. The patterns are
+    /// anchored to the workspace root, so a path outside it (an event from
+    /// another folder of the editor's workspace, a file opened from
+    /// elsewhere) is never excluded; the matcher panics on one.
     pub fn is_excluded_path(&self, path: &Path, is_dir: bool) -> bool {
-        self.excludes
-            .as_ref()
-            .is_some_and(|gi| gi.matched_path_or_any_parents(path, is_dir).is_ignore())
+        self.excludes.as_ref().is_some_and(|gi| {
+            path.starts_with(gi.path()) && gi.matched_path_or_any_parents(path, is_dir).is_ignore()
+        })
     }
 
     /// Whether a file's extension marks it as PHP source: `.php` plus
@@ -487,6 +490,17 @@ mod tests {
         assert!(!f.is_excluded_entry(&PathBuf::from("/ws/generated/deep/file.php"), false));
         // …the path check also matches through excluded ancestors.
         assert!(f.is_excluded_path(&PathBuf::from("/ws/generated/deep/file.php"), false));
+    }
+
+    /// The built-in excludes give every workspace a matcher, so asking
+    /// about a file outside the root has to answer rather than trip the
+    /// matcher's assertion that the path is below it.
+    #[test]
+    fn a_path_outside_the_root_is_not_excluded() {
+        let f = filters(&[], &[]);
+        assert!(f.is_excluded_path(&PathBuf::from("/ws/_ide_helper.php"), false));
+        assert!(!f.is_excluded_path(&PathBuf::from("/elsewhere/_ide_helper.php"), false));
+        assert!(!f.is_excluded_path(&PathBuf::from("/elsewhere/src/Foo.php"), false));
     }
 
     #[test]

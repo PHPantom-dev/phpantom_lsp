@@ -781,7 +781,10 @@ impl CachedFile {
     }
 
     fn holds(&self, content: &str) -> bool {
-        std::ptr::eq(self.content.as_ptr(), content.as_ptr()) || self.content.as_str() == content
+        // The pointer comparison includes the length, so a prefix of the
+        // cached text, which starts at the same address, is not mistaken
+        // for the whole of it.
+        std::ptr::eq(self.content.as_str(), content) || self.content.as_str() == content
     }
 
     fn program(&self) -> &Program<'_> {
@@ -1716,6 +1719,22 @@ mod with_parsed_program_tests {
         with_parsed_program(content, "test", |program, _| {
             std::ptr::from_ref(program) as usize
         })
+    }
+
+    /// A prefix of the pass's file starts at the same address as the file
+    /// itself, but it is different text and has to be parsed as itself.
+    #[test]
+    fn a_prefix_of_the_cached_file_is_not_handed_the_whole_files_program() {
+        let content = "<?php class Foo {}\nclass Bar {}\n";
+        let _guard = with_parse_cache(content);
+        let prefix = &content[.."<?php class Foo {}".len()];
+
+        let whole = with_parsed_program(content, "test", |program, _| program.statements.len());
+        let (statements, text) = with_parsed_program(prefix, "test", |program, text| {
+            (program.statements.len(), text.len())
+        });
+        assert_eq!(text, prefix.len());
+        assert!(statements < whole, "{statements} statements of {whole}");
     }
 
     #[test]

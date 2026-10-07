@@ -6,7 +6,7 @@ mod tests {
     use crate::common::{
         BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
         complete_labels_at_opened_with_trigger, create_psr4_workspace, markup_hover_at,
-        open_document, workspace_path, workspace_uri,
+        open_document, template_diagnostics, workspace_path, workspace_uri,
     };
     use tower_lsp::lsp_types::*;
 
@@ -275,20 +275,6 @@ mod tests {
         );
     }
 
-    /// Every diagnostic the whole pipeline reports on a template, so a
-    /// component tag can be held to the same standard as the rest of the
-    /// file: nothing extra, and nothing missing.
-    fn diagnostics(backend: &phpantom_lsp::Backend, uri: &Url) -> Vec<String> {
-        let virtual_php = backend
-            .blade_virtual_php(uri.as_str())
-            .expect("blade virtual content");
-        let mut diags = Vec::new();
-        backend.collect_syntax_error_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-        backend.collect_argument_count_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-        backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-        diags.into_iter().map(|d| d.message).collect()
-    }
-
     /// Laravel partitions a tag's attributes by the constructor it is
     /// about to call: the ones naming a parameter are its arguments and
     /// the rest go to the component's attribute bag. An attribute meant
@@ -302,9 +288,9 @@ mod tests {
         open_document(&backend, &uri, "blade", template).await;
 
         assert!(
-            diagnostics(&backend, &uri).is_empty(),
+            template_diagnostics(&backend, &uri).is_empty(),
             "only `type` is an argument: {:?}",
-            diagnostics(&backend, &uri)
+            template_diagnostics(&backend, &uri)
         );
     }
 
@@ -317,7 +303,7 @@ mod tests {
         let (backend, _dir, uri) = workspace(template);
         open_document(&backend, &uri, "blade", template).await;
 
-        let diags = diagnostics(&backend, &uri);
+        let diags = template_diagnostics(&backend, &uri);
         assert!(
             diags
                 .iter()
@@ -334,7 +320,7 @@ mod tests {
         let (backend, _dir, uri) = workspace(template);
         open_document(&backend, &uri, "blade", template).await;
 
-        let diags = diagnostics(&backend, &uri);
+        let diags = template_diagnostics(&backend, &uri);
         assert!(
             diags.iter().any(|d| d.contains("argument")),
             "a component missing its required attribute: {diags:?}"
@@ -349,7 +335,7 @@ mod tests {
         let (backend, _dir, uri) = workspace(template);
         open_document(&backend, &uri, "blade", template).await;
 
-        let diags = diagnostics(&backend, &uri);
+        let diags = template_diagnostics(&backend, &uri);
         assert!(
             diags
                 .iter()
@@ -397,9 +383,9 @@ mod tests {
         open_document(&backend, &uri, "blade", template).await;
 
         assert!(
-            diagnostics(&backend, &uri).is_empty(),
+            template_diagnostics(&backend, &uri).is_empty(),
             "the container fills these: {:?}",
-            diagnostics(&backend, &uri)
+            template_diagnostics(&backend, &uri)
         );
     }
 }

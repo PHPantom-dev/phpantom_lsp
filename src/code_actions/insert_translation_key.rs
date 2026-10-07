@@ -5,7 +5,6 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
 use crate::symbol_map::{LaravelStringKind, SymbolKind};
 use crate::text_position::{offset_to_position, ranges_overlap};
 
@@ -29,6 +28,10 @@ impl Backend {
             return;
         };
         let catalog = self.cached_translations();
+        // An installed package's own language files belong to Composer,
+        // which overwrites them on the next update; the application adds to
+        // a package's lines through `lang/vendor/<namespace>/` instead.
+        let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
         for span in &symbol_map.spans {
             let SymbolKind::LaravelStringKey {
                 kind: LaravelStringKind::Trans,
@@ -58,11 +61,12 @@ impl Backend {
             if path.split('.').any(str::is_empty) {
                 continue;
             }
-            for file in catalog
-                .files
-                .iter()
-                .filter(|file| file.group.as_deref() == Some(group))
-            {
+            for file in catalog.files.iter().filter(|file| {
+                file.group.as_deref() == Some(group)
+                    && !vendor_prefixes
+                        .iter()
+                        .any(|prefix| file.uri.as_str().starts_with(prefix.as_str()))
+            }) {
                 let Some(source) = self.get_file_content(file.uri.as_str()) else {
                     continue;
                 };
@@ -125,7 +129,7 @@ fn insert_into_array(
         let Expression::Literal(Literal::String(key)) = entry.key else {
             return None;
         };
-        if key.value.map(bytes_to_str)? == path[0] {
+        if key.value? == path[0].as_bytes() {
             return if path.len() > 1 {
                 insert_into_array(content, entry.value, &path[1..])
             } else {

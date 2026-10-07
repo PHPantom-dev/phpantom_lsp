@@ -8,7 +8,9 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace, open_document, open_php};
+    use crate::common::{
+        LARAVEL_APP_COMPOSER, create_psr4_workspace, open_document, open_php, template_diagnostics,
+    };
     use phpantom_lsp::Backend;
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
@@ -71,16 +73,6 @@ class Post
         (backend, dir, uri)
     }
 
-    /// The diagnostics reported against the template, as messages.
-    fn diagnostics(backend: &Backend, uri: &Url) -> Vec<String> {
-        let effective = backend
-            .blade_virtual_php(uri.as_str())
-            .expect("the template should be preprocessed");
-        let mut diags = Vec::new();
-        backend.collect_slow_diagnostics(uri.as_str(), &effective, &mut diags);
-        diags.into_iter().map(|d| d.message).collect()
-    }
-
     /// The registered directive's argument is real PHP, so a member the
     /// class it names does not have is reported the same as anywhere else.
     #[tokio::test]
@@ -91,9 +83,9 @@ class Post
         )
         .await;
         assert!(
-            diagnostics(&backend, &uri).is_empty(),
+            template_diagnostics(&backend, &uri).is_empty(),
             "a correct argument reports nothing: {:?}",
-            diagnostics(&backend, &uri)
+            template_diagnostics(&backend, &uri)
         );
 
         let (backend, _dir, uri) = start(
@@ -101,7 +93,7 @@ class Post
              <p>@datetime($post->noSuchMethod())</p>\n",
         )
         .await;
-        let reported = diagnostics(&backend, &uri);
+        let reported = template_diagnostics(&backend, &uri);
         assert!(
             reported.iter().any(|m| m.contains("noSuchMethod")),
             "the argument's unknown member should be reported: {reported:?}"
@@ -125,7 +117,7 @@ class Post
              @endadmin\n",
         )
         .await;
-        let reported = diagnostics(&backend, &uri);
+        let reported = template_diagnostics(&backend, &uri);
         assert!(
             reported.is_empty(),
             "the condition family must not break the template: {reported:?}"
@@ -141,7 +133,7 @@ class Post
              @php($post->noSuchMethod())\n",
         )
         .await;
-        let reported = diagnostics(&backend, &uri);
+        let reported = template_diagnostics(&backend, &uri);
         assert!(
             reported.iter().any(|m| m.contains("noSuchMethod")),
             "the template after the block is still PHP: {reported:?}"
@@ -204,9 +196,9 @@ class Post
                         <p>@money($post->noSuchMethod())</p>\n";
         let (backend, dir, uri) = start(template).await;
         assert!(
-            diagnostics(&backend, &uri).is_empty(),
+            template_diagnostics(&backend, &uri).is_empty(),
             "an unregistered @money masks its argument: {:?}",
-            diagnostics(&backend, &uri)
+            template_diagnostics(&backend, &uri)
         );
 
         let provider_path = dir.path().join("app/Providers/AppServiceProvider.php");
@@ -230,7 +222,7 @@ class Post
             })
             .await;
 
-        let reported = diagnostics(&backend, &uri);
+        let reported = template_diagnostics(&backend, &uri);
         assert!(
             reported.iter().any(|m| m.contains("noSuchMethod")),
             "the newly registered @money should type-check its argument: {reported:?}"
@@ -243,7 +235,7 @@ class Post
     #[tokio::test]
     async fn an_unregistered_directive_is_still_masked() {
         let (backend, _dir, uri) = start("<p>@notregistered($undefinedVariable)</p>\n").await;
-        let reported = diagnostics(&backend, &uri);
+        let reported = template_diagnostics(&backend, &uri);
         assert!(
             reported.is_empty(),
             "an unregistered directive's text is not PHP: {reported:?}"

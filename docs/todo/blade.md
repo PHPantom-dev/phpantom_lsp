@@ -84,26 +84,70 @@ inside a `@php` / `<?php` block. Re-enable code actions with:
 - Blade-aware code generation (e.g. insert `use` inside `@php`).
 - Filtering out actions that don't make sense in Blade context.
 
-**Current state:** the coordinate translation exists.
-`translate_workspace_edit` (`src/blade/translate.rs`) already runs at the
-end of `handle_code_action` and `resolve_code_action`, moving every edit
-back into the template and dropping the ones that land in the prologue.
-The template-aware `use` insertion exists too: `use_block_for`
-(`src/completion/use_edit.rs`) reads a template's own `@use` directives and
-writes a new import as one, so the "Import class" action already has an
-edit the template can take. "Replace FQCN with import" does not yet:
-`replace_fqcn.rs` calls `analyze_use_block(content)` directly, so its `use`
-edit lands in the virtual prologue and is dropped. Switch it to
-`use_block_for(uri, content)`. The PHPStan-only actions that also call
-`analyze_use_block` (`add_throws.rs`, `add_override.rs`) never fire in a
-template and can simply be filtered out. What remains is the server-side gate in
-`code_action` (`src/server.rs`), which still answers nothing for a
-template; translating the request range and its diagnostics into the
-virtual PHP before the collectors run; and discarding an action whose
-edits were all dropped rather than offering a no-op. The code-action
-suites call `handle_code_action` directly, which skips the gate; the
-gate's tests have to go through the trait method, which
-`code_actions_via_server` in `tests/integration/common/mod.rs` already
-wraps.
+**Current state:** `translate_workspace_edit` (`src/blade/translate.rs`)
+runs at the end of `handle_code_action` and `resolve_code_action`, moving
+edits back into the template and dropping the ones that land in the
+prologue. `use_block_for` (`src/completion/use_edit.rs`) hands a template
+its own `@use` block (`src/blade/use_block.rs`), which "Import class" and
+"Import all missing classes" already use, and a batch of imports keeps each
+directive's line break (`UseBlockInfo::drop_repeated_separator`).
+`replace_fqcn.rs` still plans against `analyze_use_block_in(content,
+block)`, the virtual PHP, and needs `use_block_for(uri, content, block)`.
+The server-side gate in `code_action` (`src/server.rs`) still answers
+nothing for a template.
+
+**What the Sprint 8 gate analysis found the actions need** (each point is
+a way a translated edit corrupts or misplaces template text):
+
+- **Request in virtual coordinates, diagnostics in the template's.**
+  Translate the request range into the virtual PHP before the collectors
+  run, but leave `context.diagnostics` alone: the diagnostic collectors
+  already report a template's diagnostics in its own coordinates, and the
+  editor matches an action's `diagnostics` against what it was sent.
+  Collectors that compare a diagnostic's range with a virtual one must
+  translate the diagnostic's range: `remove_unused_import.rs` (the overlap
+  test, and the line it deletes on resolve) and `insert_translation_key.rs`.
+  `create_missing_view.rs` builds its attached diagnostic from a virtual
+  range and has to build it in the template's coordinates
+  (`Backend::offset_range_to_lsp_range`).
+- **All or nothing.** Dropping a prologue edit and keeping the rest leaves
+  a refactoring half applied (an extracted constant whose declaration was
+  dropped, a replaced call whose import was). A replacement has to cover
+  text the template wrote: the virtual text under it equals the template
+  text under the translated range (a CRLF template's line breaks come out
+  bare in the virtual PHP). An insertion has to sit where the trip back to
+  the virtual PHP returns to the same position, and not straight after a
+  Blade token (a statement inserted at `@php(`'s argument splits the
+  directive from it). An edit in the prologue or in the wrapper's closing
+  lines rejects the whole action. Import edits are the one kind written in
+  Blade rather than PHP, at the positions `use_block.rs` chooses, and are
+  checked against those positions instead (see B550 for where the first
+  import belongs).
+- **Resolve before offering.** A deferred action can resolve to nothing in
+  a template (extract variable inside `{{ }}`, whose statement starts in
+  generated code; inline variable on a name only the prologue assigns), so
+  a template's deferred actions are resolved before the list goes out.
+- **Spans the template did not write.** Every template's prologue declares
+  `$errors` with `\Illuminate\Support\ViewErrorBag`, and a component tag
+  lowers to `new \App\View\Components\Alert(...)`; both are qualified class
+  references in the symbol map. "Import all qualified symbols" and "Import
+  all missing classes" have to skip a span whose text is not the template's
+  own, or they import names the template never mentions.
+- **Actions to filter out.** PHPStan and Mago fixes are planned in the raw
+  file's coordinates (their diagnostics come from tools that read the file
+  on disk), and several insert comment lines that would land in HTML.
+  Fix namespace and fix class name are about class files. Extract function
+  places the new function after the enclosing one, which for template code
+  is the wrapper the preprocessor closes after the last line.
+- **A stale lowering.** `did_change` parses in the background, so the
+  virtual PHP can lag the buffer by a keystroke. Record the template length
+  a source map was built from (as `SymbolMap::matches_source` does) and
+  offer nothing for a template whose buffer no longer matches it.
+
+Cover each through `code_actions_via_server` (`tests/integration/common/
+mod.rs`), which goes through the gate; include a template whose first line
+opens a block, an `@php(...)` one-liner, a component tag next to a
+qualified class name, a Livewire template (whose body is a method of a
+synthesized subclass), and a CRLF template.
 
 **Deliverable:** Code actions are re-enabled for `.blade.php` files.

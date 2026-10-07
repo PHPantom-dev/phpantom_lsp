@@ -1971,10 +1971,7 @@ impl Backend {
             // lookup's autoload-file fallback finds, and that fallback
             // cannot run past a recorded miss.  Refilling the cache costs
             // one fallback pass per still-missing name.
-            if !functions_retired {
-                self.symbols.function_not_found_cache.write().clear();
-                functions_retired = true;
-            }
+            functions_retired = true;
 
             let scan = crate::classmap_scanner::scan_file_full(path);
             {
@@ -1989,6 +1986,12 @@ impl Backend {
                     ci.entry(name).or_insert_with(|| path.clone());
                 }
             }
+        }
+
+        // Retired after the index inserts so a lookup that read the index
+        // before them cannot record a miss that outlives the clear.
+        if functions_retired {
+            self.symbols.retire_function_misses();
         }
 
         // The refreshed discovery indexes may add or remove a namespace-local

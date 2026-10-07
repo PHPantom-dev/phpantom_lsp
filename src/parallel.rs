@@ -53,16 +53,10 @@ where
     }
     let n_threads = threads
         .filter(|n| *n > 0)
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4)
-        })
+        .unwrap_or_else(available_cores)
         .min(count);
     let next_idx = AtomicUsize::new(0);
-    let next_idx = &next_idx;
-    let work = &work;
-    let drain = move |worker: usize| {
+    let drain = |worker: usize| {
         let mut produced: Vec<(usize, R)> = Vec::new();
         loop {
             let i = next_idx.fetch_add(1, Ordering::Relaxed);
@@ -75,8 +69,33 @@ where
         }
         produced
     };
-    let drain = &drain;
 
+    let (produced, spawn_failed) = run_workers(thread_name, n_threads, &drain);
+    let mut merged: Vec<(usize, R)> = produced.into_iter().flatten().collect();
+    if spawn_failed {
+        merged.extend(drain(n_threads));
+    }
+    merged
+}
+
+/// How many workers a pool runs when the caller does not say.
+fn available_cores() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+}
+
+/// Run `drain` on `n_threads` parse-sized workers named `thread_name`,
+/// each handed its own worker number, and return what the ones that
+/// finished produced, along with whether the OS refused to spawn any.
+///
+/// A refused spawn and a worker that panics are both logged. The caller
+/// decides what becomes of the items such a worker would have claimed.
+fn run_workers<T, F>(thread_name: &'static str, n_threads: usize, drain: &F) -> (Vec<T>, bool)
+where
+    T: Send,
+    F: Fn(usize) -> T + Sync,
+{
     std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(n_threads);
         let mut spawn_failed = false;
@@ -94,17 +113,14 @@ where
             }
         }
 
-        let mut merged: Vec<(usize, R)> = Vec::new();
+        let mut produced = Vec::with_capacity(handles.len());
         for handle in handles {
             match handle.join() {
-                Ok(produced) => merged.extend(produced),
+                Ok(result) => produced.push(result),
                 Err(_) => tracing::error!("{thread_name} thread panicked"),
             }
         }
-        if spawn_failed {
-            merged.extend(drain(n_threads));
-        }
-        merged
+        (produced, spawn_failed)
     })
 }
 
@@ -147,10 +163,7 @@ pub(crate) fn for_each_layered<G, S, F>(
         .map(<[usize]>::len)
         .max()
         .unwrap_or(1);
-    let n_threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(widest_layer);
+    let n_threads = available_cores().min(widest_layer);
 
     let next_idx = AtomicUsize::new(0);
     let finished = (parking_lot::Mutex::new(0usize), parking_lot::Condvar::new());
@@ -188,25 +201,7 @@ pub(crate) fn for_each_layered<G, S, F>(
         return;
     }
 
-    let drain = &drain;
-    std::thread::scope(|scope| {
-        let mut handles = Vec::with_capacity(n_threads);
-        for _ in 0..n_threads {
-            match std::thread::Builder::new()
-                .name(thread_name.into())
-                .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                .spawn_scoped(scope, drain)
-            {
-                Ok(handle) => handles.push(handle),
-                Err(error) => tracing::error!("failed to spawn {thread_name} thread: {error}"),
-            }
-        }
-        for handle in handles {
-            if handle.join().is_err() {
-                tracing::error!("{thread_name} thread panicked");
-            }
-        }
-    });
+    run_workers(thread_name, n_threads, &|_| drain());
     drain();
 }
 
