@@ -5744,3 +5744,32 @@ class ReconstructedProofDemo
         return $qualified->namespacePrefix;         // string
     }
 }
+
+// ── Assignments Inside `match` Arms and Ternary Branches ────────────────────
+//
+// An assignment can sit in the value an arm or branch yields. Each arm is
+// walked against its own copy of the scope and the copies are joined after
+// the expression, so the variable is typed by every arm that assigns it, and
+// by the arms that leave it untouched.
+
+class NestedAssignmentDemo
+{
+    public function matchArm(int $kind): string
+    {
+        match ($kind) {
+            1 => $pen = Scaffolding\makePen(),
+            default => null,
+        };
+
+        // Try: `$pen->` — Scaffolding\Pen members (the `default` arm leaves it unset)
+        return $pen?->color() ?? '';
+    }
+
+    public function ternaryBranch(bool $flag): string
+    {
+        $flag ? $pen = Scaffolding\makePen() : null;
+
+        // Try: `$pen->` — Scaffolding\Pen members (the else branch leaves it unset)
+        return $pen?->color() ?? '';
+    }
+}

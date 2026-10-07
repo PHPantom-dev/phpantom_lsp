@@ -146,3 +146,27 @@ fn bulk_action_skips_other_namespace_blocks() {
     assert!(texts.contains(&"Beta"));
     assert!(!texts.iter().any(|text| text.contains("Gamma")));
 }
+
+#[test]
+fn import_goes_into_the_cursors_namespace_block() {
+    let src = "<?php\nnamespace App {\n    use Vendor\\Alpha;\n}\nnamespace Other {\n    new \\Vendor\\Beta();\n}\n";
+    let action = action(src, "Vendor\\Beta");
+    let edits: Vec<&TextEdit> = action
+        .edit
+        .as_ref()
+        .unwrap()
+        .changes
+        .as_ref()
+        .unwrap()
+        .values()
+        .flatten()
+        .collect();
+    let import = edits
+        .iter()
+        .find(|edit| edit.new_text.contains("use Vendor\\Beta;"))
+        .expect("expected an import edit");
+    assert_eq!(
+        import.range.start.line, 5,
+        "the import belongs after block Other's `namespace` line"
+    );
+}

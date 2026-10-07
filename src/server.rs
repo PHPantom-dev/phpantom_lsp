@@ -200,7 +200,7 @@ impl LanguageServer for Backend {
         // A narrowed exclude list makes classes resolvable that were
         // missing a moment ago, so the negative cache has to go or the
         // editor keeps showing "class not found" for them.
-        self.clear_class_not_found_cache();
+        self.clear_not_found_caches();
 
         self.request_diagnostic_refresh().await;
     }

@@ -228,6 +228,43 @@ async fn rename_class_move_into_global_namespace_writes_siblings_where_the_names
 }
 
 #[tokio::test]
+async fn plan_class_move_names_the_declaration_in_the_requested_namespace() {
+    // Both blocks declare `Foo`; the class to move is the second one, so
+    // the plan has to be built from its declaration and no other.
+    let backend = Backend::new_test();
+
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A { class Foo {} }\n",
+        "namespace B { class Foo {} }\n",
+        "namespace Usage {\n",
+        "    function a(\\A\\Foo $a, \\B\\Foo $b): void {}\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let ws = backend
+        .plan_class_move("B\\Foo", "C\\Foo")
+        .expect("the move should be planned")
+        .expect("Expected a workspace edit for the class move");
+
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace A { class Foo {} }\n",
+            "namespace C { class Foo {} }\n",
+            "namespace Usage {\n",
+            "    function a(\\A\\Foo $a, \\C\\Foo $b): void {}\n",
+            "}\n",
+        )
+    );
+}
+
+#[tokio::test]
 async fn rename_class_move_into_global_namespace_refuses_a_brace_namespace() {
     // Removing a brace-style declaration means unwrapping the block it
     // opens, so the move says so rather than mangling the file.

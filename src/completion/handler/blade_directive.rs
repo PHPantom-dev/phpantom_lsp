@@ -83,17 +83,21 @@ impl Backend {
     /// Build the directive-name completion list for an already-typed
     /// `prefix` (the text after `@`, matched case-insensitively).
     ///
-    /// The directives the project's own service providers registered with
-    /// `Blade::directive()` / `Blade::if()` are offered alongside Blade's
-    /// own, told apart by their detail line rather than by position, since
-    /// the client is what orders the list.
+    /// Blade's own directives are the ones the installed compiler has. The
+    /// directives the project's own service providers registered with
+    /// `Blade::directive()` / `Blade::if()` are offered alongside them,
+    /// told apart by their detail line rather than by position, since the
+    /// client is what orders the list.
     pub(super) fn complete_blade_directive(&self, prefix: &str) -> CompletionResponse {
         let prefix_lower = prefix.to_lowercase();
         let matches_prefix = |name: &str| name.to_lowercase().starts_with(&prefix_lower);
+        let directives = self.blade_directives.read();
 
         let mut items: Vec<CompletionItem> = DIRECTIVE_COMPLETIONS
             .iter()
-            .filter(|completion| matches_prefix(completion.name))
+            .filter(|completion| {
+                matches_prefix(completion.name) && directives.has_builtin(completion.name)
+            })
             .map(|completion| {
                 directive_item(
                     completion.name,
@@ -104,10 +108,9 @@ impl Backend {
             })
             .collect();
 
-        let custom = self.blade_custom_directives.read();
         items.extend(
-            custom
-                .completions()
+            directives
+                .custom_completions()
                 .filter(|completion| matches_prefix(completion.name))
                 .map(|completion| {
                     directive_item(

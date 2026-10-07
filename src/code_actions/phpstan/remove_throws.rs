@@ -46,9 +46,6 @@ impl Backend {
             cache.get(uri).cloned().unwrap_or_default()
         };
 
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
-
         for diag in &phpstan_diags {
             if !ranges_overlap(&diag.range, &params.range) {
                 continue;
@@ -80,12 +77,19 @@ impl Backend {
             };
 
             // Validate that the @throws line can be removed (validation only).
+            let block = self.import_block_at(
+                uri,
+                crate::text_position::position_to_byte_offset(
+                    content,
+                    Position::new(diag_line as u32, 0),
+                ),
+            );
             if build_remove_throws_edit(
                 content,
                 &docblock,
                 &type_name_str,
-                &file_use_map,
-                &file_namespace,
+                &block.use_map,
+                &block.namespace,
             )
             .is_none()
             {
@@ -134,16 +138,18 @@ impl Backend {
         let type_name = extract_throws_type(message, code)?;
         let type_name_str = type_name.to_string();
 
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
+        let block = self.import_block_at(
+            uri,
+            crate::text_position::position_to_byte_offset(content, Position::new(line as u32, 0)),
+        );
 
         let docblock = find_docblock_above_line(content, line)?;
         let throws_edit = build_remove_throws_edit(
             content,
             &docblock,
             &type_name_str,
-            &file_use_map,
-            &file_namespace,
+            &block.use_map,
+            &block.namespace,
         )?;
 
         let doc_uri: Url = data.uri.parse().ok()?;

@@ -46,7 +46,10 @@ pub(crate) fn apply_type_guard_on_operands(
     // Decompose `&&` chains so that `is_object($x) && is_string($y)`
     // applies both guards.
     let operands = collect_and_chain_operands(condition);
-    let mut var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
+    let mut var_names: Vec<String> = scope_keys_named_by(condition, scope)
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
     // Include property access keys from conditions (e.g. `$a->foo`
     // from `is_string($a->foo)`) so they can be narrowed.
     for key in collect_condition_property_keys(condition) {
@@ -174,7 +177,10 @@ pub(crate) fn apply_class_string_guard_narrowing<'b>(
     truthy: bool,
 ) {
     let operands = collect_and_chain_operands(condition);
-    let mut var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
+    let mut var_names: Vec<String> = scope_keys_named_by(condition, scope)
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
     for key in collect_condition_property_keys(condition) {
         if !var_names.contains(&key) {
             var_names.push(key);

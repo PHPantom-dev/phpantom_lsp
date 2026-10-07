@@ -1217,8 +1217,12 @@ impl Backend {
         // ── PHPCS ───────────────────────────────────────────────────
         if !config.phpcs.is_disabled()
             && crate::phpcs::has_project_config(&root)
-            && let Some(resolved) =
-                crate::phpcs::resolve_phpcs(Some(&root), &config.phpcs, bin_dir.as_deref())
+            && let Some(resolved) = crate::phpcs::resolve_phpcs(
+                Some(&root),
+                &config.phpcs,
+                bin_dir.as_deref(),
+                composer_pkg.as_ref(),
+            )
         {
             progress.set_percentage(85, "Running PHPCS (project-wide)");
             let phpcs_config = config.phpcs.clone();

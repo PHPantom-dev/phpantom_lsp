@@ -528,7 +528,7 @@ impl Backend {
         // clear, those stale entries cause false-positive "Class not found"
         // diagnostics even though hover and go-to-definition (which run
         // later) resolve the same symbols correctly.
-        self.clear_class_not_found_cache();
+        self.clear_not_found_caches();
 
         // Clear the resolved-class cache for the same reason.  A request
         // that arrives while indexing is still in progress (the editor

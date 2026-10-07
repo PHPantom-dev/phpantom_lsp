@@ -1,7 +1,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-use crate::atom::{AtomMap, atom};
+use crate::atom::atom;
 use crate::types::ResolvedType;
 
 // ─── Diagnostic scope cache ─────────────────────────────────────────────────
@@ -9,8 +9,9 @@ use crate::types::ResolvedType;
 // During a diagnostic pass, `build_diagnostic_scopes` walks every
 // function/method body in the file once and records a scope snapshot at
 // each statement boundary.  The snapshots are stored in a thread-local
-// `BTreeMap<u32, HashMap<String, Vec<ResolvedType>>>` keyed by byte
-// offset.  When `resolve_variable_types` is called for a diagnostic
+// `BTreeMap<u32, Locals>` keyed by byte offset; a snapshot shares every
+// entry it has in common with the ones around it, so recording one costs
+// what the statement wrote rather than what the scope holds.  When `resolve_variable_types` is called for a diagnostic
 // member-access span, `lookup_diagnostic_scope` finds the nearest
 // snapshot at-or-before the requested offset and returns the variable's
 // types in O(log N) time — no backward scanning, no recursion.
@@ -23,7 +24,7 @@ use crate::types::ResolvedType;
 // nearest body the walk happened to reach.
 
 /// Scope snapshot map: byte offset → variable name → resolved types.
-pub(crate) type ScopeSnapshotMap = BTreeMap<u32, AtomMap<Vec<ResolvedType>>>;
+pub(crate) type ScopeSnapshotMap = BTreeMap<u32, Locals>;
 
 /// Which part of the file the snapshots in [`DIAGNOSTIC_SCOPE`] describe.
 ///

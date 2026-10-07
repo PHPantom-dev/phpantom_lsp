@@ -209,7 +209,7 @@ impl Backend {
         // Classes that were unresolvable a moment ago now exist, and a
         // class already resolved may have been missing a parent, trait,
         // or mixin the old filters hid.
-        self.clear_class_not_found_cache();
+        self.clear_not_found_caches();
         self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();
 

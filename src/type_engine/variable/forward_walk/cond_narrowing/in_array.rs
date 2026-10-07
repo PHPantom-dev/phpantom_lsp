@@ -73,8 +73,8 @@ pub(crate) fn apply_in_array_narrowing<'b>(
     // Unwrap parentheses and detect negation.
     let (inner, negated) = narrowing::unwrap_condition_negation(condition);
 
-    // Check every variable in scope as the potential needle.
-    let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
+    // Check every variable the condition names as the potential needle.
+    let var_names = scope_keys_named_by(condition, scope);
     for var_name in &var_names {
         if let Some(haystack_expr) = narrowing::try_extract_in_array(inner, var_name) {
             // Resolve the haystack's type from the scope to extract the

@@ -703,3 +703,31 @@ use App\Models\Post;
         "The template's markup should be untouched. Got:\n{result}"
     );
 }
+
+/// A template's `@use` directives are hoisted out of the virtual PHP it
+/// lowers to, so the fixer removes an unused one from the template's own
+/// text: the whole directive, or the one member of a group it lists.
+#[test]
+fn unused_use_directives_are_removed_from_the_template() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let path = dir.path().join("page.blade.php");
+    let content = "@use('App\\Models\\User')\n\
+                   @use('App\\Models\\Post')\n\
+                   @use('App\\Models\\{Tag, Team}')\n\
+                   \n\
+                   <div>{{ User::query()->count() }} {{ Team::first() }}</div>\n";
+    std::fs::write(&path, content).expect("failed to write the template");
+    let uri = tower_lsp::lsp_types::Url::from_file_path(&path)
+        .expect("a file URI")
+        .to_string();
+
+    let result = fix_unused_imports(&create_test_backend(), &uri, content);
+
+    assert_eq!(
+        result,
+        "@use('App\\Models\\User')\n\
+         @use('App\\Models\\{Team}')\n\
+         \n\
+         <div>{{ User::query()->count() }} {{ Team::first() }}</div>\n"
+    );
+}

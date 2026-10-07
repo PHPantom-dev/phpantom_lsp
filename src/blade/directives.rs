@@ -138,16 +138,29 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "dd",
 ];
 
+/// The directives Blade handles in a pass of its own before it looks for a
+/// `compile*` method: the `@verbatim` and `@php` block passes. They exist
+/// whatever methods the installed compiler declares.
+const PRECOMPILED_DIRECTIVES: &[&str] = &["verbatim", "endverbatim", "php", "endphp"];
+
+/// The index into [`KNOWN_DIRECTIVES`] of the directive the text right after
+/// an `@` names.
+fn known_directive_index(after_at: &str) -> Option<usize> {
+    KNOWN_DIRECTIVES.iter().position(|&d| {
+        after_at
+            .strip_prefix(d)
+            .is_some_and(|rest| rest.bytes().next().is_none_or(|next| !is_word_byte(next)))
+    })
+}
+
+/// The directive the text right after an `@` names, out of every directive
+/// some Blade version compiles.
+///
+/// Whether the project's own compiler has it is a separate question that
+/// [`BladeDirectives::builtin`] answers; this is for the scans that only
+/// need to know whether a `@name(…)` is shaped like a directive.
 pub fn match_directive(s: &str) -> Option<&'static str> {
-    for &d in KNOWN_DIRECTIVES {
-        if let Some(stripped) = s.strip_prefix(d) {
-            let next_char = stripped.chars().next();
-            if next_char.is_none() || !next_char.unwrap().is_alphanumeric() {
-                return Some(d);
-            }
-        }
-    }
-    None
+    known_directive_index(s).map(|index| KNOWN_DIRECTIVES[index])
 }
 
 /// A byte of the `\w+` run Blade reads a directive name as.
@@ -307,13 +320,21 @@ struct CustomEntry {
     closer: Option<String>,
 }
 
-/// The directives a project's service providers register, expanded so that
-/// every name a template can write is one lookup away.
+/// The directives a project's templates can write: the built-in ones its
+/// installed Blade compiler defines, and the ones its service providers
+/// register, expanded so that every name is one lookup away.
 ///
-/// Empty for a project that registers none, which is the common case and
-/// costs the preprocessor nothing.
+/// Blade only compiles an `@name` it has a `compileName()` method or a
+/// registered handler for, and leaves any other as plain text, so a
+/// `"@context":` key in a JSON-LD block is text on a Laravel that predates
+/// `@context`. The default (no compiler read, nothing registered) knows
+/// every built-in directive and nothing else.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CustomDirectives {
+pub struct BladeDirectives {
+    /// Which entries of [`KNOWN_DIRECTIVES`] the installed compiler defines,
+    /// by index, or `None` when there was no compiler source to read and
+    /// every one is taken to exist.
+    installed: Option<Box<[bool]>>,
     /// Longest name first, so a registration that another name is a prefix
     /// of (`foo` and `foo::bar`) is not shadowed by the shorter one.
     entries: Vec<CustomEntry>,
@@ -328,9 +349,33 @@ pub struct CustomDirectiveCompletion<'a> {
     pub is_snippet: bool,
 }
 
-impl CustomDirectives {
-    /// Expand the registrations a provider scan found, giving each
-    /// `Blade::if()` the four names Blade synthesizes from it.
+impl BladeDirectives {
+    /// The directive set of a project whose compiler declares the methods
+    /// `compiler_has_method` accepts (`None` when no compiler was found),
+    /// plus the registrations its provider scan found.
+    ///
+    /// Blade looks a directive up as `method_exists($this, 'compile' .
+    /// ucfirst($name))`, so `compiler_has_method` is asked for that name and
+    /// must answer case-insensitively, the way PHP compares method names.
+    pub fn new(
+        compiler_has_method: Option<&dyn Fn(&str) -> bool>,
+        registrations: &[CustomDirective],
+    ) -> Self {
+        let installed = compiler_has_method.map(|has_method| {
+            KNOWN_DIRECTIVES
+                .iter()
+                .map(|&d| PRECOMPILED_DIRECTIVES.contains(&d) || has_method(&format!("compile{d}")))
+                .collect()
+        });
+        Self {
+            installed,
+            ..Self::from_registrations(registrations)
+        }
+    }
+
+    /// Every built-in directive, plus the registrations a provider scan
+    /// found, giving each `Blade::if()` the four names Blade synthesizes
+    /// from it.
     pub fn from_registrations(registrations: &[CustomDirective]) -> Self {
         let mut entries: Vec<CustomEntry> = Vec::new();
         let mut record = |name: String, form: CustomForm, closer: Option<String>| {
@@ -371,12 +416,36 @@ impl CustomDirectives {
                 .cmp(&a.name.len())
                 .then_with(|| a.name.cmp(&b.name))
         });
-        Self { entries }
+        Self {
+            installed: None,
+            entries,
+        }
+    }
+
+    /// The built-in directive the text right after an `@` names, when the
+    /// installed compiler has it.
+    pub fn builtin(&self, after_at: &str) -> Option<&'static str> {
+        let index = known_directive_index(after_at)?;
+        self.has_index(index).then_some(KNOWN_DIRECTIVES[index])
+    }
+
+    /// Whether the installed compiler has the built-in directive `name`.
+    pub fn has_builtin(&self, name: &str) -> bool {
+        KNOWN_DIRECTIVES
+            .iter()
+            .position(|&d| d == name)
+            .is_some_and(|index| self.has_index(index))
+    }
+
+    fn has_index(&self, index: usize) -> bool {
+        self.installed
+            .as_ref()
+            .is_none_or(|installed| installed[index])
     }
 
     /// The custom directive the text right after an `@` names, and how it
     /// lowers.
-    pub fn match_directive(&self, after_at: &str) -> Option<(&str, CustomForm)> {
+    pub fn custom(&self, after_at: &str) -> Option<(&str, CustomForm)> {
         self.entries.iter().find_map(|entry| {
             let rest = after_at.strip_prefix(entry.name.as_str())?;
             // Blade reads a directive name as `\w+`, so a registered name
@@ -396,7 +465,7 @@ impl CustomDirectives {
     /// opener inserts the whole block. A `Blade::directive()` handler's
     /// arity is its own business, so its name is inserted bare rather than
     /// an argument list being invented for it.
-    pub fn completions(&self) -> impl Iterator<Item = CustomDirectiveCompletion<'_>> {
+    pub fn custom_completions(&self) -> impl Iterator<Item = CustomDirectiveCompletion<'_>> {
         self.entries.iter().map(|entry| match &entry.closer {
             Some(closer) => CustomDirectiveCompletion {
                 name: &entry.name,
@@ -409,10 +478,6 @@ impl CustomDirectives {
                 is_snippet: false,
             },
         })
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 }
 
@@ -1191,7 +1256,56 @@ mod tests {
         }
     }
 
-    fn custom(names: &[(&str, bool)]) -> CustomDirectives {
+    /// The directive set of a compiler declaring exactly `methods`.
+    fn compiler(methods: &[&str]) -> BladeDirectives {
+        let methods: Vec<String> = methods.iter().map(|m| m.to_ascii_lowercase()).collect();
+        let has_method = |name: &str| methods.contains(&name.to_ascii_lowercase());
+        BladeDirectives::new(Some(&has_method), &[])
+    }
+
+    /// A Laravel older than `CompilesContexts` has no `compileContext()`, so
+    /// `@context` is text to it, while everything it does define is still a
+    /// directive.
+    #[test]
+    fn a_built_in_directive_exists_only_when_the_compiler_defines_it() {
+        let directives = compiler(&["compileIf", "compileEndif", "compileEndPushOnce"]);
+        assert_eq!(directives.builtin(r#"context": "x""#), None);
+        assert!(!directives.has_builtin("context"));
+        assert_eq!(directives.builtin("if ($x)"), Some("if"));
+        assert_eq!(directives.builtin("endif"), Some("endif"));
+        // PHP method names are case-insensitive, and so is Blade's lookup.
+        assert_eq!(directives.builtin("endPushOnce"), Some("endPushOnce"));
+    }
+
+    /// `@verbatim` and `@php` blocks are cut out of the template before
+    /// Blade looks for a `compile*` method, so they exist whatever the
+    /// compiler declares.
+    #[test]
+    fn the_precompiled_blocks_exist_without_a_compile_method() {
+        let directives = compiler(&[]);
+        for name in PRECOMPILED_DIRECTIVES {
+            assert_eq!(directives.builtin(name), Some(*name));
+        }
+    }
+
+    /// With no compiler to read, every built-in directive is taken to exist.
+    #[test]
+    fn without_a_compiler_every_built_in_directive_exists() {
+        let directives = BladeDirectives::new(None, &[]);
+        for &name in KNOWN_DIRECTIVES {
+            assert!(directives.has_builtin(name), "{name} should exist");
+        }
+    }
+
+    /// Blade reads a directive name as `\w+`, so a known name glued to an
+    /// underscore is a different directive.
+    #[test]
+    fn a_name_glued_to_an_underscore_is_not_a_built_in_directive() {
+        assert_eq!(match_directive("if_ready"), None);
+        assert_eq!(match_directive("if("), Some("if"));
+    }
+
+    fn custom(names: &[(&str, bool)]) -> BladeDirectives {
         let registrations: Vec<CustomDirective> = names
             .iter()
             .map(|(name, conditional)| CustomDirective {
@@ -1199,7 +1313,7 @@ mod tests {
                 conditional: *conditional,
             })
             .collect();
-        CustomDirectives::from_registrations(&registrations)
+        BladeDirectives::from_registrations(&registrations)
     }
 
     /// `Blade::if('admin')` registers four directives, not one.
@@ -1213,7 +1327,7 @@ mod tests {
             ("endadmin", CustomForm::End),
         ] {
             assert_eq!(
-                directives.match_directive(written),
+                directives.custom(written),
                 Some((written, expected)),
                 "@{written} did not resolve to {expected:?}"
             );
@@ -1224,13 +1338,13 @@ mod tests {
     fn a_plain_registration_is_a_statement() {
         let directives = custom(&[("datetime", false)]);
         assert_eq!(
-            directives.match_directive("datetime($post->createdAt)"),
+            directives.custom("datetime($post->createdAt)"),
             Some(("datetime", CustomForm::Statement))
         );
         // A name that merely starts with a registered one is a different
         // directive, exactly as Blade's own `\w+` name pattern reads it.
-        assert_eq!(directives.match_directive("datetimezone"), None);
-        assert_eq!(directives.match_directive("datetime_utc"), None);
+        assert_eq!(directives.custom("datetimezone"), None);
+        assert_eq!(directives.custom("datetime_utc"), None);
     }
 
     /// A registered name another registration is a prefix of still wins for
@@ -1240,11 +1354,11 @@ mod tests {
     fn the_longest_registered_name_wins() {
         let directives = custom(&[("foo", false), ("foo::bar", false)]);
         assert_eq!(
-            directives.match_directive("foo::bar"),
+            directives.custom("foo::bar"),
             Some(("foo::bar", CustomForm::Statement))
         );
         assert_eq!(
-            directives.match_directive("foo"),
+            directives.custom("foo"),
             Some(("foo", CustomForm::Statement))
         );
     }
@@ -1256,7 +1370,10 @@ mod tests {
     fn a_name_blade_would_reject_registers_nothing() {
         for name in ["", "has space", "dash-ed", "a::b::c", "trailing::"] {
             assert!(
-                custom(&[(name, false)]).is_empty(),
+                custom(&[(name, false)])
+                    .custom_completions()
+                    .next()
+                    .is_none(),
                 "{name:?} was accepted as a directive name"
             );
         }
@@ -1269,7 +1386,7 @@ mod tests {
     fn completions_insert_what_the_registration_guarantees() {
         let directives = custom(&[("admin", true), ("datetime", false)]);
         let mut inserted: Vec<(String, String, bool)> = directives
-            .completions()
+            .custom_completions()
             .map(|c| (c.name.to_string(), c.insert_text, c.is_snippet))
             .collect();
         inserted.sort();

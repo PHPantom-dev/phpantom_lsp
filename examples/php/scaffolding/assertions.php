@@ -2080,6 +2080,12 @@ function runDemoAssertions(): void
     assert($reconstructed->eitherPrefix($qualifiedName, $plainName) === 'App\\', 'the first flag holding proves its own subject');
     assert($reconstructed->eitherPrefix($plainName, $plainName) === '', 'neither flag holding leaves the guard');
 
+    $nested = new NestedAssignmentDemo();
+    assert($nested->matchArm(1) === 'black', 'the match arm that assigns $pen types it as a Pen');
+    assert($nested->matchArm(2) === '', 'the default arm leaves $pen unset');
+    assert($nested->ternaryBranch(true) === 'black', 'the ternary branch that assigns $pen types it as a Pen');
+    assert($nested->ternaryBranch(false) === '', 'the else branch leaves $pen unset');
+
     // ── Member visibility ───────────────────────────────────────────────
     // The diagnostics demo claims which members of ScaffoldingVault are out
     // of reach from outside; reflection is what makes that claim checkable

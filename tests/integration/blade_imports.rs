@@ -170,6 +170,65 @@ class CurrencyHelper {\n\
         }
     }
 
+    /// Open a template and return its unused-import diagnostics.
+    async fn unused_imports(view: &str) -> Vec<Diagnostic> {
+        let (backend, _dir) = create_psr4_workspace(
+            APP_PSR4_COMPOSER,
+            &[
+                ("app/Helpers/CurrencyHelper.php", HELPER),
+                ("resources/views/page.blade.php", view),
+            ],
+        );
+        let uri = workspace_uri(&backend, "resources/views/page.blade.php");
+        open_document(&backend, &uri, "blade", view).await;
+        let virtual_php = backend.blade_virtual_php(uri.as_str()).unwrap();
+        let mut diags = Vec::new();
+        backend.collect_unused_import_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+        diags
+    }
+
+    /// The template's range of the first occurrence of `text` in `view`,
+    /// which sits on a single line.
+    fn range_of(view: &str, text: &str) -> Range {
+        let at = view.find(text).expect("the text is in the view");
+        let line = view[..at].matches('\n').count() as u32;
+        let character = (at - view[..at].rfind('\n').map_or(0, |newline| newline + 1)) as u32;
+        Range::new(
+            Position::new(line, character),
+            Position::new(line, character + text.len() as u32),
+        )
+    }
+
+    /// The preprocessor hoists a `@use` directive into the prologue of the
+    /// virtual PHP, which no template text stands behind, but one nothing
+    /// uses is still reported, at the directive the template wrote.
+    #[tokio::test]
+    async fn an_unused_use_directive_is_reported_at_the_directive() {
+        let view = "<p>nothing</p>\n@use('App\\Helpers\\CurrencyHelper')\n";
+        let diags = unused_imports(view).await;
+        assert_eq!(diags.len(), 1, "{:?}", diags);
+        assert_eq!(
+            diags[0].message,
+            "Unused import 'App\\Helpers\\CurrencyHelper'"
+        );
+        assert_eq!(
+            diags[0].range,
+            range_of(view, "@use('App\\Helpers\\CurrencyHelper')")
+        );
+    }
+
+    /// One unused member of a group directive is reported on its own, so
+    /// the members the template uses stay out of it.
+    #[tokio::test]
+    async fn an_unused_member_of_a_group_use_directive_is_reported_alone() {
+        let view = "@use('App\\Helpers\\{CurrencyHelper, DateHelper as Dates}')\n\
+                    {{ CurrencyHelper::formatPrice(1) }}\n";
+        let diags = unused_imports(view).await;
+        assert_eq!(diags.len(), 1, "{:?}", diags);
+        assert_eq!(diags[0].message, "Unused import 'App\\Helpers\\DateHelper'");
+        assert_eq!(diags[0].range, range_of(view, "DateHelper as Dates"));
+    }
+
     /// An import nothing references is still reported, at its Blade line.
     #[tokio::test]
     async fn a_genuinely_unused_import_is_reported() {

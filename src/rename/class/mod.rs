@@ -21,12 +21,13 @@ use crate::Backend;
 use crate::code_actions::{document_changes_edit, multi_file_edit};
 use crate::symbol_map::SymbolKind;
 use crate::text_position::offset_to_position;
+use crate::types::NamespaceSpan;
 use crate::util::{build_fqn, strip_fqn_prefix};
 
 use super::RenameOutcome;
 use imports::{has_import_collision, namespace_owns, pick_collision_alias};
-use layout::{insert_namespace_edit, remove_namespace_edits};
-use rewrite::FileRewrite;
+use layout::{class_declaration_span, insert_namespace_edit, remove_namespace_edits};
+use rewrite::{FileRewrite, locations_by_block};
 use siblings::build_sibling_import_edits;
 
 impl Backend {
@@ -63,17 +64,12 @@ impl Backend {
             .get(&definition_uri)
             .cloned()
             .ok_or_else(|| format!("Could not index the definition of `{old_fqn}`."))?;
-        let span = symbol_map
-            .spans
-            .iter()
-            .find(|span| {
-                matches!(
-                    &span.kind,
-                    SymbolKind::ClassDeclaration { name }
-                        if name.eq_ignore_ascii_case(crate::util::short_name(old_fqn))
-                )
-            })
-            .ok_or_else(|| format!("Could not locate the declaration of `{old_fqn}`."))?;
+        let span = class_declaration_span(
+            &symbol_map,
+            &self.namespace_spans_for_uri(&definition_uri),
+            old_fqn,
+        )
+        .ok_or_else(|| format!("Could not locate the declaration of `{old_fqn}`."))?;
         let position = offset_to_position(&content, span.start as usize);
         let locations = self
             .find_references_for_rename(&definition_uri, &content, position, true)
@@ -190,36 +186,45 @@ impl Backend {
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
 
         for (file_uri_str, file_locations) in &locations_by_file {
-            let Some(file) = self.file_rewrite(file_uri_str, old_fqn_normalized) else {
+            let blocks = self.file_rewrites(file_uri_str, old_fqn_normalized);
+            let Some(target_uri) = blocks.first().map(|file| file.target_uri.clone()) else {
                 continue;
             };
-            // A rename adds no import, so there is no alias for one either.
-            let rewrite =
-                file.reference_rewrite(old_fqn_normalized, old_short_name, new_short_name, None);
-            // A pure rename never changes the namespace, so the group
-            // prefix (if any) always still fits.
-            let use_statement_edit = file.use_statement_edit(
-                old_fqn_normalized,
-                &new_fqn,
-                new_short_name,
-                &rewrite,
-                None,
-            );
+            let mut file_edits: Vec<TextEdit> = Vec::new();
+            for (file, block_locations) in locations_by_block(&blocks, file_locations) {
+                // A rename adds no import, so there is no alias for one either.
+                let rewrite = file.reference_rewrite(
+                    old_fqn_normalized,
+                    old_short_name,
+                    new_short_name,
+                    None,
+                );
+                // A pure rename never changes the namespace, so the group
+                // prefix (if any) always still fits.
+                let use_statement_edit = file.use_statement_edit(
+                    old_fqn_normalized,
+                    &new_fqn,
+                    new_short_name,
+                    &rewrite,
+                    None,
+                );
 
-            // An inline qualified reference (`\Ns\Foo`, `Sub\Foo`) keeps
-            // its prefix; only the last segment changes.
-            let (mut file_edits, _) = file.rewrite_locations(
-                file_locations,
-                use_statement_edit.as_ref(),
-                &rewrite,
-                |source| match source.rfind('\\') {
-                    Some(ns_sep) => format!("{}{}", &source[..=ns_sep], new_short_name),
-                    None => new_short_name.to_string(),
-                },
-            );
+                // An inline qualified reference (`\Ns\Foo`, `Sub\Foo`) keeps
+                // its prefix; only the last segment changes.
+                let (location_edits, _) = file.rewrite_locations(
+                    &block_locations,
+                    use_statement_edit.as_ref(),
+                    &rewrite,
+                    |source| match source.rfind('\\') {
+                        Some(ns_sep) => format!("{}{}", &source[..=ns_sep], new_short_name),
+                        None => new_short_name.to_string(),
+                    },
+                );
+                file_edits.extend(location_edits);
 
-            if let Some((_, edits)) = use_statement_edit {
-                file_edits.extend(edits);
+                if let Some((_, edits)) = use_statement_edit {
+                    file_edits.extend(edits);
+                }
             }
 
             self.rewrite_template_edits(
@@ -230,10 +235,7 @@ impl Backend {
             );
 
             if !file_edits.is_empty() {
-                changes
-                    .entry(file.target_uri)
-                    .or_default()
-                    .extend(file_edits);
+                changes.entry(target_uri).or_default().extend(file_edits);
             }
         }
 
@@ -321,17 +323,50 @@ impl Backend {
         file_uri_str: &str,
         file_locations: &[&Location],
     ) -> Result<FileMoveEdits, String> {
-        let Some(file) = self.file_rewrite(file_uri_str, mv.old_fqn) else {
+        let blocks = self.file_rewrites(file_uri_str, mv.old_fqn);
+        let Some(first) = blocks.first() else {
             return Ok(FileMoveEdits::Unreadable);
         };
 
         let is_definition_file = mv.definition_uri.as_deref() == Some(file_uri_str);
 
-        let file_namespace = self.first_file_namespace(file_uri_str);
+        let mut file_edits: Vec<TextEdit> = Vec::new();
 
-        // A file with no import for the class reached it through its
+        if is_definition_file && mv.namespace_changed {
+            match self.namespace_declaration_edits(mv, &blocks, file_uri_str)? {
+                Some(edits) => file_edits.extend(edits),
+                None => return Ok(FileMoveEdits::Stale),
+            }
+        }
+
+        for (file, block_locations) in locations_by_block(&blocks, file_locations) {
+            file_edits.extend(Self::class_move_block_edits(
+                mv,
+                file,
+                &block_locations,
+                is_definition_file,
+            ));
+        }
+
+        self.rewrite_template_edits(file_uri_str, mv.new_fqn, mv.old_fqn, &mut file_edits);
+
+        Ok(FileMoveEdits::Edits(first.target_uri.clone(), file_edits))
+    }
+
+    /// One `namespace` block's part of a class move: its rewritten
+    /// references, its import of the class, and the import it needs when
+    /// it reached the class through its own namespace.
+    fn class_move_block_edits(
+        mv: &ClassMove<'_>,
+        file: &FileRewrite,
+        block_locations: &[&Location],
+        is_definition_file: bool,
+    ) -> Vec<TextEdit> {
+        let file_namespace = &file.namespace;
+
+        // A block with no import for the class reached it through its
         // own namespace, so moving the class out of that namespace
-        // leaves every short-name reference dangling.  Such a file
+        // leaves every short-name reference dangling.  Such a block
         // needs a `use` statement added.
         let needs_new_import = mv.namespace_changed
             && file.import_info.is_none()
@@ -339,7 +374,7 @@ impl Backend {
             && namespace_owns(file_namespace.as_deref(), mv.old_fqn)
             && !namespace_owns(file_namespace.as_deref(), mv.new_fqn);
 
-        // The short name may already be taken in this file by an
+        // The short name may already be taken in this block by an
         // unrelated import, in which case the added import has to be
         // aliased and the references rewritten to that alias.
         let new_import_alias = if needs_new_import
@@ -365,19 +400,10 @@ impl Backend {
             file_namespace.as_deref(),
         );
 
-        let mut file_edits: Vec<TextEdit> = Vec::new();
-
-        if is_definition_file && mv.namespace_changed {
-            match self.namespace_declaration_edits(mv, &file, file_uri_str)? {
-                Some(edits) => file_edits.extend(edits),
-                None => return Ok(FileMoveEdits::Stale),
-            }
-        }
-
         // A qualified reference is rewritten in full, keeping its
         // leading backslash when it has one.
-        let (location_edits, has_short_name_ref) = file.rewrite_locations(
-            file_locations,
+        let (mut edits, has_short_name_ref) = file.rewrite_locations(
+            block_locations,
             use_statement_edit.as_ref(),
             &rewrite,
             |source| {
@@ -388,30 +414,28 @@ impl Backend {
                 }
             },
         );
-        file_edits.extend(location_edits);
 
-        if let Some((_, edits)) = use_statement_edit {
-            file_edits.extend(edits);
+        if let Some((_, statement_edits)) = use_statement_edit {
+            edits.extend(statement_edits);
         }
 
-        // Only worth importing when the file actually spells the
-        // class by its short name; a file that only ever writes the
+        // Only worth importing when the block actually spells the
+        // class by its short name; a block that only ever writes the
         // FQN had its references rewritten in full above.
         if needs_new_import && has_short_name_ref {
-            let use_block = crate::completion::use_edit::analyze_use_block(&file.content);
+            let use_block =
+                crate::completion::use_edit::analyze_use_block_in(&file.content, file.block);
             if let Some(import_edits) = crate::completion::use_edit::build_aliased_use_edit(
                 mv.new_fqn,
                 new_import_alias.as_deref(),
                 &use_block,
-                &file_namespace,
+                file_namespace,
             ) {
-                file_edits.extend(import_edits);
+                edits.extend(import_edits);
             }
         }
 
-        self.rewrite_template_edits(file_uri_str, mv.new_fqn, mv.old_fqn, &mut file_edits);
-
-        Ok(FileMoveEdits::Edits(file.target_uri, file_edits))
+        edits
     }
 
     /// The edits that bring the declaring file's `namespace` statement to
@@ -421,25 +445,46 @@ impl Backend {
     /// This is the one edit of a move built straight from symbol-map
     /// offsets rather than from a verified reference location, so it
     /// carries the same guard: `Ok(None)` abandons the move when the map
-    /// does not describe the file or the span no longer spells the
-    /// namespace it claims to.
+    /// does not describe the file, does not hold the class's declaration,
+    /// or the span no longer spells the namespace it claims to.
     fn namespace_declaration_edits(
         &self,
         mv: &ClassMove<'_>,
-        file: &FileRewrite,
+        blocks: &[FileRewrite],
         file_uri_str: &str,
     ) -> Result<Option<Vec<TextEdit>>, String> {
         let Some(sm) = self.symbol_maps.read().get(file_uri_str).cloned() else {
             return Ok(Some(Vec::new()));
         };
+
+        // In a file with several `namespace` blocks, the statement that
+        // moves is the one of the block declaring the class, and that
+        // block's own imports are what its former siblings are planned
+        // against.
+        let namespaces = self.namespace_spans_for_uri(file_uri_str);
+        let Some(class_start) =
+            class_declaration_span(&sm, &namespaces, mv.old_fqn).map(|class| class.start)
+        else {
+            return Ok(None);
+        };
+        let (Some(class_block), Some(file)) = (
+            NamespaceSpan::containing(&namespaces, class_start),
+            blocks.get(FileRewrite::index_at(blocks, class_start as usize)),
+        ) else {
+            return Ok(None);
+        };
         if !sm.matches_source(&file.content) {
             return Ok(None);
         }
 
-        let siblings = self.sibling_imports_for_move(&sm, &file.content, &file.use_map, mv.old_ns);
+        let siblings = self.sibling_imports_for_move(&sm, file, mv.old_ns);
 
         let declaration = sm.spans.iter().find_map(|s| match &s.kind {
-            SymbolKind::NamespaceDeclaration { name } => Some((s, name)),
+            SymbolKind::NamespaceDeclaration { name }
+                if class_block.start <= s.start && s.end <= class_block.end =>
+            {
+                Some((s, name))
+            }
             _ => None,
         });
         let Some((ns_span, ns_name)) = declaration else {
@@ -464,7 +509,7 @@ impl Backend {
                     range: Range { start, end },
                     new_text: ns.to_string(),
                 }];
-                edits.extend(build_sibling_import_edits(&file.content, &siblings));
+                edits.extend(build_sibling_import_edits(file, &siblings));
                 Ok(Some(edits))
             }
             // The destination has no namespace to write in place of the
@@ -473,7 +518,7 @@ impl Backend {
             None => remove_namespace_edits(
                 mv.old_fqn,
                 file_uri_str,
-                &file.content,
+                file,
                 ns_span.start as usize,
                 ns_span.end as usize,
                 &siblings,

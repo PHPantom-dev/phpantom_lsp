@@ -131,14 +131,10 @@ impl Tool {
         workspace_root: Option<&Path>,
         composer_json: Option<&ComposerPackage>,
     ) -> bool {
-        let in_require_dev = composer_json
-            .is_some_and(|package| composer::has_require_dev(package, self.composer_package()));
         match self {
-            // A phpcs config file certifies phpcbf on its own: a project
-            // that pulls squizlabs/php_codesniffer in only transitively
-            // (e.g. through slevomat/coding-standard) never lists it in
-            // require-dev directly, but a phpcs.xml is still deliberate
-            // evidence the project uses it.
+            // The same evidence that runs PHPCS diagnostics, so the linter
+            // and its fixer never disagree about whether a project uses
+            // PHP_CodeSniffer.
             //
             // Unless the project also says what it formats with.
             // PHP_CodeSniffer is a linter that happens to ship a fixer, so
@@ -146,10 +142,11 @@ impl Tool {
             // table in `mago.toml` is evidence of nothing else.  A project
             // carrying both lints with PHPCS and formats with Mago.
             Tool::Phpcbf => {
-                (in_require_dev || workspace_root.is_some_and(crate::phpcs::has_project_config))
+                crate::phpcs::project_uses_phpcs(workspace_root, composer_json)
                     && !workspace_root.is_some_and(crate::mago::formats_with_mago)
             }
-            Tool::Pint | Tool::PhpCsFixer => in_require_dev,
+            Tool::Pint | Tool::PhpCsFixer => composer_json
+                .is_some_and(|package| composer::has_require_dev(package, self.composer_package())),
         }
     }
 }

@@ -12,6 +12,9 @@ use crate::blade::component_tags::camel_case_attr_name;
 /// only valid at attribute position inside a tag.
 pub(super) struct HtmlPos {
     pub(super) in_tag: bool,
+    /// Whether the open tag is a Blade `<x-…>` component tag. Other tags
+    /// carry client-side `:name` attributes that Blade emits verbatim.
+    pub(super) component_tag: bool,
     pub(super) attr_string: Option<char>,
 }
 
@@ -66,6 +69,7 @@ pub(super) fn open(
         // tag open by hand — otherwise `:attr="$expr"` inside
         // a component tag would not be at attribute position.
         html.in_tag = true;
+        html.component_tag = true;
     } else {
         return None;
     }
@@ -97,6 +101,7 @@ pub(super) fn close(
         match_len = if remaining[0] == '/' { 2 } else { 1 };
         replacement = open_call.take().expect("call is open").close();
         html.in_tag = false;
+        html.component_tag = false;
     } else {
         return None;
     }
@@ -124,6 +129,7 @@ pub(super) fn bound_attr(
 
     if remaining.starts_with(&[':'])
         && html.in_tag
+        && html.component_tag
         && html.attr_string.is_none()
         && (char_idx == 0 || line_chars[char_idx - 1].is_ascii_whitespace())
         && remaining.get(1) != Some(&':')
@@ -246,9 +252,11 @@ pub(super) fn track(ch: char, line_chars: &[char], char_idx: usize, html: &mut H
                 let next = line_chars.get(char_idx + 1);
                 if next.is_none() || next.is_some_and(|c| c.is_ascii_alphabetic() || *c == '/') {
                     html.in_tag = true;
+                    html.component_tag = false;
                 }
             } else if ch == '>' {
                 html.in_tag = false;
+                html.component_tag = false;
             } else if html.in_tag && (ch == '"' || ch == '\'') {
                 html.attr_string = Some(ch);
             }

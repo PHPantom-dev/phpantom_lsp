@@ -139,7 +139,19 @@ pub(super) fn index_project(
     // call sites.  With every user file parsed, re-run call-site
     // inference and re-parse the templates whose inferred set changed, so
     // the diagnostic pass sees them with injected variables in scope.
-    backend.refresh_blade_injected_vars();
+    //
+    // In a Laravel project the diagnostic pass asks for the whole
+    // workspace (routes, config writes, translations, the auth model),
+    // and left to itself it builds that index from inside a diagnostic
+    // worker, refreshing the templates again while other workers are
+    // diagnosing them.  Settling it here does that refresh once, after
+    // the resource files are indexed, the way the editor does.  On a
+    // full run the files are already parsed, so this only adds the walk.
+    if backend.resolved_class_cache.read().is_laravel() {
+        backend.ensure_workspace_index_ready_with_progress(None);
+    } else {
+        backend.refresh_blade_injected_vars();
+    }
 
     IndexedProject {
         file_data,
@@ -181,4 +193,70 @@ pub(super) fn report(
     );
 
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    /// Open the project in `root`, select `selected` alone, and index it the
+    /// way `analyze` does before its diagnostic pass.
+    async fn index_selected(root: &Path, selected: &str) -> Backend {
+        let OpenedProject { backend, files } =
+            open_project(root, Config::default(), &[root.join(selected)])
+                .await
+                .expect("the selected file should be found");
+        index_project(&backend, root, &files, false);
+        backend
+    }
+
+    fn write_project(root: &Path, require: &str) {
+        std::fs::write(
+            root.join("composer.json"),
+            format!(
+                r#"{{ "require": {{ {require} }}, "autoload": {{ "psr-4": {{ "App\\": "app/" }} }} }}"#
+            ),
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("app")).unwrap();
+        std::fs::write(
+            root.join("app/Helper.php"),
+            "<?php\nnamespace App;\nclass Helper {}\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("routes")).unwrap();
+        std::fs::write(root.join("routes/web.php"), "<?php\n").unwrap();
+    }
+
+    /// A Laravel project's diagnostics ask for the whole workspace.  The
+    /// index has to be complete before the pass starts, even when the run
+    /// is limited to one file, so no diagnostic worker builds it (and
+    /// re-types the Blade templates) while others are diagnosing.
+    #[tokio::test]
+    async fn laravel_index_is_settled_before_diagnostics() {
+        let dir = tempfile::tempdir().unwrap();
+        write_project(dir.path(), r#""laravel/framework": "^11.0""#);
+
+        let backend = index_selected(dir.path(), "app/Helper.php").await;
+
+        assert!(backend.workspace_indexed.load(Ordering::Acquire));
+        let routes_uri = crate::util::path_to_uri(&dir.path().join("routes/web.php"));
+        assert!(
+            backend.symbol_maps.read().contains_key(&routes_uri),
+            "files outside the selection should be indexed"
+        );
+    }
+
+    /// Nothing a plain project diagnoses reads the whole workspace, so a run
+    /// limited to one file does not pay for walking it.
+    #[tokio::test]
+    async fn plain_project_skips_the_workspace_walk() {
+        let dir = tempfile::tempdir().unwrap();
+        write_project(dir.path(), r#""php": ">=8.1""#);
+
+        let backend = index_selected(dir.path(), "app/Helper.php").await;
+
+        assert!(!backend.workspace_indexed.load(Ordering::Acquire));
+    }
 }

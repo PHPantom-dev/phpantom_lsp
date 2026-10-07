@@ -892,7 +892,14 @@ impl Backend {
             is_attribute,
             fqn_replace_range,
             file_use_map,
-            use_block: self.use_block_for(uri, content),
+            use_block: self.use_block_for(
+                uri,
+                content,
+                self.import_block_range_at(
+                    uri,
+                    crate::text_position::position_to_byte_offset(content, position),
+                ),
+            ),
             file_namespace: effective_namespace,
             affinity_table,
             quality_prefix,

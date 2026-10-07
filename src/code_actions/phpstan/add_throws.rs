@@ -31,7 +31,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::code_actions::CodeActionData;
 use crate::code_actions::make_code_action_data;
-use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
+use crate::completion::use_edit::{analyze_use_block_in, build_use_edit, use_import_conflicts};
 use crate::parser::with_parsed_program;
 use crate::text_position::{byte_range_to_lsp_range, offset_to_position, ranges_overlap};
 use crate::util::{strip_fqn_prefix, strip_trailing_modifiers};
@@ -58,9 +58,6 @@ impl Backend {
             cache.get(uri).cloned().unwrap_or_default()
         };
 
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
-
         for diag in &phpstan_diags {
             if !ranges_overlap(&diag.range, &params.range) {
                 continue;
@@ -81,6 +78,16 @@ impl Backend {
             };
 
             let short_name = crate::util::short_name(&exception_fqn);
+
+            let block = self.import_block_at(
+                uri,
+                crate::text_position::position_to_byte_offset(
+                    content,
+                    Position::new(diag.range.start.line, 0),
+                ),
+            );
+            let file_use_map = &block.use_map;
+            let file_namespace = &block.namespace;
 
             // Determine what name to use in the @throws tag.  If the
             // exception is already imported (or in the same namespace),
@@ -103,7 +110,7 @@ impl Backend {
 
             let needs_import = !already_imported && !same_namespace;
 
-            if needs_import && use_import_conflicts(&exception_fqn, &file_use_map) {
+            if needs_import && use_import_conflicts(&exception_fqn, file_use_map) {
                 continue;
             }
 
@@ -116,8 +123,8 @@ impl Backend {
             if docblock_already_has_throws(
                 &docblock_info,
                 &exception_fqn,
-                &file_use_map,
-                &file_namespace,
+                file_use_map,
+                file_namespace,
             ) {
                 continue;
             }
@@ -166,8 +173,15 @@ impl Backend {
         let exception_fqn = extract_exception_fqn(diagnostic_message)?;
         let short_name = crate::util::short_name(&exception_fqn);
 
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
+        let block = self.import_block_at(
+            uri,
+            crate::text_position::position_to_byte_offset(
+                content,
+                Position::new(diagnostic_line as u32, 0),
+            ),
+        );
+        let file_use_map = &block.use_map;
+        let file_namespace = &block.namespace;
 
         // Determine if an import is needed.
         let already_imported = file_use_map.iter().any(|(alias, fqn)| {
@@ -195,9 +209,8 @@ impl Backend {
 
         // 2. Import edit (if needed).
         if needs_import {
-            let use_block = analyze_use_block(content);
-            if let Some(import_edits) = build_use_edit(&exception_fqn, &use_block, &file_namespace)
-            {
+            let use_block = analyze_use_block_in(content, block.range);
+            if let Some(import_edits) = build_use_edit(&exception_fqn, &use_block, file_namespace) {
                 edits.extend(import_edits);
             }
         }

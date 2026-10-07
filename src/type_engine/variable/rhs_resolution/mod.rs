@@ -1319,7 +1319,13 @@ fn resolve_rhs_expression_inner<'b>(
             // — the proof a ternary chain carries down its `else` spine,
             // and what makes `default => $x` see the `$x === null` arm.
             let mut carried: HashMap<String, Vec<ResolvedType>> = HashMap::new();
-            for arm in match_expr.arms.iter() {
+            // `default` runs only once every other arm failed, wherever it is
+            // written, so it is resolved last.
+            let (default_arms, expression_arms): (Vec<_>, Vec<_>) = match_expr
+                .arms
+                .iter()
+                .partition(|arm| matches!(arm, MatchArm::Default(_)));
+            for arm in expression_arms.into_iter().chain(default_arms) {
                 // Create a new context with narrowed variable types so that
                 // the arm expression resolves against the narrowed class.
                 let mut overrides = carried.clone();
@@ -1344,14 +1350,22 @@ fn resolve_rhs_expression_inner<'b>(
                     widen_unresolved_branch(arm_expr, arm_results),
                 );
                 if is_true_subject && let MatchArm::Expression(expr_arm) = arm {
-                    // Every condition of this arm was false for the arms
-                    // below it, so all of their inverses hold together.
+                    // Every condition of this arm was not `true` for the
+                    // arms below it, so all of their inverses hold together,
+                    // on top of what the arms above already proved.
                     for condition in expr_arm.conditions.iter() {
-                        carried.extend(
-                            crate::type_engine::variable::forward_walk::condition_narrowing_overrides(
-                                condition, false, ctx,
-                            ),
-                        );
+                        if !super::forward_walk::match_true_condition_is_boolean(condition, || {
+                            resolve_rhs_expression(condition, ctx)
+                        }) {
+                            continue;
+                        }
+                        let carried_ctx = (!carried.is_empty())
+                            .then(|| ctx.with_match_arm_narrowing(carried.clone()));
+                        carried.extend(super::forward_walk::condition_narrowing_overrides(
+                            condition,
+                            false,
+                            carried_ctx.as_ref().unwrap_or(ctx),
+                        ));
                     }
                 }
             }

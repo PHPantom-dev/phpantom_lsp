@@ -6,7 +6,6 @@ use super::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::atom::AtomMap;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::types::{ClassInfo, ResolvedType};
@@ -42,7 +41,7 @@ pub(crate) struct ForwardWalkCtx<'a> {
     /// Pre-computed top-level scope for resolving `global` variable imports.
     /// When a function body contains `global $x;`, the walker looks up
     /// `$x` in this map to seed the local scope with the top-level type.
-    pub top_level_scope: Option<AtomMap<Vec<ResolvedType>>>,
+    pub top_level_scope: Option<Locals>,
     /// Whether the statement currently being walked sits lexically inside a
     /// loop body (`for`/`foreach`/`while`/`do-while`, at any nesting depth).
     ///

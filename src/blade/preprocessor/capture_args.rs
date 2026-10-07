@@ -62,14 +62,16 @@ fn is_php_identifier(s: &str) -> bool {
 
 /// Translate the captured argument text of an `@use(...)` directive into a
 /// real top-level `use` statement, mirroring Blade's `compileUse`. `raw` is
-/// everything from the opening `(` up to (not including) the closing `)`.
+/// everything from the opening `(` up to (not including) the closing `)`;
+/// Blade strips every paren, so the same text without the `(` translates
+/// the same.
 ///
 /// Handles the plain form (`'App\Models\Post'`), the inline alias
 /// (`'App\Models\Post as Article'`), the two-argument alias
 /// (`'App\Models\Post', 'Article'`), grouped imports
 /// (`'App\Models\{Post, Comment}'`), and the `function`/`const` modifiers.
 /// Returns `None` when no importable path can be parsed.
-fn build_use_statement(raw: &str) -> Option<String> {
+pub(crate) fn build_use_statement(raw: &str) -> Option<String> {
     // Blade strips all parens, then trims whitespace/quotes.
     let expression: String = raw.chars().filter(|c| *c != '(' && *c != ')').collect();
     let expression = trim_quotes_and_space(&expression);

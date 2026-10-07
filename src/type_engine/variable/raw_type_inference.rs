@@ -921,7 +921,7 @@ fn walk_closure_body_scope(
     param_name: Option<&str>,
     resolved_param: &[ResolvedType],
     ctx: &VarResolutionCtx<'_>,
-) -> crate::atom::AtomMap<Vec<ResolvedType>> {
+) -> super::forward_walk::Locals {
     let fw_ctx =
         super::forward_walk::ForwardWalkCtx::from_var_ctx(ctx).with_cursor_offset(u32::MAX);
     let mut scope = super::forward_walk::ScopeState::new();

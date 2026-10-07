@@ -22,7 +22,7 @@
 //! entirely. Types are "true for the callers we found": multiple call
 //! sites union per variable, and dynamic view names contribute nothing.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use mago_span::HasSpan;
@@ -360,8 +360,8 @@ impl Backend {
             // spells many candidates it will never confirm (`$xw->text(…)`
             // on an `XMLWriter` reads as a mailable's `text()` until the
             // receiver is resolved) would otherwise pay for all of them
-            // here, in the serial refresh pass, rather than in the
-            // parallel diagnostic pass that has a warm scope cache.
+            // here, in the refresh pass, rather than in the diagnostic pass
+            // that has a warm scope cache.
             let has_candidate = symbol_map
                 .view_receiver_sites
                 .iter()
@@ -525,16 +525,39 @@ impl Backend {
         // templates.
         let shared = self.view_caller_snapshot();
         let shared_blade = self.blade_caller_snapshot();
-        for uri in self.blade_render_order(blade_uris) {
-            let Some(content) = self.get_file_content(&uri) else {
-                continue;
-            };
-            self.reinfer_and_reparse_blade_with(&uri, &content, Some(&shared), Some(&shared_blade));
-        }
+        // A controller that renders many templates is walked once per
+        // template, and every method body it infers a return type from
+        // would be walked again each time.  The other type-engine memos
+        // stay scoped to one caller file: their keys include the address
+        // of the content they walked, and this pass replaces templates'
+        // virtual PHP as it goes, so a freed buffer reused at the same
+        // address could serve stale entries.
+        //
+        // Each worker keeps its own memo: the memo is thread-local, and the
+        // templates one worker picks up still share what it inferred.
+        let (order, ready_after) = self.blade_render_order(blade_uris);
+        crate::parallel::for_each_layered(
+            "blade-refresh",
+            &ready_after,
+            crate::type_engine::call_resolution::activate_body_infer_memo,
+            |index| {
+                let uri = &order[index];
+                let Some(content) = self.get_file_content(uri) else {
+                    return;
+                };
+                self.reinfer_and_reparse_blade_with(
+                    uri,
+                    &content,
+                    Some(&shared),
+                    Some(&shared_blade),
+                );
+            },
+        );
     }
 
     /// The templates of a refresh pass, ordered so that a template is
-    /// re-inferred after every template that renders it.
+    /// re-inferred after every template that renders it, with how many of
+    /// the templates before each one have to finish before it can start.
     ///
     /// A partial's inferred types are read out of the rendering template's
     /// virtual PHP, so that template's own scope has to be settled first:
@@ -542,11 +565,17 @@ impl Backend {
     /// `@foreach ($rows as $row)` only types `$row` once the rendering
     /// template knows what `$rows` holds.
     ///
+    /// The order comes in layers: a template whose renderers all sit in
+    /// earlier layers reads nothing another template of its own layer
+    /// writes, so a whole layer can be re-inferred at once.  The second
+    /// vector holds, for each template, where its layer starts.
+    ///
     /// Templates that render each other have no such order.  Each is read
     /// against the other's scope as the previous pass left it, and the tie
     /// is broken by URI so that the pass is reproducible rather than
-    /// oscillating between two answers.
-    fn blade_render_order(&self, mut uris: Vec<String>) -> Vec<String> {
+    /// oscillating between two answers.  That needs them re-inferred one
+    /// at a time, so each gets a layer of its own.
+    fn blade_render_order(&self, mut uris: Vec<String>) -> (Vec<String>, Vec<usize>) {
         // The snapshot comes from a `HashMap`, so the tie-break is only a
         // tie-break once the input itself is in a fixed order.
         uris.sort_unstable();
@@ -576,27 +605,39 @@ impl Backend {
         }
 
         let mut order: Vec<usize> = Vec::with_capacity(uris.len());
-        let mut ready: VecDeque<usize> = (0..uris.len())
+        let mut ready_after: Vec<usize> = Vec::with_capacity(uris.len());
+        let mut layer: Vec<usize> = (0..uris.len())
             .filter(|index| renderers[*index] == 0)
             .collect();
-        while let Some(index) = ready.pop_front() {
-            order.push(index);
-            for target in std::mem::take(&mut renders[index]) {
-                renderers[target] -= 1;
-                if renderers[target] == 0 {
-                    ready.push_back(target);
+        while !layer.is_empty() {
+            let layer_start = order.len();
+            let mut next: Vec<usize> = Vec::new();
+            for &index in &layer {
+                for target in std::mem::take(&mut renders[index]) {
+                    renderers[target] -= 1;
+                    if renderers[target] == 0 {
+                        next.push(target);
+                    }
                 }
             }
+            ready_after.extend(std::iter::repeat_n(layer_start, layer.len()));
+            order.append(&mut layer);
+            next.sort_unstable();
+            layer = next;
         }
         // A template rendered from a cycle never runs out of renderers, so
         // whatever the walk did not reach follows it in URI order.
         let placed: HashSet<usize> = order.iter().copied().collect();
-        order.extend((0..uris.len()).filter(|index| !placed.contains(index)));
+        for index in (0..uris.len()).filter(|index| !placed.contains(index)) {
+            ready_after.push(order.len());
+            order.push(index);
+        }
 
-        order
+        let order = order
             .into_iter()
             .map(|index| std::mem::take(&mut uris[index]))
-            .collect()
+            .collect();
+        (order, ready_after)
     }
 
     /// The view names one Blade template renders: the ones its compiled
@@ -1028,6 +1069,9 @@ impl Backend {
         content: &str,
         offsets: &[u32],
     ) -> Vec<ResolvedViewCall> {
+        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
+        let _cache_guard =
+            crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
         let file_ctx = self.file_context(uri);
         let class_loaders = self.class_loaders(&file_ctx);
         let function_loaders = self.function_loaders(&file_ctx);
@@ -1226,6 +1270,9 @@ impl Backend {
         virtual_php: &str,
         occurrences: Vec<crate::blade::component_tags::ComponentTagCall>,
     ) -> Vec<InferredVars> {
+        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
+        let _cache_guard =
+            crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
         let file_ctx = self.file_context(uri);
         let class_loader = self.class_loader(&file_ctx);
         let function_loader = self.function_loader(&file_ctx);

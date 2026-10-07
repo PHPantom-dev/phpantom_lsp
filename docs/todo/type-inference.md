@@ -834,6 +834,29 @@ joins back into the enum when every case is present. Narrowing by `===`
 and `instanceof` then subtracts cases the way it subtracts union members,
 and a branch that has compared away every case holds `never`.
 
+Since `value-of<…>` over an enum is evaluated, the gap also produces false
+positives. A case passed to a template binds the template to the whole
+enum, so the operator gives every case's value:
+
+```php
+/**
+ * @template T of Suit
+ * @param T $case
+ * @return value-of<T>
+ */
+function backingValue(Suit $case) { return $case->value; }
+
+/** @param 'hearts' $value */
+function acceptsHearts(string $value): void {}
+
+acceptsHearts(backingValue(Suit::Hearts)); // reported: 'spades' does not satisfy 'hearts'
+```
+
+A case held in a variable loses its value the same way: after `$case =
+Suit::Hearts;`, `acceptsHearts($case->value)` is reported too. Found
+running the php-typing-conformance suite
+(`phpdoc_advanced_fallback_value_of_template_enum.php`).
+
 Found porting PHPStan's `Rules/Comparison/data/bug-8485.php` and `Rules/Methods/data/return-type-class-constant.php`; both its
 case and its `never` assertion are `// SKIP` in the ported copy under
 `tests/phpstan_data/`.

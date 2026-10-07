@@ -379,13 +379,8 @@ pub(crate) struct LaravelStringKeyCache {
     /// against them, which would otherwise re-read and re-parse the config
     /// file once per template.
     pub view_roots: Option<std::sync::Arc<Vec<crate::blade::view_paths::ViewRoot>>>,
-    /// Every translation key, sorted.
-    pub trans_keys: Option<std::sync::Arc<[String]>>,
-    /// Every translation key mapped to whether it names a group (nested
-    /// array) rather than a scalar entry.  Shared behind an `Arc` for the
-    /// same reason as `routes`: consumers look up one key per call and
-    /// cloning the whole map per lookup would be waste.
-    pub trans_key_shapes: Option<std::sync::Arc<HashMap<String, bool>>>,
+    /// Shared translation declarations, values, locales, and file locations.
+    pub translations: Option<Arc<crate::virtual_members::laravel::TranslationCatalog>>,
     /// The Blade templates and component classes the project ships, keyed
     /// by the names Laravel addresses them under.  Shared behind an `Arc`
     /// because consumers look up a single name in one of its three maps and
@@ -437,8 +432,7 @@ pub(crate) struct LaravelStringKeyBuildLocks {
     pub config_keys: parking_lot::Mutex<()>,
     pub view_names: parking_lot::Mutex<()>,
     pub view_roots: parking_lot::Mutex<()>,
-    pub trans_keys: parking_lot::Mutex<()>,
-    pub trans_key_shapes: parking_lot::Mutex<()>,
+    pub translations: parking_lot::Mutex<()>,
     pub config_trees: parking_lot::Mutex<()>,
     pub blade_discovery: parking_lot::Mutex<()>,
     pub blade_blocks: parking_lot::Mutex<()>,
@@ -499,9 +493,13 @@ impl LaravelStringKeyCache {
         {
             self.view_roots = None;
         }
-        if uri.contains("/lang/") || uri.contains("/resources/lang/") {
-            self.trans_keys = None;
-            self.trans_key_shapes = None;
+        if uri.contains("/lang/")
+            || self
+                .translations
+                .as_ref()
+                .is_some_and(|catalog| catalog.contains_uri(uri))
+        {
+            self.translations = None;
         }
     }
 }
@@ -868,12 +866,13 @@ pub struct Backend {
     /// The per-provider scans the merged table above was built from, so an
     /// edit to one provider rebuilds the merge without re-reading the rest.
     pub(crate) laravel_provider_scans: Arc<RwLock<virtual_members::laravel::ProviderScans>>,
-    /// The Blade directives the project's providers register, expanded from
-    /// the merged table's `custom_directives` into every name a template can
-    /// write.  Kept separate from the table because the Blade preprocessor
-    /// reads it on every keystroke in a template and must not pay for the
-    /// expansion each time.
-    pub(crate) blade_custom_directives: Arc<RwLock<blade::directives::CustomDirectives>>,
+    /// The Blade directives the project's templates can write: the built-in
+    /// ones the installed Blade compiler defines, and the ones its providers
+    /// register, expanded from the merged table's `custom_directives` into
+    /// every name a template can write.  Kept separate from the table
+    /// because the Blade preprocessor reads it on every keystroke in a
+    /// template and must not pay for the expansion each time.
+    pub(crate) blade_directives: Arc<RwLock<blade::directives::BladeDirectives>>,
     /// Cached Laravel string key enumerations (route names, config keys,
     /// view names, translation keys).  `None` = not yet computed.
     /// Invalidated when a file in `routes/`, `config/`, `resources/views/`,
@@ -1287,9 +1286,7 @@ impl Backend {
             laravel_provider_scans: Arc::new(RwLock::new(
                 virtual_members::laravel::ProviderScans::default(),
             )),
-            blade_custom_directives: Arc::new(RwLock::new(
-                blade::directives::CustomDirectives::default(),
-            )),
+            blade_directives: Arc::new(RwLock::new(blade::directives::BladeDirectives::default())),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
             schema_index: Arc::new(RwLock::new(
@@ -1879,6 +1876,7 @@ impl Backend {
         // elsewhere; retire the memoised lookups.
         self.symbols.note_class_lookup_change();
         let mut classes_changed = !dropped_fqns.is_empty() || !promoted_fqns.is_empty();
+        let mut functions_retired = false;
         self.evict_methods_for_fqns(&dropped_fqns);
         self.evict_gti_for_fqns(&dropped_fqns);
         if !promoted_fqns.is_empty() {
@@ -1966,6 +1964,15 @@ impl Backend {
                 }
             });
 
+            // Unlike the class caches the caller clears only when a class
+            // declaration changed, the function negative cache is retired
+            // for any created or changed file: the byte scan below misses
+            // functions behind `function_exists` guards, which only the
+            // lookup's autoload-file fallback finds, and that fallback
+            // cannot run past a recorded miss.  Refilling the cache costs
+            // one fallback pass per still-missing name.
+            functions_retired = true;
+
             let scan = crate::classmap_scanner::scan_file_full(path);
             {
                 let mut fi = self.symbols.autoload_function_index.write();
@@ -1979,6 +1986,12 @@ impl Backend {
                     ci.entry(name).or_insert_with(|| path.clone());
                 }
             }
+        }
+
+        // Retired after the index inserts so a lookup that read the index
+        // before them cannot record a miss that outlives the clear.
+        if functions_retired {
+            self.symbols.retire_function_misses();
         }
 
         // The refreshed discovery indexes may add or remove a namespace-local
@@ -2076,7 +2089,7 @@ impl Backend {
             laravel_date_seed_uris: Arc::clone(&self.laravel_date_seed_uris),
             laravel_provider_resources: Arc::clone(&self.laravel_provider_resources),
             laravel_provider_scans: Arc::clone(&self.laravel_provider_scans),
-            blade_custom_directives: Arc::clone(&self.blade_custom_directives),
+            blade_directives: Arc::clone(&self.blade_directives),
             laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
             laravel_string_key_build_locks: Arc::clone(&self.laravel_string_key_build_locks),
             schema_index: Arc::clone(&self.schema_index),

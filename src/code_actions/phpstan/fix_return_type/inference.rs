@@ -7,6 +7,9 @@
 
 use std::sync::Arc;
 
+use mago_span::Span;
+use mago_syntax::cst::Block;
+use mago_syntax::cst::Statement;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::variable::Variable;
 use tower_lsp::lsp_types::Position;
@@ -70,6 +73,20 @@ impl Backend {
         func_line: usize,
         self_as_marker: bool,
     ) -> Option<InferredReturnType> {
+        let offset = body_brace_offset(content, func_line)?;
+        self.infer_return_type_at(uri, content, offset, self_as_marker)
+    }
+
+    /// [`infer_return_type_for_function`](Self::infer_return_type_for_function)
+    /// for the function or method whose declaration, from its name to its
+    /// closing brace, contains `offset` (its `name_offset` will do).
+    pub(crate) fn infer_return_type_at(
+        &self,
+        uri: &str,
+        content: &str,
+        offset: u32,
+        self_as_marker: bool,
+    ) -> Option<InferredReturnType> {
         // Set up the resolution infrastructure from Backend state.
         let local_classes: Vec<Arc<ClassInfo>> = self
             .symbols
@@ -78,14 +95,13 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-        let func_offset = line_start_byte_offset(content, func_line) as u32;
-        let (file_use_map, file_namespace) = self.use_map_and_namespace_at(uri, func_offset);
+        let (file_use_map, file_namespace) = self.use_map_and_namespace_at(uri, offset);
         let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
         let function_loader = self.function_loader_with(None, &file_use_map, &file_namespace);
 
-        infer_return_type(
+        infer_return_type_at(
             content,
-            func_line,
+            offset,
             &local_classes,
             &class_loader,
             Some(self),
@@ -131,41 +147,52 @@ pub(crate) fn infer_return_type(
     function_loader: FunctionLoader<'_>,
     self_as_marker: bool,
 ) -> Option<InferredReturnType> {
+    infer_return_type_at(
+        content,
+        body_brace_offset(content, func_line)?,
+        local_classes,
+        class_loader,
+        backend,
+        function_loader,
+        self_as_marker,
+    )
+}
+
+/// The offset of the opening brace of the declaration on `func_line`, which
+/// falls inside the body however it is formatted.
+fn body_brace_offset(content: &str, func_line: usize) -> Option<u32> {
     let lines: Vec<&str> = content.lines().collect();
     if func_line >= lines.len() {
         return None;
     }
-
-    // Find the function's opening brace, and a byte offset guaranteed
-    // to fall inside the body (the brace itself), so the AST lookup
-    // below can locate the enclosing function/method regardless of
-    // how its body is formatted (single-line, multi-line, nested
-    // control flow, comments, etc.).
     let brace_line = find_open_brace_from_declaration(&lines, func_line)?;
     let brace_col = lines[brace_line].find('{')?;
-    let body_probe_offset = (line_start_byte_offset(content, brace_line) + brace_col) as u32;
+    Some((line_start_byte_offset(content, brace_line) + brace_col) as u32)
+}
 
-    // Find the enclosing class at the function line offset.
-    let func_offset = line_start_byte_offset(content, func_line) as u32;
-    let enclosing_class = local_classes
-        .iter()
-        .find(|c| {
-            !c.name.starts_with("__anonymous@")
-                && func_offset >= c.start_offset
-                && func_offset <= c.end_offset
-        })
-        .map(|c| ClassInfo::clone(c))
-        .unwrap_or_default();
+/// [`infer_return_type`] for the function or method whose declaration,
+/// from its name to its closing brace, contains `offset`.
+fn infer_return_type_at(
+    content: &str,
+    offset: u32,
+    local_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&Backend>,
+    function_loader: FunctionLoader<'_>,
+    self_as_marker: bool,
+) -> Option<InferredReturnType> {
+    let enclosing_class = local_classes.iter().find(|c| {
+        !c.name.starts_with("__anonymous@") && offset >= c.start_offset && offset <= c.end_offset
+    });
+    let no_class = ClassInfo::default();
+    let enclosing_class: &ClassInfo = enclosing_class.map_or(&no_class, |c| c);
 
     let (mut return_types, has_bare_return, has_return_with_value) =
         with_parsed_program(content, "fix_return_type_infer", |program, _content| {
-            let body_stmts = crate::code_actions::extract_function::find_enclosing_body_statements(
-                &program.statements,
-                body_probe_offset,
-            );
+            let body = declared_body(program.statements.iter(), offset)?;
 
             let mut returns: Vec<(Option<&Expression<'_>>, usize, usize, usize)> = Vec::new();
-            collect_returns(body_stmts.into_iter(), &mut returns);
+            collect_returns(body.statements.iter(), &mut returns);
 
             let mut return_types: Vec<PhpType> = Vec::new();
             let mut has_bare_return = false;
@@ -193,7 +220,7 @@ pub(crate) fn infer_return_type(
                     loaders: Loaders::with_function(function_loader),
                     ..VarResolutionCtx::new(
                         "",
-                        &enclosing_class,
+                        enclosing_class,
                         local_classes,
                         content,
                         start as u32,
@@ -212,8 +239,8 @@ pub(crate) fn infer_return_type(
                 return_types.push(ty);
             }
 
-            (return_types, has_bare_return, has_return_with_value)
-        });
+            Some((return_types, has_bare_return, has_return_with_value))
+        })?;
 
     if !has_return_with_value && !has_bare_return {
         return Some(InferredReturnType {
@@ -287,6 +314,44 @@ pub(crate) fn infer_return_type(
         },
         returns_agree,
     })
+}
+
+/// The body of the function or method among `statements` whose
+/// declaration, from its name to its closing brace, contains `offset`.
+fn declared_body<'a>(
+    statements: impl Iterator<Item = &'a Statement<'a>>,
+    offset: u32,
+) -> Option<&'a Block<'a>> {
+    let declares = |name: &Span, body: &Block<'_>| {
+        name.start.offset <= offset && offset <= body.right_brace.end.offset
+    };
+    for stmt in statements {
+        let members = match stmt {
+            Statement::Function(func) if declares(&func.name.span, &func.body) => {
+                return Some(&func.body);
+            }
+            Statement::Namespace(ns) => {
+                if let Some(body) = declared_body(ns.statements().iter(), offset) {
+                    return Some(body);
+                }
+                continue;
+            }
+            Statement::Class(class) => class.members.as_slice(),
+            Statement::Trait(trait_) => trait_.members.as_slice(),
+            Statement::Enum(enum_) => enum_.members.as_slice(),
+            _ => continue,
+        };
+        let mut found = None;
+        crate::parser::for_each_concrete_method(members, |method, body| {
+            if found.is_none() && declares(&method.name.span, body) {
+                found = Some(body);
+            }
+        });
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
 }
 
 /// Whether `expr` is the bare `$this` variable.

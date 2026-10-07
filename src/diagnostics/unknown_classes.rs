@@ -342,7 +342,7 @@ class Panel {}
             "Filament\\Panel".to_string(),
             crate::util::path_to_uri(&vendor_class_path),
         );
-        backend.clear_class_not_found_cache();
+        backend.clear_not_found_caches();
 
         // After the clear, the lookup must succeed.
         let result = backend.find_or_load_class("Filament\\Panel");

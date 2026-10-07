@@ -93,19 +93,27 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
 ) {
     match expr {
         Expression::Match(match_expr) if match_expr.expression.is_true() => {
+            // Reaching an arm means every arm above it was tested and
+            // failed, so the inverse of each of their conditions holds in
+            // its body, exactly as in an `elseif` chain.  `default` runs
+            // only once every other arm failed, wherever it is written.
+            let mut failed_scope = scope.clone();
+            let mut default_expr = None;
             for arm in match_expr.arms.iter() {
                 match arm {
                     MatchArm::Expression(expr_arm) => {
-                        let mut arm_scope = scope.clone();
+                        let mut arm_scope = failed_scope.clone();
                         for condition in expr_arm.conditions.iter() {
                             apply_condition_narrowing(condition, &mut arm_scope, ctx);
                         }
                         record_branch_snapshots(expr_arm.expression, &arm_scope, ctx);
+                        apply_failed_match_arm_narrowing(expr_arm, &mut failed_scope, ctx);
                     }
-                    MatchArm::Default(def_arm) => {
-                        record_branch_snapshots(def_arm.expression, scope, ctx);
-                    }
+                    MatchArm::Default(def_arm) => default_expr = Some(def_arm.expression),
                 }
+            }
+            if let Some(default_expr) = default_expr {
+                record_branch_snapshots(default_expr, &failed_scope, ctx);
             }
             restore_after_branches(expr, scope);
         }

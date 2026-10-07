@@ -108,13 +108,22 @@ pub(super) fn apply_disjunct_operand_narrowing<'b>(
 /// a `$price` a guard already proved non-null. Joining the `null` it
 /// wrote back in would hand the branch body the very type the guard
 /// removed, so the base's answer stands for that subject instead.
+///
+/// Only the entries the leg rewrote can disagree with the base, so only
+/// those are compared.
 fn drop_leg_answers_the_base_rules_out(leg: &mut ScopeState, base: &ScopeState) {
-    for (name, base_types) in &base.locals {
-        let Some(leg_types) = leg.locals.get(name) else {
-            continue;
-        };
-        if types_are_disjoint(leg_types, base_types) {
-            leg.locals.insert(*name, base_types.clone());
-        }
+    let mut ruled_out: Vec<(Atom, Vec<ResolvedType>)> = Vec::new();
+    let _ = leg
+        .locals
+        .diff::<()>(&base.locals, |name, leg_types, base_types| {
+            if let (Some(leg_types), Some(base_types)) = (leg_types, base_types)
+                && types_are_disjoint(leg_types, base_types)
+            {
+                ruled_out.push((*name, base_types.clone()));
+            }
+            std::ops::ControlFlow::Continue(())
+        });
+    for (name, base_types) in ruled_out {
+        leg.locals.insert(name, base_types);
     }
 }

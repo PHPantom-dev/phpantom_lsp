@@ -16,11 +16,22 @@ use crate::types::ClassInfo;
 /// naming its inner class, and its nullability is carried over to the
 /// parent that subsumes it — dropping `?Child` in favour of a
 /// non-nullable `Parent` would silently lose the null.
+///
+/// Only the entries that differ from `joined_from`, the scope the join
+/// started out as, are looked at: an entry every path still shares is
+/// not something the join brought together.
 pub(crate) fn simplify_class_hierarchy_unions(
     scope: &mut ScopeState,
+    joined_from: &Locals,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) {
-    let keys: Vec<Atom> = scope.locals.keys().copied().collect();
+    let mut keys: Vec<Atom> = Vec::new();
+    let _ = scope.locals.diff::<()>(joined_from, |key, now, _| {
+        if now.is_some_and(|types| types.len() >= 2) {
+            keys.push(*key);
+        }
+        std::ops::ControlFlow::Continue(())
+    });
     for key in keys {
         // Decide what to drop under an immutable borrow so the class
         // names can be borrowed rather than cloned, then apply the

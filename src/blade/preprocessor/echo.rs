@@ -1,7 +1,7 @@
 use super::Mode;
 use super::component_call::contains_seq;
 use super::shared::Lowering;
-use crate::blade::directives::{CustomDirectives, match_directive};
+use crate::blade::directives::BladeDirectives;
 
 /// The last line holding each echo terminator, computed once so an echo
 /// opener can ask "is there a terminator anywhere after me?" without
@@ -95,7 +95,7 @@ pub(super) fn open_escaped(
 pub(super) fn close_escaped(
     raw: bool,
     remaining: &[char],
-    custom_directives: &CustomDirectives,
+    directives: &BladeDirectives,
 ) -> Lowering {
     let mut match_len = 0;
     let replacement = String::new();
@@ -109,7 +109,7 @@ pub(super) fn close_escaped(
     if closes_echo {
         match_len = if raw { 3 } else { 2 };
         next_mode = Mode::Html;
-    } else if directive_boundary(remaining, custom_directives) {
+    } else if directive_boundary(remaining, directives) {
         next_mode = Mode::Html;
     }
 
@@ -153,7 +153,7 @@ pub(super) fn close_php(
     raw_echo: bool,
     remaining: &[char],
     in_php_directive_block: &mut bool,
-    custom_directives: &CustomDirectives,
+    directives: &BladeDirectives,
 ) -> Lowering {
     let mut match_len = 0;
     let mut replacement = String::new();
@@ -177,7 +177,7 @@ pub(super) fn close_php(
         next_mode = Mode::Html;
         match_len = 7;
         replacement = "".to_string();
-    } else if !*in_php_directive_block && directive_boundary(remaining, custom_directives) {
+    } else if !*in_php_directive_block && directive_boundary(remaining, directives) {
         replacement = if raw_echo {
             "; ".to_string()
         } else {
@@ -200,9 +200,9 @@ pub(super) fn close_php(
 /// never part of the frontend-only text to begin with). Absorbing the
 /// directive as part of the echo instead leaves whatever block it closes
 /// (`@endif`, `@endforeach`, ...) unclosed in the emitted PHP.
-fn directive_boundary(remaining: &[char], custom_directives: &CustomDirectives) -> bool {
+fn directive_boundary(remaining: &[char], directives: &BladeDirectives) -> bool {
     remaining.first() == Some(&'@') && {
         let rest: String = remaining[1..].iter().collect();
-        match_directive(&rest).is_some() || custom_directives.match_directive(&rest).is_some()
+        directives.builtin(&rest).is_some() || directives.custom(&rest).is_some()
     }
 }

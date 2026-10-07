@@ -1441,6 +1441,352 @@ function label(?int $buy): void {{
     );
 }
 
+const MATCH_BODY_SCAFFOLD: &str = r#"
+class Cat {}
+class Dog {}
+function takesString(string $s): void {}
+function takesBoth(string $a, string $b): string { return $a . $b; }
+function takesDog(Dog $dog): string { return ''; }
+"#;
+
+/// The failed arms narrow the code inside a later arm's body too, not
+/// just the value the `match` produces.
+#[test]
+fn a_default_arm_body_sees_the_inverse_of_the_arms_above_it() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///match_arm_default_body.php";
+    let content = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class MatchTrue
+{
+    public function label(?string $name): string
+    {
+        return match (true) {
+            null === $name => 'none',
+            default => \strtoupper($name),
+        };
+    }
+}
+"#;
+
+    let errors = argument_type_errors(&backend, uri, content);
+    assert!(
+        errors.is_empty(),
+        "the arm above ruled the null out, got: {errors:?}"
+    );
+}
+
+/// Every failed arm contributes its inverse, so the `default` sees all of
+/// them at once and a middle arm sees the ones above it.
+#[test]
+fn each_arm_body_sees_the_inverse_of_every_arm_above_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_three.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a, ?string $b): string {{
+    return match (true) {{
+        null === $a => 'no a',
+        null === $b => takesBoth($a, 'no b'),
+        default => takesBoth($a, $b),
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the arms above ruled both nulls out, got: {errors:?}"
+    );
+}
+
+/// An arm with several conditions failed only when all of them did, so
+/// every one of their inverses holds below it.
+#[test]
+fn every_condition_of_a_failed_arm_holds_inverted_below_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_multi_condition.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a, ?string $b): string {{
+    return match (true) {{
+        null === $a, $b === null => 'missing',
+        default => takesBoth($a, $b),
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(errors.is_empty(), "neither condition held, got: {errors:?}");
+}
+
+/// A failed `instanceof` arm excludes the class it checked.
+#[test]
+fn a_failed_instanceof_arm_excludes_its_class_below_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_instanceof.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(Cat|Dog $pet): string {{
+    return match (true) {{
+        $pet instanceof Cat => 'cat',
+        default => takesDog($pet),
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the arm above ruled the Cat out, got: {errors:?}"
+    );
+}
+
+/// `default` runs only once every other arm failed, wherever it is
+/// written in the list.
+#[test]
+fn a_default_arm_written_first_still_sees_every_other_arm_fail() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_default_first.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a): void {{
+    match (true) {{
+        default => takesString($a),
+        null === $a => null,
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the null arm is tested before the default runs, got: {errors:?}"
+    );
+}
+
+/// Hover inside a later arm reads the same narrowed type the diagnostics
+/// do.
+#[test]
+fn hover_in_a_later_arm_sees_the_inverse_of_the_arms_above_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_hover.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a, Cat|Dog $pet): void {{
+    match (true) {{
+        null === $a, $pet instanceof Cat => null,
+        default =>
+            $a, // <-- here
+    }};
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("string") && !text.contains("?string") && !text.contains("null"),
+        "the arm above ruled the null out, got: {text}"
+    );
+}
+
+/// A `default` written before the hovered arm adds nothing to its narrowing:
+/// only the arms that actually failed above it do.
+#[test]
+fn hover_in_an_arm_below_a_default_sees_the_arms_above_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_hover_after_default.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a): void {{
+    match (true) {{
+        default => null,
+        null === $a => null,
+        true =>
+            $a, // <-- here
+    }};
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("string") && !text.contains("?string") && !text.contains("null"),
+        "the arm above ruled the null out, and the default before it changed nothing, got: {text}"
+    );
+}
+
+/// The failed arms prove nothing about a variable they never tested.
+#[test]
+fn a_failed_arm_does_not_narrow_a_variable_it_did_not_test() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_untested.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a, ?string $b): string {{
+    return match (true) {{
+        null === $a => 'no a',
+        default => takesBoth($a, $b),
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "only `$a` was ruled non-null, got: {errors:?}"
+    );
+    assert!(
+        errors[0].contains("$b"),
+        "the error is about `$b`, got: {errors:?}"
+    );
+}
+
+/// An arm's own condition does not leak into the arms below it: they run
+/// when it failed, not when it held.
+#[test]
+fn an_arm_condition_does_not_narrow_the_arms_below_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_no_leak.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a): void {{
+    match (true) {{
+        $a !== null => takesString($a),
+        default => takesString($a),
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "the default runs only when `$a` is null, got: {errors:?}"
+    );
+}
+
+/// An arm fails on every value other than `true`, so a condition that is
+/// not a boolean proves nothing by failing: `5` fails it as well as `0`.
+#[test]
+fn a_failed_arm_with_a_non_boolean_condition_proves_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_non_boolean.php";
+    let content = format!(
+        r#"<?php
+declare(strict_types=1);
+{MATCH_BODY_SCAFFOLD}
+function label(int $count): void {{
+    match (true) {{
+        $count => null,
+        default => takesString($count),
+    }};
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.len() == 1 && errors[0].contains("got int"),
+        "`$count` is still any int below the arm, got: {errors:?}"
+    );
+}
+
+/// The same for hover: an object is never `true`, so failing the arm does
+/// not make it `null`.
+#[test]
+fn hover_below_a_failed_non_boolean_arm_keeps_the_type() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_non_boolean_hover.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?Cat $cat): void {{
+    match (true) {{
+        $cat => null,
+        default =>
+            $cat, // <-- here
+    }};
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("Cat"),
+        "an object fails the arm too, so it is not ruled out, got: {text}"
+    );
+}
+
+/// The value of the `match` sees the same narrowing in a `default` written
+/// first.
+#[test]
+fn the_match_value_from_a_default_written_first_sees_the_other_arms_fail() {
+    let backend = create_test_backend();
+    let uri = "file:///match_value_default_first.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(?string $a): void {{
+    $label = match (true) {{
+        default => $a,
+        null === $a => 'none',
+    }};
+    takesString($label);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the null arm is tested before the default runs, got: {errors:?}"
+    );
+}
+
+/// Two failed arms that test the same variable both narrow the value of the
+/// `match`, rather than the later one replacing the earlier.
+#[test]
+fn the_match_value_sees_every_failed_arm_on_the_same_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///match_value_two_arms.php";
+    let content = format!(
+        r#"<?php
+{MATCH_BODY_SCAFFOLD}
+function label(Cat|Dog|null $pet): string {{
+    $dog = match (true) {{
+        $pet instanceof Cat => new Dog(),
+        null === $pet => new Dog(),
+        default => $pet,
+    }};
+    return takesDog($dog);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "both the Cat and the null were ruled out, got: {errors:?}"
+    );
+}
+
 // ─── A helper that bails out on its condition proves the other half ─────────
 
 const BAIL_SCAFFOLD: &str = r#"

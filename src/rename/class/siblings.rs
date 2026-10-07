@@ -1,56 +1,59 @@
-//! The imports a moved file needs for the siblings it reached through the
-//! namespace it is leaving.
+//! The imports a moved `namespace` block needs for the siblings it reached
+//! through the namespace it is leaving.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::completion::use_edit::UseBlockInfo;
-use crate::symbol_map::{ClassRefContext, SymbolKind};
+use crate::symbol_map::{ClassRefContext, SymbolKind, SymbolMap};
+
+use super::rewrite::FileRewrite;
 
 impl Backend {
-    /// The imports the moved file needs for the names it used to reach
-    /// through its own namespace.
+    /// The imports the moved `namespace` block needs for the names it used
+    /// to reach through its own namespace.
     ///
     /// An unqualified class, function, or constant name resolves against
-    /// the namespace the file declares, so a file leaving a populated
+    /// the namespace the block declares, so a block leaving a populated
     /// namespace silently loses every sibling it named that way: the
     /// reference still reads the same, it just points at a name the
     /// destination namespace has never heard of.  Each one becomes an
     /// explicit import of the name it used to reach.
+    ///
+    /// `file` is the block that declares the moved class, and `old_ns` the
+    /// namespace it is leaving.  Only that block is read: another block
+    /// of the file keeps its namespace, so what it names resolves as it
+    /// always did.
     ///
     /// Returns the imports sorted into the order a `use` block puts them
     /// in: classes, then constants, then functions, alphabetical within
     /// each group.
     pub(super) fn sibling_imports_for_move(
         &self,
-        symbol_map: &crate::symbol_map::SymbolMap,
-        content: &str,
-        use_map: &HashMap<String, String>,
+        symbol_map: &SymbolMap,
+        file: &FileRewrite,
         old_ns: Option<&str>,
     ) -> Vec<SiblingImport> {
-        // Only the first `namespace` declaration is rewritten, so in a
-        // file that declares several there is no single old namespace to
-        // resolve the unqualified names against.
-        if symbol_map
-            .spans
-            .iter()
-            .filter(|span| matches!(span.kind, SymbolKind::NamespaceDeclaration { .. }))
-            .count()
-            > 1
-        {
-            return Vec::new();
-        }
+        let content = file.content.as_str();
+        let use_map = &file.use_map;
+        let block_spans = || {
+            symbol_map.spans.iter().filter(|span| {
+                file.block.is_none_or(|(start, end)| {
+                    span.start as usize >= start && span.end as usize <= end
+                })
+            })
+        };
 
-        // Whatever the file declares itself travels with it.  Classes,
+        // Whatever the block declares itself travels with it.  Classes,
         // functions, and constants are three separate PHP namespaces, so
-        // a file declaring `function helper()` says nothing about the
+        // a block declaring `function helper()` says nothing about the
         // class `Helper` it names.
         let mut declared_classes: HashSet<String> = HashSet::new();
         let mut declared_functions: HashSet<String> = HashSet::new();
         let mut declared_constants: HashSet<&str> = HashSet::new();
-        for span in &symbol_map.spans {
+        for span in block_spans() {
             match &span.kind {
                 SymbolKind::ClassDeclaration { name } => {
                     declared_classes.insert(name.to_lowercase());
@@ -75,7 +78,7 @@ impl Backend {
         let mut imports: Vec<SiblingImport> = Vec::new();
         let mut seen: HashSet<(SiblingKind, String)> = HashSet::new();
 
-        for span in &symbol_map.spans {
+        for span in block_spans() {
             let (kind, name) = match &span.kind {
                 // A prose-tolerant `@see` target is not worth an import:
                 // it may name anything, and an unresolvable one is not an
@@ -231,21 +234,22 @@ pub(super) struct SiblingImport {
     pub(super) statement: String,
 }
 
-/// Place `imports` in the file's existing `use` block.
+/// Place `imports` in the `use` block of the `namespace` block `file`
+/// stands for.
 ///
 /// The positions are all computed against the unmodified block, so
 /// imports that would land on the same line are merged into a single
 /// edit: two zero-width edits sharing an offset land in whichever order
 /// the client applies them.
 pub(super) fn build_sibling_import_edits(
-    content: &str,
+    file: &FileRewrite,
     imports: &[SiblingImport],
 ) -> Vec<TextEdit> {
     if imports.is_empty() {
         return Vec::new();
     }
 
-    let use_block = crate::completion::use_edit::analyze_use_block(content);
+    let use_block = crate::completion::use_edit::analyze_use_block_in(&file.content, file.block);
 
     let mut by_line: BTreeMap<u32, Vec<&SiblingImport>> = BTreeMap::new();
     for import in imports {

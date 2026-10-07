@@ -115,6 +115,41 @@ impl<'a> LineIndex<'a> {
     }
 }
 
+thread_local! {
+    /// Line table for the content a diagnostic pass is converting ranges
+    /// for: `(content ptr, content len, line starts)`.
+    static PASS_LINES: std::cell::RefCell<Option<(usize, usize, Vec<usize>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Keeps one line table for `content` live on this thread, so every
+/// [`byte_range_to_lsp_range`] call on that same content answers from it
+/// instead of rescanning from byte 0. Restores the previous table on drop.
+///
+/// Synchronous use only: do not hold it across an `.await`.
+pub(crate) struct PassLineTable {
+    prev: Option<(usize, usize, Vec<usize>)>,
+}
+
+impl PassLineTable {
+    pub(crate) fn new(content: &str) -> Self {
+        let table = (
+            content.as_ptr() as usize,
+            content.len(),
+            line_starts(content),
+        );
+        Self {
+            prev: PASS_LINES.with(|c| c.borrow_mut().replace(table)),
+        }
+    }
+}
+
+impl Drop for PassLineTable {
+    fn drop(&mut self) {
+        PASS_LINES.with(|c| *c.borrow_mut() = self.prev.take());
+    }
+}
+
 /// The line table a [`LineIndex`] is built on: the byte offset of the first
 /// character of each line, starting with `0`.
 ///
@@ -299,6 +334,17 @@ pub(crate) fn byte_offset_to_utf16_col(line: &str, byte_offset: usize) -> u32 {
 
 /// Convert a byte offset range to an LSP `Range`.
 pub(crate) fn byte_range_to_lsp_range(content: &str, start: usize, end: usize) -> Range {
+    let cached = PASS_LINES.with(|c| {
+        let c = c.borrow();
+        let (ptr, len, starts) = c.as_ref()?;
+        (*ptr == content.as_ptr() as usize && *len == content.len()).then(|| Range {
+            start: position_in(content, starts, start),
+            end: position_in(content, starts, end),
+        })
+    });
+    if let Some(range) = cached {
+        return range;
+    }
     let start_pos = offset_to_position(content, start);
     let end_pos = offset_to_position(content, end);
     Range {
@@ -335,6 +381,20 @@ pub(crate) fn apply_text_edits(content: &str, edits: &[TextEdit]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pass_line_table_matches_uncached_and_ignores_other_content() {
+        let content = "ń = 1;\n\u{1F600}foo();\nbar();\n";
+        let other = "a\nb\nc\n";
+        let expected = byte_range_to_lsp_range(content, 3, content.len() - 2);
+        let expected_other = byte_range_to_lsp_range(other, 2, 5);
+        let _scope = PassLineTable::new(content);
+        assert_eq!(
+            byte_range_to_lsp_range(content, 3, content.len() - 2),
+            expected
+        );
+        assert_eq!(byte_range_to_lsp_range(other, 2, 5), expected_other);
+    }
 
     #[test]
     fn edits_apply_bottom_up_with_utf16_columns() {

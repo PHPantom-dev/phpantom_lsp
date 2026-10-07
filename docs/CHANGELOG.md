@@ -9,13 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Laravel translations are understood across locales.** JSON and PHP language files under `lang/` and `resources/lang/` share navigation, locale and replacement-key completion, and hover with links to each locale's value. Missing keys offer an insertion quick fix when their PHP group file already exists. Contributed by @shuvroroy.
+- **Code that cannot be reached is dimmed.** Statements after a `return`, `throw`, `exit`, `continue`, `break`, or an `if` whose every branch leaves the block are greyed out the way an unused import is. Contributed by @petrovo-as.
+
 ### Changed
+
+#### Performance and memory
+
+- **Indexing Blade templates with no DocBlock is now much faster.** Templates without a DocBlock declaring their variables have those variables inferred from the controllers that render them, and that is now much faster. The work is also spread across every core.
+- **Faster reference counts and hover in untyped code.** Code lenses, hover and diagnostics are faster in projects where untyped methods call other untyped methods.
+- **Code that calls undefined functions is analyzed much faster.** Files full of calls to missing helpers or functions from uninstalled packages no longer take minutes to analyze.
+- **Files with many diagnostics are reported much faster.** Large files that produce thousands of diagnostics no longer spend most of their time locating each one.
+- **Long scripts are analyzed much faster and in far less memory.** A long file of top-level code, such as a legacy procedural script or a generated configuration file, no longer takes minutes and gigabytes of memory to analyze.
+- **Untyped methods in large classes are inferred much faster.** Code that calls methods without a declared return type from a large class, such as a generated one, is no longer slowed down in proportion to the size of the file that declares them.
 
 ### Fixed
 
+- **Moving a class imports what its own `namespace` block used.** In a file with several `namespace` blocks, moving a class, in the editor or with `phpantom_lsp move`, now imports the names its block reached through the old namespace, and no longer imports names another block wrote.
+- **Moving a class changes the right `namespace` block.** When several `namespace` blocks in one file each declare a class with the same short name, moving one of them, in the editor or with `phpantom_lsp move`, no longer rewrites another block's `namespace`.
+- **A function added by a watched file is found right away.** A function declared in a file created or changed on disk no longer keeps being reported as undefined while a diagnostic pass or hover is running.
+- **Global Laravel translation paths are recognised.** Translations registered with `loadTranslationsFrom($path)` now support completion, navigation, hover, and key diagnostics, including when the namespace is explicitly `null`. Analysis also finds translation files when `--project-root` is a relative path. Contributed by @shuvroroy.
+- **Alpine and Vue `:attr` bindings in Blade.** A `:name="…"` attribute on a plain HTML tag is no longer parsed as PHP, so it stops producing syntax errors. Only `<x-…>` component tags evaluate bound attributes.
+- **laravel-ide-helper files are skipped.** `_ide_helper.php` and `_ide_helper_models.php` are no longer indexed, since PHPantom resolves facades and models natively and their stand-in classes only competed with the real ones. List them with a leading `!` in `[indexing] exclude` to index them anyway.
+- **PHP_CodeSniffer only runs on projects that use it.** A `vendor/bin/phpcs` installed by some other package no longer produces coding-standard warnings. PHPCS diagnostics now need `squizlabs/php_codesniffer` in `require-dev`, a PHPCS ruleset file, or a `[phpcs] standard` in `.phpantom.toml`.
+- **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp.
+- **Import edits and unused-import hints respect each `namespace` block.** In a file with several `namespace` blocks, an import in one block no longer hides the "Import class" action in another, and an import only another block uses is now dimmed as unused. New imports from code actions, completion, PHPStan quick-fixes and class moves go into the block that needs them, and renaming or moving a class updates each block's own import.
+- **`analyze` reports the same Blade diagnostics on every run.** In Laravel projects, the diagnostics reported for Blade templates no longer vary between runs, and they now match what the editor shows.
+- **Blade only recognizes the directives your Laravel version has.** A directive newer than the installed Laravel is plain text, the way Blade itself treats it. A `"@context"` key in a JSON-LD block no longer produces a cascade of syntax errors on Laravel versions before 11.
+- **A container binding removed from a service provider stops resolving.** Deleting the last `$this->app->bind(...)` from your providers no longer leaves the old key resolving to its class until restart.
+- **Member actions appear when the selection starts in the indentation.** Getter/setter, property hooks, visibility and other actions on a property or method are now offered with the cursor at column 0, on a whole-line selection, or when the selection begins on the line above.
+- **A `match (true)` arm knows the arms above it did not match.** `match (true) { $name === null => 'none', default => strtoupper($name) }` no longer reports `$name` as possibly `null` in the `default` arm. Hover, completion, and the value of the `match` see the same narrowing, wherever `default` is written. Contributed by @phcorp. Closes #464.
+- **Imports of non-ASCII class names no longer break a file.** An import such as `use App\Models\Øl;` no longer stops the file's diagnostics and code actions.
+- **Files outside the project no longer break indexing.** A PHP file opened from elsewhere, or a file change in another folder of the editor's workspace, no longer stops the server when the configuration changes or drops the other file changes reported with it.
+- **Blade `@break` and `@continue` keep their condition.** `@break($done)` and `@continue($skip)` in a loop now only leave the iteration when the condition holds, instead of being read as an unconditional jump.
 - **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp. Closes #467.
 - **Type checks narrow properties the way they narrow variables.** `if (\is_resource($this->stream)) { fclose($this->stream); }` on a `resource|null` property no longer reports "expects resource, got resource|null". Every type-check function now narrows a property, with or without a leading backslash. Contributed by @phcorp. Closes #466.
 - **`\extract()` and `\compact()` are recognised with a leading backslash.** Variables they define or read are no longer reported as undefined or unused.
+- **A Blade template's first import no longer breaks the view.** When a template's first line opens a block, such as `@if` or a component tag, completing a class adds its `@use` above that line instead of inside the block, where the view would no longer compile. A template that opens with `@php` gets the import as a `use` statement inside that block.
+- **Unused `@use` imports in Blade templates are dimmed.** A `@use` directive that nothing in the template uses is now shown as unused, the way an unused PHP import is, and `phpantom_lsp fix` removes it.
+- **A `@use` group import wrapped over several lines no longer shifts a Blade template.** Hover, diagnostics and go-to-definition no longer land on the wrong line for the rest of a template that wraps a `@use('App\Models\{...}')` list over several lines.
+- **A `match (true)` arm knows the arms above it did not match.** `match (true) { $name === null => 'none', default => strtoupper($name) }` no longer reports `$name` as possibly `null` in the `default` arm. Hover, completion, and the value of the `match` see the same narrowing, wherever `default` is written. Contributed by @phcorp.
 
 ## [0.11.0] - 2026-10-05
 

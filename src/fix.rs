@@ -42,7 +42,7 @@ use crate::analyse::{
     Colour, OpenedProject, OutputFormat, TableRow, dispatch_report, github_annotation,
     note_plain_php_project, open_project, print_box, print_success_box, print_table, progress_bar,
 };
-use crate::code_actions::build_line_deletion_edit;
+use crate::code_actions::{build_line_deletion_edit, build_use_directive_deletion_edit};
 use crate::parser::with_parse_cache;
 use crate::text_position::apply_text_edits;
 use crate::virtual_members::with_active_resolved_class_cache;
@@ -172,9 +172,26 @@ pub fn fix_unused_imports(
         .collect();
     let all_ranges: Vec<Range> = diagnostics.iter().map(|d| d.range).collect();
 
+    // A template's `@use` directive is removed as the directive it is
+    // written as, not as a line of PHP.
+    let template = backend.is_blade_file(uri);
     let mut edits: Vec<TextEdit> = diagnostics
         .iter()
-        .map(|d| build_line_deletion_edit(content, &d.range, &removed_import_lines, &all_ranges))
+        .map(|d| {
+            template
+                .then(|| {
+                    build_use_directive_deletion_edit(
+                        content,
+                        &d.range,
+                        &removed_import_lines,
+                        &all_ranges,
+                    )
+                })
+                .flatten()
+                .unwrap_or_else(|| {
+                    build_line_deletion_edit(content, &d.range, &removed_import_lines, &all_ranges)
+                })
+        })
         .collect();
 
     // Sort edits in reverse order so byte offsets remain valid as we

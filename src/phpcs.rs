@@ -7,17 +7,18 @@
 //!
 //! ## Auto-detection
 //!
-//! When `command` is unset, PHPantom checks whether
-//! `squizlabs/php_codesniffer` is in `require-dev` and resolves the
-//! `phpcs` binary via Composer's bin-dir, then falls back to `$PATH`.
-//! Set `command = ""` to explicitly disable PHPCS.
+//! When `command` is unset, PHPantom runs PHPCS only if the project
+//! lists `squizlabs/php_codesniffer` in `require-dev`, has a PHPCS
+//! ruleset file, or sets `standard`. It then resolves the `phpcs`
+//! binary via Composer's bin-dir, falling back to `$PATH`. Set
+//! `command = ""` to explicitly disable PHPCS.
 //!
 //! ## Configuration (`.phpantom.toml`)
 //!
 //! ```toml
 //! [phpcs]
 //! # Command/path for phpcs. When unset, auto-detected via
-//! # Composer's bin-dir (from require-dev), then $PATH.
+//! # Composer's bin-dir, then $PATH, for projects that use PHPCS.
 //! # Set to "" to disable.
 //! # command = "vendor/bin/phpcs"
 //!
@@ -46,6 +47,7 @@ use std::time::Duration;
 
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 
+use crate::composer::ComposerPackage;
 use crate::config::PhpcsConfig;
 use crate::process::paths_match;
 
@@ -67,21 +69,44 @@ pub(crate) struct ResolvedPhpcs {
 /// Resolution rules:
 /// - Config value `Some("")` (empty string) → disabled (`None`).
 /// - Config value `Some(cmd)` → use `cmd` as-is (user override).
-/// - Config value `None` → auto-detect: try `<bin_dir>/phpcs` under
-///   the workspace root, then search `$PATH`.
+/// - Config value `None` → auto-detect, but only when a `standard` is
+///   configured or [`project_uses_phpcs`] says so: try
+///   `<bin_dir>/phpcs` under the workspace root, then search `$PATH`.
 pub(crate) fn resolve_phpcs(
     workspace_root: Option<&Path>,
     config: &PhpcsConfig,
     bin_dir: Option<&str>,
+    composer_json: Option<&ComposerPackage>,
 ) -> Option<ResolvedPhpcs> {
     match config.command.as_deref() {
         Some("") => None,
         Some(cmd) => Some(ResolvedPhpcs {
             path: PathBuf::from(cmd),
         }),
-        None => crate::process::auto_detect_binary(workspace_root, bin_dir, "phpcs")
-            .map(|path| ResolvedPhpcs { path }),
+        None => {
+            if config.standard.is_none() && !project_uses_phpcs(workspace_root, composer_json) {
+                return None;
+            }
+            crate::process::auto_detect_binary(workspace_root, bin_dir, "phpcs")
+                .map(|path| ResolvedPhpcs { path })
+        }
     }
+}
+
+/// Whether the project's own metadata says it uses PHP_CodeSniffer.
+///
+/// A `vendor/bin/phpcs` on disk is not evidence: packages such as
+/// coding-standard bundles or mail libraries pull
+/// `squizlabs/php_codesniffer` in transitively, and running it without
+/// a ruleset reports against PHPCS's built-in default standard. A
+/// direct `require-dev` entry or a ruleset file is.
+pub(crate) fn project_uses_phpcs(
+    workspace_root: Option<&Path>,
+    composer_json: Option<&ComposerPackage>,
+) -> bool {
+    composer_json.is_some_and(|package| {
+        crate::composer::has_require_dev(package, "squizlabs/php_codesniffer")
+    }) || workspace_root.is_some_and(has_project_config)
 }
 
 // ── PHPCS execution ─────────────────────────────────────────────────
@@ -629,7 +654,7 @@ mod tests {
             standard: None,
             timeout: None,
         };
-        let result = resolve_phpcs(None, &config, None);
+        let result = resolve_phpcs(None, &config, None, None);
         assert!(result.is_none());
     }
 
@@ -640,9 +665,65 @@ mod tests {
             standard: None,
             timeout: None,
         };
-        let result = resolve_phpcs(None, &config, None);
+        let result = resolve_phpcs(None, &config, None, None);
         assert!(result.is_some());
         assert_eq!(result.unwrap().path, PathBuf::from("custom/phpcs"));
+    }
+
+    #[test]
+    fn auto_detect_ignores_a_transitively_installed_binary() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("vendor/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("phpcs"), "").unwrap();
+
+        // A dependency pulled squizlabs/php_codesniffer in, but the
+        // project itself never asked for it.
+        let package: ComposerPackage =
+            r#"{"require": {"eduardokum/laravel-mail-auto-embed": "^2.0"}}"#
+                .parse()
+                .unwrap();
+        let config = PhpcsConfig::default();
+        assert!(resolve_phpcs(Some(dir.path()), &config, None, Some(&package)).is_none());
+        assert!(resolve_phpcs(Some(dir.path()), &config, None, None).is_none());
+    }
+
+    #[test]
+    fn auto_detect_accepts_require_dev_ruleset_or_standard() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("vendor/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("phpcs"), "").unwrap();
+        let config = PhpcsConfig::default();
+
+        let package: ComposerPackage = r#"{"require-dev": {"squizlabs/php_codesniffer": "^3.0"}}"#
+            .parse()
+            .unwrap();
+        assert_eq!(
+            resolve_phpcs(Some(dir.path()), &config, None, Some(&package))
+                .unwrap()
+                .path,
+            bin.join("phpcs")
+        );
+
+        let with_standard = PhpcsConfig {
+            standard: Some("PSR12".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_phpcs(Some(dir.path()), &with_standard, None, None)
+                .unwrap()
+                .path,
+            bin.join("phpcs")
+        );
+
+        std::fs::write(dir.path().join("phpcs.xml.dist"), "").unwrap();
+        assert_eq!(
+            resolve_phpcs(Some(dir.path()), &config, None, None)
+                .unwrap()
+                .path,
+            bin.join("phpcs")
+        );
     }
 
     // ── PhpcsConfig helpers ─────────────────────────────────────────

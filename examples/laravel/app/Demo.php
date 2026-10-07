@@ -761,12 +761,25 @@ class Demo
         request()->routeIs('bakeries.*');
 
         // Translation Keys
+        // Ctrl+Click a JSON key to reach its exact declaration; find
+        // references from lang/en.json to return to its call sites.
+        __('Fresh bread for :name', ['name' => 'Ada']);
+
+        // Try: complete the locale argument or a replacement-array key.
+        // Hover shows the English and French values with links to both files.
+        __('Fresh bread for :name', replace: ['name' => 'Ada'], locale: 'fr');
+        // Try: change this to 'messages.new_key' and apply the insertion quick fix.
         __('messages.welcome');
         trans('auth.failed');
         trans_choice('messages.notifications', 5);
         Lang::get('pagination.next');
         Lang::has('validation.required');
         Lang::hasForLocale('validation.required', 'en');
+
+        // DemoServiceProvider registers resources/bakery-lang with the
+        // one-argument loadTranslationsFrom() form. Try completing this key
+        // or Ctrl+Click to reach its declaration there.
+        __('bakery.greeting', ['name' => 'Ada']);
 
         // The framework declares string|array|null for all three helpers,
         // because a key may name a whole group and the keyless form hands

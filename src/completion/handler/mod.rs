@@ -363,6 +363,13 @@ impl Backend {
                 // `ensure_workspace_indexed` → `update_ast` → write lock.
                 let is_laravel = self.resolved_class_cache.read().is_laravel();
                 if is_laravel
+                    && let Some(code) = code_ctx.as_ref()
+                    && let Some(response) =
+                        self.try_translation_argument_completion(&content, position, code, &ctx)
+                {
+                    return Ok(Some(response));
+                }
+                if is_laravel
                     && matches!(
                         string_ctx,
                         StringContext::InStringLiteral | StringContext::NotInString

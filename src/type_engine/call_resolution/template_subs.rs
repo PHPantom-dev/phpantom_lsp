@@ -637,7 +637,7 @@ fn walk_closure_body_locals(
     closure_text: &str,
     param_types: &HashMap<String, Vec<ResolvedType>>,
     ctx: &ResolutionCtx<'_>,
-) -> Option<AtomMap<Vec<ResolvedType>>> {
+) -> Option<crate::type_engine::variable::forward_walk::Locals> {
     let trimmed = closure_text.trim().trim_end_matches(';');
     let wrapped = format!("<?php $__closure = {trimmed};");
 

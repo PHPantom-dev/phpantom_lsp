@@ -1051,3 +1051,531 @@ async fn rename_exception_class_reaches_catch_and_throws() {
             .replace("catch (UserException", "catch (AccountException"),
     );
 }
+
+// ─── Several namespace blocks ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn rename_class_rewrites_each_namespace_blocks_own_import() {
+    // Each block's import is rewritten against that block's own imports:
+    // the new short name only collides in the block that imports it.
+    let backend = create_test_backend();
+    let uri_a = Url::parse("file:///src/OldName.php").unwrap();
+    let uri_b = Url::parse("file:///src/NewName.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Usage.php").unwrap();
+
+    let text_a = concat!("<?php\n", "namespace Ns\\A;\n", "\n", "class OldName {}\n");
+    let text_b = concat!("<?php\n", "namespace Ns\\B;\n", "\n", "class NewName {}\n");
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace First {\n",
+        "    use Ns\\A\\OldName;\n",
+        "    function first(OldName $a): void {}\n",
+        "}\n",
+        "namespace Second {\n",
+        "    use Ns\\A\\OldName;\n",
+        "    use Ns\\B\\NewName;\n",
+        "    function second(OldName $a, NewName $b): void {}\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri_a, text_a).await;
+    open_php(&backend, &uri_b, text_b).await;
+    open_php(&backend, &uri_usage, text_usage).await;
+
+    let ws = rename(&backend, &uri_a, 3, 6, "NewName")
+        .await
+        .expect("Expected a workspace edit for the class rename");
+    let result = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace First {\n",
+            "    use Ns\\A\\NewName;\n",
+            "    function first(NewName $a): void {}\n",
+            "}\n",
+            "namespace Second {\n",
+            "    use Ns\\A\\NewName as NewNameAlias;\n",
+            "    use Ns\\B\\NewName;\n",
+            "    function second(NewNameAlias $a, NewName $b): void {}\n",
+            "}\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_adds_the_import_to_the_block_that_needs_it() {
+    // The block that reached the class through its own namespace gets the
+    // new import; the block that already imported it has that import
+    // rewritten instead.
+    let backend = create_test_backend();
+    let uri_decl = Url::parse("file:///src/Widget.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Usage.php").unwrap();
+
+    let text_decl = concat!("<?php\n", "namespace Acme;\n", "\n", "class Widget {}\n");
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Other {\n",
+        "    use Acme\\Widget;\n",
+        "    function other(Widget $w): void {}\n",
+        "}\n",
+        "namespace Acme {\n",
+        "    function acme(Widget $w): void {}\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri_decl, text_decl).await;
+    open_php(&backend, &uri_usage, text_usage).await;
+
+    let ws = rename(&backend, &uri_decl, 3, 6, "Vendor\\Widget")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace Other {\n",
+            "    use Vendor\\Widget;\n",
+            "    function other(Widget $w): void {}\n",
+            "}\n",
+            "namespace Acme {\n",
+            "\n",
+            "use Vendor\\Widget;\n",
+            "    function acme(Widget $w): void {}\n",
+            "}\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_rewrites_the_block_that_declares_the_class() {
+    // Both blocks declare `Foo`; the move names the second one, so the
+    // first block's `namespace` statement has to stay as it is.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A { class Foo {} }\n",
+        "namespace B { class Foo {} }\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 2, 20, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace A { class Foo {} }\n",
+            "namespace C { class Foo {} }\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_from_the_first_block_leaves_the_second_block_alone() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A { class Foo {} }\n",
+        "namespace B { class Foo {} }\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 1, 20, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace C { class Foo {} }\n",
+            "namespace B { class Foo {} }\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_out_of_a_named_block_after_a_global_block_rewrites_the_named_block() {
+    // The global block has no `namespace` name to find, so the class the
+    // move names is not the first `Foo` in the file.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace { class Foo {} }\n",
+        "namespace B { class Foo {} }\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 2, 20, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace { class Foo {} }\n",
+            "namespace C { class Foo {} }\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_rewrites_the_statement_of_the_unbraced_section_that_declares_the_class() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A;\n",
+        "class Foo {}\n",
+        "namespace B;\n",
+        "class Foo {}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 4, 8, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace A;\n",
+            "class Foo {}\n",
+            "namespace C;\n",
+            "class Foo {}\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_rewrites_the_block_of_a_namespace_that_is_declared_twice() {
+    // Naming the namespace does not say which of its blocks holds the
+    // class, so the class's own position has to.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A { class Foo {} }\n",
+        "namespace A { class Bar {} }\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 2, 20, "C\\Bar")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace A { class Foo {} }\n",
+            "namespace C { class Bar {} }\n",
+        )
+    );
+}
+
+/// Open `text` beside a file declaring `B\Helper`, move the `Foo` named on
+/// `line` to `C\Foo`, and return the file as the move leaves it.
+async fn move_foo_beside_b_helper(text: &str, line: u32) -> String {
+    let backend = create_test_backend();
+    let uri_helper = Url::parse("file:///src/B/Helper.php").unwrap();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+
+    open_php(
+        &backend,
+        &uri_helper,
+        concat!("<?php\n", "namespace B;\n", "\n", "class Helper {}\n"),
+    )
+    .await;
+    open_php(&backend, &uri, text).await;
+
+    let character = text
+        .lines()
+        .nth(line as usize)
+        .and_then(|source| source.find("Foo"))
+        .expect("the line names `Foo`") as u32;
+    let ws = rename(&backend, &uri, line, character, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    apply_edits(text, &edits_for_uri(&ws, &uri))
+}
+
+#[tokio::test]
+async fn class_move_imports_the_siblings_its_block_reached_through_the_old_namespace() {
+    // Both blocks name a class `Foo`; only the one being moved leaves `B`,
+    // so only it needs the import for the `Helper` it reached through `B`.
+    let text = concat!(
+        "<?php\n",
+        "namespace A {\n",
+        "    class Foo {}\n",
+        "}\n",
+        "namespace B {\n",
+        "    class Foo\n",
+        "    {\n",
+        "        public function f(): Helper {}\n",
+        "    }\n",
+        "}\n",
+    );
+
+    assert_eq!(
+        move_foo_beside_b_helper(text, 5).await,
+        concat!(
+            "<?php\n",
+            "namespace A {\n",
+            "    class Foo {}\n",
+            "}\n",
+            "namespace C {\n",
+            "\n",
+            "use B\\Helper;\n",
+            "    class Foo\n",
+            "    {\n",
+            "        public function f(): Helper {}\n",
+            "    }\n",
+            "}\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_imports_the_siblings_into_the_first_block_when_it_declares_the_class() {
+    // The block that stays comes last, so the last `namespace` of the
+    // file is not where the import belongs.
+    let text = concat!(
+        "<?php\n",
+        "namespace B {\n",
+        "    class Foo\n",
+        "    {\n",
+        "        public function f(): Helper {}\n",
+        "    }\n",
+        "}\n",
+        "namespace A {\n",
+        "    class Foo {}\n",
+        "}\n",
+    );
+
+    assert_eq!(
+        move_foo_beside_b_helper(text, 2).await,
+        concat!(
+            "<?php\n",
+            "namespace C {\n",
+            "\n",
+            "use B\\Helper;\n",
+            "    class Foo\n",
+            "    {\n",
+            "        public function f(): Helper {}\n",
+            "    }\n",
+            "}\n",
+            "namespace A {\n",
+            "    class Foo {}\n",
+            "}\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_does_not_import_for_a_name_a_global_block_wrote() {
+    // The global block resolves `Helper` as a global class and never went
+    // through `B`, so the move owes it nothing.
+    let text = concat!(
+        "<?php\n",
+        "namespace {\n",
+        "    function g(): Helper {}\n",
+        "}\n",
+        "namespace B {\n",
+        "    class Foo {}\n",
+        "}\n",
+    );
+
+    assert_eq!(
+        move_foo_beside_b_helper(text, 5).await,
+        concat!(
+            "<?php\n",
+            "namespace {\n",
+            "    function g(): Helper {}\n",
+            "}\n",
+            "namespace C {\n",
+            "    class Foo {}\n",
+            "}\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_imports_a_sibling_another_block_imports_under_the_same_name() {
+    // The first block's `use` does not reach the second, where `Helper`
+    // is the one in `B`.
+    let text = concat!(
+        "<?php\n",
+        "namespace A {\n",
+        "    use Other\\Helper;\n",
+        "\n",
+        "    class Foo {}\n",
+        "}\n",
+        "namespace B {\n",
+        "    class Foo\n",
+        "    {\n",
+        "        public function f(): Helper {}\n",
+        "    }\n",
+        "}\n",
+    );
+
+    assert_eq!(
+        move_foo_beside_b_helper(text, 7).await,
+        concat!(
+            "<?php\n",
+            "namespace A {\n",
+            "    use Other\\Helper;\n",
+            "\n",
+            "    class Foo {}\n",
+            "}\n",
+            "namespace C {\n",
+            "\n",
+            "use B\\Helper;\n",
+            "    class Foo\n",
+            "    {\n",
+            "        public function f(): Helper {}\n",
+            "    }\n",
+            "}\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_does_not_import_a_sibling_its_own_block_imports() {
+    // The name never went through `B`, and the first block, which does not
+    // import it, is not the one the move leaves.
+    let text = concat!(
+        "<?php\n",
+        "namespace A {\n",
+        "    class Foo {}\n",
+        "}\n",
+        "namespace B {\n",
+        "    use Other\\Helper;\n",
+        "\n",
+        "    class Foo\n",
+        "    {\n",
+        "        public function f(): Helper {}\n",
+        "    }\n",
+        "}\n",
+    );
+
+    assert_eq!(
+        move_foo_beside_b_helper(text, 7).await,
+        concat!(
+            "<?php\n",
+            "namespace A {\n",
+            "    class Foo {}\n",
+            "}\n",
+            "namespace C {\n",
+            "    use Other\\Helper;\n",
+            "\n",
+            "    class Foo\n",
+            "    {\n",
+            "        public function f(): Helper {}\n",
+            "    }\n",
+            "}\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_imports_a_sibling_declared_in_another_block_of_the_file() {
+    // What a block declares travels with it; what another block of the
+    // same namespace declares stays behind.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace B {\n",
+        "    class Helper {}\n",
+        "}\n",
+        "namespace B {\n",
+        "    class Foo\n",
+        "    {\n",
+        "        public function f(): Helper {}\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 5, 10, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace B {\n",
+            "    class Helper {}\n",
+            "}\n",
+            "namespace C {\n",
+            "\n",
+            "use B\\Helper;\n",
+            "    class Foo\n",
+            "    {\n",
+            "        public function f(): Helper {}\n",
+            "    }\n",
+            "}\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_imports_the_siblings_of_the_unbraced_section_that_declares_the_class() {
+    let text = concat!(
+        "<?php\n",
+        "namespace A;\n",
+        "\n",
+        "class Foo {}\n",
+        "\n",
+        "namespace B;\n",
+        "\n",
+        "class Foo\n",
+        "{\n",
+        "    public function f(): Helper {}\n",
+        "}\n",
+    );
+
+    assert_eq!(
+        move_foo_beside_b_helper(text, 7).await,
+        concat!(
+            "<?php\n",
+            "namespace A;\n",
+            "\n",
+            "class Foo {}\n",
+            "\n",
+            "namespace C;\n",
+            "\n",
+            "use B\\Helper;\n",
+            "\n",
+            "class Foo\n",
+            "{\n",
+            "    public function f(): Helper {}\n",
+            "}\n",
+        )
+    );
+}

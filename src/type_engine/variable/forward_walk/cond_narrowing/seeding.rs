@@ -1,5 +1,52 @@
 use super::*;
 
+/// The scope keys `expr` can narrow: every variable it names that the
+/// scope holds, and every compound key read through one of them.
+///
+/// Each narrowing extractor recognises its subject in the expression's own
+/// syntax, so a key whose variable the expression never mentions is one no
+/// extractor can match. Testing only these keeps the cost of a condition
+/// proportional to the condition rather than to the scope, which at the top
+/// level of a long script holds every variable assigned so far.
+///
+/// A compound key that is not rooted at a variable (`self::$cache`,
+/// `Config::get()`) is always included, since its spelling names no
+/// variable to look for.
+pub(crate) fn scope_keys_named_by(expr: &Expression<'_>, scope: &ScopeState) -> Vec<Atom> {
+    struct NamedVariables;
+    impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<Atom>> for NamedVariables {
+        fn walk_in_expression(&self, node: &'ast Expression<'arena>, names: &mut Vec<Atom>) {
+            if let Expression::Variable(Variable::Direct(dv)) = node {
+                let name = atom(bytes_to_str(dv.name));
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+    }
+    let mut named = Vec::new();
+    mago_syntax::walker::Walker::walk_expression(&NamedVariables, expr, &mut named);
+
+    let mut keys: Vec<Atom> = named
+        .iter()
+        .filter(|name| scope.locals.contains_key(name))
+        .copied()
+        .collect();
+    for key in scope.locals.compound_keys() {
+        let root = key
+            .strip_prefix('$')
+            .map(|rest| &key[..1 + rest.find(|c: char| !is_name_char(c)).unwrap_or(rest.len())]);
+        if root.is_none_or(|root| named.iter().any(|name| name.as_str() == root)) {
+            keys.push(*key);
+        }
+    }
+    keys
+}
+
+fn is_name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || !c.is_ascii()
+}
+
 /// Extract variable names referenced in instanceof / is_a / get_class
 /// conditions.  This catches variables that are not yet in scope but
 /// are used in guard clauses like `if (!$x instanceof Foo) { return; }`.
@@ -94,13 +141,12 @@ pub(crate) fn is_synthetic_key(key: &str) -> bool {
 /// Called after loop merges and other scope transitions where
 /// condition-based narrowing no longer holds.
 pub(crate) fn strip_synthetic_property_keys(scope: &mut ScopeState) {
-    scope.locals.retain(|key, _| !is_synthetic_key(key));
+    scope.locals.retain_compound(|key| !is_synthetic_key(key));
     // A check on a property path is narrowing too, so a boolean that
     // stands for one is dropped alongside the key it describes.
-    scope.assertions.retain(|_, checks| {
-        checks.retain(|c| !is_synthetic_key(&c.subject));
-        !checks.is_empty()
-    });
+    scope
+        .assertions
+        .retain_items(|c| !is_synthetic_key(&c.subject));
 }
 
 /// Keep only the synthetic property/array access keys that *every*
@@ -119,7 +165,7 @@ pub(crate) fn retain_synthetic_keys_common_to_all(
     scope: &mut ScopeState,
     surviving: &[&ScopeState],
 ) {
-    scope.locals.retain(|key, _| {
+    scope.locals.retain_compound(|key| {
         !is_synthetic_key(key) || surviving.iter().all(|s| s.locals.contains_key(key))
     });
 }

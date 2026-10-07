@@ -62,6 +62,28 @@ fn offers_all_three_actions_for_regular_property() {
 }
 
 #[test]
+fn offers_actions_when_range_starts_in_indentation() {
+    let backend = create_test_backend();
+    let content = "<?php\nclass Foo {\n    private string $name;\n}";
+    let uri = "file:///test.php";
+    let line_start = Position::new(2, 0);
+    let ranges = [
+        Range::new(line_start, line_start),
+        Range::new(line_start, Position::new(3, 0)),
+        Range::new(Position::new(2, 2), Position::new(2, 2)),
+        Range::new(Position::new(1, 11), Position::new(3, 0)),
+    ];
+    for range in ranges {
+        let actions = get_code_actions_in_range(&backend, uri, content, range);
+        let titles = generate_titles(&actions);
+        assert!(
+            titles.iter().any(|t| t == "Generate getter"),
+            "range {range:?} should offer getter: {titles:?}"
+        );
+    }
+}
+
+#[test]
 fn readonly_property_only_offers_getter() {
     let backend = create_test_backend();
     let content = "<?php\nclass Foo {\n    public readonly int $id;\n}";

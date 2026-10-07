@@ -13,7 +13,7 @@
 use tower_lsp::lsp_types::{Range, TextEdit};
 
 use crate::blade::use_directive::{
-    first_string_literal, group_members, imported_name, use_directive_arguments,
+    first_string_literal, group_members, imported_name, use_directives,
 };
 use crate::text_position::offset_to_position;
 
@@ -29,11 +29,11 @@ pub(super) fn collect_use_directive_edits(
     moved: &dyn Fn(&str) -> Option<String>,
     edits: &mut Vec<TextEdit>,
 ) {
-    for (arguments_at, arguments) in use_directive_arguments(content) {
-        let Some((literal_at, literal)) = first_string_literal(arguments) else {
+    for directive in use_directives(content) {
+        let Some((literal_at, literal)) = first_string_literal(directive.arguments) else {
             continue;
         };
-        let literal_at = arguments_at + literal_at;
+        let literal_at = directive.arguments_at + literal_at;
 
         let Some((name_at, name)) = imported_name(literal) else {
             continue;

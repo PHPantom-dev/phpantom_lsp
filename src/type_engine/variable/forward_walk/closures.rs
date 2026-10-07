@@ -152,8 +152,10 @@ pub(crate) fn seed_closure_captures(
     use_clause: Option<&ClosureUseClause<'_>>,
 ) {
     let carry_paths_through = |root: &str, closure_scope: &mut ScopeState| {
-        for (key, types) in outer.locals.iter() {
-            if crate::type_engine::types::narrowing::key_reads_variable(key.as_str(), root) {
+        for key in outer.locals.compound_keys() {
+            if crate::type_engine::types::narrowing::key_reads_variable(key.as_str(), root)
+                && let Some(types) = outer.locals.get(key)
+            {
                 closure_scope.set(key.as_str(), types.clone());
             }
         }

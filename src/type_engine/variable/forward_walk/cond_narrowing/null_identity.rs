@@ -186,29 +186,42 @@ pub(super) fn collect_identity_comparisons<'b>(
 /// is the guarded state: a holder that is no longer nullable is one the
 /// condition ruled the null out of, whichever shape the guard was written
 /// in (`instanceof`, `!== null`, a bare truthy test, an assertion helper).
+///
+/// `entry` is the scope's variable map from before the condition was
+/// applied. A trigger reads nothing but its holder's value, so only a
+/// holder the condition changed can have started to meet one; looking up
+/// just those keeps a condition from testing every proof the scope has
+/// accumulated.
 pub(super) fn apply_non_null_implication_narrowing(
     scope: &mut ScopeState,
+    entry: &Locals,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    if !scope.non_null_implications.is_empty() {
-        let proven: Vec<Atom> = scope
-            .non_null_implications
-            .iter()
-            .filter(|(holder, _)| !scope_value_is_nullable(holder, scope))
-            .flat_map(|(_, implieds)| implieds.iter().copied())
-            .collect();
-        for implied in proven {
-            seed_synthetic_key_if_needed(&implied, scope, ctx);
-            strip_null_from_scope(&implied, scope);
-        }
-    }
-
-    if scope.implied_narrowings.is_empty() {
+    if scope.non_null_implications.is_empty() && scope.implied_narrowings.is_empty() {
         return;
     }
-    let proven: Vec<(Atom, Vec<ResolvedType>)> = scope
-        .implied_narrowings
+    let mut changed: Vec<Atom> = Vec::new();
+    let _ = scope.locals.diff::<()>(entry, |key, now, _| {
+        if now.is_some() {
+            changed.push(*key);
+        }
+        std::ops::ControlFlow::Continue(())
+    });
+
+    let proven: Vec<Atom> = changed
         .iter()
+        .filter(|holder| !scope_value_is_nullable(holder, scope))
+        .filter_map(|holder| scope.non_null_implications.get(holder))
+        .flat_map(|implieds| implieds.iter().copied())
+        .collect();
+    for implied in proven {
+        seed_synthetic_key_if_needed(&implied, scope, ctx);
+        strip_null_from_scope(&implied, scope);
+    }
+
+    let proven: Vec<(Atom, Vec<ResolvedType>)> = changed
+        .iter()
+        .filter_map(|holder| Some((holder, scope.implied_narrowings.get(holder)?)))
         .flat_map(|(holder, proofs)| {
             proofs
                 .iter()
