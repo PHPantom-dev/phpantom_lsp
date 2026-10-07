@@ -595,15 +595,15 @@ async fn test_completion_method_detail_shows_signature() {
                 Some("void"),
                 "Method detail should show the return type"
             );
-            // label_details.detail is None (detail field handles the
-            // return type display).
+            // label_details.detail repeats the return type inline, for
+            // clients that hide `detail` when a description is present.
             assert_eq!(
                 update
                     .label_details
                     .as_ref()
                     .and_then(|ld| ld.detail.as_deref()),
-                None,
-                "label_details.detail should be None"
+                Some(": void"),
+                "label_details.detail should show the return type inline"
             );
             // label_details.description shows the owning class name
             // (visible in VS Code, ignored by Zed).

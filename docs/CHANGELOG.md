@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Completion shows the return type in JetBrains IDEs.** Method and property suggestions show their return or property type inline (e.g. `findOneByEmail($email): ?User`), where previously only the class name was visible.
+
 ## [0.11.1] - 2026-10-07
 
 ### Added

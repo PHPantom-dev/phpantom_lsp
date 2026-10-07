@@ -400,8 +400,12 @@ pub(crate) fn build_completion_items(
         let class_description = Some(display_class_name(&target_class.name).to_string());
         items.push(CompletionItem {
             label,
+            // The type goes in `label_details.detail` as well as `detail`:
+            // clients such as JetBrains IDEs only render `detail` when
+            // `label_details.description` is absent, so without this the
+            // type would be hidden behind the class name.
             label_details: Some(CompletionItemLabelDetails {
-                detail: None,
+                detail: return_type.as_deref().map(|t| format!(": {t}")),
                 description: class_description,
             }),
             kind: Some(CompletionItemKind::METHOD),
@@ -458,7 +462,7 @@ pub(crate) fn build_completion_items(
         items.push(CompletionItem {
             label: display_name.clone(),
             label_details: Some(CompletionItemLabelDetails {
-                detail: None,
+                detail: detail.as_deref().map(|t| format!(": {t}")),
                 description: class_description,
             }),
             kind: Some(CompletionItemKind::PROPERTY),
