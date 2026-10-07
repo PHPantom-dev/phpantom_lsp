@@ -978,10 +978,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b553-an-unsealed-array-shape-is-checked-as-the-plain-array-it-widens-to" class="md-nav__link">
+  <a href="#b564-two-comparisons-still-read-an-unsealed-array-shape-as-the-plain-array-it-widens-to" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B553. An unsealed array shape is checked as the plain array it widens to
+        B564. Two comparisons still read an unsealed array shape as the plain array it widens to
       </span>
     </span>
   </a>
@@ -1727,10 +1727,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b553-an-unsealed-array-shape-is-checked-as-the-plain-array-it-widens-to" class="md-nav__link">
+  <a href="#b564-two-comparisons-still-read-an-unsealed-array-shape-as-the-plain-array-it-widens-to" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B553. An unsealed array shape is checked as the plain array it widens to
+        B564. Two comparisons still read an unsealed array shape as the plain array it widens to
       </span>
     </span>
   </a>
@@ -1996,41 +1996,46 @@ it and route it through the shared one.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b553-an-unsealed-array-shape-is-checked-as-the-plain-array-it-widens-to">B553. An unsealed array shape is checked as the plain array it widens to<a class="headerlink" href="#b553-an-unsealed-array-shape-is-checked-as-the-plain-array-it-widens-to" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @param array{foo: int, ...} $shape */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function take(array $shape): void {}</span>
+<h3 id="b564-two-comparisons-still-read-an-unsealed-array-shape-as-the-plain-array-it-widens-to">B564. Two comparisons still read an unsealed array shape as the plain array it widens to<a class="headerlink" href="#b564-two-comparisons-still-read-an-unsealed-array-shape-as-the-plain-array-it-widens-to" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @return array{foo: string, ...} */</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function makeOpen(): array { return [&#39;foo&#39; =&gt; &#39;x&#39;]; }</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">take([&#39;buz&#39; =&gt; 42.0]);   // not reported: `foo` is missing</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">take([&#39;foo&#39; =&gt; &#39;one&#39;]);  // not reported: `foo` is an int</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">/** @param array&lt;string, int&gt; $map */</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">function takeMap(array $map): void {}</span>
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">/** @param list{string, int, ...} $values */</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">function takeList(array $values): void {}</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">takeList([1, &#39;demo&#39;, true]); // not reported: the first two entries are the wrong types</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">takeMap(makeOpen());     // not reported: `foo` is a string</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">takeMap([&#39;foo&#39; =&gt; &#39;x&#39;]); // reported</span>
 </code></pre></div>
 <p><code>kind()</code> reads a <code>TypeKind::UnsealedShape</code> as the generic array it widens
-to, <code>non-empty-array&lt;array-key, mixed&gt;</code> for <code>array{foo: int, ...}</code>. The
-shape rules of both type comparisons match on <code>kind()</code>: the
-shape-to-shape rule in <code>is_subtype_of</code> (<code>src/php_type/subtype.rs</code>) and in
-<code>is_type_compatible</code> (<code>src/diagnostics/type_errors/compatibility.rs</code>), and
-<code>missing_required_shape_keys</code>, which names the missing key in the message.
-None of them sees the listed entries, so an unsealed shape on either side
-is held to its widened form alone. As a parameter or <code>@return</code> it accepts
-any non-empty array (<code>[]</code> is still reported, but without naming <code>foo</code>). As
-an argument it reaches a sealed <code>array{foo: string}</code> parameter as an array
-of unknown keys, which the shape rules accept as a maybe. The sealed
-spellings are unaffected.</p>
-<p>This is a regression: 0.10.0 dropped the <code>...</code> and checked the shape as
-sealed, so the missing key was reported.</p>
-<p><strong>Fix:</strong> Read an unsealed side through <code>as_unsealed_shape()</code> in those three
-places. Compare its listed entries the way two shapes are compared (a
-required key is present, a key both sides name holds a value that fits),
-then hold every other entry of the narrower side to the tail's key and
-value types. An unsealed <code>list{…, ...}</code> also keeps the list rules for its
-positional entries.</p>
-<p>Found running the php-typing-conformance suite (<code>arrays_open_shapes.php</code>,
-<code>arrays_unsealed_shape.php</code>, <code>arrays_unsealed_shape_optional_key.php</code>).</p>
+to, so a comparison that matches on <code>kind()</code> never sees the entries the
+shape lists. The shape-to-shape rules in <code>is_subtype_of</code>,
+<code>is_type_compatible</code> and <code>missing_required_shape_keys</code> read it through
+<code>shape_parts()</code> now. Two more places still do not:</p>
+<ul>
+<li>The <code>ArrayShape → typed array</code> rule in <code>is_type_compatible</code>
+  (<code>src/diagnostics/type_errors/compatibility.rs</code>) matches
+  <code>TypeKind::ArrayShape</code>, so an unsealed argument skips it and reaches a
+  typed array parameter as the <code>non-empty-array&lt;array-key, mixed&gt;</code> it
+  widens to, where the <code>mixed</code> tail swallows the listed entries. A sealed
+  literal is held to its entries by that rule, which is why the last line
+  above is reported.</li>
+<li><code>is_subtype_of_typed</code> (<code>src/class_lookup.rs</code>) falls back to its
+  generic-array rules when the structural check says no, and compares two
+  unsealed shapes as the arrays they widen to: <code>array{foo: int, ...}</code> is a
+  subtype of <code>array{foo: string, ...}</code>, which parameter seeding reads as
+  a proven narrowing of the declared type.</li>
+</ul>
+<p><strong>Fix:</strong> Read the argument through <code>shape_parts()</code> in the <code>ArrayShape →
+typed array</code> rule. Hold its listed entries to the parameter's key and
+value types as for a sealed shape, and its tail to them as for the type
+arguments of an array. The rule has to move above the same-base generic
+rule, which answers first for an unsealed argument. In
+<code>is_subtype_of_typed</code>, settle a pair of shapes, either of them unsealed,
+by the entries they list before the generic-array rules. Sharing
+<code>shape_is_subshape</code> with a class-aware element comparison would let it
+follow the class hierarchy into the entries, which it does not for sealed
+shapes either.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
