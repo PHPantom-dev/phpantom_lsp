@@ -984,10 +984,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b570-a-raw-echo-written-inside-literal-braces-is-read-as-an-escaped-echo" class="md-nav__link">
+  <a href="#b571-a-with-no-after-it-is-read-as-a-raw-echo" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B570. A raw echo written inside literal braces is read as an escaped echo
+        B571. A <code>{{!!</code> with no <code>!!}</code> after it is read as a raw echo
       </span>
     </span>
   </a>
@@ -1706,10 +1706,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b570-a-raw-echo-written-inside-literal-braces-is-read-as-an-escaped-echo" class="md-nav__link">
+  <a href="#b571-a-with-no-after-it-is-read-as-a-raw-echo" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B570. A raw echo written inside literal braces is read as an escaped echo
+        B571. A <code>{{!!</code> with no <code>!!}</code> after it is read as a raw echo
       </span>
     </span>
   </a>
@@ -1933,25 +1933,26 @@ not contradict a list.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
-<h3 id="b570-a-raw-echo-written-inside-literal-braces-is-read-as-an-escaped-echo">B570. A raw echo written inside literal braces is read as an escaped echo<a class="headerlink" href="#b570-a-raw-echo-written-inside-literal-braces-is-read-as-an-escaped-echo" title="Permanent link">&para;</a></h3>
+<h3 id="b571-a-with-no-after-it-is-read-as-a-raw-echo">B571. A <code>{{!!</code> with no <code>!!}</code> after it is read as a raw echo<a class="headerlink" href="#b571-a-with-no-after-it-is-read-as-a-raw-echo" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>{{!!$html!!}}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>&lt;p&gt;{{!!$flag}}&lt;/p&gt;
 </code></pre></div>
-<p>Blade matches echo tags longest-opening-first, so this is a literal <code>{</code>, a
-raw echo of <code>$html</code>, and a literal <code>}</code>, which is how the preprocessor lowers
-it. Hovering the <code>!!</code> of the raw opener shows the hover of <code>$html</code>, and the
-braces around the echo show <code>e()</code>.</p>
-<p><code>mode_at</code> (<code>src/blade/directive_completion.rs</code>) reads the <code>{{</code> of <code>{{!!</code> as
-an escaped echo opener and scans on to the next <code>}}</code>, so
-<code>blade_echo_delimiter_at</code> (<code>src/blade/echo_delimiter.rs</code>) never sees the raw
-opener inside it. <code>is_echo_start</code> and <code>echo_delimiters</code>
-(<code>src/blade/signature.rs</code>) read it the same way.</p>
-<p><strong>Fix:</strong> Make the three scanners agree with <code>echo::open</code>
-(<code>src/blade/preprocessor/echo.rs</code>): a <code>{{</code> followed by <code>!!</code> is a literal
-brace, and the raw echo starts at the second <code>{</code>. <code>mode_at</code> also feeds the
-component-tag and block-pairing checks (<code>src/blade/component_tags/mod.rs</code>,
-<code>src/blade/blocks.rs</code>) and directive completion, so run those alongside the
-hover tests.</p>
+<p>A double negation written without a space. Blade compiles a raw echo only
+when a <code>!!}</code> follows the <code>{!!</code>, and with none the escaped echo compiles to
+<code>e(!!$flag)</code>. <code>echo::open</code> (<code>src/blade/preprocessor/echo.rs</code>) reads every
+<code>{{!!</code> as a literal <code>{</code> and a raw echo, so the template lowers to
+<code>echo $flag}};</code> and reports a cascade of syntax errors. <code>{{ !!$flag }}</code> is
+fine.</p>
+<p><code>open_escaped</code> (the <code>@{{!!</code> form), <code>mode_at</code>
+(<code>src/blade/directive_completion.rs</code>), <code>blade_echo_delimiter_at</code>
+(<code>src/blade/echo_delimiter.rs</code>) and <code>is_echo_start</code>
+(<code>src/blade/signature.rs</code>) apply the same rule, so hover, directive
+completion, the formatter and semantic tokens read the echo as a raw one
+too.</p>
+<p><strong>Fix:</strong> Read a <code>{{!!</code> as a literal brace only when a <code>!!}</code> follows it.
+<code>EchoCloses</code> already answers that for the preprocessor. The scanners ask per
+<code>{</code>, so they need the position of the last <code>!!}</code> worked out once per scan,
+not a search forward from every opener.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
