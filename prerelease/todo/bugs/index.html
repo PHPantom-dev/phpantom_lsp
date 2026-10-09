@@ -1055,17 +1055,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B558. Removing two unused members at the end of a group import breaks the statement
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1766,17 +1755,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B558. Removing two unused members at the end of a group import breaks the statement
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1995,21 +1973,6 @@ declarations. A braced global block has no name for
 move takes the path for a file that had no <code>namespace</code> at all. Write the new
 name after the block's <code>namespace</code> keyword instead, and place the imports the
 former global siblings now need in that block.</p>
-<h3 id="b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement">B558. Removing two unused members at the end of a group import breaks the statement<a class="headerlink" href="#b558-removing-two-unused-members-at-the-end-of-a-group-import-breaks-the-statement" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">use App\Models\{User, Post, Comment};   // only User is used</span>
-</code></pre></div>
-<p>"Remove all unused imports" and <code>phpantom_lsp fix</code> turn this into
-<code>use App\Models\{User,</code>, dropping the closing <code>};</code>. Each member is removed
-on its own by <code>extend_range_for_group_member</code>
-(<code>src/code_actions/remove_unused_import.rs</code>): a member takes the comma after
-it, or the one before it when it is the last, so <code>Post</code> takes <code>Post,</code> and
-<code>Comment</code> takes <code>, Comment</code>. The two edits overlap, and <code>apply_text_edits</code>
-applies the second against text the first already changed. A member has to
-choose its comma knowing the rest of the batch: the one after it while every
-member before it is removed too, the one before it otherwise. That way no
-two removals share a comma. The removal of a template's <code>@use</code> group
-members (<code>group_member_removal</code>, in the same file) already chooses this way.</p>
 
 
 
