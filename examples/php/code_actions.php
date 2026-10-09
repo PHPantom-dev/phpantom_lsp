@@ -17,6 +17,7 @@
 namespace Demo;
 
 use Closure;
+use Couchbase\MutateArrayInsertSpec;
 use Demo\Scaffolding;
 
 // ── Code Action: Import Class ───────────────────────────────────────────────

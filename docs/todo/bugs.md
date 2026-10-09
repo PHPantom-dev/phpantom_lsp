@@ -271,25 +271,3 @@ choose its comma knowing the rest of the batch: the one after it while every
 member before it is removed too, the one before it otherwise. That way no
 two removals share a comma. The removal of a template's `@use` group
 members (`group_member_removal`, in the same file) already chooses this way.
-
-### B571. An import written into a file with no `namespace` lands after code that shares the `<?php` line
-
-**Impact: Low · Complexity: Medium**
-
-```php
-<?php class Foo { public function f(): Helper {} }
-```
-
-With `B\Helper` declared elsewhere, importing it writes `use B\Helper;` on the
-line below, after the class, where it reaches nothing written above it.
-`analyze_use_block_in` (`src/completion/use_edit.rs`) puts the first import
-of a file with no `namespace` on the line `header_insert_line`
-(`src/text_scan.rs`) names, which reads the header a line at a time: a line
-starting `<?php` or `declare(` is all header, whatever follows it on that
-line. The import belongs just after the opening tag, or after the
-`declare(...);` that follows it, the way `FirstImport::Inline` already places
-one after a `namespace` declaration. `insert_namespace_edit`
-(`src/rename/class/layout.rs`) and the "add namespace" fix
-(`src/code_actions/fix_namespace.rs`) read the header through the same
-helper, and a `namespace` statement written after code is a fatal error
-rather than a misplaced import.

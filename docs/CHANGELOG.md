@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Imports and `namespace` statements go ahead of code written on the `<?php` line.** In a file with no `namespace` whose code starts on the same line as the opening tag, or a `declare` after it, a new import or `namespace` statement is now written right after the tag or the `declare` instead of on the next line, below the code it was meant to cover.
 - **Diagnostics appear in editors that do not answer a file-watcher registration.** An editor that never replied to the server's request to watch files, such as CodeLite, showed no diagnostics at all. The request is now only sent to editors that support it, and a missing reply no longer holds anything up.
 
 ## [0.11.1] - 2026-10-07

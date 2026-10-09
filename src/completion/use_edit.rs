@@ -19,7 +19,7 @@ use crate::Backend;
 use crate::blade::use_block::TemplateUseBlock;
 use crate::diagnostics::use_statements::scan_use_statements;
 use crate::text_position::LineIndex;
-use crate::text_scan::skip_php_comment;
+use crate::text_scan::{HeaderEnd, code_follows_on_line, header_end, skip_php_comment};
 use crate::util::short_name;
 
 /// Where the first import of a block that has no `use` statement goes.
@@ -29,9 +29,9 @@ pub(crate) enum FirstImport {
     /// `namespace` declaration, or after `<?php` and any `declare`.
     OwnLine(u32),
     /// Straight after the `{` or `;` that ends the `namespace` declaration,
-    /// because code follows it on the same line.  The line after it is past
-    /// that code, and past the block itself when the block closes on the
-    /// line.
+    /// or after `<?php` and any `declare` in a file with none, because code
+    /// follows it on the same line.  The line after it is past that code,
+    /// and past the block itself when the block closes on the line.
     Inline(Position),
 }
 
@@ -147,8 +147,8 @@ impl UseBlockInfo {
     }
 
     /// Whether an import is written right after the `namespace`
-    /// declaration instead of on a line of its own: the block has no
-    /// imports yet, and code follows its declaration on the same line.
+    /// declaration or the file header instead of on a line of its own: the
+    /// block has no imports yet, and code follows on the same line.
     fn writes_inline(&self) -> bool {
         self.existing.is_empty() && matches!(self.fallback, FirstImport::Inline(_))
     }
@@ -331,7 +331,7 @@ pub(crate) fn analyze_use_block_in(content: &str, block: Option<(usize, usize)>)
     // Fallback: insert after the `namespace` declaration, on the next line
     // or, when code follows the declaration on its own line, straight after
     // it, since the next line is then past that code.  With no namespace,
-    // on the first line the file's header leaves free — which is past any
+    // just past the file's header, which is past any
     // `declare(strict_types=1)`, since PHP requires that to come first.
     let fallback = match (declaration_end, keyword) {
         (Some(end), _) if code_follows_on_line(content, end) => {
@@ -339,7 +339,10 @@ pub(crate) fn analyze_use_block_in(content: &str, block: Option<(usize, usize)>)
         }
         (Some(end), _) => FirstImport::OwnLine(index.position(end).line + 1),
         (None, Some(keyword)) => FirstImport::OwnLine(index.position(keyword).line + 1),
-        (None, None) => FirstImport::OwnLine(crate::text_scan::header_insert_line(content)),
+        (None, None) => match header_end(content) {
+            HeaderEnd::Line(line) => FirstImport::OwnLine(line),
+            HeaderEnd::Inline(end) => FirstImport::Inline(index.position(end)),
+        },
     };
 
     UseBlockInfo {
@@ -388,15 +391,6 @@ fn namespace_declaration_end(content: &str, keyword: usize) -> Option<usize> {
         };
     }
     None
-}
-
-/// Whether code follows `offset` on its line: anything but blanks and a
-/// `//` or `#` comment, which run to the end of the line.  A block comment
-/// counts, since it may run on past the line.
-fn code_follows_on_line(content: &str, offset: usize) -> bool {
-    let rest = content[offset..].trim_start_matches([' ', '\t', '\r']);
-    let line_comment = rest.starts_with("//") || (rest.starts_with('#') && !rest.starts_with("#["));
-    !(rest.is_empty() || rest.starts_with('\n') || line_comment)
 }
 
 impl Backend {

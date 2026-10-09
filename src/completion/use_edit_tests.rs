@@ -309,6 +309,27 @@ fn fallback_ignores_a_comment_between_the_name_and_the_brace() {
 }
 
 #[test]
+fn fallback_after_the_open_tag_when_code_shares_its_line() {
+    let info = analyze_use_block("<?php class Foo { public function f(): Helper {} }\n");
+    assert!(!info.has_namespace);
+    assert_eq!(info.fallback, inline_at(0, 5));
+}
+
+#[test]
+fn fallback_after_a_declare_when_code_shares_its_line() {
+    let info = analyze_use_block("<?php declare(strict_types=1); class Foo {}\n");
+    assert_eq!(info.fallback, inline_at(0, 30));
+    let info = analyze_use_block("<?php\ndeclare(strict_types=1); class Foo {}\n");
+    assert_eq!(info.fallback, inline_at(1, 24));
+}
+
+#[test]
+fn fallback_is_the_next_line_after_a_declare_that_ends_its_line() {
+    let info = analyze_use_block("<?php declare(strict_types=1);\n\nclass Foo {}\n");
+    assert_eq!(info.fallback, FirstImport::OwnLine(1));
+}
+
+#[test]
 fn a_relative_namespace_name_is_not_a_declaration() {
     let info = analyze_use_block("<?php\nnamespace\\Foo\\bar();\n");
     assert!(!info.has_namespace);

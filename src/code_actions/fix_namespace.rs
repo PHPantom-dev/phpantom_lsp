@@ -5,6 +5,8 @@ use crate::composer;
 use crate::diagnostics::namespace_mismatch::{
     namespace_decl_from_content, namespace_mismatch_diagnostic,
 };
+use crate::text_position::offset_to_position;
+use crate::text_scan::HeaderEnd;
 
 use super::single_file_edit;
 
@@ -58,14 +60,7 @@ impl Backend {
                 new_text: expected_ns.clone().unwrap_or_default(),
             }
         } else if let Some(ref ns) = expected_ns {
-            let insert_pos = find_namespace_insert_position(content);
-            TextEdit {
-                range: Range {
-                    start: insert_pos,
-                    end: insert_pos,
-                },
-                new_text: format!("namespace {};\n\n", ns),
-            }
+            insert_namespace_edit(content, ns)
         } else {
             return;
         };
@@ -94,51 +89,94 @@ fn find_namespace_keyword_line(content: &str) -> Option<u32> {
     None
 }
 
-fn find_namespace_insert_position(content: &str) -> Position {
-    Position {
-        line: crate::text_scan::header_insert_line(content),
-        character: 0,
+/// The edit that writes a `namespace` statement into a file that has
+/// none, just past its header.
+fn insert_namespace_edit(content: &str, ns: &str) -> TextEdit {
+    let (at, new_text) = match crate::text_scan::header_end(content) {
+        HeaderEnd::Line(line) => (
+            Position { line, character: 0 },
+            format!("namespace {ns};\n\n"),
+        ),
+        // Code follows the header on its line, so the line below is past
+        // it: the statement goes between the two, on that line.
+        HeaderEnd::Inline(end) => (
+            offset_to_position(content, end),
+            format!(" namespace {ns};"),
+        ),
+    };
+    TextEdit {
+        range: Range { start: at, end: at },
+        new_text,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::find_namespace_insert_position;
+    use super::insert_namespace_edit;
     use tower_lsp::lsp_types::Position;
+
+    fn insertion(content: &str) -> (Position, String) {
+        let edit = insert_namespace_edit(content, "App");
+        assert_eq!(edit.range.start, edit.range.end);
+        (edit.range.start, edit.new_text)
+    }
+
+    fn own_line(line: u32) -> (Position, String) {
+        (
+            Position { line, character: 0 },
+            "namespace App;\n\n".to_string(),
+        )
+    }
+
+    fn inline_at(line: u32, character: u32) -> (Position, String) {
+        (Position { line, character }, " namespace App;".to_string())
+    }
 
     #[test]
     fn inserts_after_php_open_tag_without_declare() {
-        let content = "<?php\n\nclass Example {}\n";
-        assert_eq!(
-            find_namespace_insert_position(content),
-            Position {
-                line: 1,
-                character: 0,
-            }
-        );
+        assert_eq!(insertion("<?php\n\nclass Example {}\n"), own_line(1));
     }
 
     #[test]
     fn inserts_after_declare_statement() {
         let content = "<?php\n\ndeclare(strict_types=1);\n\nclass Example {}\n";
-        assert_eq!(
-            find_namespace_insert_position(content),
-            Position {
-                line: 3,
-                character: 0,
-            }
-        );
+        assert_eq!(insertion(content), own_line(3));
     }
 
     #[test]
     fn inserts_after_multiple_declare_statements() {
         let content = "<?php\n\ndeclare(strict_types=1);\ndeclare(ticks=1);\n\nclass Example {}\n";
-        assert_eq!(
-            find_namespace_insert_position(content),
-            Position {
-                line: 4,
-                character: 0,
-            }
-        );
+        assert_eq!(insertion(content), own_line(4));
+    }
+
+    #[test]
+    fn inserts_after_a_declare_a_comment_precedes() {
+        let content = "<?php\n// License header\ndeclare(strict_types=1);\n\nclass Example {}\n";
+        assert_eq!(insertion(content), own_line(3));
+    }
+
+    #[test]
+    fn inserts_before_the_docblock_of_the_first_class() {
+        let content = "<?php\n\n/** An example. */\nclass Example {}\n";
+        assert_eq!(insertion(content), own_line(1));
+    }
+
+    #[test]
+    fn inserts_inline_when_code_shares_the_open_tag_line() {
+        assert_eq!(insertion("<?php class Example {}\n"), inline_at(0, 5));
+    }
+
+    #[test]
+    fn inserts_inline_after_a_declare_code_shares_a_line_with() {
+        let content = "<?php\ndeclare(strict_types=1); class Example {}\n";
+        assert_eq!(insertion(content), inline_at(1, 24));
+        let content = "<?php declare(strict_types=1); class Example {}\n";
+        assert_eq!(insertion(content), inline_at(0, 30));
+    }
+
+    #[test]
+    fn a_declare_block_is_not_header() {
+        let content = "<?php declare(ticks=1) { tick(); }\n";
+        assert_eq!(insertion(content), inline_at(0, 5));
     }
 }

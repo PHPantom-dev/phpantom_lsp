@@ -957,3 +957,21 @@ async fn moving_a_class_into_a_namespace_writes_it_after_a_declare() {
         "the namespace must be written below the declare:\n{result}"
     );
 }
+
+#[tokio::test]
+async fn moving_a_class_written_on_the_open_tag_line_declares_the_namespace_ahead_of_it() {
+    // The line below the opening tag is past the class the statement covers.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///src/Foo.php").unwrap();
+    let text = "<?php class Foo {}\n";
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 0, 12, "App\\Foo")
+        .await
+        .expect("expected an edit");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(result, "<?php namespace App; class Foo {}\n");
+}

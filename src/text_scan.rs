@@ -802,32 +802,93 @@ fn same_line_continuation_prefix(trimmed: &str) -> Option<&str> {
     None
 }
 
-/// The first line a statement may be inserted on, after the file's
-/// header.
+/// Where a statement written after the file's header goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HeaderEnd {
+    /// At the start of this line: nothing but a line comment follows the
+    /// header on its own line.
+    Line(u32),
+    /// Straight after the header, at this byte offset: code follows it on
+    /// its line, so the line below is already past that code.
+    Inline(usize),
+}
+
+/// Where a statement may be inserted after the file's header: the opening
+/// tag and any `declare(...);` statements that follow it.
 ///
 /// PHP requires `declare(strict_types=1)` to be the file's very first
 /// statement, so a `namespace` or a `use` written between `<?php` and a
-/// `declare` is a fatal error rather than a formatting quibble. The
-/// answer is therefore the line after the opening tag and any `declare`
-/// that follows it; blank lines in between are stepped over, and anything
-/// else ends the header.
-pub(crate) fn header_insert_line(content: &str) -> u32 {
-    let mut insert_line = 0u32;
-    for (i, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("<?php")
-            || trimmed.starts_with("declare(")
-            || trimmed.starts_with("declare (")
-        {
-            insert_line = (i + 1) as u32;
-            continue;
-        }
-        if trimmed.is_empty() {
-            continue;
-        }
-        break;
+/// `declare` is a fatal error rather than a formatting quibble. Blanks and
+/// comments between the tag and a `declare` are stepped over; anything
+/// else ends the header, and a comment that ends it stays below the
+/// insertion, since it may be the docblock of what follows.
+pub(crate) fn header_end(content: &str) -> HeaderEnd {
+    let bytes = content.as_bytes();
+    let tag = skip_php_trivia(bytes, 0);
+    if !bytes
+        .get(tag..tag + 5)
+        .is_some_and(|text| text.eq_ignore_ascii_case(b"<?php"))
+    {
+        return HeaderEnd::Line(0);
     }
-    insert_line
+    let mut end = tag + 5;
+    while let Some(after) = declare_statement_end(bytes, end) {
+        end = after;
+    }
+    if code_follows_on_line(content, end) {
+        HeaderEnd::Inline(end)
+    } else {
+        HeaderEnd::Line(bytes[..end].iter().filter(|&&b| b == b'\n').count() as u32 + 1)
+    }
+}
+
+/// The offset just past the `;` of a `declare(...);` statement that is the
+/// next thing after `from`, past blanks and comments.
+///
+/// The block forms, `declare(...) { }` and `declare(...): enddeclare;`,
+/// hold statements of their own, so they are not header.
+fn declare_statement_end(bytes: &[u8], from: usize) -> Option<usize> {
+    let keyword = skip_php_trivia(bytes, from);
+    let after_keyword = keyword + "declare".len();
+    if !bytes
+        .get(keyword..after_keyword)
+        .is_some_and(|text| text.eq_ignore_ascii_case(b"declare"))
+        || bytes
+            .get(after_keyword)
+            .is_some_and(|&b| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80)
+    {
+        return None;
+    }
+    let open = skip_php_trivia(bytes, after_keyword);
+    if bytes.get(open) != Some(&b'(') {
+        return None;
+    }
+    let close = open + bytes[open..].iter().position(|&b| b == b')')?;
+    let semicolon = skip_php_trivia(bytes, close + 1);
+    (bytes.get(semicolon) == Some(&b';')).then_some(semicolon + 1)
+}
+
+/// The offset of the first byte at or after `at` that is neither
+/// whitespace nor part of a comment.
+fn skip_php_trivia(bytes: &[u8], mut at: usize) -> usize {
+    loop {
+        while bytes.get(at).is_some_and(u8::is_ascii_whitespace) {
+            at += 1;
+        }
+        match skip_php_comment(bytes, at) {
+            Some(next) => at = next,
+            None => return at,
+        }
+    }
+}
+
+/// Whether code follows `offset` on its line: anything but blanks and a
+/// `//` or `#` comment, which run to the end of the line.  A block comment
+/// counts, since it may run on past the line.
+pub(crate) fn code_follows_on_line(content: &str, offset: usize) -> bool {
+    let rest = content[offset..].trim_start_matches([' ', '\t', '\r']);
+    let line_comment = rest.starts_with("//") || (rest.starts_with('#') && !rest.starts_with("#["));
+    !(rest.is_empty() || rest.starts_with('\n') || line_comment)
 }
 
 /// Whether the file declares a namespace.  An unqualified name in a file

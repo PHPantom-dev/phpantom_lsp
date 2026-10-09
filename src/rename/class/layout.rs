@@ -10,6 +10,7 @@ use crate::Backend;
 use crate::composer::psr4_path_for_class;
 use crate::symbol_map::{SymbolKind, SymbolMap, SymbolSpan};
 use crate::text_position::offset_to_position;
+use crate::text_scan::HeaderEnd;
 use crate::types::NamespaceSpan;
 
 use super::imports::namespace_owns;
@@ -339,18 +340,28 @@ pub(super) fn insert_namespace_edit(
     ns: &str,
     siblings: &[SiblingImport],
 ) -> TextEdit {
-    let insert_line = crate::text_scan::header_insert_line(content);
-    let mut new_text = format!("namespace {};\n\n", ns);
-    for import in siblings {
-        new_text.push_str(&import.statement);
-        new_text.push('\n');
-    }
-    if !siblings.is_empty() {
-        new_text.push('\n');
-    }
-    let at = Position {
-        line: insert_line,
-        character: 0,
+    let (at, new_text) = match crate::text_scan::header_end(content) {
+        HeaderEnd::Line(line) => {
+            let mut new_text = format!("namespace {};\n\n", ns);
+            for import in siblings {
+                new_text.push_str(&import.statement);
+                new_text.push('\n');
+            }
+            if !siblings.is_empty() {
+                new_text.push('\n');
+            }
+            (Position { line, character: 0 }, new_text)
+        }
+        // Code follows the header on its line, so the line below is past
+        // it: the statements go between the two, on that line.
+        HeaderEnd::Inline(end) => {
+            let mut new_text = format!(" namespace {};", ns);
+            for import in siblings {
+                new_text.push(' ');
+                new_text.push_str(&import.statement);
+            }
+            (offset_to_position(content, end), new_text)
+        }
     };
     TextEdit {
         range: Range { start: at, end: at },
