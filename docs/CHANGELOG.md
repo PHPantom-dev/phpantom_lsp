@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Diagnostics appear in editors that do not answer a file-watcher registration.** An editor that never replied to the server's request to watch files, such as CodeLite, showed no diagnostics at all. The request is now only sent to editors that support it, and a missing reply no longer holds anything up.
+
 ## [0.11.1] - 2026-10-07
 
 ### Added

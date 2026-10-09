@@ -949,6 +949,15 @@ pub struct Backend {
     pub(crate) supports_work_done_progress: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports dynamic registration for type hierarchy.
     pub(crate) supports_type_hierarchy_dynamic_registration: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client accepts dynamic registration of
+    /// `workspace/didChangeWatchedFiles`
+    /// (`workspace.didChangeWatchedFiles.dynamicRegistration`).
+    ///
+    /// The protocol has no static way to ask for file events, so this is
+    /// the only way to hear about a change made outside the editor. A
+    /// client that did not opt in is never sent the registration: it may
+    /// not understand the request, and may never answer it.
+    pub(crate) supports_watched_files_dynamic_registration: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client can match a watcher pattern against a base URI
     /// (`workspace.didChangeWatchedFiles.relativePatternSupport`).
     ///
@@ -963,7 +972,8 @@ pub struct Backend {
     /// The `[indexing] extensions` set and Laravel classification last
     /// pushed to the client as a `workspace/didChangeWatchedFiles`
     /// registration. `None` until `initialized` performs the first
-    /// registration.
+    /// registration, and for good when the client did not opt in to one
+    /// ([`Backend::supports_watched_files_dynamic_registration`]).
     ///
     /// Compared on every config reload
     /// ([`indexing::watch::reregister_watched_files_if_changed`]) so a
@@ -1308,6 +1318,9 @@ impl Backend {
                 std::sync::atomic::AtomicBool::new(false),
             ),
             registered_watcher_state: Arc::new(RwLock::new(None)),
+            supports_watched_files_dynamic_registration: Arc::new(
+                std::sync::atomic::AtomicBool::new(false),
+            ),
             supports_relative_pattern_watchers: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -2109,6 +2122,9 @@ impl Backend {
             supports_work_done_progress: Arc::clone(&self.supports_work_done_progress),
             supports_type_hierarchy_dynamic_registration: Arc::clone(
                 &self.supports_type_hierarchy_dynamic_registration,
+            ),
+            supports_watched_files_dynamic_registration: Arc::clone(
+                &self.supports_watched_files_dynamic_registration,
             ),
             supports_relative_pattern_watchers: Arc::clone(
                 &self.supports_relative_pattern_watchers,

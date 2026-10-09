@@ -133,15 +133,29 @@ impl Backend {
         self.supports_inlay_hint_refresh
             .store(client_supports_inlay_hint_refresh, Ordering::Release);
 
+        let watched_files_capability = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.did_change_watched_files.as_ref());
+
+        // Asking a client to watch files is a `client/registerCapability`
+        // request, and the protocol has no other way to do it.  One that did
+        // not opt in may not understand the request, and may never answer
+        // it, so it is not sent one.
+        let client_supports_watched_files_dynamic_registration = watched_files_capability
+            .and_then(|w| w.dynamic_registration)
+            .unwrap_or(false);
+        self.supports_watched_files_dynamic_registration.store(
+            client_supports_watched_files_dynamic_registration,
+            Ordering::Release,
+        );
+
         // A tree indexed through a symlink is not inside any workspace
         // folder, so being told about a change in it takes a watcher that
         // names the link.  Clients that predate LSP 3.17 get none, and a
         // `git pull` into a linked framework needs a reload there.
-        let client_supports_relative_pattern_watchers = params
-            .capabilities
-            .workspace
-            .as_ref()
-            .and_then(|ws| ws.did_change_watched_files.as_ref())
+        let client_supports_relative_pattern_watchers = watched_files_capability
             .and_then(|w| w.relative_pattern_support)
             .unwrap_or(false);
         self.supports_relative_pattern_watchers
@@ -512,13 +526,21 @@ impl Backend {
         // Built by the same helper `reload_config` uses to keep this
         // registration current when the extension list changes mid-session
         // (see `indexing::watch::reregister_watched_files_if_changed`).
-        let (watched_files_registration, watched_file_inputs) =
-            self.build_watched_file_registration();
-        registrations.push(watched_files_registration);
-        *self.registered_watcher_state.write() = Some(watched_file_inputs);
+        registrations.extend(self.initial_watched_file_registration());
 
-        if let Some(client) = &self.client {
-            let _ = client.register_capability(registrations).await;
+        // Sent from a task of its own rather than awaited here.  The
+        // notifications that follow `initialized`, `didOpen` among them,
+        // are not handled until it returns, so a client that is slow to
+        // answer, or never does, would hold back every file's diagnostics.
+        // And never put a timeout around the request: tower-lsp panics when
+        // a reply arrives for a request whose future was dropped (see
+        // `progress_create`).
+        if !registrations.is_empty()
+            && let Some(client) = self.client.clone()
+        {
+            tokio::spawn(async move {
+                let _ = client.register_capability(registrations).await;
+            });
         }
 
         // Clear the negative class-resolution cache.  During startup,

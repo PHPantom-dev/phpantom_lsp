@@ -477,6 +477,26 @@ impl Backend {
         )
     }
 
+    /// The `workspace/didChangeWatchedFiles` registration `initialized`
+    /// sends, or `None` for a client that did not opt in to dynamic
+    /// registration of watchers
+    /// ([`Self::supports_watched_files_dynamic_registration`]).
+    ///
+    /// Records what it was built from, so
+    /// [`Self::reregister_watched_files_if_changed`] knows what the client
+    /// was last told.
+    pub(crate) fn initial_watched_file_registration(&self) -> Option<Registration> {
+        if !self
+            .supports_watched_files_dynamic_registration
+            .load(Ordering::Acquire)
+        {
+            return None;
+        }
+        let (registration, inputs) = self.build_watched_file_registration();
+        *self.registered_watcher_state.write() = Some(inputs);
+        Some(registration)
+    }
+
     /// The followed links worth putting in a registration: none unless the
     /// client said it can match a pattern against a base URI, since a
     /// client that cannot would either ignore the watcher or fail to parse
@@ -500,7 +520,16 @@ impl Backend {
     /// churn the client's watcher list. Before `initialized` performs the
     /// first registration, this only records the desired state instead of
     /// racing that initial `register_capability` call.
+    ///
+    /// A client that did not opt in to dynamic registration of watchers
+    /// has none to keep current, and is never sent one.
     pub(crate) fn reregister_watched_files_if_changed(&self) {
+        if !self
+            .supports_watched_files_dynamic_registration
+            .load(Ordering::Acquire)
+        {
+            return;
+        }
         let (registration, inputs) = self.build_watched_file_registration();
 
         let mut state = self.registered_watcher_state.write();
@@ -1085,6 +1114,66 @@ mod tests {
         );
     }
 
+    /// A backend whose client accepted dynamic registration of the file
+    /// watchers, which is what makes any registration worth tracking.
+    fn backend_whose_client_accepts_watcher_registration() -> Backend {
+        let backend = Backend::new_test();
+        backend
+            .supports_watched_files_dynamic_registration
+            .store(true, Ordering::Release);
+        backend
+    }
+
+    /// A client that did not opt in to dynamic registration of watchers is
+    /// not asked to register any, and nothing is recorded as registered.
+    #[test]
+    fn no_watcher_registration_is_built_for_a_client_that_did_not_opt_in() {
+        let backend = Backend::new_test();
+
+        assert!(backend.initial_watched_file_registration().is_none());
+        assert_eq!(backend.registered_watcher_state.read().clone(), None);
+    }
+
+    /// The counterpart: a client that opted in gets the registration, and
+    /// what it was built from is recorded for the next reload to compare.
+    #[test]
+    fn the_startup_watcher_registration_is_recorded_for_a_client_that_opted_in() {
+        let backend = backend_whose_client_accepts_watcher_registration();
+
+        let registration = backend
+            .initial_watched_file_registration()
+            .expect("a client that opted in should be asked to register its watchers");
+
+        assert_eq!(registration.method, "workspace/didChangeWatchedFiles");
+        assert_eq!(
+            backend.registered_watcher_state.read().clone(),
+            Some(crate::WatchedFileInputs {
+                extra_extensions: Vec::new(),
+                is_laravel: true,
+                followed_links: Vec::new(),
+            })
+        );
+    }
+
+    /// A reload that adds an extension has nothing to re-register for a
+    /// client that never took the first registration, so it must not start
+    /// tracking one.
+    #[test]
+    fn reload_config_does_not_register_watchers_for_a_client_that_did_not_opt_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+
+        std::fs::write(
+            dir.path().join(crate::config::CONFIG_FILE_NAME),
+            "[indexing]\nextensions = [\"module\"]\n",
+        )
+        .unwrap();
+        backend.reload_config(dir.path());
+
+        assert_eq!(backend.registered_watcher_state.read().clone(), None);
+    }
+
     /// Adding an `[indexing] extensions` entry used to need a restart
     /// before its files were watched: `initialized` only ever registered
     /// the watcher list once, and a live `.phpantom.toml` reload never
@@ -1093,7 +1182,7 @@ mod tests {
     #[test]
     fn reload_config_updates_the_registered_watcher_state_for_a_new_extension() {
         let dir = tempfile::tempdir().unwrap();
-        let backend = Backend::new_test();
+        let backend = backend_whose_client_accepts_watcher_registration();
         *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
 
         // Simulate the registration `initialized` performs at startup,
@@ -1132,7 +1221,7 @@ mod tests {
     #[test]
     fn reload_config_leaves_the_registered_watcher_state_untouched_for_an_unrelated_edit() {
         let dir = tempfile::tempdir().unwrap();
-        let backend = Backend::new_test();
+        let backend = backend_whose_client_accepts_watcher_registration();
         *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
         backend.reregister_watched_files_if_changed();
 
@@ -1291,7 +1380,7 @@ mod tests {
     #[test]
     fn a_client_extension_update_updates_the_registered_watcher_state() {
         let dir = tempfile::tempdir().unwrap();
-        let backend = Backend::new_test();
+        let backend = backend_whose_client_accepts_watcher_registration();
         *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
         backend.reregister_watched_files_if_changed();
 
