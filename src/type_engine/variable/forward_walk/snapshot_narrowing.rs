@@ -173,6 +173,15 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                 record_match_ternary_snapshots(arg_expr, scope, ctx);
             }
         }
+        // `($a ?? $b->get($x ? $x : ''))?->text` reads a property off a
+        // value built like a method call's receiver, and the ternaries in
+        // it narrow their branches the same way.
+        Expression::Access(Access::Property(pa)) => {
+            record_match_ternary_snapshots(pa.object, scope, ctx);
+        }
+        Expression::Access(Access::NullSafeProperty(pa)) => {
+            record_match_ternary_snapshots(pa.object, scope, ctx);
+        }
         // `new Foo($x ? $x->name() : '')` holds a ternary in the same
         // position a call does, and its branches narrow the same way.
         Expression::Instantiation(inst) => {
