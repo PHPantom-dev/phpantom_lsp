@@ -123,6 +123,81 @@ impl Backend {
             .await
             .unwrap_or(Ok(None))
     }
+
+    /// Format a document, or with `range` only the lines it selects.
+    ///
+    /// Every formatter works on a whole file, so a range request formats
+    /// the whole document and keeps the edits that touch the range.
+    async fn format_document(
+        &self,
+        uri: &Url,
+        options: &FormattingOptions,
+        range: Option<Range>,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri = uri.to_string();
+
+        // External tools discover their config from the file's real path.
+        let Some(file_path) = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) else {
+            return Ok(None);
+        };
+        let Some(content) = self.get_file_content(&uri) else {
+            return Ok(None);
+        };
+
+        // Blade markup isn't PHP, so a template resolves its own strategy:
+        // Pint when the project formats Blade with it, the built-in
+        // reindenter otherwise.
+        let is_blade = self.is_blade_file(&uri);
+        let blade_options = formatting::blade::options_from_lsp(options);
+
+        // Resolving the strategy reads composer.json and running it may
+        // spawn an external tool, so all of it stays off the async runtime.
+        let backend = self.clone_for_blocking();
+        let result = run_blocking_cancel_safe("formatting", move || {
+            let formatted = if is_blade {
+                let strategy = backend.resolve_blade_formatting_strategy();
+                backend.format_blade_content(
+                    &strategy,
+                    &file_path,
+                    &content,
+                    &blade_options,
+                    &backend.shutdown_flag,
+                )
+            } else {
+                let strategy = backend.resolve_formatting_strategy();
+                backend.format_content(&strategy, &file_path, &content, &backend.shutdown_flag)
+            };
+            formatted.map(|formatted| {
+                formatted.map(|text| match range {
+                    Some(range) => formatting::compute_range_edits(&content, &text, range),
+                    None => formatting::compute_edits(&content, &text),
+                })
+            })
+        })
+        .await;
+
+        match result {
+            Some(Ok(edits)) => Ok(edits),
+            Some(Err(e)) => {
+                self.log(MessageType::ERROR, format!("Formatting failed: {}", e))
+                    .await;
+                Err(tower_lsp::jsonrpc::Error {
+                    code: tower_lsp::jsonrpc::ErrorCode::InternalError,
+                    message: format!("Formatting failed: {}", e).into(),
+                    data: None,
+                })
+            }
+            None => {
+                let msg = "Formatting task panicked".to_string();
+                self.log(MessageType::ERROR, msg.clone()).await;
+                Err(tower_lsp::jsonrpc::Error {
+                    code: tower_lsp::jsonrpc::ErrorCode::InternalError,
+                    message: msg.into(),
+                    data: None,
+                })
+            }
+        }
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -1035,65 +1110,20 @@ impl LanguageServer for Backend {
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        let uri = params.text_document.uri.to_string();
+        self.format_document(&params.text_document.uri, &params.options, None)
+            .await
+    }
 
-        // External tools discover their config from the file's real path.
-        let Some(file_path) = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) else {
-            return Ok(None);
-        };
-        let Some(content) = self.get_file_content(&uri) else {
-            return Ok(None);
-        };
-
-        // Blade markup isn't PHP, so a template resolves its own strategy:
-        // Pint when the project formats Blade with it, the built-in
-        // reindenter otherwise.
-        let is_blade = self.is_blade_file(&uri);
-        let blade_options = formatting::blade::options_from_lsp(&params.options);
-
-        // Resolving the strategy reads composer.json and running it may
-        // spawn an external tool, so all of it stays off the async runtime.
-        let backend = self.clone_for_blocking();
-        let result = run_blocking_cancel_safe("formatting", move || {
-            let formatted = if is_blade {
-                let strategy = backend.resolve_blade_formatting_strategy();
-                backend.format_blade_content(
-                    &strategy,
-                    &file_path,
-                    &content,
-                    &blade_options,
-                    &backend.shutdown_flag,
-                )
-            } else {
-                let strategy = backend.resolve_formatting_strategy();
-                backend.format_content(&strategy, &file_path, &content, &backend.shutdown_flag)
-            };
-            formatted
-                .map(|formatted| formatted.map(|text| formatting::compute_edits(&content, &text)))
-        })
-        .await;
-
-        match result {
-            Some(Ok(edits)) => Ok(edits),
-            Some(Err(e)) => {
-                self.log(MessageType::ERROR, format!("Formatting failed: {}", e))
-                    .await;
-                Err(tower_lsp::jsonrpc::Error {
-                    code: tower_lsp::jsonrpc::ErrorCode::InternalError,
-                    message: format!("Formatting failed: {}", e).into(),
-                    data: None,
-                })
-            }
-            None => {
-                let msg = "Formatting task panicked".to_string();
-                self.log(MessageType::ERROR, msg.clone()).await;
-                Err(tower_lsp::jsonrpc::Error {
-                    code: tower_lsp::jsonrpc::ErrorCode::InternalError,
-                    message: msg.into(),
-                    data: None,
-                })
-            }
-        }
+    async fn range_formatting(
+        &self,
+        params: DocumentRangeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        self.format_document(
+            &params.text_document.uri,
+            &params.options,
+            Some(params.range),
+        )
+        .await
     }
 
     async fn diagnostic(

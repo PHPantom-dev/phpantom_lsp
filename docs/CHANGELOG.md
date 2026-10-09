@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Format selection.** Formatting a selection reformats only the lines it covers, with whichever formatter the project uses, in PHP files and Blade templates alike.
+
 ### Changed
 
 ### Fixed

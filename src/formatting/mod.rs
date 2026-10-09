@@ -71,8 +71,11 @@ pub mod blade;
 mod external;
 mod mago;
 mod pint;
+mod range;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use range::compute_range_edits;
 
 const DEFAULT_TIMEOUT_MS: u64 = 10_000;
 

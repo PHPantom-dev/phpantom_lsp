@@ -38,6 +38,7 @@ parking_lot = "0.12"
 tempfile = "3"
 toml = "1"
 etcetera = "0.11"
+similar = { version = "3.2.0", default-features = false }
 
 # musl's built-in malloc is very slow under the multi-threaded,
 # allocation-heavy load of parallel indexing and parse workers (4-6x

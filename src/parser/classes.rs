@@ -1817,6 +1817,21 @@ impl Backend {
     }
 }
 
+/// The union of `types` with duplicates dropped; `None` when empty.
+fn union_of_distinct(types: Vec<PhpType>) -> Option<PhpType> {
+    let mut unique: Vec<PhpType> = Vec::with_capacity(types.len());
+    for t in types {
+        if !unique.contains(&t) {
+            unique.push(t);
+        }
+    }
+    match unique.len() {
+        0 => None,
+        1 => unique.pop(),
+        _ => Some(PhpType::union(unique)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2029,20 +2044,5 @@ class Service {
 "#;
         let classes = Backend::parse_php_versioned_with_namespaces(src, None);
         assert_eq!(property_type(&classes, "Service", "logger"), "Lib\\Logger");
-    }
-}
-
-/// The union of `types` with duplicates dropped; `None` when empty.
-fn union_of_distinct(types: Vec<PhpType>) -> Option<PhpType> {
-    let mut unique: Vec<PhpType> = Vec::with_capacity(types.len());
-    for t in types {
-        if !unique.contains(&t) {
-            unique.push(t);
-        }
-    }
-    match unique.len() {
-        0 => None,
-        1 => unique.pop(),
-        _ => Some(PhpType::union(unique)),
     }
 }

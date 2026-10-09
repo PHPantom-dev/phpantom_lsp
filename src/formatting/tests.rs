@@ -5,7 +5,11 @@ use crate::config::FormattingConfig;
 
 use super::external::write_sibling_temp_file;
 use super::mago::{format_with_mago, load_mago_format_settings, to_mago_php_version};
-use super::{FormattingStrategy, Tool, compute_edits, execute_strategy, resolve_strategy};
+use super::{
+    FormattingStrategy, Tool, compute_edits, compute_range_edits, execute_strategy,
+    resolve_strategy,
+};
+use tower_lsp::lsp_types::{Position, Range};
 
 // ── compute_edits ───────────────────────────────────────────────
 
@@ -52,6 +56,144 @@ fn compute_edits_no_trailing_newline() {
     let edit = &edits[0];
     assert_eq!(edit.range.end.line, 1);
     assert_eq!(edit.range.end.character, 13);
+}
+
+// ── compute_range_edits ─────────────────────────────────────────
+
+fn lines(start: u32, end: u32) -> Range {
+    Range {
+        start: Position {
+            line: start,
+            character: 0,
+        },
+        end: Position {
+            line: end,
+            character: 3,
+        },
+    }
+}
+
+fn format_range(original: &str, formatted: &str, range: Range) -> String {
+    let edits = compute_range_edits(original, formatted, range);
+    crate::text_position::apply_text_edits(original, &edits)
+}
+
+#[test]
+fn range_edits_no_change() {
+    let content = "<?php\necho 'hello';\n";
+    assert!(compute_range_edits(content, content, lines(0, 1)).is_empty());
+}
+
+#[test]
+fn range_edits_keep_changes_outside_the_range() {
+    let original = "<?php\nif($a){\nfoo();\n}\nif($b){\nbar();\n}\n";
+    let formatted = "<?php\nif ($a) {\n    foo();\n}\nif ($b) {\n    bar();\n}\n";
+
+    assert_eq!(
+        format_range(original, formatted, lines(5, 5)),
+        "<?php\nif($a){\nfoo();\n}\nif($b){\n    bar();\n}\n"
+    );
+    assert_eq!(
+        format_range(original, formatted, lines(1, 3)),
+        "<?php\nif ($a) {\n    foo();\n}\nif($b){\nbar();\n}\n"
+    );
+}
+
+#[test]
+fn range_edits_whole_line_selection_excludes_the_line_it_ends_on() {
+    let original = "<?php\nfoo( );\nbar( );\n";
+    let formatted = "<?php\nfoo();\nbar();\n";
+    let range = Range {
+        start: Position {
+            line: 1,
+            character: 0,
+        },
+        end: Position {
+            line: 2,
+            character: 0,
+        },
+    };
+
+    assert_eq!(
+        format_range(original, formatted, range),
+        "<?php\nfoo();\nbar( );\n"
+    );
+}
+
+#[test]
+fn range_edits_include_a_hunk_that_straddles_the_range() {
+    let original = "<?php\n$a = [\n1,\n2];\n";
+    let formatted = "<?php\n$a = [1, 2];\n";
+
+    assert_eq!(format_range(original, formatted, lines(2, 2)), formatted);
+}
+
+#[test]
+fn range_edits_include_lines_inserted_at_the_edge_of_the_range() {
+    let original = "<?php\nfunction a() {}\nfunction b() {}\n";
+    let formatted = "<?php\n\nfunction a() {}\n\nfunction b() {}\n";
+
+    assert_eq!(
+        format_range(original, formatted, lines(1, 1)),
+        "<?php\n\nfunction a() {}\n\nfunction b() {}\n"
+    );
+    assert_eq!(
+        format_range(original, formatted, lines(2, 2)),
+        "<?php\nfunction a() {}\n\nfunction b() {}\n"
+    );
+}
+
+#[test]
+fn range_edits_respaced_lines_apply_one_at_a_time() {
+    let original = "<?php\nif ($a) {\nfoo();\nbar();\n}\n";
+    let formatted = "<?php\nif ($a) {\n    foo();\n    bar();\n}\n";
+
+    assert_eq!(
+        format_range(original, formatted, lines(3, 3)),
+        "<?php\nif ($a) {\nfoo();\n    bar();\n}\n"
+    );
+}
+
+#[test]
+fn range_edits_moved_lines_go_together() {
+    let original = "<?php\nuse B;\nuse C;\nuse A;\n\nfoo( );\n";
+    let formatted = "<?php\nuse A;\nuse B;\nuse C;\n\nfoo();\n";
+
+    // The diff inserts `use A;` at the top and deletes it at the bottom.
+    assert_eq!(
+        format_range(original, formatted, lines(1, 1)),
+        "<?php\nuse A;\nuse B;\nuse C;\n\nfoo( );\n"
+    );
+    assert_eq!(
+        format_range(original, formatted, lines(3, 3)),
+        "<?php\nuse A;\nuse B;\nuse C;\n\nfoo( );\n"
+    );
+    assert_eq!(
+        format_range(original, formatted, lines(5, 5)),
+        "<?php\nuse B;\nuse C;\nuse A;\n\nfoo();\n"
+    );
+}
+
+#[test]
+fn range_edits_last_line_without_trailing_newline() {
+    let original = "<?php\nfoo( );\nbar( );";
+    let formatted = "<?php\nfoo();\nbar();\n";
+
+    assert_eq!(
+        format_range(original, formatted, lines(2, 2)),
+        "<?php\nfoo( );\nbar();\n"
+    );
+}
+
+#[test]
+fn range_edits_use_utf16_columns() {
+    let original = "<?php\n$s = 'æø'; foo( );";
+    let formatted = "<?php\n$s = 'æø';\nfoo();\n";
+
+    let edits = compute_range_edits(original, formatted, lines(1, 1));
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].range.end.line, 1);
+    assert_eq!(edits[0].range.end.character, 18);
 }
 
 // ── resolve_strategy ────────────────────────────────────────────
