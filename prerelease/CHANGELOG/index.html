@@ -5101,6 +5101,9 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Diagnostics appear in editors that do not answer a file-watcher registration.</strong> An editor that never replied to the server's request to watch files, such as CodeLite, showed no diagnostics at all. The request is now only sent to editors that support it, and a missing reply no longer holds anything up.</li>
+</ul>
 <h2 id="0111-2026-10-07"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.0...0.11.1">0.11.1</a> - 2026-10-07<a class="headerlink" href="#0111-2026-10-07" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
 <ul>
