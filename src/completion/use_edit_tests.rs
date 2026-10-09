@@ -205,6 +205,20 @@ fn fallback_after_namespace_when_no_use() {
 }
 
 #[test]
+fn braced_namespace_import_takes_block_indent() {
+    let content = "<?php\nnamespace App {\n    class X {}\n}\n";
+    let info = analyze_use_block(content);
+    assert_eq!(info.indent, "    ");
+    assert_eq!(info.import_text("use Foo;", false), "    use Foo;\n");
+}
+
+#[test]
+fn flat_namespace_import_has_no_indent() {
+    let info = analyze_use_block("<?php\nnamespace App;\n\nclass X {}\n");
+    assert_eq!(info.indent, "");
+}
+
+#[test]
 fn fallback_after_php_open_tag_when_no_namespace() {
     let content = "<?php\n\nclass X {}\n";
     let info = analyze_use_block(content);
@@ -359,6 +373,7 @@ fn insert_alphabetically_before_first() {
         existing: vec![(2, "app\\zoo".to_string())],
         fallback: FirstImport::OwnLine(1),
         has_namespace: false,
+        indent: String::new(),
         template: None,
     };
     assert_eq!(
@@ -377,6 +392,7 @@ fn insert_alphabetically_after_last() {
         existing: vec![(2, "app\\alpha".to_string())],
         fallback: FirstImport::OwnLine(1),
         has_namespace: false,
+        indent: String::new(),
         template: None,
     };
     assert_eq!(
@@ -396,6 +412,7 @@ fn insert_alphabetically_in_the_middle() {
         existing: vec![(2, "app\\alpha".to_string()), (3, "app\\zoo".to_string())],
         fallback: FirstImport::OwnLine(1),
         has_namespace: false,
+        indent: String::new(),
         template: None,
     };
     assert_eq!(
@@ -413,6 +430,7 @@ fn insert_uses_fallback_when_no_existing() {
         existing: vec![],
         fallback: FirstImport::OwnLine(2),
         has_namespace: false,
+        indent: String::new(),
         template: None,
     };
     assert_eq!(
@@ -432,6 +450,7 @@ fn insert_case_insensitive_comparison() {
         existing: vec![(2, "app\\alpha".to_string()), (3, "app\\zoo".to_string())],
         fallback: FirstImport::OwnLine(1),
         has_namespace: false,
+        indent: String::new(),
         template: None,
     };
     assert_eq!(
@@ -455,6 +474,7 @@ fn insert_among_three_existing() {
         ],
         fallback: FirstImport::OwnLine(1),
         has_namespace: false,
+        indent: String::new(),
         template: None,
     };
     assert_eq!(
@@ -529,6 +549,7 @@ fn build_edit_inserts_at_correct_alpha_position() {
         existing: vec![(2, "app\\alpha".to_string()), (3, "app\\zoo".to_string())],
         fallback: FirstImport::OwnLine(1),
         has_namespace: false,
+        indent: String::new(),
         template: None,
     };
     let edits = build_use_edit("App\\Middle", &info, &Some("App".to_string()))
@@ -550,6 +571,7 @@ fn build_edit_skips_global_class_without_namespace() {
         existing: vec![],
         fallback: FirstImport::OwnLine(1),
         has_namespace: false,
+        indent: String::new(),
         template: None,
     };
     assert!(build_use_edit("PDO", &info, &None).is_none());
@@ -561,6 +583,7 @@ fn build_edit_includes_global_class_with_namespace() {
         existing: vec![],
         fallback: FirstImport::OwnLine(2),
         has_namespace: true,
+        indent: String::new(),
         template: None,
     };
     let edits =
@@ -760,6 +783,7 @@ fn build_function_edit_skips_global_function() {
         existing: vec![],
         fallback: FirstImport::OwnLine(1),
         has_namespace: false,
+        indent: String::new(),
         template: None,
     };
     assert!(
@@ -774,6 +798,7 @@ fn build_function_edit_namespaced_no_existing_imports() {
         existing: vec![],
         fallback: FirstImport::OwnLine(2),
         has_namespace: false,
+        indent: String::new(),
         template: None,
     };
     let edits = build_use_function_edit("Illuminate\\Support\\enum_value", &info)
@@ -887,6 +912,7 @@ fn build_function_edit_deeply_namespaced() {
         existing: vec![],
         fallback: FirstImport::OwnLine(3),
         has_namespace: false,
+        indent: String::new(),
         template: None,
     };
     let edits = build_use_function_edit("Vendor\\Package\\Sub\\Module\\helper_func", &info)

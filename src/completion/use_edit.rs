@@ -51,6 +51,9 @@ pub(crate) struct UseBlockInfo {
     /// `use` statement to separate it from the `namespace` line, unless
     /// the import is written inline after the declaration.
     pub(crate) has_namespace: bool,
+    /// The whitespace an import line starts with, so an import added inside
+    /// a braced `namespace { }` block lines up with the code around it.
+    pub(crate) indent: String,
     /// The template's own import block, when the file is a Blade
     /// template rather than a PHP file.
     pub(crate) template: Option<TemplateUseBlock>,
@@ -161,12 +164,13 @@ impl UseBlockInfo {
     /// written inline starts with a space instead, which sets it off from
     /// the declaration it follows.
     pub(crate) fn import_text(&self, statement: &str, set_off: bool) -> String {
+        let indent = &self.indent;
         if self.writes_inline() {
             format!(" {statement}")
         } else if set_off {
-            format!("\n{statement}\n")
+            format!("\n{indent}{statement}\n")
         } else {
-            format!("{statement}\n")
+            format!("{indent}{statement}\n")
         }
     }
 
@@ -314,7 +318,8 @@ pub(crate) fn analyze_use_block_in(content: &str, block: Option<(usize, usize)>)
     };
     let declaration_end = keyword.and_then(|keyword| namespace_declaration_end(content, keyword));
 
-    let existing = scan_use_statements(content)
+    let mut indent = None;
+    let existing: Vec<(u32, String)> = scan_use_statements(content)
         .into_iter()
         .filter(|statement| statement.top_level)
         .filter(|statement| {
@@ -324,6 +329,10 @@ pub(crate) fn analyze_use_block_in(content: &str, block: Option<(usize, usize)>)
         })
         .filter_map(|statement| {
             let sort_key = extract_use_sort_key(&content[statement.keyword_start..statement.end])?;
+            let lead = &content[statement.line_start..statement.keyword_start];
+            if lead.trim().is_empty() {
+                indent.get_or_insert_with(|| lead.to_string());
+            }
             Some((index.position(statement.line_start).line, sort_key))
         })
         .collect();
@@ -345,10 +354,27 @@ pub(crate) fn analyze_use_block_in(content: &str, block: Option<(usize, usize)>)
         },
     };
 
+    let indent = indent
+        .or_else(|| {
+            let end = declaration_end.filter(|end| content.as_bytes()[end - 1] == b'{')?;
+            let line_end = content[end..]
+                .find('\n')
+                .map_or(content.len(), |at| end + at);
+            if !content[end..line_end].trim().is_empty() {
+                return None;
+            }
+            content[line_end..]
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .map(|line| line[..line.len() - line.trim_start().len()].to_string())
+        })
+        .unwrap_or_default();
+
     UseBlockInfo {
         existing,
         fallback,
         has_namespace: keyword.is_some(),
+        indent,
         template: None,
     }
 }

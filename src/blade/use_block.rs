@@ -192,6 +192,7 @@ pub(crate) fn analyze_template_use_block(
         existing,
         fallback: FirstImport::OwnLine(line_start.line),
         has_namespace: false,
+        indent: String::new(),
         template: Some(TemplateUseBlock { line_ends, top }),
     }
 }

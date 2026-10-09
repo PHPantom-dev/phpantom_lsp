@@ -176,6 +176,26 @@ No outstanding items.
 
 ## Miscellaneous
 
+### B573. Deferred code actions are sent to clients that cannot resolve them
+
+**Impact: Low · Complexity: Low-Medium**
+
+`handle_code_action` (`src/code_actions/mod.rs`) returns the deferred
+actions (PHPStan quick fixes, extract function/method, extract variable,
+extract constant, inline variable, convert to instance variable, remove
+unused imports) with a `data` field and no `edit`, whatever the client
+advertised. The spec only allows this when the client lists `edit` in
+`textDocument.codeAction.resolveSupport.properties`; a client without it
+applies an action as it was received. Nothing reads that capability
+(nor `dataSupport`). Found with CodeLite before it supported
+`codeAction/resolve`: the actions were listed, and picking one did
+nothing.
+
+**Fix:** Read `resolveSupport` and `dataSupport` at `initialize`, next
+to `supports_file_rename`. When either is missing, compute the edit in
+phase 1 through the same code `resolve_code_action` runs, and send it
+without `data`.
+
 ### B549. `@throws` and namespaced-function completions plan their import against the whole file
 
 **Impact: Low · Complexity: Low-Medium**
@@ -234,13 +254,3 @@ handle), keep the backing type.
 
 Found running the php-typing-conformance suite
 (`phpdoc_advanced_fallback_value_of_template_enum.php`).
-
-### B557. A sibling import added inside a braced `namespace { }` block is not indented
-
-**Impact: Low · Complexity: Low**
-
-Moving a class out of `namespace { class Foo extends Helper {} }` writes
-`namespace C {\n\nuse Helper;\n    class Foo ...`: the import lands flush left
-with a blank line above it instead of indented, with a blank line below.
-`UseBlockInfo::import_text` (`src/completion/use_edit.rs`) does not indent
-for a brace block whose first import has no neighbour to copy from.

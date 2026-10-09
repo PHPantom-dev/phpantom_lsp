@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A new import inside a braced `namespace { }` block is indented to match the block.** Imports added by completion, code actions and class moves no longer land flush left.
 - **Moving a class out of a braced global `namespace { }` block keeps the file valid.** The new namespace is written into the block's `namespace` keyword instead of a separate `namespace` statement above it.
 - **Removing two unused members at the end of a group import keeps the statement intact.** `use App\Models\{User, Post, Comment};` no longer loses its closing `};` when "Remove all unused imports" or `fix` drops the last two members.
 - **Imports and `namespace` statements go ahead of code written on the `<?php` line.** In a file with no `namespace` whose code starts on the same line as the opening tag, or a `declare` after it, a new import or `namespace` statement is now written right after the tag or the `declare` instead of on the next line, below the code it was meant to cover.

@@ -191,7 +191,7 @@ fn import_action_writes_the_use_after_a_brace_on_its_own_line() {
             "namespace App\n",
             "{\n",
             "\n",
-            "use Illuminate\\Http\\Request;\n",
+            "    use Illuminate\\Http\\Request;\n",
             "    function a(Request $r) {}\n",
             "}\n",
         )
@@ -372,7 +372,7 @@ fn import_action_offered_when_only_another_namespace_block_imports_the_name() {
         .expect("expected an import action in block B");
     let edits = extract_edits(action);
     assert_eq!(edits.len(), 1);
-    assert_eq!(edits[0].new_text, "use Illuminate\\Http\\Request;\n");
+    assert_eq!(edits[0].new_text, "    use Illuminate\\Http\\Request;\n");
     assert_eq!(
         edits[0].range.start.line, 7,
         "the import belongs in block B's use list, after its Carbon import"

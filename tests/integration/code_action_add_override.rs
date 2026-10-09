@@ -1021,7 +1021,7 @@ namespace B {
 
     let block_b = &result[result.find("namespace B").unwrap()..];
     assert!(
-        block_b.starts_with("namespace B {\n\nuse Override;\n"),
+        block_b.starts_with("namespace B {\n\n    use Override;\n"),
         "block B should get its own import:\n{}",
         result
     );
