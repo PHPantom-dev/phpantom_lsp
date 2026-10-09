@@ -1077,6 +1077,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b572-a-client-that-does-not-answer-clientregistercapability-never-gets-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B572. A client that does not answer <code>client/registerCapability</code> never gets diagnostics
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1799,6 +1810,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b572-a-client-that-does-not-answer-clientregistercapability-never-gets-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B572. A client that does not answer <code>client/registerCapability</code> never gets diagnostics
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2049,6 +2071,25 @@ one after a <code>namespace</code> declaration. <code>insert_namespace_edit</cod
 (<code>src/code_actions/fix_namespace.rs</code>) read the header through the same
 helper, and a <code>namespace</code> statement written after code is a fatal error
 rather than a misplaced import.</p>
+<h3 id="b572-a-client-that-does-not-answer-clientregistercapability-never-gets-diagnostics">B572. A client that does not answer <code>client/registerCapability</code> never gets diagnostics<a class="headerlink" href="#b572-a-client-that-does-not-answer-clientregistercapability-never-gets-diagnostics" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<p><code>initialized</code> (<code>src/backend/startup.rs</code>) sends <code>client/registerCapability</code>
+for the <code>workspace/didChangeWatchedFiles</code> watchers and awaits the reply
+before it runs the rest of the startup work. A client that never answers
+leaves the handler waiting. Notifications are dispatched in order, so the
+<code>textDocument/didOpen</code> calls that follow are not processed while it waits,
+and no file is diagnosed. Requests still run, so completion, hover,
+definition and references work, which hides the cause. CodeLite did not
+answer the request (fixed on its side), and saw no diagnostics at all.</p>
+<p>The request is also sent to clients that never asked for it: the server
+does not check <code>workspace.didChangeWatchedFiles.dynamicRegistration</code> in the
+client capabilities, and CodeLite does not set it.
+<code>reregister_watched_files_if_changed</code> (<code>src/indexing/watch.rs</code>) has the same
+missing check, though it already sends from a spawned task.</p>
+<p><strong>Fix:</strong> Send the registration only when the client advertises
+<code>dynamicRegistration</code> for <code>didChangeWatchedFiles</code>, and send it from a
+spawned task in <code>initialized</code> too, so a slow or missing reply cannot hold
+back startup.</p>
 
 
 
