@@ -1023,6 +1023,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#b573-deferred-code-actions-are-sent-to-clients-that-cannot-resolve-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B573. Deferred code actions are sent to clients that cannot resolve them
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b549-throws-and-namespaced-function-completions-plan-their-import-against-the-whole-file" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1038,17 +1049,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B554. <code>-&gt;value</code> and <code>-&gt;name</code> on an enum read as <code>string</code>, not as its cases' values
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b557-a-sibling-import-added-inside-a-braced-namespace-block-is-not-indented" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B557. A sibling import added inside a braced <code>namespace { }</code> block is not indented
       </span>
     </span>
   </a>
@@ -1723,6 +1723,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#b573-deferred-code-actions-are-sent-to-clients-that-cannot-resolve-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B573. Deferred code actions are sent to clients that cannot resolve them
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b549-throws-and-namespaced-function-completions-plan-their-import-against-the-whole-file" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1738,17 +1749,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B554. <code>-&gt;value</code> and <code>-&gt;name</code> on an enum read as <code>string</code>, not as its cases' values
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b557-a-sibling-import-added-inside-a-braced-namespace-block-is-not-indented" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B557. A sibling import added inside a braced <code>namespace { }</code> block is not indented
       </span>
     </span>
   </a>
@@ -1912,6 +1912,22 @@ not a search forward from every opener.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
+<h3 id="b573-deferred-code-actions-are-sent-to-clients-that-cannot-resolve-them">B573. Deferred code actions are sent to clients that cannot resolve them<a class="headerlink" href="#b573-deferred-code-actions-are-sent-to-clients-that-cannot-resolve-them" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p><code>handle_code_action</code> (<code>src/code_actions/mod.rs</code>) returns the deferred
+actions (PHPStan quick fixes, extract function/method, extract variable,
+extract constant, inline variable, convert to instance variable, remove
+unused imports) with a <code>data</code> field and no <code>edit</code>, whatever the client
+advertised. The spec only allows this when the client lists <code>edit</code> in
+<code>textDocument.codeAction.resolveSupport.properties</code>; a client without it
+applies an action as it was received. Nothing reads that capability
+(nor <code>dataSupport</code>). Found with CodeLite before it supported
+<code>codeAction/resolve</code>: the actions were listed, and picking one did
+nothing.</p>
+<p><strong>Fix:</strong> Read <code>resolveSupport</code> and <code>dataSupport</code> at <code>initialize</code>, next
+to <code>supports_file_rename</code>. When either is missing, compute the edit in
+phase 1 through the same code <code>resolve_code_action</code> runs, and send it
+without <code>data</code>.</p>
 <h3 id="b549-throws-and-namespaced-function-completions-plan-their-import-against-the-whole-file">B549. <code>@throws</code> and namespaced-function completions plan their import against the whole file<a class="headerlink" href="#b549-throws-and-namespaced-function-completions-plan-their-import-against-the-whole-file" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
 <p>The <code>@throws</code> smart items (<code>src/completion/phpdoc/mod.rs</code>), the <code>@throws</code>
@@ -1961,13 +1977,6 @@ case's value cannot be read (a constant expression the folder does not
 handle), keep the backing type.</p>
 <p>Found running the php-typing-conformance suite
 (<code>phpdoc_advanced_fallback_value_of_template_enum.php</code>).</p>
-<h3 id="b557-a-sibling-import-added-inside-a-braced-namespace-block-is-not-indented">B557. A sibling import added inside a braced <code>namespace { }</code> block is not indented<a class="headerlink" href="#b557-a-sibling-import-added-inside-a-braced-namespace-block-is-not-indented" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>Moving a class out of <code>namespace { class Foo extends Helper {} }</code> writes
-<code>namespace C {\n\nuse Helper;\n    class Foo ...</code>: the import lands flush left
-with a blank line above it instead of indented, with a blank line below.
-<code>UseBlockInfo::import_text</code> (<code>src/completion/use_edit.rs</code>) does not indent
-for a brace block whose first import has no neighbour to copy from.</p>
 
 
 
