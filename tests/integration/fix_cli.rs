@@ -212,6 +212,30 @@ class Foo {
     );
 }
 
+#[test]
+fn removes_two_unused_members_at_the_end_of_a_group_import() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+
+namespace App;
+
+use App\Models\{User, Post, Comment};
+
+class Foo {
+    public function bar(): User {
+        return new User();
+    }
+}
+"#;
+
+    let result = fix_unused_imports(&backend, "file:///test.php", content);
+
+    assert!(
+        result.contains("use App\\Models\\{User};"),
+        "Group should keep only User and stay closed: {result}"
+    );
+}
+
 // ── Group import with all members unused ────────────────────────────────────
 
 #[test]

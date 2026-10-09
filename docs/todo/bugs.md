@@ -251,23 +251,3 @@ declarations. A braced global block has no name for
 move takes the path for a file that had no `namespace` at all. Write the new
 name after the block's `namespace` keyword instead, and place the imports the
 former global siblings now need in that block.
-
-### B558. Removing two unused members at the end of a group import breaks the statement
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-use App\Models\{User, Post, Comment};   // only User is used
-```
-
-"Remove all unused imports" and `phpantom_lsp fix` turn this into
-`use App\Models\{User, `, dropping the closing `};`. Each member is removed
-on its own by `extend_range_for_group_member`
-(`src/code_actions/remove_unused_import.rs`): a member takes the comma after
-it, or the one before it when it is the last, so `Post` takes `Post, ` and
-`Comment` takes `, Comment`. The two edits overlap, and `apply_text_edits`
-applies the second against text the first already changed. A member has to
-choose its comma knowing the rest of the batch: the one after it while every
-member before it is removed too, the one before it otherwise. That way no
-two removals share a comma. The removal of a template's `@use` group
-members (`group_member_removal`, in the same file) already chooses this way.

@@ -234,7 +234,7 @@ pub(crate) fn build_line_deletion_edit(
             .count();
 
         if targeted_in_group < member_count {
-            if let Some(edit) = extend_range_for_group_member(content, range) {
+            if let Some(edit) = extend_range_for_group_member(content, range, all_removed_ranges) {
                 return edit;
             }
         } else {
@@ -565,7 +565,15 @@ pub(crate) fn group_statement_bounds(
 /// When the diagnostic range falls inside a group `use` statement
 /// (`use Foo\{Bar, Baz};`), build an edit that removes only the
 /// identified member rather than the entire line.
-pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Option<TextEdit> {
+///
+/// `all_removed_ranges` is the whole batch.  A member takes the comma after
+/// it only while every member before it on its line goes too, and the comma
+/// before it otherwise, so no two removals share a comma.
+pub(crate) fn extend_range_for_group_member(
+    content: &str,
+    range: &Range,
+    all_removed_ranges: &[Range],
+) -> Option<TextEdit> {
     let lines: Vec<&str> = content.lines().collect();
     let line_idx = range.start.line as usize;
     if line_idx >= lines.len() {
@@ -592,12 +600,26 @@ pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Opt
 
     // Look for a trailing comma+whitespace to consume.
     let after_member = &line[end_byte..];
-    let (removal_end, _has_trailing_comma) = if let Some(rest) = after_member.strip_prefix(',') {
-        let skip = 1 + rest.len() - rest.trim_start().len();
-        (end_byte + skip, true)
-    } else {
-        (end_byte, false)
-    };
+    let before_text = &line[..member_start_in_line];
+    let before_members = before_text
+        .rsplit_once('{')
+        .map_or(before_text, |(_, members)| members)
+        .split(',')
+        .filter(|m| !m.trim().is_empty())
+        .count();
+    let removed_before = all_removed_ranges
+        .iter()
+        .filter(|r| r.start.line == range.start.line && r.start.character < range.start.character)
+        .count();
+    let takes_trailing = removed_before >= before_members;
+
+    let (removal_end, _has_trailing_comma) =
+        if let Some(rest) = after_member.strip_prefix(',').filter(|_| takes_trailing) {
+            let skip = 1 + rest.len() - rest.trim_start().len();
+            (end_byte + skip, true)
+        } else {
+            (end_byte, false)
+        };
 
     // If no trailing comma, look for a leading comma+whitespace.
     let before_member = &line[..member_start_in_line];
@@ -776,7 +798,7 @@ mod tests {
         let content = "<?php\nuse Foo\\{Bar, Baz, Qux};\n";
         // Diagnostic covers "Bar" (start col 9, end col 12).
         let range = Range::new(Position::new(1, 9), Position::new(1, 12));
-        let edit = extend_range_for_group_member(content, &range);
+        let edit = extend_range_for_group_member(content, &range, std::slice::from_ref(&range));
         assert!(edit.is_some(), "should produce a group member edit");
         let edit = edit.unwrap();
         // Should remove "Bar, " (the member plus the trailing comma+space).
