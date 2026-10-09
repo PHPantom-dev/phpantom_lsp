@@ -235,19 +235,12 @@ handle), keep the backing type.
 Found running the php-typing-conformance suite
 (`phpdoc_advanced_fallback_value_of_template_enum.php`).
 
-### B556. Moving a class out of a braced global `namespace { }` block writes an unbracketed `namespace`
+### B557. A sibling import added inside a braced `namespace { }` block is not indented
 
-**Impact: Low · Complexity: Low-Medium**
+**Impact: Low · Complexity: Low**
 
-```php
-<?php
-namespace { class Foo {} }
-```
-
-Moving `Foo` to `C\Foo` inserts `namespace C;` above the block, and PHP
-refuses a file that mixes bracketed and unbracketed `namespace`
-declarations. A braced global block has no name for
-`namespace_declaration_edits` (`src/rename/class/mod.rs`) to rewrite, so the
-move takes the path for a file that had no `namespace` at all. Write the new
-name after the block's `namespace` keyword instead, and place the imports the
-former global siblings now need in that block.
+Moving a class out of `namespace { class Foo extends Helper {} }` writes
+`namespace C {\n\nuse Helper;\n    class Foo ...`: the import lands flush left
+with a blank line above it instead of indented, with a blank line below.
+`UseBlockInfo::import_text` (`src/completion/use_edit.rs`) does not indent
+for a brace block whose first import has no neighbour to copy from.

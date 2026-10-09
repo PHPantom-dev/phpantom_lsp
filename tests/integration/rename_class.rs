@@ -1829,3 +1829,46 @@ async fn class_move_carries_a_class_declared_in_every_branch_of_a_conditional() 
         )
     );
 }
+
+#[tokio::test]
+async fn class_move_out_of_a_braced_global_block_names_the_block() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = "<?php\nnamespace { class Foo {} }\n";
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 1, 20, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(result, "<?php\nnamespace C { class Foo {} }\n");
+}
+
+#[tokio::test]
+async fn class_move_out_of_a_braced_global_block_imports_for_its_former_siblings() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace {\n",
+        "    class Foo extends Helper {}\n",
+        "}\n",
+    );
+
+    open_php(
+        &backend,
+        &Url::parse("file:///src/Helper.php").unwrap(),
+        "<?php\nclass Helper {}\n",
+    )
+    .await;
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 2, 11, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+    assert!(result.starts_with("<?php\nnamespace C {"), "{result}");
+    assert!(result.contains("use Helper;"), "{result}");
+}

@@ -512,6 +512,21 @@ impl Backend {
             _ => None,
         });
         let Some((ns_span, ns_name)) = declaration else {
+            if let Some(keyword_end) = global_block_keyword_end(&file.content, class_start as usize)
+            {
+                return Ok(Some(match mv.new_ns {
+                    Some(ns) => {
+                        let at = offset_to_position(&file.content, keyword_end);
+                        let mut edits = vec![TextEdit {
+                            range: Range { start: at, end: at },
+                            new_text: format!(" {ns}"),
+                        }];
+                        edits.extend(build_sibling_import_edits(file, &siblings));
+                        edits
+                    }
+                    None => Vec::new(),
+                }));
+            }
             return Ok(Some(match mv.new_ns {
                 Some(ns) => vec![insert_namespace_edit(&file.content, ns, &siblings)],
                 None => Vec::new(),
@@ -581,6 +596,18 @@ impl Backend {
             edits,
         );
     }
+}
+
+/// The offset just past the `namespace` keyword of the braced global
+/// block (`namespace {`) that encloses `offset`, if that is what the
+/// class sits in.
+fn global_block_keyword_end(content: &str, offset: usize) -> Option<usize> {
+    const KEYWORD: &str = "namespace";
+    let head = content.get(..offset)?.to_ascii_lowercase();
+    head.rmatch_indices(KEYWORD).find_map(|(start, _)| {
+        let end = start + KEYWORD.len();
+        head[end..].trim_start().starts_with('{').then_some(end)
+    })
 }
 
 /// Group reference locations by the file they fall in, in the shape
