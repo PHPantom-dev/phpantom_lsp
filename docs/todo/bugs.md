@@ -293,3 +293,27 @@ one after a `namespace` declaration. `insert_namespace_edit`
 (`src/code_actions/fix_namespace.rs`) read the header through the same
 helper, and a `namespace` statement written after code is a fatal error
 rather than a misplaced import.
+
+### B572. A client that does not answer `client/registerCapability` never gets diagnostics
+
+**Impact: Medium · Complexity: Low**
+
+`initialized` (`src/backend/startup.rs`) sends `client/registerCapability`
+for the `workspace/didChangeWatchedFiles` watchers and awaits the reply
+before it runs the rest of the startup work. A client that never answers
+leaves the handler waiting. Notifications are dispatched in order, so the
+`textDocument/didOpen` calls that follow are not processed while it waits,
+and no file is diagnosed. Requests still run, so completion, hover,
+definition and references work, which hides the cause. CodeLite did not
+answer the request (fixed on its side), and saw no diagnostics at all.
+
+The request is also sent to clients that never asked for it: the server
+does not check `workspace.didChangeWatchedFiles.dynamicRegistration` in the
+client capabilities, and CodeLite does not set it.
+`reregister_watched_files_if_changed` (`src/indexing/watch.rs`) has the same
+missing check, though it already sends from a spawned task.
+
+**Fix:** Send the registration only when the client advertises
+`dynamicRegistration` for `didChangeWatchedFiles`, and send it from a
+spawned task in `initialized` too, so a slow or missing reply cannot hold
+back startup.
