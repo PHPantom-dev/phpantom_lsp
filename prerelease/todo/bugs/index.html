@@ -1066,17 +1066,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b571-an-import-written-into-a-file-with-no-namespace-lands-after-code-that-shares-the-php-line" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B571. An import written into a file with no <code>namespace</code> lands after code that shares the <code>&lt;?php</code> line
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1788,17 +1777,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b571-an-import-written-into-a-file-with-no-namespace-lands-after-code-that-shares-the-php-line" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B571. An import written into a file with no <code>namespace</code> lands after code that shares the <code>&lt;?php</code> line
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2032,23 +2010,6 @@ choose its comma knowing the rest of the batch: the one after it while every
 member before it is removed too, the one before it otherwise. That way no
 two removals share a comma. The removal of a template's <code>@use</code> group
 members (<code>group_member_removal</code>, in the same file) already chooses this way.</p>
-<h3 id="b571-an-import-written-into-a-file-with-no-namespace-lands-after-code-that-shares-the-php-line">B571. An import written into a file with no <code>namespace</code> lands after code that shares the <code>&lt;?php</code> line<a class="headerlink" href="#b571-an-import-written-into-a-file-with-no-namespace-lands-after-code-that-shares-the-php-line" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="cp">&lt;?php</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{</span> <span class="k">public</span> <span class="k">function</span> <span class="nf">f</span><span class="p">()</span><span class="o">:</span> <span class="nx">Helper</span> <span class="p">{}</span> <span class="p">}</span>
-</code></pre></div>
-<p>With <code>B\Helper</code> declared elsewhere, importing it writes <code>use B\Helper;</code> on the
-line below, after the class, where it reaches nothing written above it.
-<code>analyze_use_block_in</code> (<code>src/completion/use_edit.rs</code>) puts the first import
-of a file with no <code>namespace</code> on the line <code>header_insert_line</code>
-(<code>src/text_scan.rs</code>) names, which reads the header a line at a time: a line
-starting <code>&lt;?php</code> or <code>declare(</code> is all header, whatever follows it on that
-line. The import belongs just after the opening tag, or after the
-<code>declare(...);</code> that follows it, the way <code>FirstImport::Inline</code> already places
-one after a <code>namespace</code> declaration. <code>insert_namespace_edit</code>
-(<code>src/rename/class/layout.rs</code>) and the "add namespace" fix
-(<code>src/code_actions/fix_namespace.rs</code>) read the header through the same
-helper, and a <code>namespace</code> statement written after code is a fatal error
-rather than a misplaced import.</p>
 
 
 
