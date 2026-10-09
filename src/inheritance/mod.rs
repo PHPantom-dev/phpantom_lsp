@@ -589,26 +589,6 @@ pub(crate) fn resolve_class_with_inheritance(
         }
     }
 
-    // Refine the `value` property on backed enums.  The `BackedEnum`
-    // interface declares `public readonly int|string $value`, but each
-    // concrete backed enum knows its specific backing type.  Replace
-    // the generic union with the precise type so that hover, completion,
-    // and diagnostics see `string` or `int` instead of `int|string`.
-    if let Some(ref backed) = merged.backed_type {
-        let specific_type = match backed {
-            crate::types::BackedEnumType::String => PhpType::named(atom("string")),
-            crate::types::BackedEnumType::Int => PhpType::named(atom("int")),
-        };
-        if let Some(prop) = merged
-            .properties
-            .make_mut()
-            .iter_mut()
-            .find(|p| p.name == "value")
-        {
-            Arc::make_mut(prop).type_hint = Some(specific_type);
-        }
-    }
-
     // Refine the `cases()` method on enums.  The `UnitEnum` interface
     // declares `public static function cases(): array`, which loses the
     // element type: `Country::cases()[0]` would resolve to `mixed`.

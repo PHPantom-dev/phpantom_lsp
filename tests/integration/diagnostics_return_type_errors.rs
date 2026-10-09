@@ -3766,6 +3766,33 @@ function badValue() { return 3.5; }
     assert!(messages[0].contains("3.5"), "{messages:?}");
 }
 
+/// An enum's `->value` and `->name` read as the union of its cases' values
+/// and names, so they satisfy `value-of<Enum>` and a declared literal union.
+#[test]
+fn enum_value_and_name_read_as_the_cases_literals() {
+    let php = r#"<?php
+namespace App;
+
+enum Suit: string { case Hearts = 'hearts'; case Spades = 'spades'; }
+
+final class Card
+{
+    public function __construct(private Suit $suit) {}
+
+    /** @return value-of<Suit> */
+    public function suitValue(): string { return $this->suit->value; }
+
+    /** @return 'Hearts'|'Spades' */
+    public function suitName(): string { return $this->suit->name; }
+
+    /** @return 'hearts' */
+    public function bad(): string { return $this->suit->value; }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
 /// The same on a method, whose declared return names its own class constant.
 #[test]
 fn key_of_over_a_class_constant_holds_a_methods_body() {

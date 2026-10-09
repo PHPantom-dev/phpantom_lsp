@@ -614,20 +614,40 @@ impl Backend {
                     } = Self::extract_class_like_members(enum_def.members.iter(), doc_ctx, &[]);
 
                     // Every enum case exposes a readonly `name` property, and
-                    // backed enums additionally expose a `value` property whose
-                    // type is the backing type.  These are real instance
-                    // properties in PHP (declared on the UnitEnum/BackedEnum
-                    // interfaces via stubs, but interface properties are not
-                    // merged into implementors), so synthesize them here.
+                    // backed enums additionally expose a `value` property.
+                    // These are real instance properties in PHP (declared on
+                    // the UnitEnum/BackedEnum interfaces via stubs, but
+                    // interface properties are not merged into implementors),
+                    // so synthesize them here.  A value typed as the enum
+                    // could be any of its cases, so `name` is the union of the
+                    // case names and `value` the union of the backing values
+                    // (the bare backing type when one cannot be folded).
+                    let case_names: Vec<PhpType> = constants
+                        .iter()
+                        .filter(|c| c.is_enum_case)
+                        .map(|c| PhpType::literal_string_raw(format!("'{}'", c.name)))
+                        .collect();
+                    let name_type = union_of_distinct(case_names)
+                        .unwrap_or_else(|| PhpType::named(atom("string")));
                     properties.push(crate::types::PropertyInfo::virtual_property_typed(
                         "name",
-                        Some(&PhpType::named(atom("string"))),
+                        Some(&name_type),
                     ));
                     if let Some(hint) = enum_def.backing_type_hint.as_ref() {
-                        let value_type = crate::parser::extract_hint_type(&hint.hint);
+                        let backing_type = crate::parser::extract_hint_type(&hint.hint);
+                        let case_values = constants
+                            .iter()
+                            .filter(|c| c.is_enum_case)
+                            .map(|c| {
+                                c.enum_value.as_deref().and_then(
+                                    crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value,
+                                )
+                            })
+                            .collect::<Option<Vec<PhpType>>>()
+                            .and_then(union_of_distinct);
                         properties.push(crate::types::PropertyInfo::virtual_property_typed(
                             "value",
-                            Some(&value_type),
+                            Some(&case_values.unwrap_or(backing_type)),
                         ));
                     }
 
@@ -2009,5 +2029,20 @@ class Service {
 "#;
         let classes = Backend::parse_php_versioned_with_namespaces(src, None);
         assert_eq!(property_type(&classes, "Service", "logger"), "Lib\\Logger");
+    }
+}
+
+/// The union of `types` with duplicates dropped; `None` when empty.
+fn union_of_distinct(types: Vec<PhpType>) -> Option<PhpType> {
+    let mut unique: Vec<PhpType> = Vec::with_capacity(types.len());
+    for t in types {
+        if !unique.contains(&t) {
+            unique.push(t);
+        }
+    }
+    match unique.len() {
+        0 => None,
+        1 => unique.pop(),
+        _ => Some(PhpType::union(unique)),
     }
 }

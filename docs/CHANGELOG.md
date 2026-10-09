@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`->value` and `->name` on an enum read as its cases' values and names.** A `value-of<Enum>` parameter or return, or a declared literal union, no longer reports a false type mismatch when fed an enum's `->value`.
 - **A new import inside a braced `namespace { }` block is indented to match the block.** Imports added by completion, code actions and class moves no longer land flush left.
 - **Moving a class out of a braced global `namespace { }` block keeps the file valid.** The new namespace is written into the block's `namespace` keyword instead of a separate `namespace` statement above it.
 - **Removing two unused members at the end of a group import keeps the statement intact.** `use App\Models\{User, Post, Comment};` no longer loses its closing `};` when "Remove all unused imports" or `fix` drops the last two members.
