@@ -1045,10 +1045,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b556-moving-a-class-out-of-a-braced-global-namespace-block-writes-an-unbracketed-namespace" class="md-nav__link">
+  <a href="#b557-a-sibling-import-added-inside-a-braced-namespace-block-is-not-indented" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B556. Moving a class out of a braced global <code>namespace { }</code> block writes an unbracketed <code>namespace</code>
+        B557. A sibling import added inside a braced <code>namespace { }</code> block is not indented
       </span>
     </span>
   </a>
@@ -1745,10 +1745,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b556-moving-a-class-out-of-a-braced-global-namespace-block-writes-an-unbracketed-namespace" class="md-nav__link">
+  <a href="#b557-a-sibling-import-added-inside-a-braced-namespace-block-is-not-indented" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B556. Moving a class out of a braced global <code>namespace { }</code> block writes an unbracketed <code>namespace</code>
+        B557. A sibling import added inside a braced <code>namespace { }</code> block is not indented
       </span>
     </span>
   </a>
@@ -1961,18 +1961,13 @@ case's value cannot be read (a constant expression the folder does not
 handle), keep the backing type.</p>
 <p>Found running the php-typing-conformance suite
 (<code>phpdoc_advanced_fallback_value_of_template_enum.php</code>).</p>
-<h3 id="b556-moving-a-class-out-of-a-braced-global-namespace-block-writes-an-unbracketed-namespace">B556. Moving a class out of a braced global <code>namespace { }</code> block writes an unbracketed <code>namespace</code><a class="headerlink" href="#b556-moving-a-class-out-of-a-braced-global-namespace-block-writes-an-unbracketed-namespace" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">namespace</span> <span class="p">{</span> <span class="k">class</span> <span class="nc">Foo</span> <span class="p">{}</span> <span class="p">}</span>
-</code></pre></div>
-<p>Moving <code>Foo</code> to <code>C\Foo</code> inserts <code>namespace C;</code> above the block, and PHP
-refuses a file that mixes bracketed and unbracketed <code>namespace</code>
-declarations. A braced global block has no name for
-<code>namespace_declaration_edits</code> (<code>src/rename/class/mod.rs</code>) to rewrite, so the
-move takes the path for a file that had no <code>namespace</code> at all. Write the new
-name after the block's <code>namespace</code> keyword instead, and place the imports the
-former global siblings now need in that block.</p>
+<h3 id="b557-a-sibling-import-added-inside-a-braced-namespace-block-is-not-indented">B557. A sibling import added inside a braced <code>namespace { }</code> block is not indented<a class="headerlink" href="#b557-a-sibling-import-added-inside-a-braced-namespace-block-is-not-indented" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>Moving a class out of <code>namespace { class Foo extends Helper {} }</code> writes
+<code>namespace C {\n\nuse Helper;\n    class Foo ...</code>: the import lands flush left
+with a blank line above it instead of indented, with a blank line below.
+<code>UseBlockInfo::import_text</code> (<code>src/completion/use_edit.rs</code>) does not indent
+for a brace block whose first import has no neighbour to copy from.</p>
 
 
 
