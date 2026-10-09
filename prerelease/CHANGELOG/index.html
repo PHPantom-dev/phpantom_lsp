@@ -5102,6 +5102,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>-&gt;value</code> and <code>-&gt;name</code> on an enum read as its cases' values and names.</strong> A <code>value-of&lt;Enum&gt;</code> parameter or return, or a declared literal union, no longer reports a false type mismatch when fed an enum's <code>-&gt;value</code>.</li>
 <li><strong>A new import inside a braced <code>namespace { }</code> block is indented to match the block.</strong> Imports added by completion, code actions and class moves no longer land flush left.</li>
 <li><strong>Moving a class out of a braced global <code>namespace { }</code> block keeps the file valid.</strong> The new namespace is written into the block's <code>namespace</code> keyword instead of a separate <code>namespace</code> statement above it.</li>
 <li><strong>Removing two unused members at the end of a group import keeps the statement intact.</strong> <code>use App\Models\{User, Post, Comment};</code> no longer loses its closing <code>};</code> when "Remove all unused imports" or <code>fix</code> drops the last two members.</li>
