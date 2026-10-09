@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791513035455,
+  "lastUpdate": 1791513635843,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -36039,6 +36039,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 85.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1cedfdf326f5333fc59ce47e16567b712a953a9d",
+          "message": "Imports and `namespace` statements go ahead of code written on the\n`<?php` line",
+          "timestamp": "2026-10-09T04:27:15+02:00",
+          "tree_id": "ff16bc3de3bc2c77bd4fa7b9009f4129d26cb257",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1cedfdf326f5333fc59ce47e16567b712a953a9d"
+        },
+        "date": 1791513625223,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80.3,
             "unit": "MiB"
           }
         ]
