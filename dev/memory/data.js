@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791513635843,
+  "lastUpdate": 1791514607857,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -36073,6 +36073,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 80.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8c815514a4fc8bce6e919e87f72043ddd831686d",
+          "message": "Removing two unused members at the end of a group import keeps the\nstatement intact",
+          "timestamp": "2026-10-09T04:44:15+02:00",
+          "tree_id": "b72f3d20364c92b9aacd110afea53f0983b559ce",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8c815514a4fc8bce6e919e87f72043ddd831686d"
+        },
+        "date": 1791514600715,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 85.4,
             "unit": "MiB"
           }
         ]
