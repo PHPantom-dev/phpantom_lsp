@@ -259,27 +259,6 @@ set of removed names, turning the filter into set lookups.
 
 ---
 
-## P58. A member-completion cache hit copies the whole item list
-
-**Impact: Low · Complexity: Low**
-
-The member-completion cache exists so that each keystroke in
-`$model->wh…` reuses the unfiltered member list instead of re-resolving
-it. A hit clones the cached `Vec<CompletionItem>` wholesale, which for an
-Eloquent model is several hundred items each carrying several `String`s
-and an optional documentation block — and the prefix filter then throws
-most of them away. The cache is capped, so this is CPU rather than a
-leak, but it is paid on the keystroke the cache was added to make fast.
-
-Store an `Arc<Vec<CompletionItem>>` and have the filter take a slice,
-cloning only the items that survive.
-
-**Where to look:** `member_completion_cache` and
-`filter_member_completion_items` in
-`completion/handler/member_access.rs`.
-
----
-
 ## Appendix: Profiling
 
 ### Commands

@@ -888,7 +888,7 @@ pub struct Backend {
     /// keyword edit. The receiver and candidate member set are unchanged
     /// across those requests, so cache the unfiltered member list and let
     /// each request apply only its current prefix filter.
-    pub(crate) member_completion_cache: Arc<Mutex<HashMap<String, Vec<CompletionItem>>>>,
+    pub(crate) member_completion_cache: Arc<Mutex<HashMap<String, Arc<Vec<CompletionItem>>>>>,
     /// Embedded PHP stubs for built-in functions (e.g. `array_map`,
     /// `str_contains`, …).  Maps function name → raw PHP source code.
     ///

@@ -177,7 +177,6 @@ unlikely to move the needle for most users.
 | P73 | [A lazily loaded file is parsed three times](todo/performance.md#p73-a-lazily-loaded-file-is-parsed-three-times)                                                          | Low-Medium  | Low         |
 | P74 | [Every class lookup by name re-parses and lowercases the name](todo/performance.md#p74-every-class-lookup-by-name-re-parses-and-lowercases-the-name)                      | Low-Medium  | Low         |
 | P66 | [Stub version filtering rescans a stub file once per symbol it declares](todo/performance.md#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares) | Low-Medium  | Low-Medium  |
-| P58 | [A member-completion cache hit copies the whole item list](todo/performance.md#p58-a-member-completion-cache-hit-copies-the-whole-item-list)                                | Low         | Low         |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |
 | X6  | Disk cache (evaluate later)                                                                                                                                                 | Medium      | Very High   |

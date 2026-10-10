@@ -154,6 +154,7 @@ impl Backend {
                     )
                 },
             )
+            .map(Arc::new)
             .inspect(|items| {
                 if !items.is_empty() {
                     let mut cache = self.member_completion_cache.lock();
@@ -163,7 +164,7 @@ impl Backend {
                     if cache.len() > 200 {
                         cache.clear();
                     }
-                    cache.insert(cache_key.clone(), items.clone());
+                    cache.insert(cache_key.clone(), Arc::clone(items));
                 }
             })
         });
@@ -173,9 +174,9 @@ impl Backend {
                 let is_filtered = !prefix.is_empty();
                 let unfiltered_count = all_items.len();
                 let items = if is_filtered {
-                    Self::filter_member_completion_items(all_items, &prefix)
+                    Self::filter_member_completion_items(&all_items, &prefix)
                 } else {
-                    all_items
+                    Arc::unwrap_or_clone(all_items)
                 };
 
                 // ── Suppress snippet parentheses when `(` already follows ──
@@ -253,18 +254,19 @@ impl Backend {
     }
 
     fn filter_member_completion_items(
-        items: Vec<CompletionItem>,
+        items: &[CompletionItem],
         prefix: &str,
     ) -> Vec<CompletionItem> {
         if prefix.is_empty() {
-            return items;
+            return items.to_vec();
         }
 
         let prefix_lower = prefix.to_ascii_lowercase();
         let started = std::time::Instant::now();
         let filtered: Vec<CompletionItem> = items
-            .into_iter()
+            .iter()
             .filter(|item| item.label.to_ascii_lowercase().starts_with(&prefix_lower))
+            .cloned()
             .collect();
         let elapsed = started.elapsed();
         if elapsed >= std::time::Duration::from_micros(500) {
