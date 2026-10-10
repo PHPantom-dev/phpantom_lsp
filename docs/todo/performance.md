@@ -230,35 +230,6 @@ under mimalloc, so confirm this one with an order-swapped A/B run.
 
 ---
 
-## P66. Stub version filtering rescans a stub file once per symbol it declares
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-`set_php_version` drops every stub symbol marked `@removed` at or before
-the target version. For a file that mentions `@removed` at all,
-`is_stub_function_removed` and its class and constant counterparts locate
-each symbol with `source.find("function NAME(")` from the start of the
-file, so a stub file declaring n symbols is scanned n times. 49 of the
-537 stub files mention `@removed`, and they declare about 3,700 symbols
-between them.
-
-The server pays this once at startup and `analyze` once per run, on the
-serial path before any worker starts. On a release build it is about
-three quarters of an empty project's 0.07 s `analyze`, roughly 50 ms, or
-about 4% of a 1.2 s `analyze` of a mid-sized Laravel project. Every test
-that uses `new_test_with_full_stubs`, including each fixture the
-assertType runner checks, pays it too, about 0.45 s each in a debug
-build.
-
-Scanning each such file once for its `@removed` docblocks and recording
-the name of the declaration that follows each one would give a per-file
-set of removed names, turning the filter into set lookups.
-
-**Where to look:** `set_php_version` in `lib.rs` and the
-`is_stub_*_removed` family in `stubs.rs`.
-
----
-
 ## Appendix: Profiling
 
 ### Commands

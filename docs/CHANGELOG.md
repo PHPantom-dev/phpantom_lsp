@@ -17,10 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster analysis of loops.** A loop body is no longer walked again once its types have settled.
 - **Faster analysis of `switch` lookup tables.** A `switch` that assigns a different literal in each of hundreds of cases, such as a table of country or currency names, now takes well under a second instead of up to half a minute.
 - **Faster analysis of long files.** Checking a file of tens of thousands of lines, such as a legacy top-level script, no longer slows down out of proportion to its length. A 22,000-line script is checked in about a second instead of nearly five.
+- **Faster startup.** Hiding the standard library functions, classes, and constants that the project's PHP version no longer has takes a few milliseconds instead of about 50.
 - **Faster go-to-implementation on library classes.** Finding the implementations of a class or interface from a Composer package now reads only the files that could hold one, instead of loading every class the project depends on.
 
 ### Fixed
 
+- **Constants next to a removed one are no longer hidden.** `ASSERT_EXCEPTION`, `MB_CASE_UPPER`, `MB_CASE_LOWER`, `MB_CASE_TITLE`, and `MCRYPT_BLOWFISH_COMPAT` resolve again on the PHP versions that have them, instead of being treated as removed along with the constant declared just before them.
 - **A `catch` block sees what the `try` body assigned before anything could throw.** A variable set by an immediately invoked closure, or by any statement that cannot throw, now keeps that value in the `catch` instead of reverting to what it held before the `try`.
 - **Convert to instance variable no longer redeclares an inherited property.** The action is not offered when a parent class or trait already declares the property.
 - **Convert to instance variable handles closures and arrow functions.** A closure's `use ($x)` capture is dropped and its body converted, and arrow-function bodies are converted too. The action is no longer offered when the variable appears in a `catch`, `static`, or `global` declaration, or is reached by name through `compact()`, `extract()`, or `$$name`, where the rewrite would have broken the code.

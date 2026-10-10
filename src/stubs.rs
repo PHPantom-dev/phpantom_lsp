@@ -31,7 +31,7 @@
 /// Delete the `stubs/` directory and rebuild. The `build.rs` script will
 /// automatically fetch the latest release from GitHub, re-read the map
 /// file and re-embed everything.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // Pull in the generated static arrays.
 include!(concat!(env!("OUT_DIR"), "/stub_map_generated.rs"));
@@ -72,177 +72,121 @@ pub fn build_stub_function_index() -> HashMap<&'static str, &'static str> {
         .collect()
 }
 
-/// Quick byte-level check whether a stub function has been `@removed`
-/// at or before the given PHP version.
-///
-/// This scans the raw PHP source for the function's docblock without a
-/// full AST parse, so it is cheap enough to call during completion
-/// filtering.  Only the docblock immediately preceding
-/// `function <short_name>` is examined.
-///
-/// Returns `true` when the function's docblock contains `@removed X.Y`
-/// and `php_version >= X.Y`.
-pub fn is_stub_function_removed(
-    source: &str,
-    func_name: &str,
-    php_version: crate::types::PhpVersion,
-) -> bool {
-    // Fast path: if the entire file doesn't contain `@removed`, no
-    // function in it can be version-gated.  This skips ~92% of stub
-    // files without any allocations or string searches.
-    if !source.contains("@removed") {
-        return false;
-    }
-
-    // Use the short (unqualified) name for the search pattern.
-    let short = func_name.rsplit('\\').next().unwrap_or(func_name);
-
-    let needle = format!("function {short}(");
-    let Some(func_pos) = source.find(&needle).or_else(|| {
-        // Some stubs have a space or newline before `(`.
-        let needle2 = format!("function {short} ");
-        source.find(&needle2)
-    }) else {
-        return false;
-    };
-
-    is_preceding_docblock_removed(source, func_pos, php_version)
+/// Short names of the declarations in one stub file whose docblock marks
+/// them `@removed` at or before a given PHP version.
+#[derive(Debug, Default)]
+pub struct RemovedStubNames<'a> {
+    pub functions: HashSet<&'a str>,
+    pub classes: HashSet<&'a str>,
+    pub constants: HashSet<&'a str>,
 }
 
-/// Quick byte-level check whether a stub class/interface/trait has been
-/// `@removed` at or before the given PHP version.
-///
-/// Same approach as [`is_stub_function_removed`] but searches for
-/// `class <name>`, `interface <name>`, or `trait <name>`.
-pub fn is_stub_class_removed(
-    source: &str,
-    class_name: &str,
-    php_version: crate::types::PhpVersion,
-) -> bool {
-    // Fast path: skip files that don't mention `@removed` at all.
-    if !source.contains("@removed") {
-        return false;
+impl RemovedStubNames<'_> {
+    /// Whether the symbol `name` (qualified or not) of the given kind is
+    /// among the removed declarations.
+    pub fn contains(&self, kind: StubSymbolKind, name: &str) -> bool {
+        let short = name.rsplit('\\').next().unwrap_or(name);
+        match kind {
+            StubSymbolKind::Function => self.functions.contains(short),
+            StubSymbolKind::Class => self.classes.contains(short),
+            StubSymbolKind::Constant => self.constants.contains(short),
+        }
     }
 
-    // Use the short (unqualified) name for the search pattern.
-    let short = class_name.rsplit('\\').next().unwrap_or(class_name);
-
-    let candidates = [
-        format!("class {short}"),
-        format!("interface {short}"),
-        format!("trait {short}"),
-    ];
-
-    let decl_pos = candidates
-        .iter()
-        .filter_map(|needle| {
-            source.find(needle.as_str()).and_then(|pos| {
-                // Verify the character after the name is a boundary
-                // (space, newline, `{`, or end-of-string) to avoid
-                // matching `class FooBar` when looking for `class Foo`.
-                let after = pos + needle.len();
-                if after >= source.len() {
-                    return Some(pos);
-                }
-                let ch = source.as_bytes()[after];
-                if ch == b' ' || ch == b'\n' || ch == b'\r' || ch == b'{' || ch == b'\t' {
-                    Some(pos)
-                } else {
-                    None
-                }
-            })
-        })
-        .next();
-
-    let Some(pos) = decl_pos else {
-        return false;
-    };
-
-    is_preceding_docblock_removed(source, pos, php_version)
+    fn is_empty(&self) -> bool {
+        self.functions.is_empty() && self.classes.is_empty() && self.constants.is_empty()
+    }
 }
 
-/// Shared helper: check if the docblock immediately preceding the
-/// declaration at `decl_pos` contains `@removed X.Y` where
-/// `php_version >= X.Y`.
-fn is_preceding_docblock_removed(
+/// Collect every declaration in a stub file that has been `@removed` at
+/// or before `php_version`, in one pass over the file.
+///
+/// Each `@removed` docblock is attributed to the first declaration
+/// (`function`, `class`, `interface`, `trait`, or `define(`) that follows
+/// it before the next docblock opens.  Returns `None` when nothing in the
+/// file is removed, which is the case for most stub files.
+pub fn removed_stub_names(
     source: &str,
-    decl_pos: usize,
     php_version: crate::types::PhpVersion,
-) -> bool {
-    let before = &source[..decl_pos];
-    let Some(doc_end) = before.rfind("*/") else {
-        return false;
-    };
-
-    // Make sure there is no intervening declaration between the
-    // docblock end and our target — otherwise the docblock belongs
-    // to a different element.
-    let between = &source[doc_end + 2..decl_pos];
-    if between.contains("function ") || between.contains("class ") || between.contains("interface ")
-    {
-        return false;
-    }
-
-    let Some(doc_start) = source[..doc_end].rfind("/**") else {
-        return false;
-    };
-
-    let docblock = &source[doc_start..doc_end + 2];
-
-    // Simple line-by-line scan for `@removed X.Y` instead of a full
-    // docblock parse.  This is called for every stub entry during
-    // `set_php_version`, so avoiding the PHPDoc parser here
-    // saves significant startup time.
-    for line in docblock.lines() {
-        let trimmed = line.trim().trim_start_matches('*').trim();
-        let rest = if let Some(r) = trimmed.strip_prefix("@removed") {
-            r
-        } else {
+) -> Option<RemovedStubNames<'_>> {
+    let mut names = RemovedStubNames::default();
+    let mut search_from = 0;
+    while let Some(rel) = source[search_from..].find("@removed") {
+        let tag_pos = search_from + rel;
+        let Some(doc_end) = source[tag_pos..].find("*/").map(|p| tag_pos + p + 2) else {
+            break;
+        };
+        search_from = doc_end;
+        let Some(doc_start) = source[..tag_pos].rfind("/**") else {
             continue;
         };
-        // The version string follows the tag, separated by whitespace.
-        let rest = rest.trim_start();
-        if rest.is_empty() {
+        if !docblock_removed_at(&source[doc_start..doc_end], php_version) {
             continue;
         }
-        if let Some(ver) = crate::types::PhpVersion::from_composer_constraint(rest)
-            && php_version >= ver
-        {
-            return true;
+        let after = &source[doc_end..];
+        let after = &after[..after.find("/**").unwrap_or(after.len())];
+        if let Some((kind, name)) = first_declaration(after) {
+            match kind {
+                StubSymbolKind::Function => names.functions.insert(name),
+                StubSymbolKind::Class => names.classes.insert(name),
+                StubSymbolKind::Constant => names.constants.insert(name),
+            };
         }
     }
-
-    false
+    (!names.is_empty()).then_some(names)
 }
 
-/// Quick byte-level check whether a stub constant has been
-/// `@removed` at or before the given PHP version.
-///
-/// Same approach as [`is_stub_function_removed`] but searches for
-/// `define('CONSTANT_NAME'` or `define("CONSTANT_NAME"`.
-pub fn is_stub_constant_removed(
-    source: &str,
-    const_name: &str,
-    php_version: crate::types::PhpVersion,
-) -> bool {
-    if !source.contains("@removed") {
-        return false;
-    }
+/// Whether a docblock carries an `@removed X.Y` tag with
+/// `php_version >= X.Y`.
+fn docblock_removed_at(docblock: &str, php_version: crate::types::PhpVersion) -> bool {
+    docblock.lines().any(|line| {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+        trimmed
+            .strip_prefix("@removed")
+            .map(str::trim_start)
+            .filter(|rest| !rest.is_empty())
+            .and_then(crate::types::PhpVersion::from_composer_constraint)
+            .is_some_and(|ver| php_version >= ver)
+    })
+}
 
-    // Use the short (unqualified) name for the search pattern.
-    let short = const_name.rsplit('\\').next().unwrap_or(const_name);
+/// The kind of stub symbol a declaration introduces.
+#[derive(Debug, Clone, Copy)]
+pub enum StubSymbolKind {
+    Function,
+    Class,
+    Constant,
+}
 
-    // Constants use `define('NAME',` or `define("NAME",` in stubs.
-    let needle_sq = format!("define('{short}'");
-    let needle_dq = format!("define(\"{short}\"");
-
-    let decl_pos = source.find(&needle_sq).or_else(|| source.find(&needle_dq));
-
-    let Some(pos) = decl_pos else {
-        return false;
-    };
-
-    is_preceding_docblock_removed(source, pos, php_version)
+/// Find the earliest declaration keyword in `text` and return the name
+/// it declares.
+fn first_declaration(text: &str) -> Option<(StubSymbolKind, &str)> {
+    const KEYWORDS: [(&str, StubSymbolKind); 7] = [
+        ("function ", StubSymbolKind::Function),
+        ("class ", StubSymbolKind::Class),
+        ("interface ", StubSymbolKind::Class),
+        ("trait ", StubSymbolKind::Class),
+        ("define('", StubSymbolKind::Constant),
+        ("define(\"", StubSymbolKind::Constant),
+        ("function&", StubSymbolKind::Function),
+    ];
+    let bytes = text.as_bytes();
+    let (pos, keyword, kind) = KEYWORDS
+        .iter()
+        .flat_map(|&(keyword, kind)| {
+            text.match_indices(keyword)
+                .find(|&(pos, _)| {
+                    pos == 0 || !(bytes[pos - 1].is_ascii_alphanumeric() || bytes[pos - 1] == b'_')
+                })
+                .map(|(pos, _)| (pos, keyword, kind))
+        })
+        .min_by_key(|&(pos, _, _)| pos)?;
+    let rest = text[pos + keyword.len()..].trim_start_matches([' ', '\t', '&']);
+    let len = rest
+        .bytes()
+        .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b >= 0x80)
+        .count();
+    (len > 0).then(|| (kind, &rest[..len]))
 }
 
 /// Build a lookup table mapping constant names to their embedded PHP
@@ -266,6 +210,20 @@ mod tests {
     use super::*;
     use crate::types::PhpVersion;
 
+    const PHP_7_1: PhpVersion = PhpVersion { major: 7, minor: 1 };
+    const PHP_7_2: PhpVersion = PhpVersion { major: 7, minor: 2 };
+    const PHP_7_4: PhpVersion = PhpVersion { major: 7, minor: 4 };
+    const PHP_8_0: PhpVersion = PhpVersion { major: 8, minor: 0 };
+    const PHP_8_4: PhpVersion = PhpVersion { major: 8, minor: 4 };
+
+    fn removed_constants(source: &str, version: PhpVersion) -> Vec<&str> {
+        let mut names: Vec<&str> = removed_stub_names(source, version)
+            .map(|n| n.constants.into_iter().collect())
+            .unwrap_or_default();
+        names.sort_unstable();
+        names
+    }
+
     #[test]
     fn constant_removed_single_quote() {
         let source = r#"<?php
@@ -275,96 +233,64 @@ mod tests {
  */
 define('MCRYPT_ENCRYPT', 0);
 "#;
-        assert!(is_stub_constant_removed(
-            source,
-            "MCRYPT_ENCRYPT",
-            PhpVersion { major: 7, minor: 2 }
-        ));
-        assert!(is_stub_constant_removed(
-            source,
-            "MCRYPT_ENCRYPT",
-            PhpVersion { major: 8, minor: 0 }
-        ));
-        assert!(!is_stub_constant_removed(
-            source,
-            "MCRYPT_ENCRYPT",
-            PhpVersion { major: 7, minor: 1 }
-        ));
+        assert_eq!(removed_constants(source, PHP_7_2), ["MCRYPT_ENCRYPT"]);
+        assert_eq!(removed_constants(source, PHP_8_0), ["MCRYPT_ENCRYPT"]);
+        assert!(removed_stub_names(source, PHP_7_1).is_none());
     }
 
     #[test]
     fn constant_removed_double_quote() {
         let source = "<?php\n/**\n * @removed 8.0\n */\ndefine(\"OLD_CONST\", 1);\n";
-        assert!(is_stub_constant_removed(
-            source,
-            "OLD_CONST",
-            PhpVersion { major: 8, minor: 0 }
-        ));
-        assert!(!is_stub_constant_removed(
-            source,
-            "OLD_CONST",
-            PhpVersion { major: 7, minor: 4 }
-        ));
+        assert_eq!(removed_constants(source, PHP_8_0), ["OLD_CONST"]);
+        assert!(removed_stub_names(source, PHP_7_4).is_none());
     }
 
     #[test]
     fn constant_not_removed() {
         let source =
             "<?php\n/**\n * @return int\n */\ndefine('PHP_INT_MAX', 9223372036854775807);\n";
-        assert!(!is_stub_constant_removed(
-            source,
-            "PHP_INT_MAX",
-            PhpVersion { major: 8, minor: 4 }
-        ));
+        assert!(removed_stub_names(source, PHP_8_4).is_none());
     }
 
     #[test]
     fn constant_no_removed_tag_in_file() {
         let source = "<?php\ndefine('SOME_CONST', 42);\n";
-        assert!(!is_stub_constant_removed(
-            source,
-            "SOME_CONST",
-            PhpVersion { major: 8, minor: 4 }
-        ));
+        assert!(removed_stub_names(source, PHP_8_4).is_none());
     }
 
     #[test]
-    fn constant_not_found_in_source() {
-        let source = "<?php\n/**\n * @removed 7.2\n */\ndefine('OTHER', 0);\n";
-        assert!(!is_stub_constant_removed(
-            source,
-            "MISSING",
-            PhpVersion { major: 8, minor: 0 }
-        ));
+    fn undocumented_constant_does_not_inherit_previous_docblock() {
+        let source = "<?php\n/**\n * @removed 8.0\n */\ndefine('ASSERT_QUIET_EVAL', 5);\ndefine('ASSERT_EXCEPTION', 5);\n";
+        assert_eq!(removed_constants(source, PHP_8_0), ["ASSERT_QUIET_EVAL"]);
     }
 
     #[test]
     fn function_removed_basic() {
         let source = "<?php\n/**\n * @removed 7.2\n */\nfunction mcrypt_encrypt() {}\n";
-        assert!(is_stub_function_removed(
-            source,
-            "mcrypt_encrypt",
-            PhpVersion { major: 7, minor: 2 }
-        ));
-        assert!(!is_stub_function_removed(
-            source,
-            "mcrypt_encrypt",
-            PhpVersion { major: 7, minor: 1 }
-        ));
+        let names = removed_stub_names(source, PHP_7_2).unwrap();
+        assert!(names.functions.contains("mcrypt_encrypt"));
+        assert!(removed_stub_names(source, PHP_7_1).is_none());
+    }
+
+    #[test]
+    fn function_removed_after_attribute() {
+        let source =
+            "<?php\n/**\n * @removed 8.0\n */\n#[Pure]\nfunction &each(array &$array) {}\n";
+        let names = removed_stub_names(source, PHP_8_0).unwrap();
+        assert!(names.functions.contains("each"));
     }
 
     #[test]
     fn class_removed_basic() {
         let source = "<?php\n/**\n * @removed 8.0\n */\nclass OldClass {}\n";
-        assert!(is_stub_class_removed(
-            source,
-            "OldClass",
-            PhpVersion { major: 8, minor: 0 }
-        ));
-        assert!(!is_stub_class_removed(
-            source,
-            "OldClass",
-            PhpVersion { major: 7, minor: 4 }
-        ));
+        let names = removed_stub_names(source, PHP_8_0).unwrap();
+        assert!(names.classes.contains("OldClass"));
+        assert!(removed_stub_names(source, PHP_7_4).is_none());
+    }
+
+    #[test]
+    fn docblock_without_declaration_is_ignored() {
+        let source = "<?php\n/**\n * @removed 7.0\n */\n\n/**\n * Kept.\n */\nfunction kept() {}\n";
+        assert!(removed_stub_names(source, PHP_8_0).is_none());
     }
 }

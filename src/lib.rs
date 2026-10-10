@@ -2281,22 +2281,25 @@ impl Backend {
     pub fn set_php_version(&self, version: types::PhpVersion) {
         *self.workspace.php_version.lock() = version;
         // Every symbol a stub file declares shares that file's `&'static str`,
-        // so whether the file mentions `@removed` at all is answered once per
-        // file rather than rescanning it for each of its thousands of symbols.
-        let mut mentions_removed: HashMap<usize, bool> = HashMap::new();
-        let mut may_be_removed = |source: &str| {
-            *mentions_removed
+        // so each file is scanned once for its removed declarations and the
+        // filter below is a set lookup per symbol.
+        let mut removed_by_file: HashMap<usize, Option<stubs::RemovedStubNames<'static>>> =
+            HashMap::new();
+        let mut is_removed = |source: &'static str, name: &str, kind: stubs::StubSymbolKind| {
+            removed_by_file
                 .entry(source.as_ptr() as usize)
-                .or_insert_with(|| source.contains("@removed"))
+                .or_insert_with(|| stubs::removed_stub_names(source, version))
+                .as_ref()
+                .is_some_and(|names| names.contains(kind, name))
         };
-        self.stub_function_index.write().retain(|name, source| {
-            !may_be_removed(source) || !stubs::is_stub_function_removed(source, name, version)
-        });
-        self.stub_index.write().retain(|name, source| {
-            !may_be_removed(source) || !stubs::is_stub_class_removed(source, name, version)
-        });
-        self.stub_constant_index.write().retain(|name, source| {
-            !may_be_removed(source) || !stubs::is_stub_constant_removed(source, name, version)
-        });
+        self.stub_function_index
+            .write()
+            .retain(|name, source| !is_removed(source, name, stubs::StubSymbolKind::Function));
+        self.stub_index
+            .write()
+            .retain(|name, source| !is_removed(source, name, stubs::StubSymbolKind::Class));
+        self.stub_constant_index
+            .write()
+            .retain(|name, source| !is_removed(source, name, stubs::StubSymbolKind::Constant));
     }
 }
