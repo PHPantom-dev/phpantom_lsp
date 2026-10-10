@@ -4273,6 +4273,51 @@ mod simplification_tests {
     }
 
     #[test]
+    fn runtime_join_keeps_shapes_up_to_the_value_limit() {
+        let shapes: Vec<PhpType> = (0..256)
+            .map(|i| PhpType::parse(&format!("array{{v{i}: {i}}}")))
+            .collect();
+        let joined = PhpType::join_runtime_value_types(shapes);
+        assert_eq!(joined.union_members().len(), 256);
+    }
+
+    #[test]
+    fn runtime_join_folds_shapes_past_the_value_limit_into_a_general_array() {
+        let mut members = vec![PhpType::parse("Foo")];
+        members.extend((0..257).map(|i| PhpType::parse(&format!("array{{v{i}: {i}}}"))));
+        let joined = PhpType::join_runtime_value_types(members);
+        assert_eq!(joined.to_string(), "Foo|non-empty-array<string, int>");
+
+        // A further shape of the same kind adds nothing.
+        let next = PhpType::join_runtime_value_types(vec![
+            joined.clone(),
+            PhpType::parse("array{v300: 300}"),
+        ]);
+        assert_eq!(next, joined);
+    }
+
+    #[test]
+    fn runtime_join_folds_oversized_lists_into_a_list() {
+        let shapes: Vec<PhpType> = (0..200)
+            .map(|i| PhpType::parse(&format!("list{{'a{i}', {i}}}")))
+            .collect();
+        assert_eq!(
+            PhpType::join_runtime_value_types(shapes).to_string(),
+            "non-empty-list<string|int>"
+        );
+    }
+
+    #[test]
+    fn runtime_join_leaves_a_lone_large_shape_alone() {
+        let entries: Vec<String> = (0..300).map(|i| format!("k{i}: int")).collect();
+        let shape = PhpType::parse(&format!("array{{{}}}", entries.join(", ")));
+        assert_eq!(
+            PhpType::join_runtime_value_types(vec![shape.clone(), PhpType::int()]),
+            PhpType::union(vec![shape, PhpType::int()])
+        );
+    }
+
+    #[test]
     fn review_regression_runtime_join_absorbs_only_numeric_string_literals_into_numeric() {
         assert_eq!(
             PhpType::join_runtime_value_types(vec![

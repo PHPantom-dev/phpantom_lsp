@@ -2580,21 +2580,21 @@ fn conditional_dynamic_writes_stay_bounded() {
     );
     eprintln!();
 
-    // The array handed to `takesInt()` is the one mismatch, and its value
-    // type still holds every branch's shape.
+    // The array handed to `takesInt()` is the one mismatch. Past 256 shapes
+    // its value type is folded into the general array they all fit.
     assert_eq!(
         out.len(),
         1,
         "expected one diagnostic, got: {:?}",
         out.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
-    for i in [1, WRITES / 2, WRITES - 1] {
-        assert!(
-            out[0].message.contains(&format!("array{{v{i}: {i}}}")),
-            "expected the shape from write {i} in the union, got: {}",
-            out[0].message
-        );
-    }
+    assert!(
+        out[0]
+            .message
+            .contains("array<int, non-empty-array<string, int>>"),
+        "expected the shapes folded into one array type, got: {}",
+        out[0].message
+    );
 
     // Budget: 8 s in debug, 1 s in release.  This measures ~0.1 s in
     // release, against 3.8 s with the pairwise comparisons.

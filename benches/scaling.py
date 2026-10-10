@@ -176,7 +176,7 @@ SHAPES: dict[str, Shape] = {
     "long_script_closure_calls": Shape(long_script_closure_calls, 8000),
     "switch_literals": Shape(switch_literals, 2000, known_slow=True),
     "conditional_array_writes": Shape(conditional_array_writes, 200, known_slow=True),
-    "conditional_dynamic_writes": Shape(conditional_dynamic_writes, 2000, known_slow=True),
+    "conditional_dynamic_writes": Shape(conditional_dynamic_writes, 2000),
     "method_chain": Shape(method_chain, 600, known_slow=True),
 }
 

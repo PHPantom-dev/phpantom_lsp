@@ -173,7 +173,6 @@ unlikely to move the needle for most users.
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Very High   |
 | P73 | [A lazily loaded file is parsed three times](todo/performance.md#p73-a-lazily-loaded-file-is-parsed-three-times)                                                          | Low-Medium  | Low         |
 | P78 | [A `switch` over thousands of distinct literals is still quadratic](todo/performance.md#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic)                | Low-Medium  | Medium      |
-| P79 | [Writes under the same dynamic key in separate `if`s are quadratic](todo/performance.md#p79-writes-under-the-same-dynamic-key-in-separate-ifs-are-quadratic)                | Low-Medium  | Medium      |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |
 | X6  | Disk cache (evaluate later)                                                                                                                                                 | Medium      | Very High   |

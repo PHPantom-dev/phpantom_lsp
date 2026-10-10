@@ -290,6 +290,7 @@ impl PhpType {
         dedup_types(&mut flattened);
         simplify_bool_union(&mut flattened);
         simplify_empty_string_union(&mut flattened);
+        generalize_oversized_shapes(&mut flattened);
 
         // Branch joins are normally tiny. Pairwise containment keeps the
         // semantics explicit and handles equivalent aliases deterministically
@@ -1104,6 +1105,92 @@ fn simplify_empty_string_union(types: &mut Vec<PhpType>) {
         types.retain(|t| !is_empty_literal(t) && !is_non_empty(t));
         types.push(PhpType::parse("string"));
     }
+}
+
+/// How many entry values the array shapes of one join may spell out between
+/// them before they are folded into one general array type. The same limit
+/// as PHPStan's `ConstantArrayTypeBuilder::ARRAY_COUNT_LIMIT`.
+const SHAPE_JOIN_VALUE_LIMIT: usize = 256;
+
+/// Fold the array shapes of a join into one `non-empty-array<K, V>` (or
+/// `non-empty-list<V>`) once they spell out more values between them than
+/// [`SHAPE_JOIN_VALUE_LIMIT`].
+///
+/// A different shape written under the same dynamic key in each of a run of
+/// `if`s adds one shape to the array's value type per `if`, and every later
+/// join has to compare the new one against all of them. Past the limit no
+/// reader can make use of the individual shapes anyway, and the general
+/// array their keys and values widen to takes in every further shape of the
+/// same kind, so the union stops growing. Literal keys and values are
+/// widened the way a write in a loop widens them: keeping `0|1|…|256` as
+/// the value type would leave the next shape's `257` outside it.
+///
+/// A lone shape is left as it is, however large: it is one value spelled
+/// out in source, not a union that grows.
+fn generalize_oversized_shapes(types: &mut Vec<PhpType>) {
+    fn sealed_entries(ty: &PhpType) -> Option<&[ShapeEntry]> {
+        if ty.as_unsealed_shape().is_some() {
+            return None;
+        }
+        match ty.kind() {
+            TypeKind::ArrayShape(entries) if !entries.is_empty() => Some(entries),
+            _ => None,
+        }
+    }
+
+    let mut shape_count = 0;
+    let mut value_count = 0;
+    for entries in types.iter().filter_map(sealed_entries) {
+        shape_count += 1;
+        value_count += entries.len();
+    }
+    if shape_count < 2 || value_count <= SHAPE_JOIN_VALUE_LIMIT {
+        return;
+    }
+
+    let mut keys = Vec::new();
+    let mut values = Vec::with_capacity(value_count);
+    let mut list = true;
+    let mut non_empty = true;
+    for ty in types.iter() {
+        let Some(entries) = sealed_entries(ty) else {
+            continue;
+        };
+        list &= ty.is_list_shape() || entries.iter().all(|entry| entry.key.is_none());
+        non_empty &= entries.iter().any(|entry| !entry.optional);
+        for entry in entries {
+            keys.push(match entry.key.as_deref() {
+                Some(key) => shape_key_type(key).widen_scalar_literals(),
+                None => PhpType::int(),
+            });
+            values.push(entry.value_type.widen_scalar_literals());
+        }
+    }
+
+    let value = PhpType::join_runtime_value_types(values);
+    let general = if list {
+        let name = if non_empty { "non-empty-list" } else { "list" };
+        PhpType::generic_atom(atom(name), vec![value])
+    } else {
+        let name = if non_empty {
+            "non-empty-array"
+        } else {
+            "array"
+        };
+        let key = PhpType::join_runtime_value_types(keys);
+        PhpType::generic_atom(atom(name), vec![key, value])
+    };
+
+    let first = types
+        .iter()
+        .position(|ty| sealed_entries(ty).is_some())
+        .expect("counted at least two shapes");
+    let mut index = 0;
+    types.retain(|ty| {
+        index += 1;
+        index - 1 == first || sealed_entries(ty).is_none()
+    });
+    types[first] = general;
 }
 
 /// Drop every `non-empty-` refinement whose unrefined base shares the

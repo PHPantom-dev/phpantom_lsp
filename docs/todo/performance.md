@@ -114,34 +114,6 @@ and its callers in `php_type/subtype.rs`.
 
 ---
 
-## P79. Writes under the same dynamic key in separate `if`s are quadratic
-
-**Impact: Low-Medium · Complexity: Medium**
-
-N `if`s each writing a different shape to `$data[$id]` cost time in
-proportion to the square of N. `benches/scaling.py`'s
-`conditional_dynamic_writes` shape, on a release build, takes 1.6 s at
-2,000 writes and 6.6 s at 4,000. The array's value type is a union that
-gains one shape per `if`, and every join builds that union again from
-scratch: the samples are in `dedup_types`, `hash_for_dedup` and the shape
-index `join_runtime_value_types` builds to find which members could absorb
-which, each of them a pass over all the shapes so far. Joining one new
-member into a union that is already normalised would make each join cost
-only what it adds.
-
-That cuts the constant, but the union still grows with every write, so
-only bounding it removes the growth. PHPStan turns a union of more than
-256 constant-array values into one general `non-empty-array<K, V>`
-(`TypeCombinator::optimizeConstantArrays`). Doing the same would change
-what hover shows past that size, so it needs a decision first.
-
-**Where to look:** `join_runtime_value_types` and `absorb_subsumed_shapes`
-in `php_type/normalize.rs`, reached from a join through
-`ResolvedType::collapse_redundant_runtime_literals` in
-`types/resolved_type.rs`.
-
----
-
 ## Appendix: Profiling
 
 ### Commands
