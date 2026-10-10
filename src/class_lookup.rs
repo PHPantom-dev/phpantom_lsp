@@ -602,6 +602,21 @@ pub(crate) fn is_subtype_of_typed(
             .any(|m| is_subtype_of_typed(m, supertype, class_loader));
     }
 
+    // ── Class-constant shape keys ───────────────────────────────
+    // A docblock keeps a key spelled `Slots::NAME` as written, which the
+    // structural check can only read as some `array-key`. Evaluated, it is
+    // the integer or string the constant holds, which may well be the `0`
+    // a list needs.
+    let sub_evaluated = shape_with_constant_keys_evaluated(subtype, class_loader);
+    let sup_evaluated = shape_with_constant_keys_evaluated(supertype, class_loader);
+    if sub_evaluated.is_some() || sup_evaluated.is_some() {
+        return is_subtype_of_typed(
+            sub_evaluated.as_ref().unwrap_or(subtype),
+            sup_evaluated.as_ref().unwrap_or(supertype),
+            class_loader,
+        );
+    }
+
     // ── Shape <: shape ──────────────────────────────────────────
     // The structural check compared the entries each shape lists and found
     // them wanting, but it takes the class names in them at face value, so
@@ -616,6 +631,16 @@ pub(crate) fn is_subtype_of_typed(
         return crate::php_type::shape_is_subshape(&sub, &wider, &|a, b| {
             is_subtype_of_typed(a, b, class_loader)
         });
+    }
+
+    // ── Array <: unsealed shape ─────────────────────────────────
+    // Ahead of the generic-array rules for the same reason: an array that
+    // is not itself a shape fits the generic array an unsealed shape widens
+    // to, whatever entries the shape requires.
+    if let Some(fits) = crate::php_type::array_is_unsealed_subshape(subtype, supertype, &|a, b| {
+        is_subtype_of_typed(a, b, class_loader)
+    }) {
+        return fits;
     }
 
     // ── Generic covariance with class-loader awareness ──────────
@@ -892,6 +917,84 @@ pub(crate) fn is_subtype_of_typed(
     }
 
     false
+}
+
+/// The runtime array key a shape key spelled `Foo::CONSTANT` evaluates to,
+/// when `Foo` is loadable and the constant holds an integer or string
+/// literal: `0` for `const NAME = 0;`, `name` for `const NAME = 'name';`.
+///
+/// `None` for any other key, and for a constant whose value is not one
+/// such literal, which stays the `array-key` its spelling says.
+pub(crate) fn evaluate_constant_shape_key(
+    key: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<String> {
+    let (class_name, constant_name) = crate::php_type::class_constant_key(key)?;
+    let cls = class_loader(class_name)?;
+    let value = match cls.constants.iter().find(|c| c.name == constant_name) {
+        Some(constant) => constant.value.clone(),
+        // An inherited constant is only on the merged class.
+        None => crate::virtual_members::resolve_class_fully_maybe_cached(
+            &cls,
+            class_loader,
+            crate::virtual_members::active_resolved_class_cache(),
+        )
+        .constants
+        .iter()
+        .find(|c| c.name == constant_name)?
+        .value
+        .clone(),
+    }?;
+    let literal =
+        crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(&value)?;
+    match literal.as_literal()? {
+        lit @ crate::php_type::LiteralValue::Int(_) => lit.parse_i64().map(|n| n.to_string()),
+        lit @ crate::php_type::LiteralValue::String(_) => lit.string_content().map(Into::into),
+        crate::php_type::LiteralValue::Float(_) => None,
+    }
+}
+
+/// `ty` with the class-constant keys of its array shape replaced by the keys
+/// they evaluate to, so that a shape spelled `array{Slots::NAME: string}`
+/// compares as the `array{0: string}` it is at runtime.
+///
+/// `None` when `ty` is not a shape or none of its keys can be evaluated.
+fn shape_with_constant_keys_evaluated(
+    ty: &crate::php_type::PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<crate::php_type::PhpType> {
+    use crate::php_type::{PhpType, ShapeEntry};
+
+    let parts = ty.shape_parts()?;
+    let mut evaluated_any = false;
+    let entries: Vec<ShapeEntry> = parts
+        .entries
+        .iter()
+        .map(|entry| {
+            let key = entry.key.as_deref().and_then(|key| {
+                let evaluated = evaluate_constant_shape_key(key, class_loader);
+                evaluated_any |= evaluated.is_some();
+                evaluated
+            });
+            ShapeEntry {
+                key: key.or_else(|| entry.key.clone()),
+                value_type: entry.value_type.clone(),
+                optional: entry.optional,
+            }
+        })
+        .collect();
+    if !evaluated_any {
+        return None;
+    }
+    let shape = if parts.is_list {
+        PhpType::list_shape(entries)
+    } else {
+        PhpType::array_shape(entries)
+    };
+    Some(match parts.tail {
+        Some((key, value)) => PhpType::unsealed_shape(shape, key.clone(), value.clone()),
+        None => shape,
+    })
 }
 
 #[cfg(test)]

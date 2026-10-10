@@ -73,69 +73,7 @@ No outstanding items.
 
 ## Array types
 
-### B565. A plain array counts as a subtype of an unsealed array shape
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @param array{foo: int, ...} $shape */
-function takeOpen(array $shape): void {}
-```
-
-`array<string, int>` is a subtype of `array{foo: int, ...}` as far as
-`is_subtype_of_typed` is concerned, and `non-empty-array<string, int>` is
-one for `PhpType::is_subtype_of` too, though nothing says either array
-holds `foo`. The same goes for `list<int>` and `non-empty-list<int>`
-against `list{int, ...}`. The shape-to-shape rules read an unsealed shape
-through `shape_parts()`, but a subtype that is not itself a shape reaches
-an unsealed supertype as the `non-empty-array<array-key, mixed>` it widens
-to, which any array-like generic fits. The class-aware generic covariance
-rule in `is_subtype_of_typed` does not even check the `non-empty-` promise,
-which is why a bare `array<string, int>` passes there. A sealed supertype
-has no such problem: `non-empty-array<string, int>` is not a subtype of
-`array{foo: int}`. Parameter seeding reads the answer as a proven
-narrowing of the declared type.
-
-**Fix:** Settle an array-like generic against an unsealed supertype as an
-unsealed shape with no entries of its own, `array{...<K, V>}` (or
-`list{...<V>}` for a list), through `shape_is_subshape`: an entry the
-supertype requires is then missing, and an optional one has to fit the
-tail. Do it in `PhpType::is_subtype_of` and, ahead of the generic-array
-rules, in `is_subtype_of_typed`. The argument diagnostic answers a typed
-array handed to an unsealed parameter through its own rules, not through
-these two functions; keep it that way, so that an array that merely might
-hold the entries stays unreported.
-
-### B566. A `list` parameter rejects a docblock shape keyed by class constants
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-class Slots { const NAME = 0; const AGE = 1; }
-
-/** @return array{Slots::NAME: string, Slots::AGE: int} */
-function row(): array { return ['Ann', 30]; }
-
-/** @param list<string|int> $values */
-function takeList(array $values): void {}
-
-takeList(row()); // reported, though the keys are `0` and `1`
-```
-
-`shape_fits_array` (`src/diagnostics/type_errors/compatibility.rs`) holds
-the keys of a shape to the integers a list demands by their spelling, and
-a key spelled `Slots::NAME` is not one, so the shape is rejected whatever
-the constant evaluates to. An array literal does not have the problem,
-because its keys are evaluated: `[Slots::NAME => 'Ann']` is typed
-`array<0, 'Ann'>`. A docblock keeps the spelling, and `shape_key_type` can
-only call such a key an `array-key`.
-
-**Fix:** Evaluate the constant. When the class is loadable and the constant
-holds an integer or string literal, read the key as that value in
-`shape_fits_array`, and in the structural list check
-(`shape_keys_are_sequential`), which reads the same spelling as a string
-key. A constant that cannot be evaluated stays an `array-key`, which does
-not contradict a list.
+No outstanding items.
 
 ## Laravel
 

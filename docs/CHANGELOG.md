@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A typed array no longer proves it holds the keys an open array shape requires.** A parameter declared `array<string, int>` or `list<int>` is no longer taken to match an `array{foo: int, ...}` or `list{int, ...}` it says nothing about.
+- **Shape keys spelled as class constants are read as the keys they hold.** A docblock shape like `array{Slots::NAME: string, Slots::AGE: int}` whose constants are `0` and `1` is now accepted where a `list` is expected.
 - **Blade `{{!!$flag}}`.** A double negation written without a space is an escaped echo again, instead of a raw echo that broke the rest of the template.
 - **An assignment is seen by the rest of the expression it sits in.** In `if (($user = find($id)) && $user->isActive())`, the right-hand side now knows what `$user` holds, and `[$i++, $i]` holds the old `$i` in its first item and the incremented one in its second.
 - **Narrowing follows the order a condition is evaluated in.** In `if ($x instanceof Foo && ($x = make()))` the body sees what `make()` returned, and a call that changes an object between two checks drops what the first one proved. A check inside one argument no longer narrows the arguments after it.

@@ -288,6 +288,10 @@ fn shape_fits_array(
         .iter()
         .zip(arg.entries)
         .all(|(key, entry)| {
+            // A key spelled `Foo::CONSTANT` is checked as the key the
+            // constant evaluates to, when it can be.
+            let evaluated = crate::class_lookup::evaluate_constant_shape_key(key, class_loader);
+            let key = evaluated.as_deref().unwrap_or(key);
             (!demand.list || crate::php_type::is_canonical_int_key(key))
                 && demand.key.is_none_or(|key_type| {
                     // A key is never coerced to fit, whatever the file's

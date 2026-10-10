@@ -234,6 +234,14 @@ impl PhpType {
             }
         }
 
+        // ── Array <: unsealed shape ─────────────────────────────────
+        // Ahead of the array rules below, which would read the shape as the
+        // generic array it widens to and lose the entries it requires.
+        if let Some(fits) = array_is_unsealed_subshape(self, supertype, &|a, b| a.is_subtype_of(b))
+        {
+            return fits;
+        }
+
         // ── Array slice: T[] <: array ───────────────────────────────
         if let TypeKind::Array(inner_sub) = self.kind() {
             match supertype.kind() {
@@ -534,6 +542,51 @@ pub(crate) fn shape_is_subshape(
             is_subtype(tail_key, wider_key) && is_subtype(tail_value, wider_value)
         })
     })
+}
+
+/// Whether every array `array` describes is one the unsealed shape `wider`
+/// describes, when `array` is an array that is not itself a shape.
+///
+/// Such an array is an unsealed shape with no entries of its own:
+/// `array<K, V>` is `array{...<K, V>}` and `list<V>` is `list{...<V>}`. So
+/// an entry `wider` requires is missing from it, and one `wider` merely
+/// allows has to fit its tail. Read by `kind()` instead, `wider` is the
+/// `non-empty-array<array-key, mixed>` it widens to, which any such array
+/// fits whatever entries `wider` lists.
+///
+/// `None` when `wider` is not an unsealed shape or `array` is not an array
+/// of that kind, leaving the pair to the other rules.
+pub(crate) fn array_is_unsealed_subshape(
+    array: &PhpType,
+    wider: &PhpType,
+    is_subtype: &dyn Fn(&PhpType, &PhpType) -> bool,
+) -> Option<bool> {
+    let wider = wider.shape_parts().filter(|parts| parts.tail.is_some())?;
+    if array.shape_parts().is_some() {
+        return None;
+    }
+    let array_key = || PhpType::union(vec![PhpType::int(), PhpType::string()]);
+    let (key, value, is_list) = match array.kind() {
+        TypeKind::Generic(g)
+            if is_array_like_name(&g.name) && !g.name.eq_ignore_ascii_case("iterable") =>
+        {
+            let (key, value) = array_like_key_value(g)?;
+            (key, value.clone(), is_list_name(&g.name))
+        }
+        TypeKind::Array(value) => (array_key(), value.clone(), false),
+        TypeKind::Named(name) => match name.to_ascii_lowercase().as_str() {
+            "array" | "non-empty-array" => (array_key(), PhpType::mixed(), false),
+            "list" | "non-empty-list" => (PhpType::int(), PhpType::mixed(), true),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let sub = ShapeParts {
+        entries: &[],
+        tail: Some((&key, &value)),
+        is_list,
+    };
+    Some(shape_is_subshape(&sub, &wider, is_subtype))
 }
 
 /// The `(key, value)` pair an array-like generic implies, whichever arity

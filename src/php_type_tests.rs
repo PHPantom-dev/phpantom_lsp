@@ -3136,6 +3136,38 @@ mod subtype_tests {
         ));
     }
 
+    /// An array that is not itself a shape lists no entries, so it lacks
+    /// every one an unsealed shape requires, though it fits the generic
+    /// array the shape widens to.
+    #[test]
+    fn a_plain_array_is_an_unsealed_shape_with_no_entries_of_its_own() {
+        let is_subtype =
+            |sub: &str, sup: &str| PhpType::parse(sub).is_subtype_of(&PhpType::parse(sup));
+
+        assert!(!is_subtype("array<string, int>", "array{foo: int, ...}"));
+        assert!(!is_subtype(
+            "non-empty-array<string, int>",
+            "array{foo: int, ...}"
+        ));
+        assert!(!is_subtype("list<int>", "list{int, ...}"));
+        assert!(!is_subtype("non-empty-list<int>", "list{int, ...}"));
+        assert!(!is_subtype("int[]", "array{foo: int, ...}"));
+        assert!(!is_subtype("array", "array{foo: int, ...}"));
+        // An optional entry may turn up in the array, holding what it holds.
+        assert!(is_subtype("array<string, int>", "array{foo?: int, ...}"));
+        assert!(!is_subtype(
+            "array<string, string>",
+            "array{foo?: int, ...}"
+        ));
+        assert!(is_subtype("list<int>", "list{0?: int, ...<int>}"));
+        assert!(!is_subtype("array<int, int>", "list{0?: int, ...<int>}"));
+        // And whatever else it holds has to fit the tail.
+        assert!(!is_subtype(
+            "array<string, string>",
+            "array{foo?: string, ...<string, int>}"
+        ));
+    }
+
     #[test]
     fn array_is_subtype_of_iterable() {
         assert!(PhpType::array().is_subtype_of(&PhpType::iterable()));

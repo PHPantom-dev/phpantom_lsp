@@ -10557,6 +10557,32 @@ take($partial);
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// A typed array may hold the entries an unsealed shape requires, though
+/// it is no proof that it does, so handing one over is not reported.
+#[test]
+fn a_typed_array_that_might_hold_the_entries_stays_silent_against_an_unsealed_shape() {
+    let php = r#"<?php
+/** @param array{foo: int, ...} $shape */
+function take(array $shape): void {}
+
+/** @param list{int, ...} $values */
+function takeList(array $values): void {}
+
+/**
+ * @param array<string, int> $map
+ * @param non-empty-array<string, int> $nonEmpty
+ * @param list<int> $list
+ */
+function pass(array $map, array $nonEmpty, array $list): void {
+    take($map);
+    take($nonEmpty);
+    takeList($list);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 /// A function that returns `array{foo: int, ...}` hands over an array whose
 /// `foo` is an `int`, which a parameter that lists `foo` otherwise has to
 /// agree with, whichever of the two is sealed.
@@ -11000,13 +11026,14 @@ takesItems($items);
 
 // ─── Shape keys spelled as class constants ──────────────────────────────────
 
-/// A docblock keeps a key spelled `Slots::FIRST`, which says nothing about
-/// the key it evaluates to, so it is no more a string than an integer. A
-/// `Slots::class` key is a class name, which is a string whatever else.
+/// A docblock keeps a key spelled `Slots::FIRST`, which, when the constant's
+/// value cannot be read off its initializer, says nothing about the key it
+/// evaluates to, so it is no more a string than an integer. A `Slots::class`
+/// key is a class name, which is a string whatever else.
 #[test]
 fn a_shape_key_spelled_as_a_class_constant_is_not_a_string_to_a_typed_array() {
     let php = r#"<?php
-class Slots { const FIRST = 0; }
+class Slots { const FIRST = UNKNOWN_OFFSET; }
 
 /** @return array{Slots::FIRST: string} */
 function byConstant(): array { return ['a']; }
@@ -11029,6 +11056,38 @@ takeStringKeyed(byClassName());
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("expects array<int, string>, got array{Slots::class: string}"),
+        "got {messages:?}"
+    );
+}
+
+/// A constant that holds an integer or string literal is the key it holds,
+/// so `Slots::NAME` and `Slots::AGE` are the `0` and `1` a list wants.
+#[test]
+fn a_shape_key_spelled_as_a_class_constant_is_the_key_the_constant_holds() {
+    let php = r#"<?php
+class Base { const INHERITED = 0; }
+class Slots extends Base { const NAME = 0; const AGE = 1; const LABEL = 'label'; }
+
+/** @return array{Slots::NAME: string, Slots::AGE: int} */
+function row(): array { return ['Ann', 30]; }
+
+/** @return array{Slots::INHERITED: string} */
+function inherited(): array { return ['Ann']; }
+
+/** @return array{Slots::LABEL: string} */
+function labelled(): array { return ['label' => 'Ann']; }
+
+/** @param list<string|int> $values */
+function takeList(array $values): void {}
+
+takeList(row());
+takeList(inherited());
+takeList(labelled());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("got array{Slots::LABEL: string}"),
         "got {messages:?}"
     );
 }

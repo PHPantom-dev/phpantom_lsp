@@ -465,6 +465,46 @@ fn subtype_of_typed_compares_unsealed_shapes_by_the_entries_they_list() {
     ));
 }
 
+/// An array that is not itself a shape lacks every entry an unsealed shape
+/// requires, whatever its type arguments; the class-aware generic rules
+/// would otherwise take the shape for the generic array it widens to.
+#[test]
+fn subtype_of_typed_holds_a_plain_array_to_the_entries_an_unsealed_shape_requires() {
+    use crate::php_type::PhpType;
+
+    let animal = make_class("Animal", None, None, &[]);
+    let cat = make_class("Cat", None, Some("Animal"), &[]);
+    let classes = [animal, cat];
+    let loader = loader_from(&classes);
+    let parse = |src: &str| PhpType::parse(src);
+
+    assert!(!is_subtype_of_typed(
+        &parse("array<string, int>"),
+        &parse("array{foo: int, ...}"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("non-empty-array<string, int>"),
+        &parse("array{foo: int, ...}"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("list<int>"),
+        &parse("list{int, ...}"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("array<string, Cat>"),
+        &parse("array{foo?: Animal, ...<string, Animal>}"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("array<string, Animal>"),
+        &parse("array{foo?: Cat, ...<string, Animal>}"),
+        &loader
+    ));
+}
+
 /// The class hierarchy reaches into the entries of a shape, sealed or
 /// unsealed, and into the tail of an unsealed one.
 #[test]
