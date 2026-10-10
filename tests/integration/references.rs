@@ -1,5 +1,6 @@
 use crate::common::{
-    create_test_backend, create_test_backend_with_full_stubs, find_references, open_php,
+    create_test_backend, create_test_backend_with_full_stubs, find_references, line_char_of,
+    open_php,
 };
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
@@ -5041,4 +5042,154 @@ fn references_on_crlf_file_with_multibyte_prefix_use_utf16_columns() {
         vec![(5, expected_column, expected_column + 3)],
         "the usage range must be in UTF-16 units on its own line, got: {results:#?}"
     );
+}
+
+// ─── Constants versus same-named methods and properties ─────────────────────
+
+/// Line and character of `sub` inside the first occurrence of `needle`.
+fn position_in(text: &str, needle: &str, sub: &str) -> (u32, u32) {
+    let (line, character) = line_char_of(text, needle);
+    (line, character + needle.find(sub).unwrap() as u32)
+}
+
+/// The references (declaration included) to the `sub` inside `needle`, as
+/// sorted `(line, character)` starts.
+async fn reference_starts(text: &str, needle: &str, sub: &str) -> Vec<(u32, u32)> {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, text).await;
+    let (line, character) = position_in(text, needle, sub);
+    let mut starts: Vec<(u32, u32)> = references_at(&backend, &uri, line, character, true)
+        .await
+        .iter()
+        .map(|l| (l.range.start.line, l.range.start.character))
+        .collect();
+    starts.sort();
+    starts.dedup();
+    starts
+}
+
+const TAG: &str = concat!(
+    "<?php\n",
+    "class Tag {\n",
+    "    const name = 'tag';\n",
+    "    public string $name = 'tag';\n",
+    "    public function name(): string {\n",
+    "        return self::name . $this->name . $this->name();\n",
+    "    }\n",
+    "}\n",
+    "echo Tag::name;\n",
+);
+
+#[tokio::test]
+async fn constant_references_leave_out_a_same_named_method_and_property() {
+    let expected = vec![
+        position_in(TAG, "const name", "name"),
+        position_in(TAG, "self::name", "name"),
+        position_in(TAG, "Tag::name", "name"),
+    ];
+    for needle in ["const name", "self::name", "Tag::name"] {
+        assert_eq!(
+            reference_starts(TAG, needle, "name").await,
+            expected,
+            "references from {needle:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn method_and_property_references_leave_out_a_same_named_constant() {
+    let constant = [
+        position_in(TAG, "const name", "name"),
+        position_in(TAG, "self::name", "name"),
+        position_in(TAG, "Tag::name", "name"),
+    ];
+    // Each search still finds the member it started from.
+    for (needle, own) in [
+        ("function name", ("$this->name()", "name")),
+        ("$this->name()", ("function name", "name")),
+        ("$name = 'tag'", ("$name = 'tag'", "$name")),
+    ] {
+        let found = reference_starts(TAG, needle, "name").await;
+        assert!(
+            constant.iter().all(|c| !found.contains(c)),
+            "references from {needle:?} should not include the constant: {found:?}"
+        );
+        assert!(
+            found.contains(&position_in(TAG, own.0, own.1)),
+            "references from {needle:?} should include {own:?}: {found:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn static_property_and_constant_references_stay_apart() {
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    const path = '/etc';\n",
+        "    public static string $path = '/tmp';\n",
+        "}\n",
+        "echo Config::path;\n",
+        "echo Config::$path;\n",
+    );
+    assert_eq!(
+        reference_starts(text, "Config::path", "path").await,
+        vec![
+            position_in(text, "const path", "path"),
+            position_in(text, "Config::path", "path"),
+        ],
+    );
+    assert_eq!(
+        reference_starts(text, "Config::$path", "path").await,
+        vec![
+            position_in(text, "$path = '/tmp'", "$path"),
+            position_in(text, "Config::$path", "$path"),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn enum_case_and_same_named_static_method_references_stay_apart() {
+    let text = concat!(
+        "<?php\n",
+        "enum Suit {\n",
+        "    case Hearts;\n",
+        "    public static function Hearts(): self { return self::Hearts; }\n",
+        "}\n",
+        "Suit::Hearts();\n",
+        "$s = Suit::Hearts;\n",
+    );
+    assert_eq!(
+        reference_starts(text, "$s = Suit::Hearts", "Hearts").await,
+        vec![
+            position_in(text, "case Hearts", "Hearts"),
+            position_in(text, "self::Hearts", "Hearts"),
+            position_in(text, "$s = Suit::Hearts", "Hearts"),
+        ],
+    );
+    assert_eq!(
+        reference_starts(text, "Suit::Hearts()", "Hearts").await,
+        vec![
+            position_in(text, "function Hearts", "Hearts"),
+            position_in(text, "Suit::Hearts()", "Hearts"),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn a_docblock_member_reference_counts_for_a_constant_and_a_method() {
+    let text = concat!(
+        "<?php\n",
+        "class Tag {\n",
+        "    const name = 'tag';\n",
+        "    /** @see Tag::name */\n",
+        "    public function name(): string { return self::name; }\n",
+        "}\n",
+    );
+    let see = position_in(text, "@see Tag::name", "name");
+    for needle in ["const name", "function name"] {
+        let found = reference_starts(text, needle, "name").await;
+        assert!(found.contains(&see), "from {needle:?}: {found:?}");
+    }
 }

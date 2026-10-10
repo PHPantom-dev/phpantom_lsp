@@ -295,6 +295,45 @@ impl<'a> SpanFqnResolver<'a> {
     }
 }
 
+/// Whether a member access reads a class constant or enum case, or `None`
+/// when it does not say.
+///
+/// PHP keeps class constants (and enum cases) apart from methods and
+/// properties, and `Foo::BAR` is the only way code reads one.  A static
+/// property read (`Foo::$bar`) has the same shape, but its span covers the
+/// `$` its member name leaves out.  A docblock reference (`@see Foo::bar`)
+/// does not say which kind of member it names.
+pub(super) fn reads_constant(span: &crate::symbol_map::SymbolSpan) -> Option<bool> {
+    let crate::symbol_map::SymbolKind::MemberAccess {
+        member_name,
+        is_static,
+        is_method_call,
+        docblock_ref,
+        ..
+    } = &span.kind
+    else {
+        return None;
+    };
+    if *docblock_ref != crate::symbol_map::DocblockMemberRef::No {
+        return None;
+    }
+    Some(*is_static && !*is_method_call && (span.end - span.start) as usize == member_name.len())
+}
+
+/// Whether two members can be the same one, as far as being a class
+/// constant goes; `None` is a member whose kind is not known.
+pub(super) fn constant_kinds_agree(a: Option<bool>, b: Option<bool>) -> bool {
+    a.zip(b).is_none_or(|(a, b)| a == b)
+}
+
+/// Whether the member declared at `offset` is a class constant or enum case.
+pub(super) fn declares_constant_at(classes: &[Arc<crate::types::ClassInfo>], offset: u32) -> bool {
+    classes
+        .iter()
+        .flat_map(|class| class.constants.iter())
+        .any(|constant| constant.name_offset != 0 && constant.name_offset == offset)
+}
+
 /// Normalise a class FQN: strip leading `\` if present.
 pub(super) fn normalize_fqn(fqn: &str) -> String {
     strip_fqn_prefix(fqn).to_string()

@@ -246,6 +246,7 @@ impl Backend {
         struct PreparedQuery {
             member: Atom,
             is_static: bool,
+            is_constant: Option<bool>,
             hierarchy: Option<MemberScope>,
         }
 
@@ -259,6 +260,9 @@ impl Backend {
             .map(|query| PreparedQuery {
                 member: query.member,
                 is_static: query.is_static,
+                is_constant: self
+                    .shared_classes_for_uri(&query.uri)
+                    .map(|classes| declares_constant_at(&classes, query.offset)),
                 hierarchy: self
                     .resolve_member_declaration_scopes(
                         &query.uri,
@@ -342,8 +346,13 @@ impl Backend {
                         let Some((range, subject_fqns)) = warm.resolved_access(span_index) else {
                             continue;
                         };
+                        let access_is_constant = reads_constant(&symbol_map.spans[span_index]);
                         for &query_index in query_indices {
-                            let Some(hierarchy) = prepared[query_index].hierarchy.as_ref() else {
+                            let query = &prepared[query_index];
+                            if !constant_kinds_agree(access_is_constant, query.is_constant) {
+                                continue;
+                            }
+                            let Some(hierarchy) = query.hierarchy.as_ref() else {
                                 continue;
                             };
                             if subject_fqns.iter().any(|fqn| hierarchy.contains(self, fqn)) {
@@ -412,8 +421,12 @@ impl Backend {
                         ),
                     };
 
+                    let access_is_constant = reads_constant(span);
                     for &query_index in query_indices {
                         let query = &prepared[query_index];
+                        if !constant_kinds_agree(access_is_constant, query.is_constant) {
+                            continue;
+                        }
                         if let Some(hierarchy) = &query.hierarchy {
                             if !subject_fqns.iter().any(|fqn| hierarchy.contains(self, fqn)) {
                                 continue;
@@ -483,6 +496,7 @@ impl Backend {
         &self,
         target_member: &str,
         target_is_static: bool,
+        target_is_constant: Option<bool>,
         include_declaration: bool,
         hierarchy: Option<&MemberScope>,
         declaration_scope: Option<&MemberScope>,
@@ -516,14 +530,14 @@ impl Backend {
                     });
 
                 if has_member_access_match {
-                    self.push_member_access_matches(
+                    locations.extend(self.member_access_matches(
                         file,
                         symbol_map,
                         member,
                         target_is_static,
+                        target_is_constant,
                         hierarchy,
-                        locations,
-                    );
+                    ));
                 }
 
                 if !include_declaration {
@@ -534,6 +548,7 @@ impl Backend {
                 // to find a declaration's enclosing class.
                 let file_ctx_cell: std::cell::OnceCell<crate::types::FileContext> =
                     std::cell::OnceCell::new();
+                let classes = self.shared_classes_for_uri(file_uri);
 
                 for span in &symbol_map.spans {
                     match &span.kind {
@@ -541,6 +556,12 @@ impl Backend {
                             if name == target_member =>
                         {
                             if *is_static != target_is_static && hierarchy.is_none() {
+                                continue;
+                            }
+                            let is_constant = classes
+                                .as_deref()
+                                .map(|classes| declares_constant_at(classes, span.start));
+                            if !constant_kinds_agree(is_constant, target_is_constant) {
                                 continue;
                             }
 
@@ -575,8 +596,11 @@ impl Backend {
                 // MemberDeclaration) because GTD relies on the Variable
                 // kind to jump to the type hint.  Scan the uri_classes_index
                 // to pick up property declaration sites.
-                if let Some(classes) = self.shared_classes_for_uri(file_uri) {
-                    for class in &classes {
+                if target_is_constant == Some(true) {
+                    return;
+                }
+                if let Some(classes) = &classes {
+                    for class in classes {
                         if let Some(hier) = declaration_scope.or(hierarchy)
                             && !hier.contains(self, &class.fqn())
                         {
@@ -620,16 +644,17 @@ impl Backend {
     /// large projects.
     ///
     /// Without one, every access of the right static-ness matches.
-    fn push_member_access_matches(
+    fn member_access_matches(
         &self,
         file: &CandidateFile<'_>,
         symbol_map: &Arc<SymbolMap>,
         member: Atom,
         target_is_static: bool,
+        target_is_constant: Option<bool>,
         hierarchy: Option<&MemberScope>,
-        locations: &mut Vec<Location>,
-    ) {
+    ) -> Vec<Location> {
         let access_indices = symbol_map.member_access_indices(&member);
+        let mut locations = Vec::new();
 
         let Some(hierarchy) = hierarchy else {
             for &span_index in access_indices {
@@ -637,24 +662,32 @@ impl Backend {
                 let SymbolKind::MemberAccess { is_static, .. } = &span.kind else {
                     continue;
                 };
-                if *is_static != target_is_static {
+                if *is_static != target_is_static
+                    || !constant_kinds_agree(reads_constant(span), target_is_constant)
+                {
                     continue;
                 }
                 let Some(location) = file.location(span.start, span.end) else {
-                    return;
+                    break;
                 };
                 locations.push(location);
             }
-            return;
+            return locations;
         };
 
         // A static-ness mismatch is allowed here: for Laravel custom
         // builders `Model::active()` is static while `UserBuilder->active()`
         // is not, and the hierarchy is what shows they are related.
         let Some(resolved) = self.member_receivers_for(file, symbol_map, &[member]) else {
-            return;
+            return locations;
         };
         for &span_index in access_indices {
+            if !constant_kinds_agree(
+                reads_constant(&symbol_map.spans[span_index]),
+                target_is_constant,
+            ) {
+                continue;
+            }
             let Some((range, targets)) = resolved.resolved_access(span_index) else {
                 continue;
             };
@@ -664,5 +697,6 @@ impl Backend {
                 locations.push(Location { uri, range });
             }
         }
+        locations
     }
 }
