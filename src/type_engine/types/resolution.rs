@@ -376,6 +376,18 @@ fn type_hint_to_classes_typed_depth(
             )
         }
 
+        // ── Closure signature (`Closure(int): string`) ─────────────
+        // An instance of the `Closure` class whatever its signature.
+        TypeKind::Callable(c) if c.is_closure() => resolve_named_type(
+            "Closure",
+            &[],
+            owning_class_name,
+            all_classes,
+            class_loader,
+            depth,
+            produced,
+        ),
+
         // ── Array slice (T[]) ──────────────────────────────────────
         // Not a class type itself; skip.
         TypeKind::Array(_)
