@@ -157,6 +157,28 @@ impl Backend {
         self.symbols.uri_classes_index.read().get(uri).cloned()
     }
 
+    /// The classes `uri` declares, with the type aliases they import linked
+    /// into their members.
+    ///
+    /// The file's own classes are found in this list before the class
+    /// loader is asked, so they have to be linked here the way the loader
+    /// links a class declared in any other file.
+    fn linked_classes_for_uri(&self, uri: &str) -> Vec<Arc<ClassInfo>> {
+        let mut classes = self
+            .symbols
+            .uri_classes_index
+            .read()
+            .get(uri)
+            .cloned()
+            .unwrap_or_default();
+        for class in &mut classes {
+            if crate::type_engine::types::aliases::has_imported_type_aliases(class) {
+                *class = self.link_imported_type_aliases(Arc::clone(class));
+            }
+        }
+        classes
+    }
+
     /// The short names of the classes `uri` declares in `namespace`, for
     /// asking whether a name written there is one of the file's own
     /// classes without cloning their bodies.
@@ -191,13 +213,7 @@ impl Backend {
     /// `uri_classes_index`, `file_imports`, and `file_namespaces` locks
     /// and extracting the entry for a given URI.
     pub(crate) fn file_context(&self, uri: &str) -> FileContext {
-        let classes = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
+        let classes = self.linked_classes_for_uri(uri);
 
         // The legacy use_map (short name → FQN from `use` statements)
         // remains the canonical import table.  `resolved_names` is a
@@ -251,13 +267,7 @@ impl Backend {
         uri: &str,
         byte_offset: u32,
     ) -> (Vec<Arc<ClassInfo>>, Option<String>) {
-        let classes = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
+        let classes = self.linked_classes_for_uri(uri);
         let namespace = self.namespace_at_offset(uri, byte_offset);
         (classes, namespace)
     }

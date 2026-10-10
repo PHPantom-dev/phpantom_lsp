@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Imported type aliases resolve in the file that imports them.** A method typed with an alias from `@phpstan-import-type` now returns the full shape when it is called from the same file, not only from other files.
 - **An override that names a different class than its ancestor keeps its own.** A `take(Box $b)` that names its own `Box` no longer inherits the ancestor's `@param Box&Countable` for a `Box` in another namespace.
 - **A no-op emptiness check no longer breaks a `non-empty-string` argument.** After `if ($h !== '') { ... }`, passing `$h` to a `non-empty-string` parameter is no longer reported, since the variable is still a plain `string`.
 - **A value both branches could hold no longer says which branch ran.** When one branch leaves `$x` as `1|2` and the other as `2|3`, a later `if ($x === 2)` no longer narrows variables to what only one of the branches assigned.

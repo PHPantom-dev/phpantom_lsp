@@ -1154,6 +1154,64 @@ function f(Child $c) {
     );
 }
 
+/// A class that imports an alias is read with the import linked when it is
+/// used from the file that declares it, as it is from any other file.
+#[test]
+fn an_imported_alias_on_a_member_is_expanded_in_the_declaring_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Form.php",
+            concat!(
+                "<?php\nnamespace App;\n",
+                "/** @phpstan-type Address array{city: string|null} */\n",
+                "class Form {}\n",
+            ),
+        )],
+    );
+    let content = r#"<?php
+namespace App;
+/**
+ * @phpstan-import-type Address from Form
+ * @phpstan-type Nested array{address: Address}
+ */
+class NestedForm {
+    /** @return Nested */
+    public function nested(): array { return []; }
+    /** @return Address */
+    public function address(): array { return []; }
+}
+/**
+ * @phpstan-type Local array{n: int}
+ */
+class Source {}
+/**
+ * @phpstan-import-type Local from Source
+ */
+class LocalImporter {
+    /** @return Local */
+    public function local(): array { return []; }
+}
+function f(NestedForm $form, LocalImporter $importer) {
+    $nested = $form->nested();
+    $address = (new NestedForm())->address();
+    $created = (new NestedForm())->nested();
+    $local = $importer->local();
+}
+"#;
+    assert_assigned_types_on(
+        &backend,
+        "file:///consumer.php",
+        content,
+        &[
+            ("$nested", "array{address: array{city: string|null}}"),
+            ("$address", "array{city: string|null}"),
+            ("$created", "array{address: array{city: string|null}}"),
+            ("$local", "array{n: int}"),
+        ],
+    );
+}
+
 /// Editing the class an alias is imported from refreshes the members of the
 /// class that imports it, which was not itself re-parsed.
 #[test]

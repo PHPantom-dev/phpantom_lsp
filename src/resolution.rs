@@ -293,7 +293,7 @@ impl Backend {
     /// linked copy is cached against this very `Arc` together with the
     /// classes the imports were read from, so that editing either one
     /// drops it (see `evict_fqn`).
-    fn link_imported_type_aliases(&self, class: Arc<ClassInfo>) -> Arc<ClassInfo> {
+    pub(crate) fn link_imported_type_aliases(&self, class: Arc<ClassInfo>) -> Arc<ClassInfo> {
         use crate::type_engine::types::aliases;
         if !aliases::has_imported_type_aliases(&class) {
             return class;

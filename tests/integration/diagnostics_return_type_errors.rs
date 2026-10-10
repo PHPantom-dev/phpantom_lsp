@@ -5126,3 +5126,44 @@ class User {
         "A docblock refining the override's own class should still be inherited, got: {diags:?}"
     );
 }
+
+#[test]
+fn array_map_over_templated_first_class_method_returns_callback_result() {
+    let php = r#"<?php
+/** @template T of object */
+class ClassMetadata {
+    /** @return class-string<T> */
+    public function getName(): string { return ''; }
+}
+
+final readonly class EntitiesLister {
+    /**
+     * @template T of object
+     * @param ClassMetadata<T>[] $metadatas
+     * @return class-string<T>[]
+     */
+    private function getAllClassNames(array $metadatas): array {
+        return array_map($this->getClassName(...), $metadatas);
+    }
+
+    /**
+     * @template T of object
+     * @param ClassMetadata<T> $metadata
+     * @return class-string<T>
+     */
+    private function getClassName(ClassMetadata $metadata): string {
+        return $metadata->getName();
+    }
+}
+"#;
+    let diags = collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    );
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "array_map over a first-class method callable should produce the method's \
+         return type, not the input element type, got: {diags:?}"
+    );
+}
