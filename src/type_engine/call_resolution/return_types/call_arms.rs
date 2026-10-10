@@ -870,33 +870,8 @@ impl Backend {
         // type string rather than on a class, which is how a
         // property annotated `@var callable(): Scope` arrives
         // here.  Read it the same way the `$fn(…)` path does.
-        // Subject resolution keeps only class-typed results, so a
-        // property whose type is a bare `callable(…): T` comes back
-        // empty and its declared hint has to be read directly.
-        let mut callable_types: Vec<PhpType> = callee_resolved
-            .iter()
-            .map(|rt| rt.type_string.clone())
-            .collect();
-        if callable_types.is_empty()
-            && let SubjectExpr::PropertyChain { base, property } = callee
-        {
-            let owners = ResolvedType::into_arced_classes(
-                crate::type_engine::resolver::resolve_target_classes_expr(
-                    base,
-                    AccessKind::Arrow,
-                    ctx,
-                ),
-            );
-            for owner in &owners {
-                if let Some(hint) = crate::inheritance::resolve_property_type_hint(
-                    owner,
-                    property,
-                    ctx.class_loader,
-                ) {
-                    callable_types.push(hint);
-                }
-            }
-        }
+        let callable_types =
+            crate::type_engine::call_resolution::invoked_value_types(callee, &callee_resolved, ctx);
         for ty in &callable_types {
             if let Some(ret_type) = ty.callable_return_type() {
                 let classes: Vec<Arc<ClassInfo>> =

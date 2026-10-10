@@ -1017,4 +1017,162 @@ class Second {
             "Expected too-few-args diagnostic for Second::make via self::, got: {diags:?}",
         );
     }
+
+    #[test]
+    fn invoked_property_not_checked_against_same_named_method() {
+        // `($this->onClose)()` invokes the closure the property holds;
+        // the method that happens to share its name is not involved.
+        let php = r#"<?php
+final class PropertyInvoked
+{
+    /** @var (\Closure(): void)|null */
+    private ?\Closure $onClose = null;
+    public function onClose(\Closure $then): void { $this->onClose = $then; }
+    public function close(): void
+    {
+        if (null !== $this->onClose) {
+            ($this->onClose)();
+        }
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "Invoking the property must not be checked against method onClose(), got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn invoked_property_checked_against_closure_signature() {
+        let php = r#"<?php
+class A {}
+class B {}
+class X {}
+final class Highlighter
+{
+    /** @var \Closure(A, B): void */
+    private \Closure $highlight;
+    public function highlight(X $x): void {}
+    public function run(A $a, B $b): void
+    {
+        ($this->highlight)($a, $b);
+    }
+}
+"#;
+        let diags = collect_extra(php);
+        assert!(
+            diags.is_empty(),
+            "Two arguments match the closure's signature, got: {diags:?}",
+        );
+
+        let php = r#"<?php
+class A {}
+class B {}
+class X {}
+final class Highlighter
+{
+    /** @var \Closure(A, B): void */
+    private \Closure $highlight;
+    public function highlight(X $x): void {}
+    public function run(A $a): void
+    {
+        ($this->highlight)($a);
+    }
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert!(
+            diags[0].message.contains("Expected 2 arguments") && diags[0].message.contains("got 1"),
+            "A missing closure argument is still reported, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn invoked_property_holding_an_invokable_object_is_checked_against_invoke() {
+        let php = r#"<?php
+final class Adder
+{
+    public function __invoke(int $a, int $b): int { return $a + $b; }
+}
+final class Calculator
+{
+    private Adder $add;
+    public function add(): void {}
+    public function run(): void
+    {
+        ($this->add)(1);
+    }
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert!(
+            diags[0].message.contains("Expected 2 arguments") && diags[0].message.contains("got 1"),
+            "An object property is invoked through its __invoke(), not the same-named method, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn invoked_property_of_unknown_type_is_not_checked() {
+        let php = r#"<?php
+final class Callbacks
+{
+    private $handler;
+    public function handler(int $required): void {}
+    public function run(): void
+    {
+        ($this->handler)();
+    }
+}
+"#;
+        let diags = collect_extra(php);
+        assert!(
+            diags.is_empty(),
+            "Nothing is known of what the property holds, so the call is not checked against the method, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn invoked_property_with_unknown_signature_accepts_any_arguments() {
+        let php = r#"<?php
+final class Callbacks
+{
+    private \Closure $handler;
+    public function handler(): void {}
+    public function run(): void
+    {
+        ($this->handler)(1, 2, 3);
+    }
+}
+"#;
+        let diags = collect_extra(php);
+        assert!(
+            diags.is_empty(),
+            "A bare Closure says nothing about its parameters, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn method_call_still_checked_when_property_shares_its_name() {
+        let php = r#"<?php
+final class PropertyInvoked
+{
+    /** @var (\Closure(): void)|null */
+    private ?\Closure $onClose = null;
+    public function onClose(\Closure $then): void { $this->onClose = $then; }
+    public function close(): void
+    {
+        $this->onClose();
+    }
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert!(
+            diags[0].message.contains("Expected 1 argument") && diags[0].message.contains("got 0"),
+            "Calling the method with too few arguments is still reported, got: {diags:?}",
+        );
+    }
 }

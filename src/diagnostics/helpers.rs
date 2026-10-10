@@ -310,10 +310,15 @@ fn find_method_name_in_members<'a>(
 ///   offset (`find_class_at_offset`), which differs between call sites
 ///   in different classes within the same file.
 ///
+/// The same holds for an invoked value (`($handler)`, `(self::$handler)`),
+/// judged by the expression inside its parentheses.
+///
 /// Plain function calls and calls through a literal class name
 /// (`Fqn::method`, `new Fqn`) resolve identically regardless of where
 /// in the file they appear, so those remain safe to cache by text.
 pub(crate) fn is_position_independent_call_expression(expr: &str) -> bool {
+    // An invoked value (`($this->handler)`) depends on its inner expression.
+    let expr = expr.trim_start_matches('(');
     if expr.starts_with('$') {
         return false;
     }

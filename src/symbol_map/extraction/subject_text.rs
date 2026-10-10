@@ -21,6 +21,24 @@ pub(super) fn expr_to_subject_text(expr: &Expression<'_>) -> String {
         .unwrap_or_default()
 }
 
+/// Render the callee of a function-call expression (`callee(…)`) as the
+/// call expression [`CallSite::call_expression`] stores.
+///
+/// That format reads `base->name` and `Class::name` as method calls, but a
+/// function call's callee is a *value* being invoked: `($this->onClose)()`
+/// calls the closure the property holds, not a method named `onClose`.  A
+/// callee that reads a member therefore keeps its parentheses, which is how
+/// the callable resolver tells an invoked value apart from a method name.
+pub(super) fn invoked_callee_text(callee: &Expression<'_>) -> String {
+    match expr_to_subject_expr(callee) {
+        Some(value @ (SubjectExpr::PropertyChain { .. } | SubjectExpr::StaticAccess { .. })) => {
+            format!("({})", value.to_subject_text())
+        }
+        Some(other) => other.to_subject_text(),
+        None => String::new(),
+    }
+}
+
 /// One link of a receiver spine: `->property` or `->method(args)`.
 enum SpineLink<'a> {
     Property(&'a ClassLikeMemberSelector<'a>),
