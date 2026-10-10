@@ -286,7 +286,23 @@ pub(crate) fn resolve_param_type(
     let is_variadic = param.ellipsis.is_some();
     // The hint as written, which is what the declarations it is compared
     // against below record.
-    let raw_native = param.hint.as_ref().map(|h| extract_hint_type(h));
+    let written_native = param.hint.as_ref().map(|h| extract_hint_type(h));
+    // A method's own declaration records the same hint fully qualified
+    // against its namespace block's imports, which the file-wide class
+    // loader cannot do when blocks reuse a short name.  That is also the
+    // form the declarations it is compared against below record.
+    let raw_native = written_native
+        .as_ref()
+        .and_then(|_| {
+            let own = ctx
+                .current_class
+                .get_method(method_name?)?
+                .parameters
+                .iter()
+                .find(|p| p.name == pname)?;
+            own.native_type_hint.clone()
+        })
+        .or(written_native);
     // A `null` default makes the parameter accept null whatever its type
     // says (`bool $a = null` is `?bool`).
     let default_is_null = crate::parser::param_default_is_null(param);

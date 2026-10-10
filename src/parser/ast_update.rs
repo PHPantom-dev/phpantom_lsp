@@ -2018,10 +2018,19 @@ impl Backend {
                     }
                 }
                 for param in method.parameters.make_mut() {
+                    let native_was_effective = param.native_type_hint == param.type_hint;
                     if let Some(ref hint) = param.type_hint {
                         let resolved = hint.resolve_names(method_resolver);
                         if resolved != *hint {
                             param.type_hint = Some(resolved);
+                        }
+                    }
+                    if native_was_effective {
+                        param.native_type_hint = param.type_hint.clone();
+                    } else if let Some(ref native) = param.native_type_hint {
+                        let resolved = native.resolve_names(method_resolver);
+                        if resolved != *native {
+                            param.native_type_hint = Some(resolved);
                         }
                     }
                     // `@param-closure-this` names a class the same way the

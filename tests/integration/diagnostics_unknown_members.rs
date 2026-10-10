@@ -14467,6 +14467,36 @@ class Sorter {
 /// namespaces each see their own class: through a parameter type, a `new`
 /// expression, an inherited parent, and a function's return type.
 #[test]
+fn override_redeclaring_a_same_named_class_does_not_inherit_the_ancestor_param_docblock() {
+    let backend = create_test_backend();
+    let text = r#"<?php
+namespace P {
+    class Box {}
+    class Base {
+        /** @param Box&\Countable $b */
+        public function take(Box $b): void {}
+    }
+}
+namespace Q {
+    class Box { public function fromQ(): void {} }
+    class Child extends \P\Base {
+        public function take(Box $b): void {
+            $b->fromQ();
+        }
+    }
+}
+"#;
+
+    let diags =
+        unknown_member_diagnostics_with_scope_cache(&backend, "file:///override_box.php", text);
+    assert!(
+        diags.is_empty(),
+        "the override's own `Q\\Box` must win, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn each_namespace_block_resolves_names_through_its_own_imports() {
     let backend = create_test_backend();
     let uri = "file:///blocks.php";
