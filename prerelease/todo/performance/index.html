@@ -1679,6 +1679,11 @@ index <code>join_runtime_value_types</code> builds to find which members could a
 which, each of them a pass over all the shapes so far. Joining one new
 member into a union that is already normalised would make each join cost
 only what it adds.</p>
+<p>That cuts the constant, but the union still grows with every write, so
+only bounding it removes the growth. PHPStan turns a union of more than
+256 constant-array values into one general <code>non-empty-array&lt;K, V&gt;</code>
+(<code>TypeCombinator::optimizeConstantArrays</code>). Doing the same would change
+what hover shows past that size, so it needs a decision first.</p>
 <p><strong>Where to look:</strong> <code>join_runtime_value_types</code> and <code>absorb_subsumed_shapes</code>
 in <code>php_type/normalize.rs</code>, reached from a join through
 <code>ResolvedType::collapse_redundant_runtime_literals</code> in
