@@ -201,7 +201,7 @@ fn range_edits_use_utf16_columns() {
 #[test]
 fn strategy_default_config_no_composer_is_builtin() {
     let config = FormattingConfig::default();
-    let strategy = resolve_strategy(None, &config, None, None);
+    let strategy = resolve_strategy(None, &config, None, None, None);
     assert!(matches!(strategy, FormattingStrategy::BuiltIn(None)));
 }
 
@@ -221,7 +221,7 @@ fn strategy_builtin_carries_mago_config_when_composer_tools_uninstalled() {
         "[formatter]\npreset = \"psr-12\"\n",
     )
     .unwrap();
-    let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy = resolve_strategy(Some(dir.path()), &config, None, Some(&composer), None);
 
     match strategy {
         FormattingStrategy::BuiltIn(path) => {
@@ -279,7 +279,7 @@ fn strategy_both_disabled() {
         blade_php: None,
         timeout: None,
     };
-    let strategy = resolve_strategy(None, &config, None, None);
+    let strategy = resolve_strategy(None, &config, None, None, None);
     assert!(matches!(strategy, FormattingStrategy::Disabled));
 }
 
@@ -293,7 +293,7 @@ fn strategy_explicit_commands() {
         blade_php: None,
         timeout: None,
     };
-    let strategy = resolve_strategy(None, &config, None, None);
+    let strategy = resolve_strategy(None, &config, None, None, None);
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 2);
@@ -316,7 +316,7 @@ fn strategy_one_explicit_one_disabled() {
         blade_php: None,
         timeout: None,
     };
-    let strategy = resolve_strategy(None, &config, None, None);
+    let strategy = resolve_strategy(None, &config, None, None, None);
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
@@ -348,7 +348,7 @@ fn strategy_require_dev_php_cs_fixer() {
     .unwrap();
 
     let config = FormattingConfig::default();
-    let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy = resolve_strategy(Some(dir.path()), &config, None, Some(&composer), None);
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
@@ -381,7 +381,7 @@ fn strategy_require_dev_phpcodesniffer() {
     .unwrap();
 
     let config = FormattingConfig::default();
-    let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy = resolve_strategy(Some(dir.path()), &config, None, Some(&composer), None);
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
@@ -413,7 +413,7 @@ fn strategy_phpcs_config_file_without_composer_dependency() {
     std::fs::write(dir.path().join("phpcs.xml"), "").unwrap();
 
     let config = FormattingConfig::default();
-    let strategy = resolve_strategy(Some(dir.path()), &config, None, None);
+    let strategy = resolve_strategy(Some(dir.path()), &config, None, None, None);
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
@@ -450,7 +450,7 @@ fn strategy_phpcs_xml_dist_certifies_phpcbf_over_transitive_dependency() {
     .unwrap();
 
     let config = FormattingConfig::default();
-    let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy = resolve_strategy(Some(dir.path()), &config, None, Some(&composer), None);
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
@@ -489,7 +489,7 @@ fn strategy_mago_formatter_table_keeps_phpcbf_off_a_phpcs_project() {
     .unwrap();
 
     let config = FormattingConfig::default();
-    let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy = resolve_strategy(Some(dir.path()), &config, None, Some(&composer), None);
     match strategy {
         FormattingStrategy::BuiltIn(path) => {
             assert_eq!(path.unwrap(), dir.path().join("mago.toml"))
@@ -518,7 +518,7 @@ fn strategy_mago_toml_without_formatter_table_leaves_phpcbf_in_charge() {
     std::fs::write(dir.path().join("mago.toml"), "[linter]\n").unwrap();
 
     let config = FormattingConfig::default();
-    let strategy = resolve_strategy(Some(dir.path()), &config, None, None);
+    let strategy = resolve_strategy(Some(dir.path()), &config, None, None, None);
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
@@ -553,7 +553,7 @@ fn strategy_require_dev_both_tools() {
     .unwrap();
 
     let config = FormattingConfig::default();
-    let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy = resolve_strategy(Some(dir.path()), &config, None, Some(&composer), None);
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 2);
@@ -579,7 +579,7 @@ fn strategy_require_dev_binary_missing_falls_back_to_builtin() {
     .unwrap();
 
     let config = FormattingConfig::default();
-    let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy = resolve_strategy(Some(dir.path()), &config, None, Some(&composer), None);
     assert!(
         matches!(strategy, FormattingStrategy::BuiltIn(None)),
         "Expected BuiltIn when binary is missing, got {:?}",
@@ -617,7 +617,7 @@ fn strategy_explicit_overrides_require_dev() {
         blade_php: None,
         timeout: None,
     };
-    let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy = resolve_strategy(Some(dir.path()), &config, None, Some(&composer), None);
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
@@ -649,7 +649,13 @@ fn strategy_custom_bin_dir() {
     .unwrap();
 
     let config = FormattingConfig::default();
-    let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), Some("bin"));
+    let strategy = resolve_strategy(
+        Some(dir.path()),
+        &config,
+        None,
+        Some(&composer),
+        Some("bin"),
+    );
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
@@ -688,6 +694,7 @@ fn strategy_custom_bin_dir_ignores_default_vendor_bin() {
     let strategy = resolve_strategy(
         Some(dir.path()),
         &config,
+        None,
         Some(&composer),
         Some("custom-bin"),
     );
@@ -709,7 +716,7 @@ fn strategy_no_require_dev_no_config_is_builtin() {
     }))
     .unwrap();
     let config = FormattingConfig::default();
-    let strategy = resolve_strategy(None, &config, Some(&composer), None);
+    let strategy = resolve_strategy(None, &config, None, Some(&composer), None);
     assert!(matches!(strategy, FormattingStrategy::BuiltIn(None)));
 }
 
@@ -920,6 +927,7 @@ fn run_external_pipeline_rejects_empty_stdout_for_nonempty_input() {
         &[ResolvedTool {
             tool: Tool::Pint,
             path: tool_path,
+            standard: None,
         }],
         "<?php\necho 'hello';\n",
         &file_path,
@@ -930,6 +938,44 @@ fn run_external_pipeline_rejects_empty_stdout_for_nonempty_input() {
 
     let err = result.expect_err("empty stdout for non-empty input must be rejected");
     assert!(err.contains("pint"), "unexpected error: {err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn phpcbf_fixes_against_the_phpcs_standard() {
+    let dir = tempfile::tempdir().unwrap();
+    // Rewrites the file it is given (the last argument) with its first
+    // argument, so the result shows what standard it was asked to apply.
+    let tool_path = write_fake_tool(
+        dir.path(),
+        "fake-phpcbf",
+        "for arg; do file=$arg; done\nprintf '%s\\n' \"$1\" > \"$file\"",
+    );
+    let config = FormattingConfig {
+        php_cs_fixer: Some("/usr/bin/php-cs-fixer".to_string()),
+        phpcbf: Some(tool_path.to_string_lossy().into_owned()),
+        ..FormattingConfig::default()
+    };
+
+    let strategy = resolve_strategy(None, &config, Some("WordPress"), None, None);
+    let FormattingStrategy::External(tools) = &strategy else {
+        panic!("Expected External, got {:?}", strategy);
+    };
+    assert_eq!(tools[0].tool, Tool::PhpCsFixer);
+    assert_eq!(tools[0].standard, None);
+
+    let phpcbf_only = FormattingStrategy::External(tools[1..].to_vec());
+    let formatted = super::format_content(
+        &phpcbf_only,
+        "<?php\n",
+        &dir.path().join("Example.php"),
+        None,
+        &config,
+        crate::types::PhpVersion::default(),
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(formatted.as_deref(), Some("--standard=WordPress\n"));
 }
 
 #[cfg(unix)]
@@ -946,6 +992,7 @@ fn run_external_pipeline_allows_empty_stdout_for_empty_input() {
         &[ResolvedTool {
             tool: Tool::Pint,
             path: tool_path,
+            standard: None,
         }],
         "",
         &file_path,
@@ -971,6 +1018,7 @@ fn run_pint_on_blade_rejects_empty_stdout_for_nonempty_input() {
         &ResolvedTool {
             tool: Tool::Pint,
             path: tool_path,
+            standard: None,
         },
         "<div>{{ $hello }}</div>\n",
         &file_path,

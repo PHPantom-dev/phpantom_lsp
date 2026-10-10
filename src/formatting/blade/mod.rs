@@ -112,7 +112,8 @@ pub fn resolve_blade_strategy(
             }
         }))
     };
-    let tools = match resolve_strategy(workspace_root, config, composer_json, bin_dir) {
+    // Only Pint formats Blade, so the PHPCS standard is not needed here.
+    let tools = match resolve_strategy(workspace_root, config, None, composer_json, bin_dir) {
         FormattingStrategy::Disabled => return BladeFormattingStrategy::Disabled,
         FormattingStrategy::BuiltIn(_) => return built_in(),
         FormattingStrategy::External(tools) => tools,

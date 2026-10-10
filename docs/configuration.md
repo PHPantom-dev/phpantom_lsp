@@ -142,7 +142,7 @@ highlighting remains in charge of ordinary PHP syntax.
 | Key        | Type    | Default | Description |
 | ---------- | ------- | ------- | ----------- |
 | `command`  | string  | unset   | Command or path for PHPCS. Unset: auto-detect via `vendor/bin/phpcs` then `$PATH`. `""`: disable. |
-| `standard` | string  | unset   | Coding standard to enforce (e.g. `"PSR12"`). Unset: PHPCS uses its own default detection. |
+| `standard` | string  | unset   | Coding standard to enforce (e.g. `"PSR12"`). phpcbf fixes against the same standard. Unset: PHPCS uses its own default detection. |
 | `timeout`  | integer | `30000` | Max runtime in milliseconds before PHPCS is killed. |
 
 ### `[phpmd]`

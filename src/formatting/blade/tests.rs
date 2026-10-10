@@ -1397,7 +1397,8 @@ fn pint_formats_php_from_the_workspace_root() {
     let (dir, composer) = pint_workspace("cat >/dev/null; ls pint.json");
     std::fs::write(dir.path().join("pint.json"), "{}").unwrap();
     let config = FormattingConfig::default();
-    let strategy = super::super::resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy =
+        super::super::resolve_strategy(Some(dir.path()), &config, None, Some(&composer), None);
     let output = super::super::format_content(
         &strategy,
         "<?php\n",

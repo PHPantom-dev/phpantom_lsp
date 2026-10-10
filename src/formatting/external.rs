@@ -82,6 +82,17 @@ impl Tool {
     }
 }
 
+impl ResolvedTool {
+    /// The tool's arguments plus the standard it was resolved with.
+    fn arguments(&self, file_path: &Path) -> Vec<OsString> {
+        let mut arguments = self.tool.arguments(file_path);
+        if let Some(standard) = &self.standard {
+            arguments.insert(0, format!("--standard={}", standard).into());
+        }
+        arguments
+    }
+}
+
 /// Where and how long a tool runs.
 struct Run<'a> {
     workspace_root: Option<&'a Path>,
@@ -159,12 +170,12 @@ fn run_tool(
 ) -> Result<String, String> {
     match tool.tool.invocation() {
         Invocation::Stdin => {
-            let output = execute(tool, &tool.tool.arguments(file_path), Some(content), run)?;
+            let output = execute(tool, &tool.arguments(file_path), Some(content), run)?;
             reject_empty_result(tool.tool, content, output.stdout)
         }
         Invocation::SiblingFile => {
             let temp = write_sibling_temp_file(file_path, content)?;
-            let result = execute(tool, &tool.tool.arguments(temp.path()), None, run);
+            let result = execute(tool, &tool.arguments(temp.path()), None, run);
             // Read back before checking the outcome: phpcbf reports partial
             // fixes through a non-zero code and the file is what it wrote.
             let formatted = std::fs::read_to_string(temp.path())

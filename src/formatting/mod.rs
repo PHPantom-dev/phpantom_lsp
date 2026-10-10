@@ -160,6 +160,10 @@ pub struct ResolvedTool {
     pub tool: Tool,
     /// Absolute or relative path to the binary.
     pub path: PathBuf,
+    /// The coding standard phpcbf fixes against: the `[phpcs]` standard,
+    /// so the fixer applies the rules the linter reports.  Always `None`
+    /// for the other tools.
+    pub standard: Option<String>,
 }
 
 /// The resolved formatting strategy: external tools, built-in
@@ -185,9 +189,12 @@ pub enum FormattingStrategy {
 ///   [`Tool::detected`]) and whose binary the Composer bin-dir holds →
 ///   `External`.
 /// - Otherwise → `BuiltIn`.
+///
+/// `phpcs_standard` is the `[phpcs]` standard, handed on to phpcbf.
 pub fn resolve_strategy(
     workspace_root: Option<&Path>,
     config: &FormattingConfig,
+    phpcs_standard: Option<&str>,
     composer_json: Option<&ComposerPackage>,
     bin_dir: Option<&str>,
 ) -> FormattingStrategy {
@@ -195,15 +202,20 @@ pub fn resolve_strategy(
         return FormattingStrategy::Disabled;
     }
 
+    let resolved = |tool: Tool, path: PathBuf| ResolvedTool {
+        tool,
+        path,
+        standard: phpcs_standard
+            .filter(|_| tool == Tool::Phpcbf)
+            .map(str::to_string),
+    };
+
     // Explicit config wins, and skips detection entirely.
     let explicit: Vec<ResolvedTool> = Tool::ALL
         .into_iter()
         .filter_map(|tool| {
             let command = tool.configured(config)?;
-            (!command.is_empty()).then(|| ResolvedTool {
-                tool,
-                path: PathBuf::from(command),
-            })
+            (!command.is_empty()).then(|| resolved(tool, PathBuf::from(command)))
         })
         .collect();
     if !explicit.is_empty() {
@@ -216,7 +228,10 @@ pub fn resolve_strategy(
         .into_iter()
         .filter(|tool| tool.configured(config) != Some(""))
         .filter(|tool| tool.detected(workspace_root, composer_json))
-        .filter_map(|tool| resolve_from_bin_dir(tool, workspace_root, bin))
+        .filter_map(|tool| {
+            let path = resolve_from_bin_dir(tool, workspace_root, bin)?;
+            Some(resolved(tool, path))
+        })
         .collect();
     if !detected.is_empty() {
         return FormattingStrategy::External(detected);
@@ -233,12 +248,9 @@ fn resolve_from_bin_dir(
     tool: Tool,
     workspace_root: Option<&Path>,
     bin_dir: &str,
-) -> Option<ResolvedTool> {
+) -> Option<PathBuf> {
     let candidate = workspace_root?.join(bin_dir).join(tool.name());
-    candidate.is_file().then_some(ResolvedTool {
-        tool,
-        path: candidate,
-    })
+    candidate.is_file().then_some(candidate)
 }
 
 /// The workspace-level inputs every formatting entry point reads off the
@@ -282,6 +294,7 @@ impl Backend {
         resolve_strategy(
             inputs.workspace_root.as_deref(),
             &inputs.config.formatting,
+            inputs.config.phpcs.standard.as_deref(),
             composer_json.as_ref(),
             bin_dir.as_deref(),
         )

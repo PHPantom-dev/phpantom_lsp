@@ -223,7 +223,7 @@
         },
         "standard": {
           "type": "string",
-          "description": "Coding standard to enforce (e.g. \"PSR12\"). Unset: PHPCS uses its own default detection (phpcs.xml / phpcs.xml.dist in the project root, then its built-in default)."
+          "description": "Coding standard to enforce (e.g. \"PSR12\"). phpcbf fixes against the same standard. Unset: PHPCS uses its own default detection (phpcs.xml / phpcs.xml.dist in the project root, then its built-in default)."
         },
         "timeout": {
           "type": "integer",

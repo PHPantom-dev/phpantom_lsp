@@ -151,6 +151,7 @@ fn collect(options: &FormatOptions) -> Option<Outcomes> {
     // ── 1. Open the project (config and source layout, no index) ────
     let cfg = crate::analyse::load_config_or_default(root, options.global_config.as_deref());
     let formatting_config = cfg.formatting.clone();
+    let phpcs_standard = cfg.phpcs.standard.clone();
     let backend = Backend::new_headless();
     crate::analyse::open_headless_project_unindexed(&backend, root, cfg);
     let php_version = backend.php_version();
@@ -163,6 +164,7 @@ fn collect(options: &FormatOptions) -> Option<Outcomes> {
     let strategy = formatting::resolve_strategy(
         Some(root),
         &formatting_config,
+        phpcs_standard.as_deref(),
         composer_json.as_ref(),
         bin_dir.as_deref(),
     );

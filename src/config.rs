@@ -509,6 +509,7 @@ pub struct PhpcsConfig {
     ///   `"vendor/bin/phpcs"` or `"phpcs"`).
     pub command: Option<String>,
     /// Coding standard to enforce (e.g. `"PSR12"`).
+    /// phpcbf fixes against the same standard.
     ///
     /// When unset, PHPCS uses its own default detection
     /// (`phpcs.xml` / `phpcs.xml.dist` in the project root,
