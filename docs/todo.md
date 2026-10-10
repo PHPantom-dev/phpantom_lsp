@@ -170,7 +170,6 @@ unlikely to move the needle for most users.
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Medium      |
 |     | **[Performance](todo/performance.md)**                                                                                       |             |             |
-| P75 | [Closures and calls through a variable on a long file rescan it](todo/performance.md#p75-closures-and-calls-through-a-variable-on-a-long-file-rescan-it)                 | Medium      | Medium      |
 | P76 | [Literal-key writes under separate `if`s grow far faster than their count](todo/performance.md#p76-literal-key-writes-under-separate-ifs-grow-far-faster-than-their-count)  | Medium      | Medium      |
 | P77 | [A long method chain costs the cube of its length](todo/performance.md#p77-a-long-method-chain-costs-the-cube-of-its-length)                                                | Medium      | Medium      |
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Very High   |

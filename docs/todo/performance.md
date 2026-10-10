@@ -20,45 +20,6 @@ against that bar.
 
 ---
 
-## P75. Closures and calls through a variable on a long file rescan it
-
-**Impact: Medium · Complexity: Medium**
-
-Two lookups still cost time in proportion to the length of the file at
-each use, so a long file that has many of them costs the square. On a
-release build, a generated top-level script of repeated 11-line blocks,
-each with a closure that has a typed parameter (`function (Foo $p)`) and a
-call through the variable holding it (`$f($a)`), takes:
-
-| Lines  | analyse wall clock |
-| ------ | ------------------ |
-| 5,500  | 0.6 s              |
-| 11,000 | 1.7 s              |
-| 22,000 | 5.8 s              |
-
-where the same script without those two lines takes 0.9 s at 22,000.
-`benches/scaling.py`'s `long_script_closure_calls` shape reproduces it.
-Nearly all of the difference is in:
-
-- `seed_closure_params` (forward walk) asks
-  `declared_param_docblock_type` for each closure parameter, which falls
-  back to `find_iterable_raw_type_in_source` (`docblock/tags.rs`). That
-  scans the text backwards line by line, counting braces, until it leaves
-  the enclosing scope. A closure at file scope has no enclosing scope, so
-  the scan runs to the top of the file.
-- `extract_callable_target_from_variable` (`signature_help.rs`), reached
-  from `collect_argument_type_diagnostics` through
-  `resolve_callable_target_inner`, walks every statement in the file
-  (`find_fcc_target_in_stmts`) looking for the last first-class-callable
-  assignment to the variable.
-
-**Where to look:** `declared_param_docblock_type` in
-`type_engine/variable/resolution.rs`, `find_iterable_raw_type_in_source`
-in `docblock/tags.rs`, and `find_fcc_target_in_stmts` in
-`signature_help.rs`.
-
----
-
 ## P76. Literal-key writes under separate `if`s grow far faster than their count
 
 **Impact: Medium · Complexity: Medium**

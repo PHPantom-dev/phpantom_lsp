@@ -1050,3 +1050,34 @@ fn fcc_extract_simple_function() {
     let result = Backend::extract_callable_target_from_variable("$fn", content, cursor_offset);
     assert_eq!(result, Some("makePen".to_string()));
 }
+
+#[test]
+fn fcc_extract_latest_assignment_before_cursor() {
+    let content = "<?php\n$fn = first(...);\n$fn = second(...);\n$fn();\n$fn = third(...);\n";
+    let cursor_offset = content.find("$fn();").unwrap() as u32 + 4;
+    let result = Backend::extract_callable_target_from_variable("$fn", content, cursor_offset);
+    assert_eq!(result, Some("second".to_string()));
+}
+
+#[test]
+fn fcc_extract_respects_function_scope() {
+    let content = "<?php\n$fn = outer(...);\nfunction a() {\n    $fn = inner(...);\n    $fn();\n}\nfunction b() {\n    $fn();\n}\n$fn();\n";
+    let in_a = content.find("$fn();").unwrap() as u32 + 4;
+    let in_b = content[in_a as usize..].find("$fn();").unwrap() as u32 + in_a + 4;
+    let at_top = content.rfind("$fn();").unwrap() as u32 + 4;
+    let extract = |offset| Backend::extract_callable_target_from_variable("$fn", content, offset);
+    assert_eq!(extract(in_a), Some("inner".to_string()));
+    assert_eq!(extract(in_b), Some("outer".to_string()));
+    assert_eq!(extract(at_top), Some("outer".to_string()));
+}
+
+#[test]
+fn fcc_extract_from_cached_file() {
+    let content = "<?php\nclass C {\n    public function m() {\n        $fn = $this->other(...);\n        $fn();\n    }\n}\n$fn();\n";
+    let _guard = crate::parser::with_parse_cache(content);
+    let in_method = content.find("$fn();").unwrap() as u32 + 4;
+    let at_top = content.rfind("$fn();").unwrap() as u32 + 4;
+    let extract = |offset| Backend::extract_callable_target_from_variable("$fn", content, offset);
+    assert_eq!(extract(in_method), Some("$this->other".to_string()));
+    assert_eq!(extract(at_top), None);
+}

@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster analysis of loops.** A loop body is no longer walked again once its types have settled.
 - **Faster analysis of `switch` lookup tables.** A `switch` that assigns a different literal in each of hundreds of cases, such as a table of country or currency names, now takes well under a second instead of up to half a minute.
 - **Faster analysis of long files.** Checking a file of tens of thousands of lines, such as a legacy top-level script, no longer slows down out of proportion to its length. A 22,000-line script is checked in about a second instead of nearly five.
+- **Faster analysis of closures in long files.** A long script full of closures with typed parameters, called through the variables that hold them, no longer slows down out of proportion to its length. A 22,000-line script of them is checked in under half a second instead of nearly six.
 - **Faster startup.** Hiding the standard library functions, classes, and constants that the project's PHP version no longer has takes a few milliseconds instead of about 50.
 - **Faster go-to-implementation on library classes.** Finding the implementations of a class or interface from a Composer package now reads only the files that could hold one, instead of loading every class the project depends on.
 
@@ -36,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A passing strict `in_array()` against `object` elements keeps the needle's classes.** A `Foo|Bar|string` needle checked against a `list<object>` still reads as `Foo` or `Bar` inside the branch.
 - **A typed array no longer proves it holds the keys an open array shape requires.** A parameter declared `array<string, int>` or `list<int>` is no longer taken to match an `array{foo: int, ...}` or `list{int, ...}` it says nothing about.
 - **Shape keys spelled as class constants are read as the keys they hold.** A docblock shape like `array{Slots::NAME: string, Slots::AGE: int}` whose constants are `0` and `1` is now accepted where a `list` is expected.
+- **A closure only reads `@param` from its own docblock.** A closure whose docblock does not mention a parameter no longer picks up the type from a `@param` written above an earlier closure.
 - **Blade `{{!!$flag}}`.** A double negation written without a space is an escaped echo again, instead of a raw echo that broke the rest of the template.
 - **An assignment is seen by the rest of the expression it sits in.** In `if (($user = find($id)) && $user->isActive())`, the right-hand side now knows what `$user` holds, and `[$i++, $i]` holds the old `$i` in its first item and the incremented one in its second.
 - **Narrowing follows the order a condition is evaluated in.** In `if ($x instanceof Foo && ($x = make()))` the body sees what `make()` returned, and a call that changes an object between two checks drops what the first one proved. A check inside one argument no longer narrows the arguments after it.

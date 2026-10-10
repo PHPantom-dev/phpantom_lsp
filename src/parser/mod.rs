@@ -772,6 +772,8 @@ struct CachedFile {
     parsed: std::cell::OnceCell<(mago_allocator::LocalArena, *const ())>,
     /// The file's `namespace` declarations, scanned on first use.
     namespaces: std::cell::OnceCell<crate::text_scan::NamespaceDecls>,
+    /// The file's first-class callable assignments, collected on first use.
+    fcc_assignments: std::cell::OnceCell<Vec<crate::signature_help::FccAssignment>>,
     /// Address and length of each borrowed copy of `content` a live
     /// [`ParseCacheGuard`] registered this file from.
     ///
@@ -790,6 +792,7 @@ impl CachedFile {
             content,
             parsed: std::cell::OnceCell::new(),
             namespaces: std::cell::OnceCell::new(),
+            fcc_assignments: std::cell::OnceCell::new(),
             aliases: RefCell::new(Vec::new()),
         })
     }
@@ -1185,6 +1188,51 @@ pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> 
             .get_or_init(|| crate::text_scan::NamespaceDecls::scan(&file.content))
             .at(content, offset),
         None => crate::text_scan::namespace_at_offset(content, offset),
+    }
+}
+
+/// Pass `content`'s first-class callable assignments (`$fn = target(...)`)
+/// to `f`.
+///
+/// A file in the active parse cache collects them once per pass, so a pass
+/// that asks at every call through a variable in a long file does not walk
+/// the whole file at each one.  Other text is parsed and walked per call.
+pub(crate) fn with_fcc_assignments<T: Default>(
+    content: &str,
+    f: impl FnOnce(&[crate::signature_help::FccAssignment]) -> T,
+) -> T {
+    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    match cached {
+        Some(file) => {
+            let collected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                file.fcc_assignments
+                    .get_or_init(|| {
+                        crate::signature_help::collect_fcc_assignments(
+                            file.program().statements.as_slice(),
+                            &file.content,
+                        )
+                    })
+                    .as_slice()
+            }));
+            match collected {
+                Ok(assignments) => f(assignments),
+                Err(_) => {
+                    PARSE_CACHE.with(|cell| {
+                        if let Some(cache) = cell.borrow_mut().as_mut() {
+                            cache.evict(&file);
+                        }
+                    });
+                    tracing::error!("PHPantom: parser panicked in with_fcc_assignments");
+                    T::default()
+                }
+            }
+        }
+        None => with_parsed_program(content, "with_fcc_assignments", |program, content| {
+            f(&crate::signature_help::collect_fcc_assignments(
+                program.statements.as_slice(),
+                content,
+            ))
+        }),
     }
 }
 

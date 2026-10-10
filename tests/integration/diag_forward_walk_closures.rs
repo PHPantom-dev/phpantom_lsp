@@ -1063,3 +1063,31 @@ class Runner
         "`$node` must stay Alpha, got: {messages:?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A closure's `@param` comes only from the docblock attached to it
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn closure_param_docblock_does_not_leak_past_attached_docblock() {
+    let backend = create_test_backend();
+    let uri = "file:///script.php";
+    let text = r#"<?php
+class Pen { public function write(): void {} }
+/** @param Pen $item */
+$a = function ($item) { $item->missing(); };
+/** @var Closure */
+$b = function ($item) { $item->open(); };
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    let messages: Vec<_> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(
+        messages.len(),
+        1,
+        "only `$a`'s own `@param` should apply, got: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("missing"),
+        "expected `missing` on Pen to be flagged, got: {messages:?}"
+    );
+}

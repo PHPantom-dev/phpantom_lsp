@@ -639,31 +639,26 @@ pub(crate) fn walk_closure_in_partial_call_args<'b, F>(
     }
 }
 
-/// Check whether a `/** … */` docblock is directly attached to the
-/// code at `fn_offset` — i.e. only whitespace, the `static`/`function`
-/// keywords, or an assignment target separates the closing `*/` from
-/// `fn_offset`.  This prevents `@param` annotations from sibling
-/// closures/arrow functions from leaking across statement boundaries.
-pub(crate) fn is_docblock_adjacent(content: &str, fn_offset: usize) -> bool {
-    let before = match content.get(..fn_offset) {
-        Some(s) => s,
-        None => return false,
-    };
-    // Walk backward over whitespace, then over optional keywords
-    // (`static`, visibility modifiers) that may sit between the
-    // docblock and `fn`.
-    let trimmed = before.trim_end();
-    if trimmed.ends_with("*/") {
-        return true;
+/// The `/** … */` docblock directly attached to the code at
+/// `fn_offset` — i.e. only whitespace, the `static`/`function` keywords,
+/// or an assignment target separates its closing `*/` from `fn_offset`.
+/// Restricting a closure's `@param` lookup to this block keeps
+/// annotations from sibling closures/arrow functions from leaking across
+/// statement boundaries, and keeps the lookup from scanning the file
+/// above it.
+pub(crate) fn adjacent_docblock(content: &str, fn_offset: usize) -> Option<&str> {
+    let before = content.get(..fn_offset)?.trim_end();
+    if before.ends_with("*/") {
+        return docblock_ending_at(before);
     }
     // Allow `static` keyword between docblock and `fn(…)`:
     //   /** @param T $x */ static fn(T $x) => …
     // Also allow the `function` keyword for regular closures.
-    let trimmed = trimmed
+    let before = before
         .trim_end_matches(|c: char| c.is_ascii_alphanumeric() || c == '_')
         .trim_end();
-    if trimmed.ends_with("*/") {
-        return true;
+    if before.ends_with("*/") {
+        return docblock_ending_at(before);
     }
     // A closure stored in a variable carries its docblock above the whole
     // statement, because that is where PHP attaches the comment:
@@ -674,10 +669,18 @@ pub(crate) fn is_docblock_adjacent(content: &str, fn_offset: usize) -> bool {
     // Stepping back over the assignment target reaches it.  Only a plain
     // assignment is stepped over — a call argument or an array element is
     // not — which is what keeps a sibling closure's annotation out.
-    match assignment_target_start(trimmed) {
-        Some(start) => trimmed[..start].trim_end().ends_with("*/"),
-        None => false,
-    }
+    let start = assignment_target_start(before)?;
+    docblock_ending_at(before[..start].trim_end())
+}
+
+/// The `/** … */` block that `text` ends with, or `None` when it ends
+/// with something else (including a plain `/* … */` comment).
+fn docblock_ending_at(text: &str) -> Option<&str> {
+    let body = text.strip_suffix("*/")?;
+    let open = body.rfind("/**")?;
+    // A `*/` in between means the nearest `/**` closed earlier and
+    // `text` ends with a plain comment instead.
+    (!body[open + 3..].contains("*/")).then(|| &text[open..])
 }
 
 /// Byte offset of the assignment target in text that ends with a plain
@@ -715,6 +718,7 @@ pub(crate) fn seed_closure_params(
     inferred_types: &[PhpType],
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    let docblock = adjacent_docblock(ctx.content, fn_span_start as usize);
     for (idx, param) in parameter_list.parameters.iter().enumerate() {
         let pname = bytes_to_str(param.variable.name).to_string();
         let is_variadic = param.ellipsis.is_some();
@@ -728,22 +732,13 @@ pub(crate) fn seed_closure_params(
             .as_ref()
             .map(|h| accept_default(extract_hint_type(h)));
 
-        // Check the `@param` docblock annotation.
-        //
-        // Only trust the result when the docblock is directly attached
-        // to this closure/arrow function (no intervening code).  Without
-        // this guard, sibling arrow functions that share a parameter
-        // name (e.g. two `array_map(fn($row) => …)` calls) would leak
-        // `@param` annotations from one closure to the other, because
-        // arrow functions don't introduce `{`/`}` scope boundaries and
-        // `find_iterable_raw_type_in_source` scans backward freely.
-        let raw_docblock_type = crate::docblock::find_iterable_raw_type_in_source(
-            ctx.content,
-            fn_span_start as usize,
-            &pname,
-        )
-        .filter(|_| is_docblock_adjacent(ctx.content, fn_span_start as usize))
-        .map(|t| super::param_seeding::resolve_docblock_param_type(&t, ctx));
+        // Check the `@param` docblock annotation, looking only in the
+        // docblock attached to this closure/arrow function.
+        let raw_docblock_type = docblock
+            .and_then(|doc| {
+                crate::docblock::find_iterable_raw_type_in_source(doc, doc.len(), &pname)
+            })
+            .map(|t| super::param_seeding::resolve_docblock_param_type(&t, ctx));
 
         // A template can take the `null` itself, so it keeps its own name
         // (`@param T $t = null` stays `T`).

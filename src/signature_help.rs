@@ -314,52 +314,82 @@ impl From<crate::types::ResolvedCallableTarget> for ResolvedCallable {
 
 // ─── First-class callable target extraction (AST-based) ────────────────────
 
+use crate::atom::bytes_to_str;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-/// Walk statements looking for the last assignment to `var_name` (with
-/// `$` prefix) before `cursor_offset` where the RHS is a
-/// `PartialApplication` (first-class callable).  Returns the callable
-/// target text extracted from `content`.
-fn find_fcc_target_in_stmts<'a, I>(
-    stmts: I,
-    var_name: &str,
-    cursor_offset: u32,
-    content: &str,
-) -> Option<String>
-where
-    I: Iterator<Item = &'a Statement<'a>>,
-{
-    let mut best: Option<String> = None;
-    for stmt in stmts {
-        collect_fcc_targets(stmt, var_name, cursor_offset, content, &mut best);
-    }
-    best
+/// A first-class callable assignment (`$fn = target(...)`) recorded by
+/// [`collect_fcc_assignments`].
+pub(crate) struct FccAssignment {
+    /// The assigned variable, with its `$` prefix.
+    var_name: Box<str>,
+    /// Where the assignment expression ends.
+    end: u32,
+    /// The callable target text (`makePen`, `$obj->method`, `Foo::bar`).
+    target: Box<str>,
+    /// The span of the innermost function or method the assignment sits
+    /// in, or `None` at file scope.  It is only visible from inside it.
+    scope: Option<(u32, u32)>,
 }
 
-/// Recursively collect first-class callable assignment targets from a
-/// statement, updating `best` with the latest match found.
-fn collect_fcc_targets(
-    stmt: &Statement<'_>,
+/// Every first-class callable assignment in `statements`, in source
+/// order.  File-scope assignments and those in function and method bodies
+/// are recorded; those inside closures are not.
+pub(crate) fn collect_fcc_assignments(
+    statements: &[Statement<'_>],
+    content: &str,
+) -> Vec<FccAssignment> {
+    let mut out = Vec::new();
+    for stmt in statements {
+        collect_fcc_targets(stmt, None, content, &mut out);
+    }
+    out
+}
+
+/// The target of the last first-class callable assignment to `var_name`
+/// (with `$` prefix) that ends before `cursor_offset` and is visible from
+/// it.
+fn find_fcc_target(
+    assignments: &[FccAssignment],
     var_name: &str,
     cursor_offset: u32,
+) -> Option<String> {
+    assignments
+        .iter()
+        .rev()
+        .find(|a| {
+            &*a.var_name == var_name
+                && a.end <= cursor_offset
+                && a.scope
+                    .is_none_or(|(start, end)| cursor_offset >= start && cursor_offset <= end)
+        })
+        .map(|a| a.target.to_string())
+}
+
+/// Recursively collect first-class callable assignments from a statement
+/// into `out`, tagging each with the function-like `scope` it sits in.
+fn collect_fcc_targets(
+    stmt: &Statement<'_>,
+    scope: Option<(u32, u32)>,
     content: &str,
-    best: &mut Option<String>,
+    out: &mut Vec<FccAssignment>,
 ) {
     macro_rules! walk {
-        ($iter:expr) => {
+        ($iter:expr, $scope:expr) => {
             for s in $iter {
-                collect_fcc_targets(s, var_name, cursor_offset, content, best);
+                collect_fcc_targets(s, $scope, content, out);
             }
         };
+        ($iter:expr) => {
+            walk!($iter, scope)
+        };
     }
+    let span_of = |span: mago_span::Span| Some((span.start.offset, span.end.offset));
 
     match stmt {
         Statement::Expression(expr_stmt) => {
-            if let Some(found) =
-                find_fcc_target_in_expr(expr_stmt.expression, var_name, cursor_offset, content)
-            {
-                *best = Some(found);
+            if let Some(found) = fcc_assignment_in_expr(expr_stmt.expression, scope, content) {
+                out.push(found);
             }
         }
         Statement::Block(block) => walk!(block.statements.iter()),
@@ -371,11 +401,7 @@ fn collect_fcc_targets(
                 if let ClassLikeMember::Method(method) = member
                     && let MethodBody::Concrete(block) = &method.body
                 {
-                    let span = method.span();
-                    if cursor_offset >= span.start.offset && cursor_offset <= span.end.offset {
-                        walk!(block.statements.iter());
-                        return;
-                    }
+                    walk!(block.statements.iter(), span_of(method.span()));
                 }
             }
         }
@@ -386,34 +412,21 @@ fn collect_fcc_targets(
                 if let ClassLikeMember::Method(method) = member
                     && let MethodBody::Concrete(block) = &method.body
                 {
-                    let span = method.span();
-                    if cursor_offset >= span.start.offset && cursor_offset <= span.end.offset {
-                        walk!(block.statements.iter());
-                        return;
-                    }
+                    walk!(block.statements.iter(), span_of(method.span()));
                 }
             }
         }
         Statement::Function(func) => {
-            let span = func.body.span();
-            if cursor_offset >= span.start.offset && cursor_offset <= span.end.offset {
-                walk!(func.body.statements.iter());
-            }
+            walk!(func.body.statements.iter(), span_of(func.body.span()));
         }
         Statement::If(if_stmt) => match &if_stmt.body {
             IfBody::Statement(body) => {
-                collect_fcc_targets(body.statement, var_name, cursor_offset, content, best);
+                collect_fcc_targets(body.statement, scope, content, out);
                 for ei in body.else_if_clauses.iter() {
-                    collect_fcc_targets(ei.statement, var_name, cursor_offset, content, best);
+                    collect_fcc_targets(ei.statement, scope, content, out);
                 }
                 if let Some(ref else_clause) = body.else_clause {
-                    collect_fcc_targets(
-                        else_clause.statement,
-                        var_name,
-                        cursor_offset,
-                        content,
-                        best,
-                    );
+                    collect_fcc_targets(else_clause.statement, scope, content, out);
                 }
             }
             IfBody::ColonDelimited(body) => {
@@ -427,25 +440,19 @@ fn collect_fcc_targets(
             }
         },
         Statement::Foreach(foreach) => match &foreach.body {
-            ForeachBody::Statement(inner) => {
-                collect_fcc_targets(inner, var_name, cursor_offset, content, best);
-            }
+            ForeachBody::Statement(inner) => collect_fcc_targets(inner, scope, content, out),
             ForeachBody::ColonDelimited(body) => walk!(body.statements.iter()),
         },
         Statement::For(for_stmt) => match &for_stmt.body {
-            ForBody::Statement(inner) => {
-                collect_fcc_targets(inner, var_name, cursor_offset, content, best);
-            }
+            ForBody::Statement(inner) => collect_fcc_targets(inner, scope, content, out),
             ForBody::ColonDelimited(body) => walk!(body.statements.iter()),
         },
         Statement::While(while_stmt) => match &while_stmt.body {
-            WhileBody::Statement(inner) => {
-                collect_fcc_targets(inner, var_name, cursor_offset, content, best);
-            }
+            WhileBody::Statement(inner) => collect_fcc_targets(inner, scope, content, out),
             WhileBody::ColonDelimited(body) => walk!(body.statements.iter()),
         },
         Statement::DoWhile(do_while) => {
-            collect_fcc_targets(do_while.statement, var_name, cursor_offset, content, best);
+            collect_fcc_targets(do_while.statement, scope, content, out);
         }
         Statement::Try(try_stmt) => {
             walk!(try_stmt.block.statements.iter());
@@ -460,32 +467,28 @@ fn collect_fcc_targets(
     }
 }
 
-/// Check if an expression is an assignment to `var_name` with a
-/// `PartialApplication` RHS, and extract the callable target text.
-fn find_fcc_target_in_expr(
+/// The first-class callable assignment `expr` makes (`$fn = target(...)`),
+/// if it is one.
+fn fcc_assignment_in_expr(
     expr: &Expression<'_>,
-    var_name: &str,
-    cursor_offset: u32,
+    scope: Option<(u32, u32)>,
     content: &str,
-) -> Option<String> {
-    if let Expression::Assignment(assignment) = expr {
-        // Only consider assignments that end before the cursor.
-        let assign_end = assignment.span().end.offset;
-        if assign_end > cursor_offset {
-            return None;
-        }
-
-        if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
-            if dv.name != var_name.as_bytes() {
-                return None;
-            }
-
-            if let Expression::PartialApplication(pa) = assignment.rhs {
-                return extract_callable_text_from_partial(pa, content);
-            }
-        }
-    }
-    None
+) -> Option<FccAssignment> {
+    let Expression::Assignment(assignment) = expr else {
+        return None;
+    };
+    let Expression::Variable(Variable::Direct(dv)) = assignment.lhs else {
+        return None;
+    };
+    let Expression::PartialApplication(pa) = assignment.rhs else {
+        return None;
+    };
+    Some(FccAssignment {
+        var_name: bytes_to_str(dv.name).into(),
+        end: assignment.span().end.offset,
+        target: extract_callable_text_from_partial(pa, content)?.into(),
+        scope,
+    })
 }
 
 /// Extract the callable target text from a `PartialApplication` AST
@@ -643,26 +646,16 @@ impl Backend {
     /// This enables signature help for first-class callable invocations:
     /// `$fn = makePen(...); $fn()` shows `makePen`'s parameters.
     ///
-    /// Uses the AST to find assignments to `var_name` before
-    /// `cursor_offset` where the RHS is a `PartialApplication` node,
-    /// then extracts the callable portion from the source text.
+    /// Looks the assignment up among the file's first-class callable
+    /// assignments, which the active parse cache collects once per pass.
     pub(crate) fn extract_callable_target_from_variable(
         var_name: &str,
         content: &str,
         cursor_offset: u32,
     ) -> Option<String> {
-        crate::parser::with_parsed_program(
-            content,
-            "extract_callable_target",
-            |program, content| {
-                find_fcc_target_in_stmts(
-                    program.statements.iter(),
-                    var_name,
-                    cursor_offset,
-                    content,
-                )
-            },
-        )
+        crate::parser::with_fcc_assignments(content, |assignments| {
+            find_fcc_target(assignments, var_name, cursor_offset)
+        })
     }
 
     /// Insert `);` at the cursor position so that an unclosed call
