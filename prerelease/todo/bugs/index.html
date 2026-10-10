@@ -935,34 +935,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b580-convert-to-instance-variable-rewrites-positions-where-a-property-access-is-invalid" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B580. Convert to instance variable rewrites positions where a property access is invalid
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b581-convert-to-instance-variable-redeclares-an-inherited-property" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B581. Convert to instance variable redeclares an inherited property
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1540,34 +1512,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b580-convert-to-instance-variable-rewrites-positions-where-a-property-access-is-invalid" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B580. Convert to instance variable rewrites positions where a property access is invalid
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b581-convert-to-instance-variable-redeclares-an-inherited-property" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B581. Convert to instance variable redeclares an inherited property
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1629,54 +1573,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b580-convert-to-instance-variable-rewrites-positions-where-a-property-access-is-invalid">B580. Convert to instance variable rewrites positions where a property access is invalid<a class="headerlink" href="#b580-convert-to-instance-variable-rewrites-positions-where-a-property-access-is-invalid" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    public function bar() {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">        $x = 1;                                  // cursor here</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        $f = function () use ($x) { return $x; };</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">        $h = fn() =&gt; $x;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">        try {} catch (\Exception $x) {}</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">        static $x;</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">        global $x;</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">        return compact(&#39;x&#39;);</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    }</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">}</span>
-</code></pre></div>
-<p>The action produces <code>use ($this-&gt;x)</code>, <code>use (&amp;$this-&gt;x)</code>,
-<code>catch (\Exception $this-&gt;x)</code>, <code>static $this-&gt;x;</code> and <code>global $this-&gt;x;</code>,
-all syntax errors. It leaves <code>$x</code> inside the closure body and the arrow
-function untouched, so those now read an undefined local, and <code>compact('x')</code>
-silently loses the variable.</p>
-<p><code>resolve_convert_to_instance_variable</code> replaces every occurrence
-<code>ScopeMap::all_occurrences</code> returns, and that list does not say which
-occurrences sit in a declaring position (closure <code>use</code>, <code>catch</code>, <code>static</code>,
-<code>global</code>, parameters) or how a nested closure or arrow function captures the
-variable.</p>
-<p><strong>Fix:</strong> Carry the syntactic role of each occurrence out of the scope
-collector. Rewrite a closure <code>use</code> capture by dropping it from the <code>use</code> list
-and converting the closure body's occurrences, and convert arrow-function
-bodies directly (both bind <code>$this</code>). Decline the action when the variable
-appears in a <code>catch</code>, <code>static</code>, or <code>global</code> declaration, or by name in
-<code>compact()</code> / <code>extract()</code> / <code>$$</code>.</p>
-<h3 id="b581-convert-to-instance-variable-redeclares-an-inherited-property">B581. Convert to instance variable redeclares an inherited property<a class="headerlink" href="#b581-convert-to-instance-variable-redeclares-an-inherited-property" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Base { protected $x; }</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">class Foo extends Base {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    public function bar() {</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">        $x = 1; // cursor here</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    }</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>The action adds <code>private $x;</code> to <code>Foo</code>, which is a fatal error ("Access level
-to Foo::$x must be protected (as in class Base) or weaker"). Even with a
-compatible visibility it would shadow the inherited property instead of
-reusing it.</p>
-<p><code>property_exists</code> in <code>convert_to_instance_variable.rs</code> only scans the class's
-own members and promoted constructor parameters.</p>
-<p><strong>Fix:</strong> Check the fully resolved class (parents, traits) for an existing
-property. When an inherited, accessible one exists, either decline the action
-or convert to <code>$this-&gt;x</code> without declaring a new property.</p>
+<p>No outstanding items.</p>
 
 
 
