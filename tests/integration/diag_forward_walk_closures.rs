@@ -1,6 +1,6 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
-    unknown_member_diagnostics_with_scope_cache,
+    slow_diagnostic_messages, unknown_member_diagnostics_with_scope_cache,
 };
 use tower_lsp::lsp_types::*;
 
@@ -1061,5 +1061,222 @@ class Runner
     assert!(
         !messages[0].contains("Beta"),
         "`$node` must stay Alpha, got: {messages:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Narrowing by a ternary, `&&` or `match` reaches a closure written there
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// The `type_mismatch_argument` messages for `body`, placed in a method
+/// whose `$c` is a `?Conversation` and whose `take()` wants a
+/// `Conversation`.
+fn conversation_mismatches(body: &str) -> Vec<String> {
+    let backend = create_test_backend_with_full_stubs();
+    let php = format!(
+        r#"<?php
+class Conversation {{}}
+
+class Repro
+{{
+    public function run(?Conversation $c = null): void
+    {{
+        {body}
+    }}
+
+    private function take(Conversation $c): void {{}}
+}}
+"#
+    );
+    slow_diagnostic_messages(
+        &backend,
+        "file:///closure_narrowing.php",
+        &php,
+        "type_mismatch_argument",
+    )
+}
+
+/// Every `(label, body)` whose diagnostics fail `ok`, with what it got.
+fn failing_cases(cases: &[(&str, &str)], ok: impl Fn(&[String]) -> bool) -> Vec<String> {
+    cases
+        .iter()
+        .filter_map(|(label, body)| {
+            let messages = conversation_mismatches(body);
+            (!ok(&messages)).then(|| format!("{label}: {messages:?}"))
+        })
+        .collect()
+}
+
+/// A closure created where an expression has proved `$c` non-null
+/// captures that non-null value, exactly as one created inside the
+/// matching `if` block does.
+#[test]
+fn expression_narrowing_reaches_closures_created_in_the_narrowed_branch() {
+    let cases = [
+        (
+            "ternary truthy",
+            "$run = $c ? fn () => $this->take($c) : null;",
+        ),
+        (
+            "ternary !== null",
+            "$run = $c !== null ? fn () => $this->take($c) : null;",
+        ),
+        (
+            "ternary === null, else branch",
+            "$run = $c === null ? null : fn () => $this->take($c);",
+        ),
+        (
+            "ternary isset",
+            "$run = isset($c) ? fn () => $this->take($c) : null;",
+        ),
+        (
+            "ternary static fn",
+            "$run = $c ? static fn () => $this->take($c) : null;",
+        ),
+        (
+            "ternary closure use",
+            "$run = $c ? function () use ($c) { $this->take($c); } : null;",
+        ),
+        (
+            "ternary fn as a call argument",
+            "$result = $c ? array_map(fn ($x) => $this->take($c), [1]) : null;",
+        ),
+        ("&& right operand", "$run = $c && fn () => $this->take($c);"),
+        (
+            "|| right operand",
+            "$run = $c === null || fn () => $this->take($c);",
+        ),
+        (
+            "short ternary else branch",
+            "$run = !$c ?: fn () => $this->take($c);",
+        ),
+        (
+            "match (true) arm",
+            "$run = match (true) { $c !== null => fn () => $this->take($c), default => null };",
+        ),
+        (
+            "ternary in an array element",
+            "$run = [$c ? fn () => $this->take($c) : null];",
+        ),
+        (
+            "nested ternary",
+            "$run = rand() ? ($c ? fn () => $this->take($c) : null) : null;",
+        ),
+        (
+            "closure nested in an arrow fn",
+            "$run = $c ? fn () => function () use ($c) { $this->take($c); } : null;",
+        ),
+    ];
+    let failing = failing_cases(&cases, <[String]>::is_empty);
+    assert!(
+        failing.is_empty(),
+        "expected no mismatch, got: {failing:#?}"
+    );
+}
+
+/// The forms that already narrowed before the expression forms did must
+/// keep doing so.
+#[test]
+fn statement_narrowing_and_direct_uses_still_reach_the_argument() {
+    let cases = [
+        ("if block", "if ($c) { $run = fn () => $this->take($c); }"),
+        (
+            "early return",
+            "if ($c === null) { return; } $run = fn () => $this->take($c);",
+        ),
+        ("ternary direct call", "$c ? $this->take($c) : null;"),
+    ];
+    let failing = failing_cases(&cases, <[String]>::is_empty);
+    assert!(
+        failing.is_empty(),
+        "expected no mismatch, got: {failing:#?}"
+    );
+}
+
+/// A closure the narrowing does not cover still sees a nullable `$c`.
+#[test]
+fn closures_outside_the_narrowed_branch_still_see_null() {
+    let cases = [
+        (
+            "ternary else branch",
+            "$run = $c ? null : fn () => $this->take($c);",
+        ),
+        (
+            "ternary then branch of === null",
+            "$run = $c === null ? fn () => $this->take($c) : null;",
+        ),
+        (
+            "condition about another variable",
+            "$d = rand(); $run = $d ? fn () => $this->take($c) : null;",
+        ),
+        (
+            "closure in the condition",
+            "$run = (fn () => $this->take($c))() ? 1 : 2;",
+        ),
+        (
+            "|| right operand of a truthy test",
+            "$run = $c || fn () => $this->take($c);",
+        ),
+        (
+            "match (true) default arm",
+            "$run = match (true) { $c !== null => null, default => fn () => $this->take($c) };",
+        ),
+        (
+            "after the ternary",
+            "$run = $c ? 1 : 2; $later = fn () => $this->take($c);",
+        ),
+    ];
+    let failing = failing_cases(&cases, |messages| messages.len() == 1);
+    assert!(
+        failing.is_empty(),
+        "expected exactly one mismatch, got: {failing:#?}"
+    );
+}
+
+/// A by-reference capture reads the variable when the closure runs, not
+/// when it is created, so a reassignment after the closure reaches it.
+/// The ternary branch treats it the way an `if` block does.
+#[test]
+fn by_reference_capture_in_a_narrowed_branch_matches_the_if_block() {
+    let in_if =
+        conversation_mismatches("if ($c) { $run = function () use (&$c) { $this->take($c); }; }");
+    let in_ternary =
+        conversation_mismatches("$run = $c ? function () use (&$c) { $this->take($c); } : null;");
+    assert_eq!(in_ternary, in_if);
+}
+
+/// A `match ($x::class)` arm proves the subject's class to a closure
+/// written in it, as it does to a direct use there.
+#[test]
+fn class_match_arm_narrowing_reaches_a_closure_in_the_arm() {
+    let backend = create_test_backend_with_full_stubs();
+    let php = r#"<?php
+interface Shape {}
+class Circle implements Shape {}
+class Square implements Shape {}
+
+class Painter
+{
+    public function run(Shape $s): void
+    {
+        $paint = match ($s::class) {
+            Circle::class => fn () => $this->circle($s),
+            default => fn () => $this->circle($s),
+        };
+    }
+
+    private function circle(Circle $c): void {}
+}
+"#;
+    let messages = slow_diagnostic_messages(
+        &backend,
+        "file:///class_match.php",
+        php,
+        "type_mismatch_argument",
+    );
+    assert_eq!(
+        messages.len(),
+        1,
+        "only the default arm's closure passes a Shape, got: {messages:?}"
     );
 }
