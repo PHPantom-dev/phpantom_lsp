@@ -145,38 +145,6 @@ there.
 
 ---
 
-## P74. Every class lookup by name re-parses and lowercases the name
-
-**Impact: Low-Medium · Complexity: Low**
-
-`find_or_load_class(&str)` (`resolution.rs`) runs `PhpType::parse` on the
-name before looking it up, so that callers may pass `?Foo` or
-`Collection<int, User>`. Most callers pass a bare class name, and
-`try_parse` has no fast path for one: each lookup runs the full PHPDoc
-type parser, hyphenated-keyword rewriting included, before
-`class_loader_memo` is consulted. 119 call sites use the `&str` form.
-Separately, `is_scalar_name` and `is_keyword_type`
-(`php_type/keywords.rs`) allocate a lowercase copy of the name on every
-call, and `find_indexed_class` reaches them on every lookup, memo hits
-included.
-
-On a release `analyze` of a mid-sized Laravel project the PHPDoc type
-parser is about 4% of CPU samples (part of it is this re-parse), and the
-two keyword checks about 2%.
-
-**Fix:** give `PhpType::try_parse` a fast path for input made only of
-identifier characters and backslashes that is not a keyword, returning
-the named type directly, and compare against the keyword lists with
-`eq_ignore_ascii_case` (or a stack buffer) instead of allocating. An
-earlier attempt at allocation-free `CiMap` lookups regressed slightly
-under mimalloc, so confirm this one with an order-swapped A/B run.
-
-**Where to look:** `find_or_load_class` in `resolution.rs`,
-`PhpType::try_parse` in `php_type/parse.rs`, `is_scalar_name` and
-`is_keyword_type` in `php_type/keywords.rs`.
-
----
-
 ## P78. A `switch` over thousands of distinct literals is still quadratic
 
 **Impact: Low-Medium · Complexity: Medium**

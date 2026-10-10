@@ -27,6 +27,10 @@ impl PhpType {
             return Some(PhpType::untyped());
         }
 
+        if super::keywords::is_plain_class_name(input) {
+            return Some(PhpType::named(atom(input)));
+        }
+
         // `static(Foo)` / `$this(Foo)` is how a bounded late-static type is
         // displayed, and no PHPDoc grammar covers it, so each one is smuggled
         // past the parser as a placeholder name and put back afterwards.
@@ -952,5 +956,72 @@ pub(crate) fn literal_or_named_shape_key(ty: &PhpType) -> Option<String> {
         TypeKind::Literal(lit) => lit.string_content().map(Cow::into_owned),
         TypeKind::Named(key) => Some(key.to_string()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod plain_name_tests {
+    use super::*;
+
+    #[test]
+    fn fast_path_matches_full_parser() {
+        let names = [
+            "Foo",
+            "foo",
+            "Foo\\Bar",
+            "\\Foo",
+            "Foo\\",
+            "Int",
+            "INT",
+            "Array",
+            "List",
+            "list",
+            "Integer",
+            "integer",
+            "Number",
+            "number",
+            "Scalar",
+            "Resource",
+            "Numeric",
+            "Mixed",
+            "Self",
+            "STATIC",
+            "Parent",
+            "Iterable",
+            "Callable",
+            "Object",
+            "Null",
+            "Never",
+            "Void",
+            "True",
+            "False",
+            "Key",
+            "Min",
+            "Max",
+            "Empty",
+            "Class",
+            "Collection",
+            "_x",
+            "Foo1",
+            "Foo\\1a",
+            "Boolean",
+            "Double",
+            "Real",
+            "Float",
+            "Bool",
+            "String",
+            "New",
+            "Global",
+            "Const",
+            "Readonly",
+            "Äpfel",
+            "Foo\\\\Bar",
+        ];
+        for n in names {
+            if super::super::keywords::is_plain_class_name(n) {
+                let slow = parse_type_text(n);
+                assert_eq!(Some(PhpType::named(atom(n))), slow, "{n}");
+            }
+        }
     }
 }

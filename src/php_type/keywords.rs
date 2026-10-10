@@ -45,8 +45,12 @@ pub(crate) fn keyword_lowercase(name: &str) -> String {
 ///
 /// Native type names are reserved keywords, so they match in any casing.
 pub(crate) fn is_native_type_name(name: &str) -> bool {
+    with_ascii_lowercase(name, is_native_type_name_lower)
+}
+
+fn is_native_type_name_lower(lower: &str) -> bool {
     matches!(
-        name.to_ascii_lowercase().as_str(),
+        lower,
         "int"
             | "float"
             | "string"
@@ -77,8 +81,12 @@ pub(crate) fn is_keyword_type(name: &str) -> bool {
     if is_scalar_name(name) {
         return true;
     }
+    with_ascii_lowercase(name, is_keyword_type_lower)
+}
+
+fn is_keyword_type_lower(lower: &str) -> bool {
     matches!(
-        name.to_ascii_lowercase().as_str(),
+        lower,
         // ── Integer refinements ─────────────────────────────────
         "non-zero-int"
             | "int-mask"
@@ -303,20 +311,41 @@ pub(crate) fn is_scalar_name(name: &str) -> bool {
     if name == "number" {
         return true;
     }
-    let lower = name.to_ascii_lowercase();
+    with_ascii_lowercase(name, |lower| is_scalar_name_lower(name, lower))
+}
+
+/// Run `f` on an ASCII-lowercased copy of `name` held in a stack buffer.
+///
+/// A name longer than every keyword cannot match one, so `f` gets a
+/// string no keyword equals instead of the name's lowercase.
+fn with_ascii_lowercase<R>(name: &str, f: impl FnOnce(&str) -> R) -> R {
+    const CAP: usize = 48;
+    let bytes = name.as_bytes();
+    if bytes.len() > CAP {
+        return f("");
+    }
+    let mut buf = [0u8; CAP];
+    for (dst, src) in buf.iter_mut().zip(bytes) {
+        *dst = src.to_ascii_lowercase();
+    }
+    // Lowercasing ASCII bytes of valid UTF-8 keeps it valid.
+    f(std::str::from_utf8(&buf[..bytes.len()]).unwrap_or(""))
+}
+
+fn is_scalar_name_lower(name: &str, lower: &str) -> bool {
     // `integer`, `boolean`, `double`, `resource`, `scalar`, and `numeric` are
     // PHP aliases/pseudo-types, not reserved keywords (see
     // `is_lowercase_only_pseudo_type`), so a project may legally declare a
     // class of one of these names — `PhpParser\Node\Scalar` is one such class.
     // Only the exact lowercase spelling counts as the alias.
     if matches!(
-        lower.as_str(),
+        lower,
         "integer" | "boolean" | "double" | "resource" | "scalar" | "numeric"
     ) {
         return name == lower;
     }
     matches!(
-        lower.as_str(),
+        lower,
         "int"
             | "float"
             | "string"
@@ -504,4 +533,41 @@ pub(crate) fn native_scalar_name(name: &str) -> Option<&str> {
         // Anything else is a class name — pass it through.
         _ => Some(name),
     }
+}
+
+/// Whether `name` is a single identifier-like word the PHPDoc parser reads
+/// as a plain class reference: identifier characters and namespace
+/// separators only, no keyword in any casing.
+///
+/// Anything this returns `false` for may still be a class name; it only
+/// means the caller must run the full parser to find out.
+pub(crate) fn is_plain_class_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    let Some(&first) = bytes.first() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == b'_' || first >= 0x80) || bytes.ends_with(b"\\") {
+        return false;
+    }
+    let mut prev_sep = false;
+    for &b in bytes {
+        let sep = b == b'\\';
+        if !(b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80 || sep) || (sep && prev_sep) {
+            return false;
+        }
+        if prev_sep && b.is_ascii_digit() {
+            return false;
+        }
+        prev_sep = sep;
+    }
+    with_ascii_lowercase(name, |lower| {
+        !is_keyword_type_lower(lower)
+            && !is_scalar_name_lower(name, lower)
+            && !is_native_type_name_lower(lower)
+            && !is_lowercase_only_pseudo_type(lower)
+            && !matches!(
+                lower,
+                "list" | "key" | "min" | "max" | "new" | "global" | "const" | "readonly"
+            )
+    })
 }

@@ -174,7 +174,6 @@ unlikely to move the needle for most users.
 | P77 | [A long method chain costs the cube of its length](todo/performance.md#p77-a-long-method-chain-costs-the-cube-of-its-length)                                                | Medium      | Medium      |
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Very High   |
 | P73 | [A lazily loaded file is parsed three times](todo/performance.md#p73-a-lazily-loaded-file-is-parsed-three-times)                                                          | Low-Medium  | Low         |
-| P74 | [Every class lookup by name re-parses and lowercases the name](todo/performance.md#p74-every-class-lookup-by-name-re-parses-and-lowercases-the-name)                      | Low-Medium  | Low         |
 | P78 | [A `switch` over thousands of distinct literals is still quadratic](todo/performance.md#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic)                | Low-Medium  | Medium      |
 | P79 | [Writes under the same dynamic key in separate `if`s are quadratic](todo/performance.md#p79-writes-under-the-same-dynamic-key-in-separate-ifs-are-quadratic)                | Low-Medium  | Medium      |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
