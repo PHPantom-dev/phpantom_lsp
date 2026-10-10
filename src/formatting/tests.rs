@@ -461,6 +461,32 @@ fn strategy_phpcs_xml_dist_certifies_phpcbf_over_transitive_dependency() {
 }
 
 #[test]
+fn strategy_phpcs_standard_alone_selects_phpcbf() {
+    let dir = tempfile::tempdir().unwrap();
+    let vendor_bin = dir.path().join("vendor/bin");
+    std::fs::create_dir_all(&vendor_bin).unwrap();
+
+    let p = vendor_bin.join("phpcbf");
+    std::fs::write(&p, "#!/bin/sh\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let config = FormattingConfig::default();
+    let strategy = resolve_strategy(Some(dir.path()), &config, Some("PSR12"), None, None);
+    match &strategy {
+        FormattingStrategy::External(tools) => {
+            assert_eq!(tools.len(), 1);
+            assert_eq!(tools[0].tool, Tool::Phpcbf);
+            assert_eq!(tools[0].standard.as_deref(), Some("PSR12"));
+        }
+        other => panic!("Expected External, got {:?}", other),
+    }
+}
+
+#[test]
 fn strategy_mago_formatter_table_keeps_phpcbf_off_a_phpcs_project() {
     let dir = tempfile::tempdir().unwrap();
     let vendor_bin = dir.path().join("vendor/bin");

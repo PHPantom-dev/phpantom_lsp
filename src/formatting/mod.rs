@@ -132,10 +132,12 @@ impl Tool {
     fn detected(
         self,
         workspace_root: Option<&Path>,
+        phpcs_standard: Option<&str>,
         composer_json: Option<&ComposerPackage>,
     ) -> bool {
         match self {
-            // The same evidence that runs PHPCS diagnostics, so the linter
+            // The same evidence that runs PHPCS diagnostics (including a
+            // configured `[phpcs]` standard), so the linter
             // and its fixer never disagree about whether a project uses
             // PHP_CodeSniffer.
             //
@@ -145,7 +147,8 @@ impl Tool {
             // table in `mago.toml` is evidence of nothing else.  A project
             // carrying both lints with PHPCS and formats with Mago.
             Tool::Phpcbf => {
-                crate::phpcs::project_uses_phpcs(workspace_root, composer_json)
+                (phpcs_standard.is_some()
+                    || crate::phpcs::project_uses_phpcs(workspace_root, composer_json))
                     && !workspace_root.is_some_and(crate::mago::formats_with_mago)
             }
             Tool::Pint | Tool::PhpCsFixer => composer_json
@@ -227,7 +230,7 @@ pub fn resolve_strategy(
     let detected: Vec<ResolvedTool> = Tool::ALL
         .into_iter()
         .filter(|tool| tool.configured(config) != Some(""))
-        .filter(|tool| tool.detected(workspace_root, composer_json))
+        .filter(|tool| tool.detected(workspace_root, phpcs_standard, composer_json))
         .filter_map(|tool| {
             let path = resolve_from_bin_dir(tool, workspace_root, bin)?;
             Some(resolved(tool, path))

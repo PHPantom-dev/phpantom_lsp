@@ -195,17 +195,3 @@ nothing.
 to `supports_file_rename`. When either is missing, compute the edit in
 phase 1 through the same code `resolve_code_action` runs, and send it
 without `data`.
-
-### B574. A `[phpcs]` standard turns on PHPCS but not phpcbf
-
-**Impact: Low · Complexity: Low**
-
-`resolve_phpcs` (`src/phpcs.rs`) runs PHPCS whenever `[phpcs] standard`
-is set, even with no ruleset file or `require-dev` entry, but
-`Tool::detected` for phpcbf (`src/formatting/mod.rs`) only checks
-`project_uses_phpcs`. A project configured that way with
-`vendor/bin/phpcbf` installed gets PHPCS diagnostics and the built-in
-formatter, though the comment there promises the linter and its fixer
-never disagree. Treat a set standard as evidence in `detected` too,
-still yielding to a `mago.toml` `[formatter]` table.
-
