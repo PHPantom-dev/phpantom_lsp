@@ -291,16 +291,12 @@ pub(crate) fn walk_closures_in_expr<'b>(
             record_scope_snapshot(body_span.start.offset, &arrow_scope);
             // The body is `return <expr>;`, and writes and narrows what
             // that statement would: a snapshot at the end of each
-            // assignment, and at each `&&` / `||` operand the narrowing
-            // the operands before it prove (`fn($x) => $x instanceof Foo
-            // && $x->bar()`).
+            // assignment, at each `&&` / `||` operand the narrowing the
+            // operands before it prove (`fn($x) => $x instanceof Foo &&
+            // $x->bar()`), and in each ternary or `match` arm the narrowing
+            // that arm runs under.
             process_assignment_expr(arrow.expression, &mut arrow_scope, ctx);
             record_scope_snapshot(body_span.end.offset, &arrow_scope);
-
-            // The match / ternary narrowing a `return` statement gets.
-            if is_diagnostic_scope_active() {
-                record_match_ternary_snapshots(arrow.expression, &arrow_scope, ctx);
-            }
 
             // Restore the outer scope after the arrow body (same
             // reasoning as for closures above).
@@ -1105,6 +1101,7 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
         top_level_scope: None,
         in_loop: false,
         template_markers: None,
+        cursor_scope: None,
     };
 
     let mut top_level_scope = ScopeState::new();
@@ -1455,6 +1452,7 @@ impl<'a> DiagnosticWalkCtx<'a> {
             top_level_scope: None,
             in_loop: false,
             template_markers: None,
+            cursor_scope: None,
         }
     }
 }
@@ -1592,6 +1590,7 @@ pub(crate) fn walk_anonymous_class_member_bodies<'b>(
         top_level_scope: None,
         in_loop: false,
         template_markers: None,
+        cursor_scope: None,
     };
 
     for member in anon.members.iter() {

@@ -77,7 +77,7 @@ src/
 ├── type_engine/
 │   ├── subject_expr.rs, subject_extraction.rs, subject_resolution.rs
 │   │                       # Extracting and resolving the subject before ->, ?->, ::
-│   ├── resolver/           # Subject expression → ClassInfo (type engine entry point) + chain cache, property narrowing
+│   ├── resolver/           # Subject expression → ClassInfo (type engine entry point) + chain cache
 │   ├── variable/           # Variable type resolution via assignment scanning
 │   │   ├── forward_walk/   #   the forward walker (shared by diagnostics, hover, go-to-def, sig help)
 │   │   ├── rhs_resolution/ #   right-hand-side expression resolution
@@ -1192,6 +1192,19 @@ The forward walker (`src/type_engine/variable/forward_walk/`) walks
 method bodies top-to-bottom, building a scope of variable types at
 each statement boundary. It is shared by diagnostics, completion,
 hover, go-to-definition, and signature help.
+
+Inside a statement, the walk follows PHP's evaluation order
+(`forward_walk/expr.rs`): each sub-expression runs on the scope the ones
+before it left, so a write or a check partway through an expression
+(`($a = g()) && $a->bar()`, `$x instanceof Foo ? $x->foo() : null`) is in
+force for whatever is evaluated after it. A condition also hands back
+what each of its outcomes proves (`forward_walk/condition.rs`), and the
+right operand of `&&`/`||`, the arms of a ternary or `match`, the
+branches of an `if`/`elseif` chain, and loop bodies run on the outcome
+that lets them run. A walk to the cursor answers with the scope of the
+innermost expression holding it, and walks to the same position within
+one request are shared, so asking about several variables and member
+paths there costs one walk.
 
 The same walk answers which branches cannot run
 (`forward_walk/reachability.rs`): a guard whose value the source decides

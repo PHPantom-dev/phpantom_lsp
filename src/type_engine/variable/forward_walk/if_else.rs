@@ -6,26 +6,6 @@ use crate::type_engine::types::narrowing;
 
 // ─── Control flow handling ──────────────────────────────────────────────────
 
-/// The conditions of an `if`'s `elseif` clauses, in source order.
-///
-/// Both body styles carry the same clauses under different types, and
-/// several passes need to treat an `elseif`'s condition exactly as they
-/// treat the leading `if`'s.
-pub(crate) fn elseif_conditions<'b>(body: &'b IfBody<'b>) -> Vec<&'b Expression<'b>> {
-    match body {
-        IfBody::Statement(body) => body
-            .else_if_clauses
-            .iter()
-            .map(|clause| clause.condition)
-            .collect(),
-        IfBody::ColonDelimited(body) => body
-            .else_if_clauses
-            .iter()
-            .map(|clause| clause.condition)
-            .collect(),
-    }
-}
-
 /// Process an `if` statement with branch merging.
 pub(crate) fn process_if<'b>(
     if_stmt: &'b If<'b>,
@@ -33,21 +13,18 @@ pub(crate) fn process_if<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // Cursor inside the condition: narrowing for member accesses there is
-    // applied by the caller after this returns (mod.rs's cursor narrowing
-    // pass for hover/completion), so leave scope untouched.
+    // Assignment in condition: `if ($x = expr())`, pass-by-reference
+    // (`if (preg_match(..., $matches))`), and the narrowing a `&&` / `||`
+    // chain proves for its later operands: `if ($x !== null &&
+    // $x->method())`.
+    let condition = process_condition(if_stmt.condition, scope, ctx);
+
+    // A cursor inside the condition is answered by the scope the condition
+    // walk reached it with; nothing the branches do is in force there yet.
     let cond_span = if_stmt.condition.span();
     if ctx.cursor_offset >= cond_span.start.offset && ctx.cursor_offset <= cond_span.end.offset {
         return;
     }
-
-    // Assignment in condition: `if ($x = expr())`, and the narrowing a
-    // `&&` / `||` chain proves for its later operands:
-    // `if ($x !== null && $x->method())`.
-    process_expr(if_stmt.condition, scope, ctx);
-
-    // Pass-by-reference in condition: `if (preg_match(..., $matches))`
-    seed_pass_by_ref_in_condition(if_stmt.condition, scope, ctx);
 
     // Record a snapshot after condition processing so that variables
     // seeded by pass-by-reference (e.g. `$matches` from `preg_match`)
@@ -65,12 +42,31 @@ pub(crate) fn process_if<'b>(
 
     match &if_stmt.body {
         IfBody::Statement(body) => {
-            process_if_statement_body(if_stmt, body, enclosing_stmt, scope, ctx);
+            process_if_statement_body(if_stmt, body, enclosing_stmt, &condition, scope, ctx);
         }
         IfBody::ColonDelimited(body) => {
-            process_if_colon_body(if_stmt, body, enclosing_stmt, scope, ctx);
+            process_if_colon_body(if_stmt, body, enclosing_stmt, &condition, scope, ctx);
         }
     }
+}
+
+/// The scope an arm of an `if` chain is reached on: every condition
+/// before it was evaluated and came out false.
+///
+/// `condition` is the leading `if`'s; `prior` are the `elseif` conditions
+/// between it and the arm, each evaluated on the scope the one before it
+/// failed in.
+fn falsey_through<'b>(
+    condition: &Condition<'_>,
+    prior: impl Iterator<Item = &'b Expression<'b>>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> ScopeState {
+    let mut path = condition.falsey(ctx).clone();
+    for prior in prior {
+        let prior = process_condition(prior, &mut path, ctx);
+        path = prior.falsey(ctx).clone();
+    }
+    path
 }
 
 /// Process if with statement body (brace-style).
@@ -78,6 +74,7 @@ pub(crate) fn process_if_statement_body<'b>(
     if_stmt: &'b If<'b>,
     body: &'b IfStatementBody<'b>,
     enclosing_stmt: &'b Statement<'b>,
+    condition: &Condition<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
@@ -124,57 +121,48 @@ pub(crate) fn process_if_statement_body<'b>(
 
     // Cursor inside an elseif's own condition (as opposed to its body,
     // handled by `cursor_in_elseif` below): the if condition and every
-    // strictly preceding elseif condition were false to reach here, but
-    // this elseif's own condition is still being evaluated — it hasn't
-    // been narrowed on yet, and the if/preceding-elseif bodies never ran.
-    // Without this case the cursor falls through to the "after the whole
-    // chain" merge below, which pulls in assignments from the if-body
-    // (e.g. `if (...) { $value = true; } elseif (foo($value)) { ... }`
-    // must not see `$value` as `T|bool` while evaluating `foo($value)`).
+    // strictly preceding elseif condition were false to reach here, and
+    // this elseif's own condition is walked from there, so the scope it
+    // reaches the cursor with answers.  The if/preceding-elseif bodies
+    // never ran: without this case the cursor falls through to the "after
+    // the whole chain" merge below, which pulls in assignments from the
+    // if-body (e.g. `if (...) { $value = true; } elseif (foo($value)) { ...
+    // }` must not see `$value` as `T|bool` while evaluating `foo($value)`).
     for (idx, ei) in body.else_if_clauses.iter().enumerate() {
         let cond_span = ei.condition.span();
         if ctx.cursor_offset >= cond_span.start.offset && ctx.cursor_offset <= cond_span.end.offset
         {
-            apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
-            for prev_ei in body.else_if_clauses.iter().take(idx) {
-                apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
-            }
+            *scope = falsey_through(
+                condition,
+                body.else_if_clauses.iter().take(idx).map(|ei| ei.condition),
+                ctx,
+            );
+            process_condition(ei.condition, scope, ctx);
             return;
         }
     }
 
     if cursor_in_then {
-        // Cursor is inside the then-branch.  Apply instanceof narrowing
-        // and walk only this branch.
-        apply_condition_narrowing(if_stmt.condition, scope, ctx);
+        // Cursor is inside the then-branch: walk only this branch, on the
+        // scope where the condition held.
+        *scope = condition.truthy(ctx).clone();
         walk_body_forward(std::iter::once(body.statement), scope, ctx);
         return;
     }
 
     if cursor_in_elseif {
         // Find which elseif contains the cursor.
-        for ei in body.else_if_clauses.iter() {
+        for (idx, ei) in body.else_if_clauses.iter().enumerate() {
             let sp = ei.statement.span();
             if ctx.cursor_offset >= sp.start.offset && ctx.cursor_offset <= sp.end.offset {
-                // Apply negated narrowing from the if condition, then
-                // positive narrowing from this elseif condition.
-                apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
-                // Also apply inverse narrowing for preceding elseifs.
-                for prev_ei in body.else_if_clauses.iter() {
-                    if std::ptr::eq(prev_ei, ei) {
-                        break;
-                    }
-                    apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
-                }
-                // The assignment and the by-reference seeding run before the
-                // narrowing, exactly as they do for the leading `if`:
-                // `elseif ($x = f())` has to put `$x` in scope before the
-                // truthy test can strip its falsy members, and
-                // `elseif (preg_match(…, $m))` has to seed `$m` before the
-                // test can rule out the failed match.
-                process_expr(ei.condition, scope, ctx);
-                seed_pass_by_ref_in_condition(ei.condition, scope, ctx);
-                apply_condition_narrowing(ei.condition, scope, ctx);
+                // Every condition above this one failed, and this one held.
+                let mut path = falsey_through(
+                    condition,
+                    body.else_if_clauses.iter().take(idx).map(|ei| ei.condition),
+                    ctx,
+                );
+                let arm = process_condition(ei.condition, &mut path, ctx);
+                *scope = arm.truthy(ctx).clone();
                 walk_body_forward(std::iter::once(ei.statement), scope, ctx);
                 return;
             }
@@ -183,18 +171,19 @@ pub(crate) fn process_if_statement_body<'b>(
     }
 
     if cursor_in_else && let Some(ref else_clause) = body.else_clause {
-        // Apply inverse narrowing from all conditions.
-        apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
-        for ei in body.else_if_clauses.iter() {
-            apply_condition_narrowing_inverse(ei.condition, scope, ctx);
-        }
+        // Every condition in the chain failed.
+        *scope = falsey_through(
+            condition,
+            body.else_if_clauses.iter().map(|ei| ei.condition),
+            ctx,
+        );
         walk_body_forward(std::iter::once(else_clause.statement), scope, ctx);
         return;
     }
 
     // Cursor is AFTER the if/else block.  We need to merge all branches.
     let branches = fork_if_branches(
-        if_stmt,
+        condition,
         &dead,
         std::iter::once(body.statement),
         body.else_if_clauses
@@ -219,6 +208,7 @@ pub(crate) fn process_if_colon_body<'b>(
     if_stmt: &'b If<'b>,
     body: &'b IfColonDelimitedBody<'b>,
     enclosing_stmt: &'b Statement<'b>,
+    condition: &Condition<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
@@ -266,7 +256,7 @@ pub(crate) fn process_if_colon_body<'b>(
     }
 
     if cursor_in_then {
-        apply_condition_narrowing(if_stmt.condition, scope, ctx);
+        *scope = condition.truthy(ctx).clone();
         walk_body_forward(body.statements.iter(), scope, ctx);
         return;
     }
@@ -280,10 +270,12 @@ pub(crate) fn process_if_colon_body<'b>(
         let cond_span = ei.condition.span();
         if ctx.cursor_offset >= cond_span.start.offset && ctx.cursor_offset <= cond_span.end.offset
         {
-            apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
-            for prev_ei in body.else_if_clauses.iter().take(idx) {
-                apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
-            }
+            *scope = falsey_through(
+                condition,
+                body.else_if_clauses.iter().take(idx).map(|ei| ei.condition),
+                ctx,
+            );
+            process_condition(ei.condition, scope, ctx);
             return;
         }
     }
@@ -296,13 +288,13 @@ pub(crate) fn process_if_colon_body<'b>(
             .map(|s| s.span().end.offset)
             .unwrap_or(ei_start);
         if ctx.cursor_offset >= ei_start && ctx.cursor_offset <= ei_end {
-            apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
-            for prev_ei in body.else_if_clauses.iter().take(idx) {
-                apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
-            }
-            process_expr(ei.condition, scope, ctx);
-            seed_pass_by_ref_in_condition(ei.condition, scope, ctx);
-            apply_condition_narrowing(ei.condition, scope, ctx);
+            let mut path = falsey_through(
+                condition,
+                body.else_if_clauses.iter().take(idx).map(|ei| ei.condition),
+                ctx,
+            );
+            let arm = process_condition(ei.condition, &mut path, ctx);
+            *scope = arm.truthy(ctx).clone();
             walk_body_forward(ei.statements.iter(), scope, ctx);
             return;
         }
@@ -316,10 +308,11 @@ pub(crate) fn process_if_colon_body<'b>(
             .map(|s| s.span().end.offset)
             .unwrap_or(ec_start);
         if ctx.cursor_offset >= ec_start && ctx.cursor_offset <= ec_end {
-            apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
-            for ei in body.else_if_clauses.iter() {
-                apply_condition_narrowing_inverse(ei.condition, scope, ctx);
-            }
+            *scope = falsey_through(
+                condition,
+                body.else_if_clauses.iter().map(|ei| ei.condition),
+                ctx,
+            );
             walk_body_forward(else_clause.statements.iter(), scope, ctx);
             return;
         }
@@ -327,7 +320,7 @@ pub(crate) fn process_if_colon_body<'b>(
 
     // Cursor is after the if — merge branches.
     let branches = fork_if_branches(
-        if_stmt,
+        condition,
         &dead,
         body.statements.iter(),
         body.else_if_clauses
@@ -364,71 +357,57 @@ struct ElseArm<I> {
     snapshot_offset: Option<u32>,
 }
 
-/// Walk every arm of an `if` chain the cursor sits after, each from its
-/// own copy of `scope`, so [`merge_if_branches`] can join them.
+/// Walk every arm of an `if` chain the cursor sits after, each from the
+/// scope it is reached on, so [`merge_if_branches`] can join them.
 ///
 /// Both spellings of an `if` (braced and `:`-delimited) fork the same way
 /// and differ only in how they reach each arm's statements, which is what
 /// the `I` iterator abstracts over.  A branch the guard rules out is still
 /// walked (the cursor may be inside it), but it is marked so the join drops
 /// what it established.
+///
+/// An `elseif` is evaluated only when every condition before it failed, so
+/// it runs on the scope the one before it failed in, and so does whatever
+/// follows it: the `else`, or the fall-through when there is none.
 fn fork_if_branches<'b, I>(
-    if_stmt: &'b If<'b>,
+    condition: &Condition<'_>,
     dead: &DeadIfBranches,
     then_stmts: I,
     else_ifs: Vec<ElseIfArm<'b, I>>,
     else_arm: Option<ElseArm<I>>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) -> IfBranchScopes<'b>
+) -> IfBranchScopes
 where
     I: Iterator<Item = &'b Statement<'b>> + std::clone::Clone,
 {
-    let pre_if_scope = scope.clone();
-
-    let mut then_scope = scope.clone();
+    let mut then_scope = condition.truthy(ctx).clone();
     then_scope.unreachable |= dead.then_branch;
-    apply_condition_narrowing(if_stmt.condition, &mut then_scope, ctx);
     walk_body_forward(then_stmts.clone(), &mut then_scope, ctx);
     let then_exits = branch_exits_stmts(then_stmts, &then_scope, ctx);
 
+    let has_else_ifs = !else_ifs.is_empty();
+    let mut path = condition.falsey(ctx).clone();
     let mut elseif_scopes: Vec<(ScopeState, bool)> = Vec::with_capacity(else_ifs.len());
-    let mut else_if_conditions: Vec<&'b Expression<'b>> = Vec::with_capacity(else_ifs.len());
     for (ei_idx, arm) in else_ifs.into_iter().enumerate() {
-        let mut ei_scope = pre_if_scope.clone();
-        ei_scope.unreachable |= dead.else_if_clauses[ei_idx];
-        // The elseif branch only runs when the if condition and every
-        // preceding elseif condition were false, so apply their inverse
-        // narrowing before walking this branch.
-        apply_condition_narrowing_inverse(if_stmt.condition, &mut ei_scope, ctx);
-        for prev_condition in &else_if_conditions {
-            apply_condition_narrowing_inverse(prev_condition, &mut ei_scope, ctx);
-        }
         // Record a scope snapshot at the elseif condition boundary so
         // that diagnostic variable lookups inside the condition don't
         // pick up assignments from preceding if/elseif bodies.
         if is_diagnostic_scope_active() {
-            record_scope_snapshot(arm.condition.span().start.offset, &ei_scope);
+            record_scope_snapshot(arm.condition.span().start.offset, &path);
         }
-        process_expr(arm.condition, &mut ei_scope, ctx);
-        seed_pass_by_ref_in_condition(arm.condition, &mut ei_scope, ctx);
-        apply_condition_narrowing(arm.condition, &mut ei_scope, ctx);
+        let arm_condition = process_condition(arm.condition, &mut path, ctx);
+        let mut ei_scope = arm_condition.truthy(ctx).clone();
+        ei_scope.unreachable |= dead.else_if_clauses[ei_idx];
         walk_body_forward(arm.stmts.clone(), &mut ei_scope, ctx);
         let exits = branch_exits_stmts(arm.stmts, &ei_scope, ctx);
         elseif_scopes.push((ei_scope, exits));
-        else_if_conditions.push(arm.condition);
+        path = arm_condition.falsey(ctx).clone();
     }
 
     let else_branch = else_arm.map(|arm| {
-        let mut else_scope = pre_if_scope.clone();
+        let mut else_scope = path.clone();
         else_scope.unreachable |= dead.else_clause;
-        // The else branch only runs when the if condition and every
-        // elseif condition were false, so apply the inverse of all of
-        // them.
-        apply_condition_narrowing_inverse(if_stmt.condition, &mut else_scope, ctx);
-        for condition in &else_if_conditions {
-            apply_condition_narrowing_inverse(condition, &mut else_scope, ctx);
-        }
         // Record a scope snapshot at the else boundary so that
         // diagnostic variable lookups inside the else body don't
         // pick up assignments from the if/elseif bodies.
@@ -443,28 +422,31 @@ where
     });
 
     IfBranchScopes {
-        pre_if: pre_if_scope,
+        pre_if_unreachable: scope.unreachable,
         then_branch: (then_scope, then_exits),
         else_ifs: elseif_scopes,
         else_branch,
-        else_if_conditions,
+        fall_through: path,
+        has_else_ifs,
     }
 }
 
 /// The branch scopes an `if` chain produced, with whether each of them
 /// reaches the statement after the chain.
-struct IfBranchScopes<'e> {
-    /// The scope as it stood before the `if`.
-    pre_if: ScopeState,
+struct IfBranchScopes {
+    /// Whether the `if` itself could not be reached.
+    pre_if_unreachable: bool,
     /// The then-body's scope, and whether it exits.
     then_branch: (ScopeState, bool),
     /// One entry per `elseif`, in source order.
     else_ifs: Vec<(ScopeState, bool)>,
     /// `None` when the chain has no `else` clause.
     else_branch: Option<(ScopeState, bool)>,
-    /// Each `elseif` condition, for the inverse narrowing the implicit
-    /// fall-through path carries.
-    else_if_conditions: Vec<&'e Expression<'e>>,
+    /// The scope where every condition in the chain failed, which is the
+    /// path out of the bottom when there is no `else`.
+    fall_through: ScopeState,
+    /// Whether the chain has an `elseif`.
+    has_else_ifs: bool,
 }
 
 /// Join the branch scopes of an `if` chain back into `scope`, and apply
@@ -480,21 +462,24 @@ struct IfBranchScopes<'e> {
 /// which `record_exit_edge` has already been handed.
 fn merge_if_branches(
     if_stmt: &If<'_>,
-    branches: IfBranchScopes<'_>,
+    branches: IfBranchScopes,
     enclosing_stmt: &Statement<'_>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
     let IfBranchScopes {
-        pre_if,
+        pre_if_unreachable,
         then_branch: (then_scope, then_exits),
         else_ifs,
         else_branch,
-        else_if_conditions,
+        fall_through,
+        has_else_ifs,
     } = branches;
-    let pre_if_unreachable = pre_if.unreachable;
 
-    let mut implicit_else_scope;
+    // A guard clause: the then-body leaves and nothing else is written, so
+    // the code after the `if` is reached only where the condition failed.
+    let guard = then_exits && !has_else_ifs && else_branch.is_none();
+
     let mut surviving_scopes: Vec<&ScopeState> = Vec::new();
 
     if !then_exits {
@@ -512,31 +497,15 @@ fn merge_if_branches(
             }
         }
         None => {
-            // No else clause — the pre-if scope is an implicit surviving
-            // path.  Falling out of the bottom means every condition in
-            // the chain was false, so each one's inverse narrowing holds
-            // here (e.g. `$a["test"] === null` → `$a["test"]` is NOT null
-            // in the implicit else path).
+            // No else clause: falling out of the bottom means every
+            // condition in the chain was false (e.g. `$a["test"] === null`
+            // → `$a["test"]` is NOT null in the implicit else path).
             //
-            // The leading condition is the exception: when the then-body
-            // exits and there is no `elseif`, the dedicated guard clause
-            // section below applies its inverse to the merged scope, and
-            // applying it in both places would double-narrow.  With an
-            // `elseif` present that section bails out, so this is the only
-            // place the fall-through path learns the leading condition was
-            // false.
-            implicit_else_scope = pre_if.clone();
-            if !then_exits || !else_if_conditions.is_empty() {
-                apply_condition_narrowing_inverse(if_stmt.condition, &mut implicit_else_scope, ctx);
-            }
-            for condition in &else_if_conditions {
-                apply_condition_narrowing_inverse(condition, &mut implicit_else_scope, ctx);
-            }
             // The implicit else path precedes the then-body in source
             // order, so it goes first: the merge below preserves this
             // order in each variable's type list, and hover renders the
             // first entry as the headline type.
-            surviving_scopes.insert(0, &implicit_else_scope);
+            surviving_scopes.insert(0, &fall_through);
         }
     }
 
@@ -554,11 +523,10 @@ fn merge_if_branches(
     if surviving_scopes.is_empty() {
         // Every branch returns, throws, or jumps, and the branches cover
         // every case: nothing falls out of the bottom of this `if`.  The
-        // pre-if types are the least surprising answer for a cursor in
-        // the dead code that follows, but a join further out must not
-        // count this path — an enclosing loop whose body always `break`s
-        // has no fall-through edge, only the break edges.
-        *scope = pre_if;
+        // pre-if types (still in `scope`) are the least surprising answer
+        // for a cursor in the dead code that follows, but a join further
+        // out must not count this path — an enclosing loop whose body
+        // always `break`s has no fall-through edge, only the break edges.
         scope.unreachable = true;
         return;
     } else if surviving_scopes.len() == 1 {
@@ -579,34 +547,31 @@ fn merge_if_branches(
     // established: those represent narrowing (or an assignment) that
     // holds within one branch and says nothing about the others.  Keys
     // every surviving path carries are kept, so their merged union is
-    // the type the property has once the branches reconverge.  This
-    // must run BEFORE guard clause narrowing so that
-    // guard-clause-narrowed property keys (e.g. `$this->model`
-    // narrowed to `Order` after
-    // `if (!$this->model instanceof Order) { return; }`) survive into
-    // the post-if scope.
+    // the type the property has once the branches reconverge.  A guard
+    // clause's fall-through is the only surviving path, so what it proved
+    // (e.g. `$this->model` narrowed to `Order` after
+    // `if (!$this->model instanceof Order) { return; }`) survives into the
+    // post-if scope.
     retain_synthetic_keys_common_to_all(scope, &surviving_scopes);
 
-    // Impossibility is a property of one branch's path conditions, not of
-    // the join: the statement after the `if` is reached by whichever branch
-    // *was* possible.  Restoring the pre-if reachability keeps a dropped
-    // branch from erasing the rest of the walk.  The guard clause narrowing
-    // below runs after the restore because what *it* proves impossible is a
-    // property of the continuation, not of a branch that was dropped.
-    scope.unreachable = pre_if_unreachable;
-
-    // Guard clause narrowing: when the if body unconditionally exits
-    // and there are no elseif/else branches, apply inverse narrowing.
-    // This applies to ALL exit types (return, throw, break, continue)
-    // because the code after the if in the current scope does not
-    // execute in that path.
-    if enclosing_stmt.span().end.offset < ctx.cursor_offset
-        && then_exits
-        && else_if_conditions.is_empty()
-        && else_branch.is_none()
-    {
-        apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
-        apply_guard_clause_null_narrowing(if_stmt, scope, ctx);
+    if guard {
+        // What the failed condition proves impossible is a property of the
+        // continuation, not of a branch that was dropped, so the
+        // fall-through's reachability stands.
+        //
+        // When the if body unconditionally exits and there are no
+        // elseif/else branches, the code after the `if` does not run on
+        // that path.  This applies to ALL exit types (return, throw, break,
+        // continue).
+        if enclosing_stmt.span().end.offset < ctx.cursor_offset {
+            apply_guard_clause_null_narrowing(if_stmt, scope, ctx);
+        }
+    } else {
+        // Impossibility is a property of one branch's path conditions, not
+        // of the join: the statement after the `if` is reached by whichever
+        // branch *was* possible.  Restoring the pre-if reachability keeps a
+        // dropped branch from erasing the rest of the walk.
+        scope.unreachable = pre_if_unreachable;
     }
 }
 

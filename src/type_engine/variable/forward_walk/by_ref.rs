@@ -497,28 +497,25 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
     }
 }
 
-/// Process pass-by-reference parameter type inference.
+/// Write what the call `expr` hands back through the variables it passes
+/// by reference, once its arguments have been evaluated.
+///
+/// The expression walk calls this at every call it evaluates, so a write
+/// lands where the call happens: `preg_match('/(a)/', $s, $m) && $m[1]`
+/// reads the `$m` the call filled, and in `$file = end($file);` the
+/// assignment that follows the call is what `$file` ends up holding.
 pub(crate) fn process_pass_by_ref<'b>(
     expr: &'b Expression<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // `$ok = preg_match($p, $s, $m);` makes the same call, and writes the
-    // same out-parameter, as the bare `preg_match($p, $s, $m);` statement
-    // does; none of the three passes below recognise anything but a call,
-    // so the assignment has to come off first.
-    let (expr, assigned) = pass_by_ref_call_expr(expr);
-
-    // The assignment lands once the call has returned, so a variable that
-    // is both the statement's target and an out-parameter of its call
-    // (`$file = end($file);`) ends up holding what was assigned to it, not
-    // what the callee wrote through the reference.  Everything the passes
-    // below decide about it is put back afterwards.
-    let assigned_before: Vec<(&str, Option<Vec<ResolvedType>>)> = assigned
-        .iter()
-        .map(|name| (*name, scope.locals.get(&atom(name)).cloned()))
-        .collect();
-
+    // Only a variable passed as an argument can be written through a
+    // by-reference parameter, so a call without one is left alone before
+    // anything is looked up.  `extract()` is the exception: it writes
+    // locals named by its argument's keys, whatever the argument is.
+    if extract_call_arg_variables(expr).is_empty() && !is_extract_call(expr) {
+        return;
+    }
     if !super::array_assignment::process_array_push_call(expr, scope, ctx)
         && !super::array_assignment::process_array_cursor_call(expr, scope, ctx)
         && !super::array_assignment::process_array_sort_call(expr, scope)
@@ -526,14 +523,19 @@ pub(crate) fn process_pass_by_ref<'b>(
     {
         apply_by_ref_parameter_types(expr, scope, ctx);
     }
+}
 
-    for (name, before) in assigned_before {
-        let key = atom(name);
-        match before {
-            Some(types) => scope.locals.insert(key, types),
-            None => scope.locals.remove(&key),
-        };
-    }
+/// Whether `expr` is a call to `extract()`.
+fn is_extract_call(expr: &Expression<'_>) -> bool {
+    let Expression::Call(Call::Function(call)) = expr else {
+        return false;
+    };
+    let Expression::Identifier(ident) = call.function else {
+        return false;
+    };
+    bytes_to_str(ident.value())
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case("extract")
 }
 
 /// How `extract()` treats a key, from its `flags` argument (with the
@@ -644,18 +646,12 @@ fn process_extract_call<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
+    if !is_extract_call(expr) {
+        return false;
+    }
     let Expression::Call(Call::Function(call)) = expr else {
         return false;
     };
-    let Expression::Identifier(ident) = call.function else {
-        return false;
-    };
-    if !bytes_to_str(ident.value())
-        .trim_start_matches('\\')
-        .eq_ignore_ascii_case("extract")
-    {
-        return false;
-    }
     let mut array_arg = None;
     let mut flags_arg = None;
     let mut prefix_arg = None;
@@ -847,82 +843,6 @@ fn apply_by_ref_parameter_types<'b>(
     // `array`, `int`, `string` return empty from
     // `type_hint_to_classes_typed` and are missed.
     seed_pass_by_ref_primitives(expr, scope, ctx);
-}
-
-/// The call an expression statement makes, and the variables it assigns the
-/// result to.
-///
-/// A statement that stores the call's result (`$ok = f($out);`, and the
-/// chained `$a = $b = f($out);`) still makes the call and still lets the
-/// callee write through `$out`, so the assignment wrapper is looked
-/// through before the by-reference passes read the expression.  The
-/// assigned names come back with it because the assignment outlives the
-/// call: `$file = end($file);` leaves `$file` holding what `end()`
-/// returned, not the `array|object` its parameter is declared as.
-fn pass_by_ref_call_expr<'b>(expr: &'b Expression<'b>) -> (&'b Expression<'b>, Vec<&'b str>) {
-    let mut assigned = Vec::new();
-    let mut inner = expr;
-    loop {
-        match inner {
-            Expression::Assignment(assignment) => {
-                if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
-                    assigned.push(bytes_to_str(dv.name));
-                }
-                inner = assignment.rhs;
-            }
-            Expression::Parenthesized(paren) => inner = paren.expression,
-            _ => break,
-        }
-    }
-    (inner, assigned)
-}
-
-/// Recursively walk an expression tree to find function call
-/// sub-expressions and seed pass-by-reference primitive types for each.
-/// This handles patterns like `if (preg_match($pattern, $subject, $matches))`
-/// and `if (preg_match(..., $matches) === 1)` where the call is nested
-/// inside a comparison or logical expression rather than appearing as a
-/// standalone expression statement.
-///
-/// Only uses [`seed_pass_by_ref_primitives`] (not the full
-/// [`process_pass_by_ref`]) to avoid triggering recursive variable
-/// resolution through `try_apply_pass_by_reference_type`, which would
-/// inflate the fallthrough counter for every variable already in scope.
-pub(crate) fn seed_pass_by_ref_in_condition<'b>(
-    expr: &'b Expression<'b>,
-    scope: &mut ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    match expr {
-        // Direct call expressions — seed primitive pass-by-ref types.
-        Expression::Call(_) => {
-            seed_pass_by_ref_primitives(expr, scope, ctx);
-        }
-        // Binary operators (e.g. `preg_match(...) === 1`, `a && b`)
-        // — recurse into both sides.
-        Expression::Binary(bin) => {
-            seed_pass_by_ref_in_condition(bin.lhs, scope, ctx);
-            seed_pass_by_ref_in_condition(bin.rhs, scope, ctx);
-        }
-        // Unary prefix (e.g. `!preg_match(...)`) — recurse into operand.
-        Expression::UnaryPrefix(unary) => {
-            seed_pass_by_ref_in_condition(unary.operand, scope, ctx);
-        }
-        // Unary postfix — recurse into operand.
-        Expression::UnaryPostfix(unary) => {
-            seed_pass_by_ref_in_condition(unary.operand, scope, ctx);
-        }
-        // Parenthesized — recurse into inner expression.
-        Expression::Parenthesized(paren) => {
-            seed_pass_by_ref_in_condition(paren.expression, scope, ctx);
-        }
-        // Assignment in condition (e.g. `if ($x = preg_match(..., $m))`)
-        // — recurse into the RHS.
-        Expression::Assignment(assignment) => {
-            seed_pass_by_ref_in_condition(assignment.rhs, scope, ctx);
-        }
-        _ => {}
-    }
 }
 
 /// The callee an instance method call names, with the parameters the

@@ -2231,6 +2231,44 @@ function f(Reflection $reflection): void
     );
 }
 
+/// A call the walker cannot classify (here, on a receiver typed as an
+/// intersection) forgets the other calls read through its receiver, but
+/// not a guard on the chain it is the first link of: evaluating
+/// `$scope->getClassReflection()` on the way to
+/// `$scope->getClassReflection()->getParentClass()` is part of reading the
+/// guarded chain, not an event that unproves it.
+#[test]
+fn evaluating_a_guarded_chain_s_receiver_keeps_the_guard_on_the_chain() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+interface Other {}
+
+class Refl
+{
+    public function getParentClass(): ?Refl { return null; }
+}
+
+interface Scope
+{
+    public function getClassReflection(): ?Refl;
+}
+
+function needRefl(Refl $r): void {}
+
+function f(Scope&Other $scope): void
+{
+    if ($scope->getClassReflection() === null || $scope->getClassReflection()->getParentClass() === null) {
+        return;
+    }
+    $parent = $scope->getClassReflection()->getParentClass();
+    needRefl($parent);
+}
+"#,
+    );
+}
+
 // ─── Seed-if-absent array writes ────────────────────────────────────────────
 
 const SEED_IF_ABSENT_SCAFFOLD: &str = r#"<?php

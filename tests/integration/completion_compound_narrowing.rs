@@ -166,3 +166,38 @@ async fn reassigned_base_variable_drops_property_completion() {
          property after it, got: {methods:?}"
     );
 }
+
+/// A property checked by the left operand of `&&` is narrowed in the right
+/// one, and a call that changes the object between them ends that.
+#[tokio::test]
+async fn and_operand_narrows_a_property_for_the_next_operand() {
+    let text = concat!(
+        "<?php\n",
+        "class Cat {\n",
+        "    public function purr(): bool { return true; }\n",
+        "}\n",
+        "class Dog {\n",
+        "    public function bark(): bool { return true; }\n",
+        "}\n",
+        "class C {\n",
+        "    public Cat|Dog $pet;\n",
+        "    public function reset(): void {}\n",
+        "    public function m(): void {\n",
+        "        if ($this->pet instanceof Cat && $this->pet->purr()) {}\n",
+        "        if ($this->pet instanceof Cat && $this->reset() === null && $this->pet->purr()) {}\n",
+        "    }\n",
+        "}\n",
+    );
+    // Line 11, after the second `$this->pet->` = 8 + 45 = 53.
+    let methods = completion_methods(text, 11, 53).await;
+    assert!(
+        methods.iter().any(|m| m == "purr") && !methods.iter().any(|m| m == "bark"),
+        "The left operand proved a Cat, got: {methods:?}"
+    );
+    // Line 12, after the last `$this->pet->` = 8 + 72 = 80.
+    let methods = completion_methods(text, 12, 80).await;
+    assert!(
+        methods.iter().any(|m| m == "purr") && methods.iter().any(|m| m == "bark"),
+        "`reset()` returns nothing, so it may have replaced the pet, got: {methods:?}"
+    );
+}

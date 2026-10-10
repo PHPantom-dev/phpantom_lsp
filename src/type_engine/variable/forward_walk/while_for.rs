@@ -24,20 +24,12 @@ pub(crate) fn process_while<'b>(
 
     let pre_loop_scope = scope.clone();
 
-    // Assignment in condition: `while ($x = expr())`.  Seeded before the
-    // narrowing below so a condition that assigns and checks in one
-    // expression (`while (($line = fgets($h)) !== false)`) finds the
-    // variable in scope and can strip the sentinel from it.
-    process_expr(while_stmt.condition, scope, ctx);
-
-    // Pass-by-reference in condition: `while (preg_match(..., $matches))`
-    seed_pass_by_ref_in_condition(while_stmt.condition, scope, ctx);
-
-    // The while body executes when the condition is truthy, so apply
-    // condition narrowing (instanceof, phpstan-assert-if-true, etc.).
-    // This must happen AFTER saving pre_loop_scope so the narrowing
-    // only affects the loop body, not the post-loop scope.
-    apply_condition_narrowing(while_stmt.condition, scope, ctx);
+    // The condition runs before every iteration, and the body only when
+    // it held: `while (($line = fgets($h)) !== false)` assigns `$line` and
+    // strips the sentinel from it in one go, and `while (preg_match(...,
+    // $matches))` seeds `$matches` for the body to read.
+    let entry = process_condition(while_stmt.condition, scope, ctx);
+    *scope = entry.truthy(ctx).clone();
 
     // When the cursor is inside the loop body (completion path), discovery
     // passes must walk the ENTIRE body; the final pass uses the real
@@ -89,9 +81,8 @@ pub(crate) fn process_while<'b>(
             if point != LoopSeedPoint::Entry {
                 return;
             }
-            process_expr(while_stmt.condition, next_scope, ctx);
-            seed_pass_by_ref_in_condition(while_stmt.condition, next_scope, ctx);
-            apply_condition_narrowing(while_stmt.condition, next_scope, ctx);
+            let entry = process_condition(while_stmt.condition, next_scope, ctx);
+            *next_scope = entry.truthy(ctx).clone();
         },
     );
     let exits = exit_frame.pop();
@@ -104,23 +95,30 @@ pub(crate) fn process_while<'b>(
         return;
     }
 
-    // The loop body might not execute at all (condition false on
-    // first check), so merge with the pre-loop scope.  A loop that started
-    // out unreachable has no live "might not run" alternative to protect:
-    // `pre_loop_scope` is exactly as dead as what the body produced, so
-    // merging the two would only let `merge_branch`'s "an unreachable side
-    // contributes nothing" rule discard whatever the body actually
-    // assigned.  See the matching comment in `process_foreach`.
+    // The loop leaves when the condition fails, which it does either on
+    // the first test or on the one after an iteration: `while ($a) { $a =
+    // $a->parent; }` leaves `$a` null.  The test after the last iteration
+    // is the same expression at the same offsets, and what the walk
+    // recorded there (diagnostic snapshots, the scope at a cursor) already
+    // describes every time it runs.
+    let mut exited = {
+        let _suspend = suspend_snapshot_recording();
+        let retest_ctx = ctx.with_cursor_offset(u32::MAX);
+        let retest = process_condition(while_stmt.condition, scope, &retest_ctx);
+        retest.falsey(&retest_ctx).clone()
+    };
+    // A loop that started out unreachable has no live "never ran"
+    // alternative to protect: the first test's failure is exactly as dead
+    // as what the body produced, so joining it would only let
+    // `merge_branch`'s "an unreachable side contributes nothing" rule
+    // discard whatever the body actually assigned.  See the matching
+    // comment in `process_foreach`.
     if !pre_loop_scope.unreachable {
-        let post_loop = scope.clone();
-        *scope = pre_loop_scope;
-        scope.merge_branch(&post_loop);
+        let mut never_ran = entry.falsey(ctx).clone();
+        never_ran.merge_branch(&exited);
+        exited = never_ran;
     }
-
-    // After the loop, the condition evaluated to false (that's why the
-    // loop exited).  Apply the inverse of the condition to narrow types.
-    // For example: `while ($a) { $a = $a->parent; }` => after loop, $a is null.
-    apply_condition_narrowing_inverse(while_stmt.condition, scope, ctx);
+    *scope = exited;
 
     // A `break` leaves without re-testing the condition, so its state
     // joins *after* the inverse narrowing rather than being narrowed by it.
@@ -161,30 +159,15 @@ pub(crate) fn process_for<'b>(
     // the narrowing a clause's `&&` / `||` chain proves for its own later
     // operands (`for (; $n && $n->next(); )`), and pass-by-ref in
     // conditions (e.g. `for (; preg_match(..., $m); )`).
-    //
-    // A snapshot at each clause lets member accesses in it (which live on
-    // the `for` line, before any body statement) see the variables bound
-    // by the init clause and by the clauses before it.  Without this, a
-    // diagnostic on the condition would only find the pre-`for` snapshot
-    // and treat init-clause variables as unresolved.
-    for cond_expr in for_stmt.conditions.iter() {
-        record_scope_snapshot(cond_expr.span().start.offset, scope);
-        process_expr(cond_expr, scope, ctx);
-        seed_pass_by_ref_in_condition(cond_expr, scope, ctx);
-    }
+    let entry = process_for_conditions(for_stmt, scope, ctx);
 
     let pre_loop_scope = scope.clone();
     let always_enters = for_condition_holds_on_entry(for_stmt, scope, ctx);
 
-    // The body executes when the conditions are truthy, so apply condition
-    // narrowing (instanceof, isset, phpstan-assert-if-true, etc.) the same
-    // way `process_while` does for its single condition. Comma-separated
-    // conditions are evaluated left to right, so narrow them in that order;
-    // only the last one's truthiness decides whether the body runs, but an
-    // earlier clause can still narrow a variable that a later clause or the
-    // body depends on.
-    for cond_expr in for_stmt.conditions.iter() {
-        apply_condition_narrowing(cond_expr, scope, ctx);
+    // The body executes when the last condition clause is truthy; the
+    // earlier clauses are evaluated for their side effects alone.
+    if let Some(entry) = &entry {
+        *scope = entry.truthy(ctx).clone();
     }
 
     // When the cursor is inside the loop body (completion path), discovery
@@ -240,10 +223,8 @@ pub(crate) fn process_for<'b>(
                 process_for_updates(for_stmt, next_scope, ctx);
             }
             LoopSeedPoint::Entry => {
-                for cond_expr in for_stmt.conditions.iter() {
-                    process_expr(cond_expr, next_scope, ctx);
-                    seed_pass_by_ref_in_condition(cond_expr, next_scope, ctx);
-                    apply_condition_narrowing(cond_expr, next_scope, ctx);
+                if let Some(entry) = process_for_conditions(for_stmt, next_scope, ctx) {
+                    *next_scope = entry.truthy(ctx).clone();
                 }
             }
         },
@@ -275,23 +256,30 @@ pub(crate) fn process_for<'b>(
     // clause makes are part of the post-loop state.
     process_for_updates(for_stmt, scope, ctx);
 
-    // Unless the conditions hold on entry, the loop body might not execute
-    // at all, so merge with the pre-loop scope.  As in `process_while` and
-    // `process_foreach`, a loop that started out unreachable has nothing
-    // live to protect by reverting to `pre_loop_scope` first.
-    if !always_enters && !pre_loop_scope.unreachable {
-        let post_loop = scope.clone();
-        *scope = pre_loop_scope;
-        scope.merge_branch(&post_loop);
-    }
-
-    // After the loop, only the last condition clause decided the exit (the
-    // earlier clauses were evaluated for their side effects but don't gate
-    // continuation), so apply the inverse of just that clause.
-    // For example: `for (; ($row = fgetcsv($h)) !== false; )` => after the
-    // loop, $row is false.
-    if let Some(last_cond) = for_stmt.conditions.iter().last() {
-        apply_condition_narrowing_inverse(last_cond, scope, ctx);
+    // The loop leaves when its last condition clause fails (the earlier
+    // clauses are evaluated for their side effects but don't gate
+    // continuation), on the first test or on the one after an iteration:
+    // `for (; ($row = fgetcsv($h)) !== false; )` leaves `$row` false.  As
+    // in `process_while`, the re-test records no snapshots of its own.
+    if let Some(entry) = entry {
+        let mut exited = {
+            let _suspend = suspend_snapshot_recording();
+            let retest_ctx = ctx.with_cursor_offset(u32::MAX);
+            match process_for_conditions(for_stmt, scope, &retest_ctx) {
+                Some(retest) => retest.falsey(&retest_ctx).clone(),
+                None => scope.clone(),
+            }
+        };
+        // Unless the conditions hold on entry, the loop body might not
+        // execute at all.  As in `process_while` and `process_foreach`, a
+        // loop that started out unreachable has nothing live to protect by
+        // keeping that path.
+        if !always_enters && !pre_loop_scope.unreachable {
+            let mut never_ran = entry.falsey(ctx).clone();
+            never_ran.merge_branch(&exited);
+            exited = never_ran;
+        }
+        *scope = exited;
     }
 
     // A `break` leaves without re-testing the condition, so its state
@@ -302,6 +290,26 @@ pub(crate) fn process_for<'b>(
     // narrowing; they only hold inside the loop body where the conditions
     // were true.
     strip_synthetic_property_keys(scope);
+}
+
+/// Evaluate a `for` loop's condition clauses left to right, and return
+/// the last one's outcomes: only the last clause decides whether the body
+/// runs.  `None` when there is no clause.
+///
+/// A snapshot at each clause lets member accesses in it (which live on the
+/// `for` line, before any body statement) see the variables bound by the
+/// init clause and by the clauses before it.
+fn process_for_conditions<'b>(
+    for_stmt: &'b For<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<Condition<'b>> {
+    let mut last = None;
+    for cond_expr in for_stmt.conditions.iter() {
+        record_scope_snapshot(cond_expr.span().start.offset, scope);
+        last = Some(process_condition(cond_expr, scope, ctx));
+    }
+    last
 }
 
 /// Whether a `for` loop's body is certain to run at least once: its last
@@ -399,36 +407,36 @@ pub(crate) fn process_do_while<'b>(
                 apply_condition_narrowing(dw.condition, next_scope, ctx);
             }
             LoopSeedPoint::Entry => {
-                process_expr(dw.condition, next_scope, ctx);
-                seed_pass_by_ref_in_condition(dw.condition, next_scope, ctx);
-                // The assignment above re-runs `$c = $c->getParent()` on
-                // the merged scope, which puts the declared `?Category`
+                // Re-evaluating the condition re-runs `$c = $c->getParent()`
+                // on the merged scope, which puts the declared `?Category`
                 // back over the narrowing `AfterBody` applied. The loop
-                // only re-enters when the condition held, so that
-                // narrowing has to go back on top of it.
-                apply_condition_narrowing(dw.condition, next_scope, ctx);
+                // only re-enters when the condition held, so the entry is
+                // where it held.
+                let entry = process_condition(dw.condition, next_scope, ctx);
+                *next_scope = entry.truthy(ctx).clone();
             }
         },
     );
     let exits = exit_frame.pop();
 
+    // A caller asking about a position inside the body has its answer: the
+    // walk stopped there.
+    if cursor_in_body && !is_diagnostic_scope_active() {
+        return;
+    }
+
     // The condition runs after the body, so it is walked on the scope the
     // body leaves behind: that is where
     // `do { $n = next(); } while ($n && $n->ok());` reads `$n` from, and
-    // what it writes is in force once the loop exits.
-    process_expr(dw.condition, scope, ctx);
-
-    // After the do-while loop, the condition evaluated to false (that's
-    // why the loop exited).  Apply the inverse of the condition to narrow
-    // types.  For example: `do { $a = getA(); } while ($a !== null);`
-    // => after loop, $a is null.
-    apply_condition_narrowing_inverse(dw.condition, scope, ctx);
+    // what it writes is in force once the loop exits.  The loop exits
+    // where it failed: `do { $a = getA(); } while ($a !== null);` leaves
+    // `$a` null.
+    let exit = process_condition(dw.condition, scope, ctx);
+    *scope = exit.falsey(ctx).clone();
 
     // A `break` leaves without re-testing the condition, so its state
     // joins after the inverse narrowing.  This is the only way the state
     // before an early `break` reaches the code after the loop: the body
     // always runs, so there is no pre-loop scope to merge with.
-    if !cursor_in_body {
-        merge_exit_edges(scope, &exits.breaks);
-    }
+    merge_exit_edges(scope, &exits.breaks);
 }

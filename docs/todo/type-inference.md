@@ -273,9 +273,11 @@ algebraic framework that PHPStan and Psalm use. Key gaps:
 1. No separate tracking of "sure types" vs "sure-not types". When
    `$x !== null`, PHPantom should remove `null` from the union
    (sure-not) rather than trying to intersect with "not-null".
-2. No proper AND/OR algebra. `$a instanceof Foo && $b instanceof Bar`
-   should union the narrowings in true context and intersect them in
-   false context. Currently only simple cases work.
+2. No clause algebra. `&&`, `||` and `!` compose what their operands
+   prove (`forward_walk/condition.rs`), but a `||` that held leaves the
+   join of its operands' scopes, which cannot say how they relate:
+   inside `if ($a instanceof Foo || $b instanceof Bar)`, a later
+   `!$a instanceof Foo` should prove `$b` is a `Bar`, and does not.
 3. No truthy/falsey distinction. `if ($x)` (truthy) vs
    `if ($x === true)` (strict true) should produce different
    narrowings. PHPStan uses a 4-state bitmask context.
@@ -283,9 +285,8 @@ algebraic framework that PHPStan and Psalm use. Key gaps:
 `@phpstan-assert`/`@psalm-assert` annotations on called functions are
 now applied as narrowings at call sites (`extract_call_assertions` and
 `CallAssertionInfo` in `type_engine/types/narrowing/assertions.rs`,
-consulted from `type_engine/types/narrowing/guards.rs` and
-`type_engine/variable/forward_walk/cond_narrowing.rs`), so that gap
-from the original list is closed. It is still ad hoc rather than
+consulted from `type_engine/variable/forward_walk/cond_narrowing/`), so
+that gap from the original list is closed. It is still ad hoc rather than
 going through a unified `reconcile` dispatch, so items 1-3 remain.
 
 **Design:** create a
@@ -339,127 +340,39 @@ raw strings.
 
 ---
 
-## T45. Expressions should hand their scope, type and narrowing to the next expression
-**Impact: Medium-High · Complexity: Very High**
+## T48. A sub-expression's type is resolved again by every consumer
+**Impact: Low-Medium · Complexity: High**
 
-The forward walker threads scope from statement to statement, and
-`process_expr` (`forward_walk/expr.rs`) threads it through one expression
-in evaluation order: writes (including `++`/`--`) land where they happen,
-the operands of `&&`/`||` run on the scope the earlier operands left,
-narrowed by what they proved, and the right side of `??` and the arms of a
-ternary or `match` run on their own copy. But the expression is still
-walked in further passes: `process_expression_statement`
-(`forward_walk/assignment.rs`) adds match/ternary snapshots, by-ref
-captures, receiver mutation, asserts and self-out, and an `if` condition is
-walked again by `seed_pass_by_ref_in_condition` and once more per branch by
-`apply_condition_narrowing{,_inverse}`, which itself runs about fifteen
-extractors that each pattern-match the whole condition. The expression's
-own type is resolved once against the scope after all its writes; the
-sub-expressions that read an earlier scope are typed where they ran and
-handed to the resolver by span (`ExprTypes`), but only
-`resolve_rhs_expression` and array-item inference consult them.
+The forward walker threads the scope through each expression in
+evaluation order (`forward_walk/expr.rs`) and records the scope each node
+ran on, but not the node's type. The expression's own type is resolved
+once, by the caller, against the scope after the whole expression
+(`resolve_rhs_with_scope`). The sub-expressions that read an earlier scope
+(evaluated before a later write, or the old value `$d++` yields) are typed
+where they ran and handed back by span in `ExprTypes`, which only
+`resolve_rhs_expression` and array-item inference consult. Diagnostics,
+hover and completion resolve the nodes they look at again, each against
+the scope recorded there, and `CHAIN_CACHE` exists to keep re-resolving a
+chain affordable.
 
-PHPStan 2.3 replaced the same three-walker shape (`NodeScopeResolver`,
-`MutatingScope::resolveType`, `TypeSpecifier`) with one: processing a node
-returns an `ExpressionResult` holding the scope before and after it, a
-lazily computed type, and lazily computed truthy/falsey narrowing. Parents
-compose their children's results instead of re-resolving them:
+PHPStan 2.3 keeps each processed node's `ExpressionResult`, whose type is
+computed lazily, and `Scope::getType()` on a node already processed reads
+it back. It recomputes only for synthetic nodes, or under a scope that
+disagrees on a variable the node reads.
 
-- `&&` processes its right operand on the left's truthy scope, and its own
-  truthy scope *is* the right operand's (`truthyScopeOverrideResult`), so a
-  narrowing from the left is never re-applied over a variable the right
-  reassigned. `||` mirrors this on the falsey side; `!` reuses the
-  operand's narrowing with the context flipped.
-- Array items, call arguments and the like pass each child's post-scope to
-  the next sibling, which is what makes `[$b = 1, $b + 1]` read `2`.
-- `$c++` is processed as a virtual pre-increment assignment: the post-scope
-  holds the new value, the node's own type is the old one.
-- A call with side effects invalidates receiver-rooted expressions inside
-  the expression walk, so `$this->a instanceof Foo && $this->reset()`
-  drops the narrowing before the next operand.
-- Every result is stored by node identity; rules, and `Scope::getType()`
-  for a node already processed, read the stored result. Recomputation
-  happens only for synthetic nodes or a scope that disagrees on a variable
-  the node reads.
+**Design.** Give each node `ExprWalk` evaluates a lazily computed type
+against the scope it ran on, stored by span next to the node scopes the
+diagnostic walk records. `ExprTypes` and its pending/flush bookkeeping
+then go away, `resolve_rhs_with_scope` reads the stored type, and a
+diagnostic reads the type of the node it checks instead of resolving it
+again. Measure first: the win is the resolutions it saves, and a stored
+type per node costs memory on every file the diagnostic pass walks.
 
-Their old engine re-specified the left side at every `&&` level, which is
-exponential and needed `BOOLEAN_EXPRESSION_MAX_PROCESS_DEPTH = 4`. Ours has
-no cap, and while a chain's operands are now narrowed once each, the
-branch narrowing still re-reads the whole condition, and each `elseif`
-re-applies the inverse of every earlier condition from scratch.
-
-B577 (condition narrowing applied after the fact instead of per operand) is
-the bug this shape still produces, filed separately so it can be fixed in
-place first.
-
-**Design.** `process_expr` today mutates the scope in place and returns an
-`ExprResult` that only says whether the expression wrote. It grows into
-`process_expr(expr, before: &ScopeState, ctx) -> Rc<ExprResult>`, with
-roughly:
-
-```rust
-struct ExprResult {
-    after: ScopeState,
-    ty: OnceCell<Vec<ResolvedType>>,
-    narrowing: OnceCell<[Narrowing; 2]>,      // truthy, falsey
-    truthy: OnceCell<ScopeState>,
-    falsey: OnceCell<ScopeState>,
-    truthy_override: Option<Rc<ExprResult>>,  // `&&`, `||` right operand
-    falsey_override: Option<Rc<ExprResult>>,
-    impure: bool,
-}
-```
-
-`ScopeState`'s persistent `Locals` trie already makes the before/after
-copies cheap. The extractors in `types/narrowing/` and
-`cond_narrowing/` become per-node narrowing producers that read the
-operand's result (an `instanceof` emits narrowing for its left operand's
-subject key) instead of scanning the whole condition for one variable
-name. That is the natural carrier for T20's sure/sure-not algebra, so the
-two should be designed together: T20 decides what a `Narrowing` holds,
-this item decides where it is produced and how it composes.
-
-Results are stored per file by span during the diagnostic walk. Hover and
-completion walk to the node containing the cursor and read its `before`
-scope, so they agree with diagnostics by construction instead of through
-the two code paths in `narrowed_subject_from_scope`.
-
-**What it retires.** `resolve_rhs_with_scope` and `ExprTypes` (become
-`.ty()`), `seed_pass_by_ref_in_condition`,
-`apply_condition_narrowing{,_inverse}` (become `.truthy()`/`.falsey()`),
-`record_match_ternary_snapshots`, `apply_cursor_ternary_narrowing`, the
-expression-level snapshots in `DIAGNOSTIC_SCOPE` (statement snapshots
-stay), `CHAIN_CACHE` (span keys make its variable-rooted exclusions
-unnecessary), most of `VAR_TYPE_MEMO`, and P54 entirely:
-`narrowed_by_rewalk`, the re-parse in `apply_property_narrowing`, and
-`NARROWING_IN_PROGRESS` go away because property and call subject keys
-live in the threaded scope.
-
-**Migration.** Incremental, behind the existing entry points. The first
-step (`process_expr` for array items, call arguments, binary operators,
-`&&`/`||`, `??`, ternary, `match` and `++`/`--`) is in; what is left:
-1. Move narrowing production into the per-node handlers and switch `if`,
-   `while` and `for` conditions to `.truthy()`/`.falsey()`. Thread the
-   `elseif` chain through the previous arm's falsey scope. Narrow ternary
-   and `match` arms inside `process_expr` too, which retires
-   `record_match_ternary_snapshots`: it still runs as its own pass from the
-   scope the statement started with, so an arm does not see a write made
-   earlier in the same statement.
-2. Store results by span, point hover/completion at them, and delete the
-   snapshot and re-walk machinery listed above.
-
-Each step should leave the full suite and the `projects/` diagnostic
-counts unchanged except for the bugs it fixes.
-
-**Where to look:** PHPStan 2.3's `src/Analyser/ExpressionResult.php`,
-`ExprHandler/BooleanAndHandler.php`, `ExprHandler/AssignHandler.php`,
-`ExprHandler/ArrayHandler.php`, `ExprHandler/PostIncHandler.php`,
-`ExprHandler/MethodCallHandler.php` (invalidation), and
+**Where to look:** PHPStan 2.3's `src/Analyser/ExpressionResult.php` and
 `MutatingScope::resolveTypeOfNewWorldHandlerNode`. Ours:
-`forward_walk/expr.rs`, `forward_walk/assignment.rs`,
-`forward_walk/if_else.rs`, `forward_walk/snapshot_narrowing.rs`,
-`cond_narrowing/apply.rs`,
-`rhs_resolution/mod.rs`, `resolver/property_narrowing.rs`.
+`forward_walk/expr.rs` (`ExprTypes`, `ExprWalk`),
+`forward_walk/diagnostic_cache.rs` (`record_node_scope`),
+`rhs_resolution/mod.rs`, and `CHAIN_CACHE` in `resolver/context.rs`.
 
 ---
 

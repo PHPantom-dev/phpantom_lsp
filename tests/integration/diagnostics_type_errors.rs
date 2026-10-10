@@ -11053,9 +11053,8 @@ useString(content() ?: '');
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
-/// Only the short form yields the condition's own value: a full ternary
-/// naming the same call in its then branch still contributes every member
-/// of that call's type.
+/// Only the short form yields the condition's own value: a full ternary's
+/// then branch contributes every member of its own type.
 #[test]
 fn a_full_ternary_keeps_its_then_branch_whole() {
     let php = r#"<?php
@@ -11064,7 +11063,10 @@ function useString(string $value): void {}
 /** @return string|false */
 function content() { return ''; }
 
-useString(content() ? content() : '');
+/** @return string|false */
+function fallback() { return ''; }
+
+useString(content() ? fallback() : '');
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");

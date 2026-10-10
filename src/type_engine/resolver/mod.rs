@@ -28,17 +28,14 @@
 ///
 /// Context types ([`ResolutionCtx`], [`VarResolutionCtx`], [`Loaders`]) and
 /// the thread-local chain resolution cache live in [`context`].
-/// Property-path (`$this->prop`) narrowing lives in [`property_narrowing`].
 mod context;
-mod property_narrowing;
 
 pub(crate) use context::{
     CtxLoaders, FunctionLoaderFn, LendsLoaders, Loaders, OwnedLoaders, ResolutionCtx,
     ScopeVarResolverFn, VarResolutionCtx, with_chain_resolution_cache, with_isolated_chain_cache,
 };
-pub(crate) use property_narrowing::apply_property_narrowing;
 
-use crate::atom::{Atom, atom};
+use crate::atom::atom;
 use std::sync::Arc;
 
 use crate::Backend;
@@ -224,40 +221,40 @@ fn chain_cache_key(expr: &SubjectExpr, ctx: &ResolutionCtx<'_>) -> Option<String
     // and reused by `$model->where(...)->whereNotNull(...)` etc.).
     //
     // The cache is NOT used for variable-only subjects (no `->` or `::`
-    // in the expression) because those are context-sensitive: the same
-    // `$var` may resolve to different types at different cursor offsets
-    // due to reassignment or narrowing.
+    // in the expression): those are answered straight from the scope.
     //
-    // PropertyChain expressions rooted in a variable (e.g. `$this->pet`,
-    // `$obj->prop`, `$args[0]->value`, `$this->a->b`) are also excluded
-    // because instanceof narrowing can change the resolved type at
-    // different positions within the same method body.  For example,
-    // `$this->pet` may resolve to `Dog` inside `if ($this->pet
-    // instanceof Dog)` but to `Cat` after `if (!$this->pet instanceof
-    // Cat) { return; }`.  The root test is transitive: a chain rooted in
-    // a variable through array accesses or nested property chains
-    // (`$args[0]->value`) is just as narrowable as a direct one.
+    // A chain rooted in a variable (`$this->pet`, `$obj->prop`,
+    // `$args[0]->value`, `$this->a->b`), and an argument-less instance
+    // call on one (`$job->data()`), resolves differently wherever the
+    // variable or a path through it was narrowed or written: `$this->pet`
+    // may be a `Dog` inside `if ($this->pet instanceof Dog)` and a `Cat`
+    // after `if (!$this->pet instanceof Cat) { return; }`.  So its text
+    // alone does not identify the answer, but its text where it is written
+    // does, whenever the scope at that position is fixed: outside a walk
+    // in progress, which can see one position on several scopes (each
+    // re-walk of a loop body).
     //
-    // Static accesses and calls that carry arguments are safe to cache:
-    // their return types are deterministic (method signatures don't
-    // change based on narrowing context).  An argument-less instance
-    // call is not — it is a narrowing subject in its own right, so
-    // `$job->data()` can be one subtype inside one check and another
-    // inside the next.
-    let is_cacheable_chain = match expr {
+    // Static accesses and calls that carry arguments are safe to share
+    // across positions: their return types are deterministic (method
+    // signatures don't change based on narrowing context).
+    let shared = match expr {
         SubjectExpr::CallExpr { .. } => narrowable_call_key(expr).is_none(),
         SubjectExpr::MethodCall { .. }
         | SubjectExpr::StaticMethodCall { .. }
         | SubjectExpr::StaticAccess { .. } => true,
-        // PropertyChain is only cacheable when its base does NOT root
-        // in a variable — e.g. `$this->method()->prop` (rooted in a
-        // call) is safe, but `$this->pet`, `$args[0]->value`, and
-        // `$this->a->b` (rooted in `$this`/a variable) are subject to
-        // narrowing.
+        // PropertyChain is only shared when its base does NOT root in a
+        // variable — e.g. `$this->method()->prop` (rooted in a call).
         SubjectExpr::PropertyChain { base, .. } => !base_roots_in_variable(base),
         _ => false,
     };
-    if !is_cacheable_chain {
+    let positional = !shared
+        && matches!(
+            expr,
+            SubjectExpr::CallExpr { .. } | SubjectExpr::PropertyChain { .. }
+        )
+        && ctx.scope_var_resolver.is_none()
+        && !crate::type_engine::variable::forward_walk::is_building_scopes();
+    if !shared && !positional {
         return None;
     }
 
@@ -286,6 +283,13 @@ fn chain_cache_key(expr: &SubjectExpr, ctx: &ResolutionCtx<'_>) -> Option<String
     // distinct entries.  When the variables can't be resolved cheaply
     // (no active scope), fall back to a per-site key so nothing leaks.
     // Chains with no local variables keep the shared text-only key.
+    if positional {
+        return Some(format!(
+            "{file_id:x}:{}@{}",
+            expr.to_subject_text(),
+            ctx.cursor_offset
+        ));
+    }
     let mut vars = Vec::new();
     expr.collect_local_variables(&mut vars);
     Some(if vars.is_empty() {
@@ -555,7 +559,7 @@ fn resolve_target_classes_expr_inner(
             }
 
             let mut hint: Option<PhpType> = None;
-            let mut classes = Backend::resolve_call_return_types_on_receiver(
+            let classes = Backend::resolve_call_return_types_on_receiver(
                 callee,
                 args_text,
                 receiver,
@@ -563,37 +567,6 @@ fn resolve_target_classes_expr_inner(
                 Some(&mut hint),
             );
 
-            // No forward-walker scope (completion / hover): re-walk the
-            // enclosing body for a check on this call, exactly as the
-            // property path does below.
-            if let Some(key) = narrowing_key
-                && !classes.is_empty()
-            {
-                let before: Vec<Atom> = classes.iter().map(|c| c.fqn()).collect();
-                let dummy_class;
-                let effective_class = match current_class {
-                    Some(cc) => cc,
-                    None => {
-                        dummy_class = crate::class_lookup::class_context_placeholder(
-                            ctx.content,
-                            ctx.cursor_offset,
-                        );
-                        &dummy_class
-                    }
-                };
-                let is_intersection =
-                    apply_property_narrowing(&key, effective_class, ctx, &mut classes);
-                // A narrowed result stands on its own: the raw return
-                // type hint below describes what the method declares,
-                // which is what the check just refined away.
-                if classes.iter().map(|c| c.fqn()).ne(before) {
-                    let mut narrowed = ResolvedType::from_classes(classes);
-                    if is_intersection {
-                        ResolvedType::tag_as_intersection(&mut narrowed);
-                    }
-                    return narrowed;
-                }
-            }
             // Use the raw return type hint only when it actually carries
             // generic args a resolved class can benefit from: either the
             // class declares its own `@template` params, or (a `static<...>`
@@ -652,7 +625,7 @@ fn resolve_target_classes_expr_inner(
             // The generic members of the property's hint, e.g.
             // `Collection<int, Post>`.  The classes resolved from it carry
             // only its base name, so each is given its generic spelling
-            // back once narrowing has settled which classes remain.
+            // back below.
             let mut generic_hints: Vec<PhpType> = Vec::new();
             for cls in &base_arcs {
                 let Some(hint) = resolve_property_type_hint(cls, property, class_loader) else {
@@ -697,57 +670,22 @@ fn resolve_target_classes_expr_inner(
                 }
             }
 
-            // ── Property-level narrowing ────────────────────────
-            // When the property chain resolves to a union (or a
-            // broad interface type), an enclosing `instanceof`
-            // check like `if ($this->prop instanceof Foo)` should
-            // narrow the result set, just as it does for plain
-            // variables.  Build the full access path (e.g.
-            // `$this->timeline`) and run the narrowing walk.
-            //
-            // This also handles untyped properties: when the
-            // property has no type hint, `results` is empty but
-            // an `instanceof` check or `assert()` can still
-            // provide a type via `apply_instanceof_inclusion`.
-            //
-            // Use a dummy class when outside a class body so that
-            // property narrowing works in standalone functions and
-            // top-level code (e.g. `$arg->value instanceof Foo`
-            // inside a foreach).
-            {
-                let dummy_class;
-                let effective_class = match current_class {
-                    Some(cc) => cc,
-                    None => {
-                        dummy_class = crate::class_lookup::class_context_placeholder(
-                            ctx.content,
-                            ctx.cursor_offset,
-                        );
-                        &dummy_class
-                    }
+            // The generic spelling of each class the hint named.
+            let mut resolved = ResolvedType::from_classes(arc_results);
+            for rt in &mut resolved {
+                let Some(class) = &rt.class_info else {
+                    continue;
                 };
-                let is_intersection =
-                    apply_property_narrowing(&full_path, effective_class, ctx, &mut arc_results);
-                let mut narrowed = ResolvedType::from_classes(arc_results);
-                if is_intersection {
-                    ResolvedType::tag_as_intersection(&mut narrowed);
-                } else if !generic_hints.is_empty() {
-                    for rt in &mut narrowed {
-                        let Some(class) = &rt.class_info else {
-                            continue;
-                        };
-                        let fqn = class.fqn();
-                        if let Some(hint) = generic_hints.iter().find(|hint| {
-                            hint.base_name().is_some_and(|base| {
-                                base == fqn.as_str() || crate::util::short_name(&fqn) == base
-                            })
-                        }) {
-                            rt.type_string = hint.clone();
-                        }
-                    }
+                let fqn = class.fqn();
+                if let Some(hint) = generic_hints.iter().find(|hint| {
+                    hint.base_name().is_some_and(|base| {
+                        base == fqn.as_str() || crate::util::short_name(&fqn) == base
+                    })
+                }) {
+                    rt.type_string = hint.clone();
                 }
-                narrowed
             }
+            resolved
         }
 
         // ── Array access on variable or call expression ─────────
@@ -1934,19 +1872,16 @@ fn subject_scope_key(expr: &SubjectExpr) -> String {
 }
 
 /// Consult the forward-walker scope for a narrowed type for a compound
-/// subject key (property path like `$a->b->c` or array access like
-/// `$a["k"]`).
+/// subject key (property path like `$a->b->c`, an argument-less call like
+/// `$a->b()`, or array access like `$a["k"]`).
 ///
 /// The forward walker seeds and narrows these keys while walking the
-/// enclosing method, capturing narrowing shapes the property-narrowing
-/// re-walk in [`apply_property_narrowing`] cannot express (compound
-/// `&&`/`||` conditions with mixed subjects, guard clauses whose De
-/// Morgan expansion narrows several distinct subjects, etc.).
+/// enclosing body, so its scope at the subject's position is what every
+/// check and write on the way there left the key holding.
 ///
-/// Returns `Some(types)` only when the scope holds a non-empty narrowed
-/// type for `key`; the caller then trusts it and skips the re-walk.
-/// Returns `None` when no scope is active or the key was never seeded,
-/// so the caller falls back to normal resolution.
+/// Returns `Some(types)` only when the scope holds a non-empty type for
+/// `key`; the caller then trusts it.  Returns `None` when the key was
+/// never seeded, so the caller falls back to the declared type.
 fn lookup_scope_for_subject(key: &str, ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>> {
     use crate::type_engine::variable::forward_walk;
 
@@ -1964,10 +1899,37 @@ fn lookup_scope_for_subject(key: &str, ctx: &ResolutionCtx<'_>) -> Option<Vec<Re
         return Some(types);
     }
 
-    // Interactive (completion / hover) forward walk carries a live
-    // scope resolver.
+    // A resolution made inside a forward walk carries the walk's live
+    // scope, which is the authority there.
     if let Some(resolver) = ctx.scope_var_resolver {
         let types = resolver(key);
+        return (!types.is_empty()).then_some(types);
+    }
+
+    // A request made outside any walk (hover, completion, go-to-definition)
+    // asks the walker what the key holds at the cursor, exactly as a
+    // variable is resolved: the walk threads property and call keys
+    // through every check and write on the way there.
+    if !forward_walk::is_diagnostic_scope_active() {
+        let dummy_class;
+        let current_class = match ctx.current_class {
+            Some(cc) => cc,
+            None => {
+                dummy_class =
+                    crate::class_lookup::class_context_placeholder(ctx.content, ctx.cursor_offset);
+                &dummy_class
+            }
+        };
+        let types = super::variable::resolution::resolve_variable_types(
+            key,
+            current_class,
+            ctx.all_classes,
+            ctx.content,
+            ctx.cursor_offset,
+            ctx.class_loader,
+            ctx.backend,
+            Loaders::with_function(ctx.function_loader),
+        );
         if !types.is_empty() {
             return Some(types);
         }

@@ -245,3 +245,41 @@ function f(): void {{
         "expected result() to read as string while TReady is still false, got: {text}"
     );
 }
+
+/// The receiver is rebound where the call runs, whatever expression the call
+/// sits in, just as it is after a call made as a statement of its own.
+#[test]
+fn a_call_inside_an_expression_rebinds_its_receiver() {
+    let slot = r#"
+/** @template T */
+final class Slot {
+    /**
+     * @template U
+     * @param U $value
+     * @phpstan-self-out self<U>
+     */
+    public function swap(mixed $value): bool { return true; }
+}
+"#;
+    for statement in [
+        "$ok = $box->swap('x');",
+        "if ($box->swap('x')) {}",
+        "echo $box->swap('x') ? 1 : 0;",
+    ] {
+        let content = format!(
+            r#"<?php
+{slot}
+/** @param Slot<int> $box */
+function f(Slot $box): void {{
+    {statement}
+    $box;
+}}
+"#
+        );
+        let text = hover_last(&content, "$box;");
+        assert!(
+            text.contains("Slot<string>"),
+            "`{statement}`: expected $box to read as Slot<string> after the call, got: {text}"
+        );
+    }
+}

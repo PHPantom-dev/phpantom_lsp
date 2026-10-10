@@ -13,9 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Faster analysis of methods that check many properties.** Narrowing a property or a call's result no longer walks the method again from its first line.
+
 ### Fixed
 
 - **An assignment is seen by the rest of the expression it sits in.** In `if (($user = find($id)) && $user->isActive())`, the right-hand side now knows what `$user` holds, and `[$i++, $i]` holds the old `$i` in its first item and the incremented one in its second.
+- **Narrowing follows the order a condition is evaluated in.** In `if ($x instanceof Foo && ($x = make()))` the body sees what `make()` returned, and a call that changes an object between two checks drops what the first one proved. A check inside one argument no longer narrows the arguments after it.
+- **Ternary and `match` arms see what was assigned earlier in the statement.** In `[$x = 1, $x > 0 ? needInt($x) : 0]`, the arm reads the `1` rather than what `$x` held before the statement.
+- **Completion after `&&` knows what the left side proved about a property.** In `if ($this->pet instanceof Cat && $this->pet->`, completion offers `Cat`'s methods alone.
+- **A call nested in an expression writes through its reference parameters.** `$found = [preg_match('/(\d+)/', $s, $m), …]` now leaves `$m` typed the same as a `preg_match()` call on its own line.
+- **`@phpstan-self-out` applies wherever the call sits.** A call whose result is assigned or tested, such as `$ok = $box->replace('x')`, now updates the type of `$box` too, not only a call made on its own line.
 - **Variables inside a closure keep their types when another method is chained onto the call.** In `$obj->with(function (string $s) { … })->run()`, hover and completion inside the closure again know the types of its parameters and locals.
 - **Writing to a `global` variable is no longer reported as unused.** The same goes for a write through a reference, such as `$first = &$items[0]; $first = 5;`.
 - **phpcbf fixes against the `[phpcs]` standard.** With `standard` set in `.phpantom.toml`, formatting now applies the rules PHPCS reports instead of PHP_CodeSniffer's default standard.

@@ -166,12 +166,13 @@ pub(super) fn split_iterable_alternatives(
 /// up as `Foo&Bar`, not as whichever operand was looked at last.
 ///
 /// Returns the subjects an operand pinned to a definite class, which is
-/// what [`apply_disjunct_operand_narrowing`] reads to know whose type a
-/// disjunction further along the chain must not widen back.
+/// what [`Condition::or`] reads to know whose type a disjunction further
+/// along the chain must not widen back.
 pub(super) fn commit_chain_instanceof<'b>(
     operands: &[&'b Expression<'b>],
     alias_extractions: &[Vec<AliasExtraction>],
     var_names: &[String],
+    conjoined: &[String],
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<String> {
@@ -357,6 +358,7 @@ pub(super) fn commit_chain_instanceof<'b>(
                 .is_some_and(Conjuncts::is_intersection),
             allow_string: conjuncts.get(&var_name).is_some_and(|c| c.allow_string),
             exact: conjuncts.get(&var_name).is_some_and(|c| c.exact),
+            conjoined: conjoined.contains(&var_name),
         };
         commit_instanceof_narrowing(&var_name, narrowed, shape, scope, ctx, &scope_resolver);
     }
@@ -450,6 +452,7 @@ pub(super) fn commit_instanceof_narrowing(
         intersected,
         allow_string,
         exact,
+        conjoined,
     } = shape;
     if intersected {
         ResolvedType::tag_as_intersection(&mut narrowed);
@@ -719,6 +722,30 @@ pub(super) fn commit_instanceof_narrowing(
             }
         }
         scope.set(var_name, with_string_alt(intersected));
+        return;
+    }
+
+    // An earlier conjunct of the same chain proved the class the subject
+    // holds, and this one proves an unrelated class: the value the branch
+    // runs on is both.  `$x instanceof Foobar && $x instanceof Barfoo` keeps
+    // the members of both, as the two checks spelled side by side promise.
+    if conjoined
+        && !narrowed_fqns.iter().any(|checked| {
+            existing.iter().any(|rt| {
+                rt.class_info.as_ref().is_some_and(|cls| {
+                    crate::class_lookup::is_subtype_of_names(checked, &cls.fqn(), ctx.class_loader)
+                })
+            })
+        })
+    {
+        let mut both: Vec<ResolvedType> = existing
+            .iter()
+            .filter(|rt| rt.class_info.is_some())
+            .cloned()
+            .collect();
+        ResolvedType::extend_unique(&mut both, narrowed);
+        ResolvedType::tag_as_intersection(&mut both);
+        scope.set(var_name, with_string_alt(both));
         return;
     }
 

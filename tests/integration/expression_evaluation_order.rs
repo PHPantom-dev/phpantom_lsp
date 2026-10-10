@@ -94,6 +94,143 @@ fn an_item_reads_what_an_earlier_item_assigned() {
     );
 }
 
+// ─── What an operand proved, and what came after it ─────────────────────────
+
+#[test]
+fn a_later_operand_s_write_replaces_an_earlier_operand_s_narrowing() {
+    let php = r#"<?php
+class Foo {}
+class Bar {}
+function make(): Bar { return new Bar(); }
+function t(mixed $x): void {
+    if ($x instanceof Foo && ($x = make())) {
+        $x; // here
+    }
+}
+"#;
+    assert_eq!(type_at_marker(php), "Bar");
+}
+
+#[test]
+fn a_call_that_changes_its_receiver_drops_what_an_earlier_operand_proved() {
+    let php = r#"<?php
+class Foo {}
+function needFoo(Foo $f): bool { return true; }
+class Holder {
+    public ?Foo $a = null;
+    /** @phpstan-impure */
+    public function reset(): bool { $this->a = null; return true; }
+    public function kept(): void {
+        if ($this->a !== null && needFoo($this->a)) {}
+    }
+    public function dropped(): void {
+        if ($this->a !== null && $this->reset() && needFoo($this->a)) {}
+    }
+}
+"#;
+    let diagnostics = slow_diagnostic_messages(
+        &create_test_backend(),
+        "file:///evaluation_order.php",
+        php,
+        "type_mismatch_argument",
+    );
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "only the operand after `reset()` reads the nullable property: {diagnostics:?}"
+    );
+    assert!(diagnostics[0].contains("?Foo"), "{diagnostics:?}");
+}
+
+#[test]
+fn a_ternary_arm_reads_what_an_earlier_item_assigned() {
+    let php = r#"<?php
+function needInt(int $i): void {}
+function t(): void {
+    $x = 'a';
+    $r = [$x = 1, $x > 0 ? needInt($x) : 0];
+    echo count($r);
+}
+"#;
+    let diagnostics = slow_diagnostic_messages(
+        &create_test_backend(),
+        "file:///evaluation_order.php",
+        php,
+        "type_mismatch_argument",
+    );
+    assert!(
+        diagnostics.is_empty(),
+        "the arm reads the `1` the first item wrote, not the `'a'` before it: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn a_call_nested_in_an_expression_writes_through_its_reference_parameters() {
+    let statement = r#"<?php
+function t(string $s): void {
+    preg_match('/^(\d+)$/', $s, $m);
+    $m; // here
+}
+"#;
+    let nested = r#"<?php
+function t(string $s): void {
+    $found = [preg_match('/^(\d+)$/', $s, $m), 1];
+    $m; // here
+}
+"#;
+    assert_eq!(type_at_marker(nested), type_at_marker(statement));
+}
+
+#[test]
+fn what_an_operand_proved_stays_inside_its_condition() {
+    let php = r#"<?php
+class Foo {}
+function needFoo(Foo $f): bool { return true; }
+function both(bool $a, bool $b): void {}
+function t(?Foo $a, bool $x): void {
+    both($a instanceof Foo && $x, needFoo($a));
+}
+"#;
+    let diagnostics = slow_diagnostic_messages(
+        &create_test_backend(),
+        "file:///evaluation_order.php",
+        php,
+        "type_mismatch_argument",
+    );
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "the second argument reads `$a` unnarrowed: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn the_value_a_var_docblock_retypes_is_read_as_it_was() {
+    for docblock in ["/** @var Inner */", "/** @var Inner $node */"] {
+        let php = format!(
+            r#"<?php
+class Inner {{}}
+class Outer {{ public Inner $inner; }}
+function t(Outer $node): void {{
+    {docblock}
+    $node = $node->inner;
+}}
+"#
+        );
+        let backend = create_test_backend();
+        let diagnostics = slow_diagnostic_messages(
+            &backend,
+            "file:///evaluation_order.php",
+            &php,
+            "unknown_member",
+        );
+        assert!(
+            diagnostics.is_empty(),
+            "{docblock}: `$node->inner` reads the `Outer` the write replaces: {diagnostics:?}"
+        );
+    }
+}
+
 // ─── `++` / `--` inside an expression ───────────────────────────────────────
 
 #[test]

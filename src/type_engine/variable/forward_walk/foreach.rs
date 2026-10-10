@@ -381,9 +381,6 @@ pub(crate) fn process_foreach<'b>(
     // `foreach ($t instanceof UnionType ? $t->getTypes() : [$t] as $inner)`
     // reads `getTypes()` off the narrowed subject, not the declared one.
     process_expr(foreach.expression, scope, ctx);
-    if is_diagnostic_scope_active() {
-        record_match_ternary_snapshots(foreach.expression, scope, ctx);
-    }
 
     // Resolve the iterable expression's type.
     let iter_type = resolve_foreach_iterable_type(foreach, scope, ctx);

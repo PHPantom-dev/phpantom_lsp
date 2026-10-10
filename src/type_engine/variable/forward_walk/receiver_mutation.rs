@@ -32,23 +32,50 @@ pub(crate) fn process_receiver_mutation<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let mut invalidations: Vec<Invalidation> = Vec::new();
-    collect_call_invalidations(expr, scope, ctx, &mut invalidations);
-
     // A write to `$x->prop` (or through it, `$x->prop['k'] = …`) is what
     // the object's own methods read, so their recorded results go stale.
     // The other properties keep what they were shown to hold.
     if let Some(object) = written_object(expr)
         && scope_reads_through(scope, &object)
     {
-        invalidations.push(Invalidation {
-            subject: object,
-            made: None,
-            members: false,
-            method: None,
-        });
+        apply_invalidations(
+            vec![Invalidation {
+                subject: object,
+                made: None,
+                members: false,
+                method: None,
+            }],
+            scope,
+            ctx,
+        );
     }
+}
+
+/// Drop what one call or instantiation could have changed, once its
+/// receiver and arguments have been evaluated.
+///
+/// The expression walk calls this at every call it evaluates, so what a
+/// call changes is gone before anything evaluated after it reads it:
+/// `$this->a instanceof Foo && $this->reset() && $this->a->x()` no longer
+/// reads `$this->a` as a `Foo` by the time `x()` is called, when
+/// `reset()` changes `$this`.
+pub(crate) fn process_call_effects<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let mut invalidations: Vec<Invalidation> = Vec::new();
+    call_node_invalidations(expr, scope, ctx, &mut invalidations);
     forget_static_properties_after_impure_call(expr, scope, ctx);
+    apply_invalidations(invalidations, scope, ctx);
+}
+
+/// Apply what a call (or a write to a property) invalidates.
+fn apply_invalidations(
+    invalidations: Vec<Invalidation>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
     for invalidation in invalidations {
         if !invalidation.members {
             scope.invalidate_receiver_state(
@@ -95,8 +122,8 @@ pub(crate) fn process_receiver_mutation<'b>(
     }
 }
 
-/// Forget what the scope knows through a static property when `expr`
-/// makes a call declared impure.
+/// Forget what the scope knows through a static property when the call
+/// `expr` is declared impure.
 ///
 /// A static property is no object's state, so no receiver or argument of
 /// the call stands for it: any impure call may have written one.  A path
@@ -116,19 +143,13 @@ fn forget_static_properties_after_impure_call(
     {
         return;
     }
-    if !makes_impure_call(expr, scope, ctx) {
+    if !call_is_impure(expr, scope, ctx) {
         return;
     }
-    // `self::$x = $this->impure();` writes the property after the call,
-    // so what the assignment recorded stands.
-    let written = match crate::parser::unwrap_parens(expr) {
-        Expression::Assignment(assignment) => narrowing::expr_to_subject_key(assignment.lhs),
-        _ => None,
-    };
     let keys: Vec<String> = scope
         .locals
         .compound_keys()
-        .filter(|key| is_static_property_key(key) && written.as_deref() != Some(&***key))
+        .filter(|key| is_static_property_key(key))
         .map(|key| key.to_string())
         .collect();
     for key in keys {
@@ -157,55 +178,33 @@ fn is_static_property_key(key: &str) -> bool {
     })
 }
 
-/// Whether evaluating `expr` makes a call declared impure.
-fn makes_impure_call(expr: &Expression<'_>, scope: &ScopeState, ctx: &ForwardWalkCtx<'_>) -> bool {
-    match expr {
-        Expression::Parenthesized(inner) => makes_impure_call(inner.expression, scope, ctx),
-        Expression::Assignment(assignment) => makes_impure_call(assignment.rhs, scope, ctx),
-        Expression::Binary(bin) => {
-            makes_impure_call(bin.lhs, scope, ctx) || makes_impure_call(bin.rhs, scope, ctx)
-        }
-        Expression::UnaryPrefix(unary) => makes_impure_call(unary.operand, scope, ctx),
-        Expression::Call(call) => {
-            let (object, args) = match call {
-                Call::Method(mc) => (Some(mc.object), &mc.argument_list),
-                Call::NullSafeMethod(mc) => (Some(mc.object), &mc.argument_list),
-                Call::Function(fc) => (None, &fc.argument_list),
-                Call::StaticMethod(sc) => (None, &sc.argument_list),
+/// Whether the call `expr` is declared impure.
+fn call_is_impure(expr: &Expression<'_>, scope: &ScopeState, ctx: &ForwardWalkCtx<'_>) -> bool {
+    let Expression::Call(call) = expr else {
+        return false;
+    };
+    let effect = match call {
+        Call::Method(MethodCall { object, method, .. })
+        | Call::NullSafeMethod(NullSafeMethodCall { object, method, .. }) => {
+            let ClassLikeMemberSelector::Identifier(ident) = method else {
+                return false;
             };
-            if object.is_some_and(|object| makes_impure_call(object, scope, ctx))
-                || args
-                    .arguments
-                    .iter()
-                    .any(|arg| makes_impure_call(arg.value(), scope, ctx))
-            {
-                return true;
-            }
-            let effect = match call {
-                Call::Method(MethodCall { object, method, .. })
-                | Call::NullSafeMethod(NullSafeMethodCall { object, method, .. }) => {
-                    let ClassLikeMemberSelector::Identifier(ident) = method else {
-                        return false;
-                    };
-                    method_call_effect(object, bytes_to_str(ident.value), scope, ctx)
-                }
-                Call::StaticMethod(sc) => {
-                    let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
-                        return false;
-                    };
-                    static_call_effect(sc.class, bytes_to_str(ident.value), ctx).0
-                }
-                Call::Function(fc) => {
-                    let Expression::Identifier(ident) = fc.function else {
-                        return false;
-                    };
-                    function_call_effect(fc.function, bytes_to_str(ident.value()), ctx)
-                }
-            };
-            effect.forgets_own_result()
+            method_call_effect(object, bytes_to_str(ident.value), scope, ctx)
         }
-        _ => false,
-    }
+        Call::StaticMethod(sc) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
+                return false;
+            };
+            static_call_effect(sc.class, bytes_to_str(ident.value), ctx).0
+        }
+        Call::Function(fc) => {
+            let Expression::Identifier(ident) = fc.function else {
+                return false;
+            };
+            function_call_effect(fc.function, bytes_to_str(ident.value()), ctx)
+        }
+    };
+    effect.forgets_own_result()
 }
 
 /// Forget what a condition proved about the result of a call declared
@@ -369,6 +368,10 @@ impl CallEffect {
 }
 
 /// Walk `expr` for calls, collecting what each one invalidates.
+///
+/// For a closure body read as though it ran at its call site (see
+/// [`collect_closure_invalidations`]); the expression walk visits the calls
+/// it evaluates one at a time, through [`process_call_effects`].
 fn collect_call_invalidations<'b>(
     expr: &'b Expression<'b>,
     scope: &mut ScopeState,
@@ -390,12 +393,53 @@ fn collect_call_invalidations<'b>(
             collect_call_invalidations(unary.operand, scope, ctx, out)
         }
         Expression::Instantiation(inst) => {
+            if let Some(args) = inst.argument_list.as_ref() {
+                for arg in args.arguments.iter() {
+                    collect_call_invalidations(arg.value(), scope, ctx, out);
+                }
+            }
+            call_node_invalidations(expr, scope, ctx, out);
+        }
+        Expression::Call(call) => {
+            // A chained call's receiver is itself a call, and an argument
+            // may hold one too, so both are searched.  A closure or a
+            // variable holding one is the call's own business, below.
+            let (object, args) = match call {
+                Call::Method(mc) => (Some(mc.object), &mc.argument_list),
+                Call::NullSafeMethod(mc) => (Some(mc.object), &mc.argument_list),
+                Call::Function(fc) => (None, &fc.argument_list),
+                Call::StaticMethod(sc) => (None, &sc.argument_list),
+            };
+            if let Some(object) = object {
+                collect_call_invalidations(object, scope, ctx, out);
+            }
+            for arg in args.arguments.iter() {
+                if !matches!(
+                    arg.value(),
+                    Expression::Closure(_) | Expression::Variable(Variable::Direct(_))
+                ) {
+                    collect_call_invalidations(arg.value(), scope, ctx, out);
+                }
+            }
+            call_node_invalidations(expr, scope, ctx, out);
+        }
+        _ => {}
+    }
+}
+
+/// What one call or instantiation invalidates, apart from the calls nested
+/// in its receiver and its arguments.
+fn call_node_invalidations<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    out: &mut Vec<Invalidation>,
+) {
+    match expr {
+        Expression::Instantiation(inst) => {
             let Some(args) = inst.argument_list.as_ref() else {
                 return;
             };
-            for arg in args.arguments.iter() {
-                collect_call_invalidations(arg.value(), scope, ctx, out);
-            }
             if !any_argument_has_state(args, scope) {
                 return;
             }
@@ -411,17 +455,12 @@ fn collect_call_invalidations<'b>(
             }
         }
         Expression::Call(call) => {
-            let (object, args) = match call {
-                Call::Method(mc) => (Some(mc.object), &mc.argument_list),
-                Call::NullSafeMethod(mc) => (Some(mc.object), &mc.argument_list),
-                Call::Function(fc) => (None, &fc.argument_list),
-                Call::StaticMethod(sc) => (None, &sc.argument_list),
+            let args = match call {
+                Call::Method(mc) => &mc.argument_list,
+                Call::NullSafeMethod(mc) => &mc.argument_list,
+                Call::Function(fc) => &fc.argument_list,
+                Call::StaticMethod(sc) => &sc.argument_list,
             };
-            // A chained call's receiver is itself a call, and an argument
-            // may hold one too, so both are searched.
-            if let Some(object) = object {
-                collect_call_invalidations(object, scope, ctx, out);
-            }
 
             // `(function () { … })()` runs its body right here, so a
             // state-changing call inside it reaches the same `$this` and
@@ -472,7 +511,7 @@ fn collect_call_invalidations<'b>(
                             apply_stored_closure_effects(scope, name, out);
                         }
                     }
-                    _ => collect_call_invalidations(arg_expr, scope, ctx, out),
+                    _ => {}
                 }
             }
 

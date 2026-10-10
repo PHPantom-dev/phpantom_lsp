@@ -510,10 +510,12 @@ fn resolved_type_with_lookup(
 /// is what carries `getDocComment() !== false ? getDocComment() : null`
 /// over to the repeated call in the true arm.
 ///
-/// Failing that, the completion/hover paths carry a `scope_var_resolver`;
-/// the diagnostic path instead reads the forward walker's snapshot cache,
-/// so both are consulted — otherwise diagnostics get a different answer
-/// than hover for the identical expression.
+/// Failing that, the forward walker's scope answers: the live scope when
+/// this resolution runs inside a walk, the snapshot the diagnostic walk
+/// recorded at the expression, or, for a member path read by a request
+/// made outside any walk (hover, completion), a walk to the request's
+/// position.  Each is the same walk, so diagnostics, hover and completion
+/// agree.
 fn narrowed_subject_from_scope(
     key: &str,
     expr: &Expression<'_>,
@@ -526,52 +528,29 @@ fn narrowed_subject_from_scope(
     }
     let from_scope = match ctx.scope_var_resolver {
         Some(resolver) => resolver(key),
-        None if super::forward_walk::is_diagnostic_scope_active()
-            && !super::forward_walk::is_building_scopes() =>
-        {
+        None if super::forward_walk::is_diagnostic_scope_active() => {
+            if super::forward_walk::is_building_scopes() {
+                return None;
+            }
             super::forward_walk::lookup_diagnostic_scope(key, expr.span().start.offset)?
         }
-        None => return None,
+        // Only a path read through `->` is worth a walk: the static and
+        // offset keys a callee's body reads while its return type is
+        // inferred would each walk that body again for every file that
+        // calls it, and nothing narrows them often enough to pay for that.
+        None if !key.contains("->") => return None,
+        None => super::resolution::resolve_variable_types(
+            key,
+            ctx.current_class,
+            ctx.all_classes,
+            ctx.content,
+            ctx.cursor_offset,
+            ctx.class_loader,
+            ctx.backend,
+            ctx.loaders,
+        ),
     };
     (!from_scope.is_empty()).then_some(from_scope)
-}
-
-/// Re-walk the enclosing body for an `instanceof` check on `key` and
-/// apply it to `resolved`, returning the narrowed type when the check
-/// changed it.
-///
-/// This is what reaches the checks the forward walker's scope does not
-/// hold: `$this->prop` and `$this->prop()` are not locals, so the scope
-/// resolver returns nothing for them and completion and hover would
-/// otherwise see the declared type.
-fn narrowed_by_rewalk(
-    key: &str,
-    resolved: &[ResolvedType],
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<Vec<ResolvedType>> {
-    let mut classes: Vec<Arc<ClassInfo>> = resolved
-        .iter()
-        .filter_map(|r| r.class_info.clone())
-        .collect();
-    if classes.is_empty() {
-        return None;
-    }
-    let before: Vec<Atom> = classes.iter().map(|c| c.fqn()).collect();
-    let rctx = ctx.as_resolution_ctx();
-    let is_intersection = crate::type_engine::resolver::apply_property_narrowing(
-        key,
-        ctx.current_class,
-        &rctx,
-        &mut classes,
-    );
-    if classes.iter().map(|c| c.fqn()).eq(before) {
-        return None;
-    }
-    let mut narrowed = ResolvedType::from_classes(classes);
-    if is_intersection {
-        ResolvedType::tag_as_intersection(&mut narrowed);
-    }
-    Some(narrowed)
 }
 
 /// The type a check on `call` narrowed it to, given what the method it
@@ -580,24 +559,9 @@ fn narrowed_by_rewalk(
 /// The narrowing is keyed under the call's own text, the same key the
 /// subject-expression resolver builds, so the check and every later
 /// occurrence of the call agree on what they are talking about.
-fn narrowed_call(
-    call: &Expression<'_>,
-    resolved: &[ResolvedType],
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<Vec<ResolvedType>> {
+fn narrowed_call(call: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> Option<Vec<ResolvedType>> {
     let key = crate::type_engine::types::narrowing::expr_to_subject_key(call)?;
-    if let Some(from_scope) = narrowed_subject_from_scope(&key, call, ctx) {
-        return Some(from_scope);
-    }
-    // The re-walk re-parses the file to find the check, so it is reserved
-    // for the argument-less form, whose receiver is a path the walker's
-    // scope never holds.  A call that takes arguments is answered by the
-    // scope entry the condition seeded, and paying for a re-parse per
-    // occurrence of every such call would be felt on every keystroke.
-    if crate::type_engine::types::narrowing::is_call_key_with_arguments(&key) {
-        return None;
-    }
-    narrowed_by_rewalk(&key, resolved, ctx)
+    narrowed_subject_from_scope(&key, call, ctx)
 }
 
 /// Resolve a right-hand-side expression to zero or more
@@ -1133,7 +1097,7 @@ fn resolve_method_chain<'b>(
         // Foo)`, `if ($this->option('from') !== null)`) is keyed under the
         // call's own text, so a later occurrence of that text reads the
         // narrowed type instead of the method's declared return type.
-        if let Some(narrowed) = narrowed_call(link.call, &resolved, ctx) {
+        if let Some(narrowed) = narrowed_call(link.call, ctx) {
             resolved = narrowed;
         }
         receiver = Some((ResolvedType::into_arced_classes(resolved.clone()), resolved));
@@ -1226,8 +1190,7 @@ fn resolve_rhs_expression_inner<'b>(
         // same treatment one level up, in `resolve_method_chain`, where
         // the chain spine is already peeled.
         Expression::Call(call @ (Call::Function(_) | Call::StaticMethod(_))) => {
-            let resolved = resolve_rhs_call(call, expr, ctx);
-            narrowed_call(expr, &resolved, ctx).unwrap_or(resolved)
+            narrowed_call(expr, ctx).unwrap_or_else(|| resolve_rhs_call(call, expr, ctx))
         }
         Expression::Call(call) => resolve_rhs_call(call, expr, ctx),
         Expression::Access(access) => {
@@ -1255,22 +1218,7 @@ fn resolve_rhs_expression_inner<'b>(
             {
                 return from_scope;
             }
-            let result = resolve_rhs_property_access(access, ctx);
-            // Apply property narrowing from enclosing if / ternary
-            // conditions (instanceof checks) so that `$this->prop` inside
-            // `if ($this->prop instanceof X)` or
-            // `$this->prop instanceof X ? $this->prop->m() : …` resolves to
-            // X instead of the declared property type.  The scope resolver
-            // (when present) is tried first above; property paths are not
-            // locals, so it returns nothing for them and we fall through to
-            // this walk.
-            if let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
-                && key.contains("->")
-                && let Some(narrowed) = narrowed_by_rewalk(&key, &result, ctx)
-            {
-                return narrowed;
-            }
-            result
+            resolve_rhs_property_access(access, ctx)
         }
         // Unary signs are separate AST nodes rather than part of numeric
         // literals. Resolve the operand first so parenthesized expressions,

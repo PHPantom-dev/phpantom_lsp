@@ -2,8 +2,9 @@
 //! narrowing, for the truthy branch and for its inverse.
 //!
 //! The extractors each sibling module owns answer what one check
-//! proves; these walk the condition, combine what the operands of a
-//! logical chain prove, and write the result into the scope.
+//! proves; these run every extractor over one operand of a condition and
+//! write the result into the scope.  [`Condition`] combines what the
+//! operands of a logical chain prove.
 
 use super::*;
 
@@ -73,6 +74,10 @@ pub(super) struct CheckShape {
     pub(super) allow_string: bool,
     /// The classes are exact identities rather than subtype bounds.
     pub(super) exact: bool,
+    /// The subject's current type is what an earlier conjunct of the same
+    /// `&&` chain proved, so a class unrelated to it is one more thing the
+    /// value is, not a replacement for it.
+    pub(super) conjoined: bool,
 }
 
 impl Conjuncts {
@@ -87,70 +92,60 @@ impl Conjuncts {
     }
 }
 
-/// The operand of a `(bool)` cast, which a condition tests exactly as it
-/// would test the operand itself.
-fn bool_cast_operand<'b>(condition: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
-    match unwrap_parens(condition) {
-        Expression::UnaryPrefix(prefix)
-            if matches!(
-                prefix.operator,
-                UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..)
-            ) =>
-        {
-            Some(prefix.operand)
-        }
-        _ => None,
-    }
-}
-
-/// Apply condition-based narrowing (instanceof, null check, type guard)
-/// to the scope.  This narrows types for the "truthy" branch.
+/// Narrow `scope` to where `condition` held.
+///
+/// The condition is split at its `&&` / `||` / `!` operators and each
+/// operand narrows the scope the operands before it left (see
+/// [`narrow_condition`]); this does not evaluate it, so a write inside it
+/// is not applied.
 pub(crate) fn apply_condition_narrowing<'b>(
     condition: &'b Expression<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // `!(!$x)` says exactly what `$x` says, so cancel the pair before any
-    // extractor looks at it.  The chain collectors fold each operand of an
-    // `&&` / `||` the same way.
-    let condition = narrowing::fold_negation_pairs(condition);
-    if let Some(operand) = bool_cast_operand(condition) {
-        apply_condition_narrowing(operand, scope, ctx);
+    if let Split::Leaf(leaf) = split_condition(condition) {
+        narrow_leaf_truthy(leaf, scope, ctx, &[]);
         return;
     }
+    let narrowed = narrow_condition(condition, scope, ctx).truthy(ctx).clone();
+    *scope = narrowed;
+}
 
-    // A `!` over a logical chain proves what the *inverse* pass proves
-    // about the chain itself.
-    if let Some(inner) = negated_logical_chain(condition) {
-        apply_condition_narrowing_inverse(inner, scope, ctx);
+/// Narrow `scope` to where `condition` failed: the else branch of an `if`,
+/// or the fall-through of a guard clause.  See [`apply_condition_narrowing`].
+pub(crate) fn apply_condition_narrowing_inverse<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    if let Split::Leaf(leaf) = split_condition(condition) {
+        narrow_leaf_falsey(leaf, scope, ctx);
         return;
     }
+    let narrowed = narrow_condition(condition, scope, ctx).falsey(ctx).clone();
+    *scope = narrowed;
+}
 
+/// Narrow `scope` to where a condition with no `&&` / `||` at its root
+/// held, and return the subjects it pinned to a definite class (see
+/// [`Condition::or`]).
+///
+/// `conjoined` names the subjects an earlier conjunct of the same `&&`
+/// chain pinned (see [`CheckShape::conjoined`]).
+pub(crate) fn narrow_leaf_truthy<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    conjoined: &[String],
+) -> Vec<String> {
     let entry_locals = scope.locals.clone();
 
     // Seed property access keys from conditions into the scope so that
     // narrowing functions can find and narrow them.
     seed_property_keys_into_scope(condition, scope, ctx);
 
-    // Decompose `&&` chains so that `$x instanceof Foo && $x instanceof Bar`
-    // applies both narrowings as a union (intersection semantics: the
-    // variable satisfies both checks, so members from both types are
-    // available).
-    //
-    // An operand that is itself a disjunction is held back from that
-    // decomposition: entering the branch proves the disjunction, not any
-    // one of its legs, and every pass below narrows what it is handed as
-    // though it had held.  The join at the end of this function owns them
-    // instead, so a leg's own conclusion never reaches the branch body
-    // unless every other leg proves it too.
-    let (disjunctions, operands): (Vec<_>, Vec<_>) = collect_and_chain_operands(condition)
-        .into_iter()
-        .partition(|operand| collect_or_chain_operands(unwrap_parens(operand)).len() > 1);
-
     // `check() === true` proves what `check()` does.
-    for operand in &operands {
-        apply_bool_comparison_narrowing(operand, true, scope, ctx);
-    }
+    apply_bool_comparison_narrowing(condition, true, scope, ctx);
 
     let mut var_names: Vec<String> = scope_keys_named_by(condition, scope)
         .iter()
@@ -170,29 +165,32 @@ pub(crate) fn apply_condition_narrowing<'b>(
             var_names.push(key);
         }
     }
-    // Expand operands that are a bare boolean standing for a check
-    // (`$isHtml` from `$isHtml = $raw instanceof HtmlString`) into the
-    // check itself, and make sure its subject is narrowed below even
-    // when the condition never names it.
-    let alias_extractions: Vec<Vec<AliasExtraction>> = operands
-        .iter()
-        .map(|operand| assertion_alias_extractions(operand, scope))
-        .collect();
+    // Expand a bare boolean standing for a check (`$isHtml` from
+    // `$isHtml = $raw instanceof HtmlString`) into the check itself, and
+    // make sure its subject is narrowed below even when the condition
+    // never names it.
+    let operands = [condition];
+    let alias_extractions = [assertion_alias_extractions(condition, scope)];
     for subject in alias_extractions.iter().flatten().map(|a| &a.subject) {
         if !var_names.contains(subject) {
             var_names.push(subject.clone());
         }
     }
 
-    let mut pinned = commit_chain_instanceof(&operands, &alias_extractions, &var_names, scope, ctx);
+    let mut pinned = commit_chain_instanceof(
+        &operands,
+        &alias_extractions,
+        &var_names,
+        conjoined,
+        scope,
+        ctx,
+    );
 
-    // A key read through a receiver the same chain narrows is only
-    // resolvable once that narrowing has landed:
-    // `$expr instanceof FuncCall && !$expr->name instanceof Name` cannot
-    // look `name` up on `FuncCall` until the first operand has proved that
-    // is what `$expr` is.  Seeding is left until here for those keys, and
-    // the extraction runs again over them alone — the subjects the first
-    // run committed are already narrowed and must not be narrowed twice.
+    // A key whose receiver could not be resolved when the keys were seeded
+    // above may resolve once the check has narrowed something it reads
+    // through, so it gets a second chance here.  The extraction runs again
+    // over those keys alone: the subjects the first run committed are
+    // already narrowed and must not be narrowed twice.
     let late_keys: Vec<String> = collect_condition_property_keys(condition)
         .into_iter()
         .filter(|key| !scope.contains(key))
@@ -210,18 +208,12 @@ pub(crate) fn apply_condition_narrowing<'b>(
                 &operands,
                 &alias_extractions,
                 &seeded,
+                conjoined,
                 scope,
                 ctx,
             ));
         }
     }
-
-    // The passes below still read the whole condition, disjunctions and
-    // all.  Each of them either decomposes `&&` and stops at an operand it
-    // does not recognise, or reads the condition as one expression — so a
-    // disjunction is opaque to them and none of a leg's conclusions can
-    // escape through them.  A new pass that looks *inside* an `||` belongs
-    // in the leg walk below, not here.
 
     // Type guard narrowing: `is_object($x)`, `is_array($x)`, etc.
     apply_type_guard_narrowing_truthy(condition, scope, ctx);
@@ -261,12 +253,6 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // so `$matches` has the keys the pattern describes.
     apply_preg_match_narrowing(condition, scope, ctx, true);
 
-    // Each disjunction the chain held back proves only that one of its
-    // legs held.  Splitting it re-uses the branch join, so the scope ends
-    // up carrying both the union of what the legs prove and the record of
-    // which leg proved what.
-    apply_disjunct_operand_narrowing(&disjunctions, &pinned, scope, ctx);
-
     // A proof about `$x['k']` is a proof about the entry `$x` holds there.
     write_offset_narrowing_into_shapes(condition, scope);
 
@@ -278,13 +264,12 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // proved about every value whose null it stands for.  Last, so it
     // sees the narrowed state rather than the state on the way in.
     apply_non_null_implication_narrowing(scope, &entry_locals, ctx);
+
+    pinned
 }
 
-/// Apply inverse narrowing for a single condition expression (not
-/// decomposed).  Called by [`apply_condition_narrowing_inverse`] for
-/// each operand in a `&&` chain, or for the whole condition when it
-/// is not a chain.
-pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
+/// The `instanceof`-style half of [`narrow_leaf_falsey`].
+fn apply_condition_narrowing_inverse_single<'b>(
     condition: &'b Expression<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
@@ -470,76 +455,6 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
     apply_property_discriminant_narrowing(condition, scope, ctx, false);
 }
 
-/// Apply inverse condition-based narrowing (for else branches and
-/// guard clauses).
-pub(crate) fn apply_condition_narrowing_inverse<'b>(
-    condition: &'b Expression<'b>,
-    scope: &mut ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    // As in the truthy pass: `!(!$x)` is `$x`, so cancel the pair first.
-    let condition = narrowing::fold_negation_pairs(condition);
-    if let Some(operand) = bool_cast_operand(condition) {
-        apply_condition_narrowing_inverse(operand, scope, ctx);
-        return;
-    }
-
-    // The mirror of the truthy pass: the fall-through of
-    // `if (!($t instanceof CallableType || $t instanceof ClosureType)) { return; }`
-    // is what the chain itself proves, so hand it to the truthy pass.
-    if let Some(inner) = negated_logical_chain(condition) {
-        apply_condition_narrowing(inner, scope, ctx);
-        return;
-    }
-
-    // De Morgan over `||`: NOT (A || B) = !A && !B.  Every operand's inverse
-    // holds at the same time, so they apply sequentially to one scope.  This
-    // is what makes the `if (!guard1 || !guard2) { return; }` idiom narrow
-    // its fall-through by each conjunct.
-    let or_operands = collect_or_chain_operands(condition);
-    if or_operands.len() > 1 {
-        for operand in &or_operands {
-            // Recurse rather than calling the single-operand form directly,
-            // so a nested `&&` inside one `||` operand is decomposed too.
-            apply_condition_narrowing_inverse(operand, scope, ctx);
-        }
-        return;
-    }
-
-    // De Morgan over `&&`: NOT (A && B) = !A || !B.  The operands are
-    // alternatives, not simultaneous facts, so each contributes one branch
-    // of a union: narrow a clone per operand, then merge.
-    let and_operands = collect_and_chain_operands(condition);
-    if and_operands.len() > 1 {
-        let base_scope = scope.clone();
-        let mut branch_scopes: Vec<ScopeState> = Vec::new();
-        for operand in &and_operands {
-            let mut branch = base_scope.clone();
-            apply_condition_narrowing_inverse(operand, &mut branch, ctx);
-            branch_scopes.push(branch);
-        }
-        if let Some(first) = branch_scopes.first() {
-            let mut merged = first.clone();
-            for branch in &branch_scopes[1..] {
-                merged.merge_branch(branch);
-            }
-            // A synthetic key only one branch established is not a fact
-            // about the merge: the other branches say nothing about it, so
-            // the declared type still stands.  Without this,
-            // `!($n === 'self' && $s->isInClass())` left
-            // `$s->getClassReflection()` narrowed to the `null` that one
-            // alternative implies, and a sibling `elseif` that proves the
-            // opposite could no longer widen it back.
-            let branch_refs: Vec<&ScopeState> = branch_scopes.iter().collect();
-            retain_synthetic_keys_common_to_all(&mut merged, &branch_refs);
-            *scope = merged;
-        }
-        return;
-    }
-
-    apply_condition_narrowing_inverse_operand(condition, scope, ctx);
-}
-
 /// Whether a `match (true)` arm failing on `condition` proves the condition
 /// was falsy, so its inverse narrowing can be applied below the arm.
 ///
@@ -601,7 +516,7 @@ pub(crate) fn apply_match_arm_narrowing<'b>(
     for condition in &conditions {
         seed_property_keys_into_scope(condition, scope, ctx);
     }
-    apply_any_leg_narrowing(&conditions, &[], scope, ctx);
+    apply_any_leg_narrowing(&conditions, scope, ctx);
 }
 
 /// Narrow `scope` by one `match (true)` arm condition that was tested and
@@ -721,13 +636,13 @@ pub(crate) fn condition_arm_narrowing<'b>(
     (overrides, impossible)
 }
 
-/// Apply every inverse narrowing rule to a condition that is no longer a
-/// `&&`/`||` chain.
+/// Narrow `scope` to where a condition with no `&&` / `||` at its root
+/// failed.
 ///
-/// [`apply_condition_narrowing_inverse`] does the De Morgan decomposition and
-/// hands each leaf here, so every rule sees the operand it can actually match
-/// instead of the compound expression wrapping it.
-fn apply_condition_narrowing_inverse_operand<'b>(
+/// [`Condition`] composes the operators, so every rule here sees the
+/// operand it can actually match instead of the compound expression
+/// wrapping it.
+pub(crate) fn narrow_leaf_falsey<'b>(
     condition: &'b Expression<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,

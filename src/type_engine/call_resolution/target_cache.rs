@@ -395,7 +395,7 @@ pub(crate) struct TypeEngineCaches {
     _callable_target: CallableTargetCacheGuard,
     _body_infer: BodyInferMemoGuard,
     _out_type: super::out_param::OutTypeMemoGuard,
-    _var_type: crate::type_engine::variable::resolution::VarTypeMemoGuard,
+    _walk: crate::type_engine::variable::forward_walk::WalkMemoGuard,
 }
 
 /// Activate every request-scoped type-engine memo for the current
@@ -413,7 +413,7 @@ pub(crate) fn activate_type_engine_caches() -> TypeEngineCaches {
         _callable_target: with_callable_target_cache(),
         _body_infer: with_body_infer_memo(),
         _out_type: super::out_param::with_out_type_memo(),
-        _var_type: crate::type_engine::variable::resolution::with_var_type_memo(),
+        _walk: crate::type_engine::variable::forward_walk::with_walk_memo(),
     }
 }
 

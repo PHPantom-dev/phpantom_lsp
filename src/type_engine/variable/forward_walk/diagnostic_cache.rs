@@ -233,6 +233,33 @@ pub(crate) fn record_scope_snapshot(offset: u32, scope: &ScopeState) {
     });
 }
 
+/// Record the scope an expression node is evaluated on, at the node's
+/// start offset.
+///
+/// The expression walk calls this for every node it evaluates, so a
+/// lookup at any of them reads the scope that node saw: the right operand
+/// of `&&` its narrowed scope, the argument after it the scope without
+/// that narrowing, an item after a write the scope with the write.  Most
+/// nodes change nothing, so a node whose scope is already what a lookup at
+/// its offset would find records nothing.
+pub(crate) fn record_node_scope(offset: u32, scope: &ScopeState) {
+    if SUSPEND_SNAPSHOT.with(|c| c.get()) > 0 {
+        return;
+    }
+    DIAGNOSTIC_SCOPE.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let Some(map) = borrow.as_mut() else {
+            return;
+        };
+        if let Some((_, floor)) = map.range(..=offset).next_back()
+            && !floor.differs_from(&scope.locals)
+        {
+            return;
+        }
+        map.insert(offset, scope.locals.clone());
+    });
+}
+
 thread_local! {
     /// Non-zero while a nested variable-resolution walk is running.
     /// Consulted by [`record_scope_snapshot`] to suppress snapshot

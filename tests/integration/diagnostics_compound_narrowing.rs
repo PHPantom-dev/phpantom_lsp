@@ -1556,7 +1556,10 @@ function f(?Variable $v, bool $flag): void {
 "#;
     let messages = type_error_messages(&backend, uri, text);
     assert_eq!(messages.len(), 1, "got {messages:?}");
-    assert!(messages[0].contains("?Repro\\Variable") || messages[0].contains("?Variable"));
+    assert!(
+        messages[0].contains("?Repro\\Variable") || messages[0].contains("Repro\\Variable|null"),
+        "got {messages:?}"
+    );
 }
 
 /// Two legs checking two different subjects narrow neither: whichever one

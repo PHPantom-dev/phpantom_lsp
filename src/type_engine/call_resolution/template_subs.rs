@@ -690,6 +690,7 @@ fn walk_closure_body_locals(
                 top_level_scope: None,
                 in_loop: false,
                 template_markers: None,
+                cursor_scope: None,
             };
 
             let mut scope = ScopeState::new();

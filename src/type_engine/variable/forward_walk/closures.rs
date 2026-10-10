@@ -383,6 +383,54 @@ fn try_enter_closure_body<'b>(
     true
 }
 
+/// Resolve the scope at the cursor inside an arrow function's body.
+///
+/// Arrow functions inherit the enclosing scope, with their parameters
+/// seeded on top (using callable inference when available).  The body is
+/// `return <expr>;`, so it writes and narrows what that statement would:
+/// `fn () => $x = $this->make()` assigns `$x`, `fn () => ($x = f()) &&
+/// $x->ok()` reads it back, and `fn ($x) => $x instanceof Foo &&
+/// $x->bar()` reads a `Foo`.  The walk records the scope it reached the
+/// cursor with, as `walk_body_forward` does for a statement.
+///
+/// Kept out of [`try_enter_closure_expr`], which recurses once per link of
+/// a method chain: the scopes held here would otherwise grow every one of
+/// those frames.
+#[inline(never)]
+fn enter_arrow_function_body<'b>(
+    arrow: &'b ArrowFunction<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    inferred_params: Option<&[PhpType]>,
+) {
+    let inferred = inferred_params.unwrap_or(&[]);
+    let filtered_inferred = filter_resolvable_inferred_params(inferred, ctx);
+    seed_closure_params(
+        scope,
+        &arrow.parameter_list,
+        arrow.span().start.offset,
+        &filtered_inferred,
+        ctx,
+    );
+    let at_cursor = CursorScope::default();
+    let mut walked = scope.clone();
+    process_assignment_expr(
+        arrow.expression,
+        &mut walked,
+        &ctx.with_cursor_scope(Some(&at_cursor)),
+    );
+    let reached = at_cursor.take().unwrap_or(walked);
+    // A closure nested in the body (an argument of a call inside it, say)
+    // that holds the cursor has a scope of its own, entered from the scope
+    // the walk reached it with.
+    let mut nested = reached.clone();
+    *scope = if try_enter_closure_expr(arrow.expression, &mut nested, ctx, None) {
+        nested
+    } else {
+        reached
+    };
+}
+
 /// Recursively search an expression for a closure/arrow function
 /// containing the cursor.
 pub(crate) fn try_enter_closure_expr<'b>(
@@ -400,43 +448,7 @@ pub(crate) fn try_enter_closure_expr<'b>(
             if ctx.cursor_offset >= body_span.start.offset
                 && ctx.cursor_offset <= body_span.end.offset
             {
-                // Arrow functions inherit the enclosing scope.
-                // Seed with parameter types, using callable inference
-                // when available.
-                let inferred = inferred_params.unwrap_or(&[]);
-                let filtered_inferred = filter_resolvable_inferred_params(inferred, ctx);
-                seed_closure_params(
-                    scope,
-                    &arrow.parameter_list,
-                    arrow.span().start.offset,
-                    &filtered_inferred,
-                    ctx,
-                );
-                // The body is `return <expr>;`, so it writes what that
-                // statement would: `fn () => $x = $this->make()` assigns
-                // `$x` and `fn () => ($x = f()) && $x->ok()` reads it back.
-                // A cursor in the right-hand side of a root assignment is
-                // left to the recursion below, which applies the write
-                // itself before searching the value for a nested closure.
-                let cursor_in_root_rhs = matches!(
-                    crate::parser::unwrap_parens(arrow.expression),
-                    Expression::Assignment(a)
-                        if ctx.cursor_offset >= a.rhs.span().start.offset
-                            && ctx.cursor_offset <= a.rhs.span().end.offset
-                );
-                if !cursor_in_root_rhs {
-                    process_assignment_expr(arrow.expression, scope, ctx);
-                }
-                // The arrow body is a single return-value expression, so
-                // apply the same cursor narrowing that `walk_body_forward`
-                // applies to a statement body.  This narrows a parameter
-                // referenced after an earlier `&&` conjunct (e.g.
-                // `fn($x) => $x instanceof Foo && $x->bar()`).
-                apply_cursor_ternary_narrowing(arrow.expression, scope, ctx);
-                // Recurse into the body to find nested closures/arrow
-                // functions that may contain the cursor (e.g. a closure
-                // passed as an argument inside the arrow body).
-                try_enter_closure_expr(arrow.expression, scope, ctx, None);
+                enter_arrow_function_body(arrow, scope, ctx, inferred_params);
                 return true;
             }
         }

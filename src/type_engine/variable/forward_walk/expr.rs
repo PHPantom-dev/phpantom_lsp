@@ -10,14 +10,21 @@
 //! each sub-expression to the next, so each one sees the scope at its own
 //! position:
 //!
-//! - Each write is applied where it happens and a snapshot is recorded at
-//!   its end, so a diagnostic lookup further along the expression finds
-//!   the written type.
-//! - The right operand of `&&` / `||` runs on the scope the left one left
-//!   behind, narrowed by what the left one proved (or its inverse, for
-//!   `||`), and the snapshot at its start is recorded from that scope.
-//!   The right operand of `??` and the arms of a ternary or `match` run
-//!   on their own copy, joined with the path where they did not run.
+//! - Each node records the scope it runs on at its start (see
+//!   [`record_node_scope`]), so a diagnostic lookup anywhere in the
+//!   expression finds what was written and proved before that point.  A
+//!   walk to the cursor keeps the scope of the innermost node holding the
+//!   cursor instead (see [`CursorScope`]), which is what hover and
+//!   completion read there.
+//! - A call changes the scope where it runs, once its receiver and
+//!   arguments have: the variables it writes through by-reference
+//!   parameters, and what was known about an object it may have changed.
+//! - A condition ([`process_condition`]) also hands back what each of its
+//!   outcomes proves, as a [`Condition`].  The right operand of `&&` /
+//!   `||` runs on the outcome of the left one that lets it run, and the
+//!   arms of a ternary or `match` on the outcome that selects them.  The
+//!   right operand of `??` and those arms run on their own copy of the
+//!   scope, joined with the path where they did not run when they wrote.
 //! - The expression's own type is still resolved once, by the caller,
 //!   against the scope after the whole expression.  That answer is wrong
 //!   for a sub-expression evaluated before a later write and for the old
@@ -30,6 +37,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::unary::{UnaryPostfixOperator, UnaryPrefixOperator};
 
 use crate::atom::bytes_to_str;
+use crate::type_engine::types::narrowing;
 use crate::types::ResolvedType;
 
 /// The types of sub-expressions recorded where they were evaluated, keyed
@@ -73,7 +81,7 @@ pub(crate) struct ExprResult {
 }
 
 /// Walk `expr` in evaluation order, applying the writes it makes to
-/// `scope` and recording the snapshots described in the module docs.
+/// `scope` and recording the scopes described in the module docs.
 ///
 /// Returns the sub-expression types the caller should resolve the
 /// expression's own value with (see [`resolve_rhs_with_types`]).
@@ -89,6 +97,20 @@ pub(crate) fn process_expr<'b>(
     let mut walk = ExprWalk::default();
     walk.expr(expr, scope, ctx);
     walk.types
+}
+
+/// Walk a condition in evaluation order, applying the writes it makes to
+/// `scope`, and return what each of its outcomes proves.
+///
+/// `scope` is left holding what evaluating the condition left behind,
+/// whichever way it came out; the [`Condition`] hands out the scope for
+/// each outcome.
+pub(crate) fn process_condition<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Condition<'b> {
+    ExprWalk::default().cond(condition, scope, ctx, &[])
 }
 
 /// The state one [`process_expr`] call carries through the expression.
@@ -118,6 +140,10 @@ impl<'b> ExprWalk<'b> {
         scope: &mut ScopeState,
         ctx: &ForwardWalkCtx<'_>,
     ) -> ExprResult {
+        record_node_scope(expr.span().start.offset, scope);
+        if let Some(cursor_scope) = ctx.cursor_scope {
+            cursor_scope.reached(expr, scope, ctx.cursor_offset);
+        }
         let result = match expr {
             Expression::Assignment(assignment) => self.assignment(expr, assignment, scope, ctx),
             Expression::Parenthesized(inner) => self.expr(inner.expression, scope, ctx),
@@ -149,12 +175,10 @@ impl<'b> ExprWalk<'b> {
                 self.step(expr, postfix.operand, step, false, scope, ctx)
             }
             Expression::Binary(bin) => match bin.operator {
-                BinaryOperator::And(_) | BinaryOperator::LowAnd(_) => {
-                    self.chain(expr, ChainKind::And, scope, ctx)
-                }
-                BinaryOperator::Or(_) | BinaryOperator::LowOr(_) => {
-                    self.chain(expr, ChainKind::Or, scope, ctx)
-                }
+                BinaryOperator::And(_)
+                | BinaryOperator::LowAnd(_)
+                | BinaryOperator::Or(_)
+                | BinaryOperator::LowOr(_) => self.short_circuit_value(expr, scope, ctx),
                 BinaryOperator::NullCoalesce(_) => self.coalesce(bin, scope, ctx),
                 _ => {
                     let lhs = self.expr(bin.lhs, scope, ctx);
@@ -171,11 +195,20 @@ impl<'b> ExprWalk<'b> {
                 let index = self.expr(aa.index, scope, ctx);
                 array.or(index)
             }
-            Expression::Call(call) => self.call(call, scope, ctx),
-            Expression::Match(match_expr) => self.match_arms(match_expr, scope, ctx),
-            Expression::Conditional(conditional) => self.conditional(conditional, scope, ctx),
+            Expression::Call(call) => {
+                let evaluated = self.call(call, scope, ctx);
+                evaluated.or(self.effects(expr, scope, ctx))
+            }
+            Expression::Match(match_expr) => self.match_arms(expr, match_expr, scope, ctx),
+            Expression::Conditional(conditional) => self.conditional(expr, conditional, scope, ctx),
+            // A `throw` is an expression since PHP 8, and the value it throws
+            // is built like any other.
+            Expression::Throw(throw_expr) => self.expr(throw_expr.exception, scope, ctx),
             Expression::Instantiation(inst) => match &inst.argument_list {
-                Some(args) => self.arguments(args, scope, ctx),
+                Some(args) => {
+                    let evaluated = self.arguments(args, scope, ctx);
+                    evaluated.or(self.effects(expr, scope, ctx))
+                }
                 None => ExprResult::default(),
             },
             Expression::Array(array) => self.elements(array.elements.iter(), scope, ctx),
@@ -256,7 +289,8 @@ impl<'b> ExprWalk<'b> {
         self.base = saved;
     }
 
-    /// Walk `expr` on `fork`, a copy of the enclosing scope.
+    /// Walk `expr`, which may not run at all (the right operand of `??`, an
+    /// arm of a ternary or `match`), on `fork`, its own copy of the scope.
     fn fork(
         &mut self,
         expr: &'b Expression<'b>,
@@ -305,6 +339,10 @@ impl<'b> ExprWalk<'b> {
             }
         }
         record_scope_snapshot(expr.span().end.offset, scope);
+        // A cursor on the target asks about what was written there.
+        if let Some(cursor_scope) = ctx.cursor_scope {
+            cursor_scope.reached(assignment.lhs, scope, ctx.cursor_offset);
+        }
         ExprResult { wrote: true }
     }
 
@@ -346,53 +384,107 @@ impl<'b> ExprWalk<'b> {
         ExprResult { wrote: true }
     }
 
-    /// A `&&` or `||` chain: each operand after the first runs only when
-    /// every one before it was truthy (`&&`) or falsy (`||`), so it runs
-    /// on the scope the operands before it left, narrowed by what they
-    /// proved.  Snapshots record that scope at each operand's start, so a
-    /// lookup inside it sees both the narrowing and the writes:
-    /// `if (($a = g()) && $a->bar())`.
+    /// A `&&` / `||` whose value is used rather than tested: its operands
+    /// still short-circuit, so it is walked as the condition it is.
+    ///
+    /// Kept out of line so the [`Condition`] it builds is not part of every
+    /// [`Self::expr`] frame.
     #[inline(never)]
-    fn chain(
+    fn short_circuit_value(
         &mut self,
         expr: &'b Expression<'b>,
-        kind: ChainKind,
         scope: &mut ScopeState,
         ctx: &ForwardWalkCtx<'_>,
     ) -> ExprResult {
-        let operands = match kind {
-            ChainKind::And => collect_and_chain_operands(expr),
-            ChainKind::Or => collect_or_chain_operands(expr),
-        };
-        let Some((first, rest)) = operands.split_first() else {
-            return ExprResult::default();
-        };
-        let mut result = self.expr(first, scope, ctx);
-        if rest.is_empty() {
-            return result;
+        ExprResult {
+            wrote: self.cond(expr, scope, ctx, &[]).wrote,
         }
+    }
 
-        let diagnostics = is_diagnostic_scope_active();
-        let mut path = scope.clone();
-        narrow_by_operand(kind, first, &mut path, ctx);
-        for (i, operand) in rest.iter().enumerate() {
-            if diagnostics {
-                record_scope_snapshot(operand.span().start.offset, &path);
-                record_scope_snapshot_recursive(operand, &path);
-            }
-            let operand_result = self.fork(operand, &mut path, ctx);
-            if operand_result.wrote {
-                // The chain can stop before this operand, so what it wrote
-                // joins the path where it never ran.
-                result.wrote = true;
-                self.flush(scope, ctx);
-                scope.merge_branch(&path);
-            }
-            if i + 1 < rest.len() {
-                narrow_by_operand(kind, operand, &mut path, ctx);
-            }
+    /// Walk a condition, see [`process_condition`].
+    ///
+    /// `pinned` names the subjects the conjuncts before this condition
+    /// pinned to a definite class (see [`Condition::or`]).
+    fn cond(
+        &mut self,
+        expr: &'b Expression<'b>,
+        scope: &mut ScopeState,
+        ctx: &ForwardWalkCtx<'_>,
+        pinned: &[String],
+    ) -> Condition<'b> {
+        record_node_scope(expr.span().start.offset, scope);
+        if let Some(cursor_scope) = ctx.cursor_scope {
+            cursor_scope.reached(expr, scope, ctx.cursor_offset);
         }
-        result
+        let condition = match split_condition(expr) {
+            Split::Leaf(leaf) => self.leaf(leaf, scope, ctx, pinned),
+            Split::Not(inner) => Condition::not(self.cond(inner, scope, ctx, &[])),
+            Split::And(lhs, rhs) => {
+                let (left, right) = self.short_circuit(true, lhs, rhs, scope, ctx, pinned);
+                Condition::and(left, right)
+            }
+            Split::Or(lhs, rhs) => {
+                // What a leg concludes about a member path is checked against
+                // what the scope already knew about it, so the paths every
+                // leg names are seeded before the legs split.
+                seed_property_keys_into_scope(expr, scope, ctx);
+                let base = scope.clone();
+                let (left, right) = self.short_circuit(false, lhs, rhs, scope, ctx, pinned);
+                Condition::or(left, right, base, pinned.to_vec())
+            }
+        };
+        self.done(
+            expr,
+            ExprResult {
+                wrote: condition.wrote,
+            },
+        );
+        condition
+    }
+
+    /// One operand of a condition that is not itself `&&`, `||` or `!`.
+    fn leaf(
+        &mut self,
+        leaf: &'b Expression<'b>,
+        scope: &mut ScopeState,
+        ctx: &ForwardWalkCtx<'_>,
+        pinned: &[String],
+    ) -> Condition<'b> {
+        let wrote = self.expr(leaf, scope, ctx).wrote;
+        Condition::leaf(leaf, scope.clone(), wrote, pinned)
+    }
+
+    /// `lhs && rhs` (`and`) or `lhs || rhs`: the right operand runs only
+    /// when the left one was truthy (`&&`) or falsy (`||`), so it runs on
+    /// the scope the left one left in that outcome, and a lookup inside it
+    /// sees both the narrowing and the writes: `if (($a = g()) && $a->bar())`.
+    #[inline(never)]
+    fn short_circuit(
+        &mut self,
+        and: bool,
+        lhs: &'b Expression<'b>,
+        rhs: &'b Expression<'b>,
+        scope: &mut ScopeState,
+        ctx: &ForwardWalkCtx<'_>,
+        pinned: &[String],
+    ) -> (Condition<'b>, Condition<'b>) {
+        let left = self.cond(lhs, scope, ctx, pinned);
+        let (mut path, rhs_pinned) = if and {
+            let rhs_pinned = with_pinned(pinned, left.pinned(ctx));
+            (left.truthy(ctx).clone(), rhs_pinned)
+        } else {
+            (left.falsey(ctx).clone(), pinned.to_vec())
+        };
+        let saved = self.enter_fork();
+        let right = self.cond(rhs, &mut path, ctx, &rhs_pinned);
+        self.leave_fork(saved, ExprResult { wrote: right.wrote }, &path, ctx);
+        if right.wrote {
+            // The condition can stop before the right operand, so what it
+            // wrote joins the path where it never ran.
+            self.flush(scope, ctx);
+            scope.merge_branch(&path);
+        }
+        (left, right)
     }
 
     /// `$a ?? $b`: the right operand runs only when the left one is null.
@@ -435,6 +527,42 @@ impl<'b> ExprWalk<'b> {
         receiver.or(self.arguments(args, scope, ctx))
     }
 
+    /// What the call (or instantiation) `expr` changes besides producing
+    /// its value, once its receiver and arguments have run: the variables
+    /// it writes through by-reference parameters (see
+    /// [`process_pass_by_ref`]), what was known about an object it changed
+    /// (see [`process_call_effects`]), and the type a `@phpstan-self-out`
+    /// method leaves its receiver with (see [`process_self_out_narrowing`]).
+    #[inline(never)]
+    fn effects(
+        &mut self,
+        expr: &'b Expression<'b>,
+        scope: &mut ScopeState,
+        ctx: &ForwardWalkCtx<'_>,
+    ) -> ExprResult {
+        let mut after = scope.clone();
+        process_pass_by_ref(expr, &mut after, ctx);
+        process_call_effects(expr, &mut after, ctx);
+        process_self_out_narrowing(expr, &mut after, ctx);
+        // A cursor on a variable the call wrote through asks about what the
+        // call left there: `$m` in `preg_match('/(a)/', $s, $m)`.
+        if let Some(cursor_scope) = ctx.cursor_scope
+            && let Some(written) = argument_at_cursor(expr, ctx.cursor_offset)
+            && narrowing_changed_types(scope.get(written), after.get(written))
+        {
+            cursor_scope.record(&after);
+        }
+        let wrote = after.locals.differs_from(&scope.locals);
+        if wrote {
+            // The call's own value, and everything it read on the way, came
+            // from the scope before it changed anything.
+            self.done(expr, ExprResult::default());
+            self.flush(scope, ctx);
+        }
+        *scope = after;
+        ExprResult { wrote }
+    }
+
     /// The arguments of a `?->` call run only when the receiver is not
     /// null, so they see it narrowed, and what they write is joined with
     /// the path where the call short-circuited and wrote nothing.
@@ -445,18 +573,12 @@ impl<'b> ExprWalk<'b> {
         scope: &mut ScopeState,
         ctx: &ForwardWalkCtx<'_>,
     ) -> ExprResult {
-        let diagnostics = is_diagnostic_scope_active();
         let mut ran = scope.clone();
         narrow_nullsafe_call_receiver(call.object, &mut ran, ctx);
         let saved = self.enter_fork();
         let mut result = ExprResult::default();
         for arg in call.argument_list.arguments.iter() {
-            let value = arg.value();
-            if diagnostics {
-                record_scope_snapshot(value.span().start.offset, &ran);
-                record_scope_snapshot_recursive(value, &ran);
-            }
-            result = result.or(self.expr(value, &mut ran, ctx));
+            result = result.or(self.expr(arg.value(), &mut ran, ctx));
         }
         self.leave_fork(saved, result, &ran, ctx);
         if result.wrote {
@@ -464,9 +586,7 @@ impl<'b> ExprWalk<'b> {
         }
         scope.merge_branch(&ran);
         // What follows the call reads the receiver as it was.
-        if diagnostics {
-            record_scope_snapshot(call.argument_list.span().end.offset, scope);
-        }
+        record_node_scope(call.argument_list.span().end.offset, scope);
         result
     }
 
@@ -504,61 +624,139 @@ impl<'b> ExprWalk<'b> {
         result
     }
 
+    /// Join the scopes the arms of a ternary or `match` left into `scope`,
+    /// when one of them wrote.  Arms that did not write leave `scope` as the
+    /// expression found it: joining what each arm proved would only widen
+    /// the narrowing back to the type it started from.
+    ///
+    /// Either way, what follows the expression reads the joined scope rather
+    /// than the last arm's narrowing.
+    fn join_arms(
+        &mut self,
+        expr: &'b Expression<'b>,
+        wrote: bool,
+        arms: Vec<ScopeState>,
+        scope: &mut ScopeState,
+        ctx: &ForwardWalkCtx<'_>,
+    ) {
+        if wrote {
+            self.flush(scope, ctx);
+            let mut arms = arms.into_iter();
+            if let Some(mut joined) = arms.next() {
+                for arm in arms {
+                    joined.merge_branch(&arm);
+                }
+                *scope = joined;
+            }
+        }
+        record_node_scope(expr.span().end.offset, scope);
+    }
+
     /// Only one arm of a `match` runs, so each arm is walked against its
-    /// own copy of the scope and the copies are joined: an arm that does
-    /// not run cannot leak a definite assignment.  A match with no matching
-    /// arm throws `UnhandledMatchError` rather than falling through, so
-    /// unlike a `switch` without `default` there is no "no arm ran" scope
-    /// to fold into the join.
+    /// own scope and the scopes are joined: an arm that does not run cannot
+    /// leak a definite assignment.  A match with no matching arm throws
+    /// `UnhandledMatchError` rather than falling through, so unlike a
+    /// `switch` without `default` there is no "no arm ran" scope to fold
+    /// into the join.
+    ///
+    /// A `match ($x::class)` arm sees its subject narrowed to the classes it
+    /// names, and a `match (true)` arm runs where one of its conditions held
+    /// and every condition above it did not.
     #[inline(never)]
     fn match_arms(
         &mut self,
+        expr: &'b Expression<'b>,
         match_expr: &'b Match<'b>,
         scope: &mut ScopeState,
         ctx: &ForwardWalkCtx<'_>,
     ) -> ExprResult {
         let subject = self.expr(match_expr.expression, scope, ctx);
-        let mut arms = ExprResult::default();
-        let mut merged: Option<ScopeState> = None;
+        if match_expr.expression.is_true() {
+            return subject.or(self.match_true_arms(expr, match_expr, scope, ctx));
+        }
+        let class_subject = narrowing::match_class_subject_var(match_expr.expression);
+        let mut wrote = false;
+        let mut arms = Vec::with_capacity(match_expr.arms.len());
         for arm in match_expr.arms.iter() {
             let mut arm_scope = scope.clone();
-            arms = arms.or(self.fork(arm.expression(), &mut arm_scope, ctx));
-            match &mut merged {
-                Some(merged) => merged.merge_branch(&arm_scope),
-                None => merged = Some(arm_scope),
+            if let (Some(var), MatchArm::Expression(expr_arm)) = (class_subject, arm) {
+                apply_class_match_arm_narrowing(var, expr_arm, &mut arm_scope, ctx);
             }
+            wrote |= self.fork(arm.expression(), &mut arm_scope, ctx).wrote;
+            arms.push(arm_scope);
         }
-        if let Some(merged) = merged {
-            if arms.wrote {
-                self.flush(scope, ctx);
-            }
-            *scope = merged;
+        self.join_arms(expr, wrote, arms, scope, ctx);
+        ExprResult {
+            wrote: subject.wrote || wrote,
         }
-        subject.or(arms)
     }
 
-    /// Only one branch of a ternary runs; see [`Self::match_arms`].
+    /// The arms of a `match (true)`.
+    ///
+    /// Reaching an arm means every condition above it was tested and was
+    /// not `true`, so the inverse of each holds in its body, exactly as in
+    /// an `elseif` chain; `default` runs only once every condition failed,
+    /// wherever it is written.  A condition is itself tested only once
+    /// every condition before it failed, so a chain or a ternary inside it
+    /// starts from that.
+    #[inline(never)]
+    fn match_true_arms(
+        &mut self,
+        expr: &'b Expression<'b>,
+        match_expr: &'b Match<'b>,
+        scope: &mut ScopeState,
+        ctx: &ForwardWalkCtx<'_>,
+    ) -> ExprResult {
+        let mut failed = scope.clone();
+        let mut default_arm = None;
+        let mut wrote = false;
+        let mut arms = Vec::with_capacity(match_expr.arms.len());
+        for arm in match_expr.arms.iter() {
+            match arm {
+                MatchArm::Expression(expr_arm) => {
+                    let mut arm_scope = failed.clone();
+                    apply_match_arm_narrowing(expr_arm, &mut arm_scope, ctx);
+                    for condition in expr_arm.conditions.iter() {
+                        self.fork(condition, &mut failed.clone(), ctx);
+                        apply_failed_match_condition_narrowing(condition, &mut failed, ctx);
+                    }
+                    wrote |= self.fork(expr_arm.expression, &mut arm_scope, ctx).wrote;
+                    arms.push(arm_scope);
+                }
+                MatchArm::Default(def_arm) => default_arm = Some(def_arm.expression),
+            }
+        }
+        if let Some(default_arm) = default_arm {
+            wrote |= self.fork(default_arm, &mut failed, ctx).wrote;
+            arms.push(failed);
+        }
+        self.join_arms(expr, wrote, arms, scope, ctx);
+        ExprResult { wrote }
+    }
+
+    /// Only one arm of a ternary runs; see [`Self::match_arms`].  Each runs
+    /// where the condition came out its way: `$x instanceof Foo ? $x->foo()
+    /// : null` reads a `Foo`, and so does the short `$x ?: …`'s value.
     #[inline(never)]
     fn conditional(
         &mut self,
+        expr: &'b Expression<'b>,
         conditional: &'b Conditional<'b>,
         scope: &mut ScopeState,
         ctx: &ForwardWalkCtx<'_>,
     ) -> ExprResult {
-        let condition = self.expr(conditional.condition, scope, ctx);
-        let mut then_scope = scope.clone();
-        let mut arms = ExprResult::default();
+        let condition = self.cond(conditional.condition, scope, ctx, &[]);
+        let mut then_scope = condition.truthy(ctx).clone();
+        let mut wrote = false;
         if let Some(then_expr) = conditional.then {
-            arms = self.fork(then_expr, &mut then_scope, ctx);
+            wrote |= self.fork(then_expr, &mut then_scope, ctx).wrote;
         }
-        let mut else_scope = scope.clone();
-        arms = arms.or(self.fork(conditional.r#else, &mut else_scope, ctx));
-        if arms.wrote {
-            self.flush(scope, ctx);
+        let mut else_scope = condition.falsey(ctx).clone();
+        wrote |= self.fork(conditional.r#else, &mut else_scope, ctx).wrote;
+        self.join_arms(expr, wrote, vec![then_scope, else_scope], scope, ctx);
+        ExprResult {
+            wrote: condition.wrote || wrote,
         }
-        then_scope.merge_branch(&else_scope);
-        *scope = then_scope;
-        condition.or(arms)
     }
 }
 
@@ -570,16 +768,23 @@ impl ExprResult {
     }
 }
 
-/// Narrow `path` by what one chain operand proved for the operands after
-/// it: that it was truthy (`&&`) or falsy (`||`).
-fn narrow_by_operand<'b>(
-    kind: ChainKind,
-    operand: &'b Expression<'b>,
-    path: &mut ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    match kind {
-        ChainKind::And => apply_condition_narrowing(operand, path, ctx),
-        ChainKind::Or => apply_condition_narrowing_inverse(operand, path, ctx),
-    }
+/// The variable passed directly as an argument of the call (or
+/// instantiation) `expr` that holds the cursor, if any.
+fn argument_at_cursor<'b>(expr: &'b Expression<'b>, cursor: u32) -> Option<&'b str> {
+    let args = match expr {
+        Expression::Call(Call::Function(call)) => &call.argument_list,
+        Expression::Call(Call::Method(call)) => &call.argument_list,
+        Expression::Call(Call::NullSafeMethod(call)) => &call.argument_list,
+        Expression::Call(Call::StaticMethod(call)) => &call.argument_list,
+        Expression::Instantiation(inst) => inst.argument_list.as_ref()?,
+        _ => return None,
+    };
+    args.arguments.iter().find_map(|arg| match arg.value() {
+        Expression::Variable(Variable::Direct(dv)) => {
+            let span = dv.span();
+            (span.start.offset <= cursor && cursor <= span.end.offset)
+                .then(|| bytes_to_str(dv.name))
+        }
+        _ => None,
+    })
 }

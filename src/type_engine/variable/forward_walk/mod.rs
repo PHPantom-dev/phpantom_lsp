@@ -55,6 +55,7 @@ mod by_ref;
 mod callable_inference;
 mod closures;
 mod cond_narrowing;
+mod condition;
 mod control_flow;
 mod diagnostic_cache;
 mod diagnostic_walk;
@@ -68,7 +69,6 @@ mod reachability;
 mod readonly_properties;
 mod receiver_mutation;
 mod scope_state;
-mod snapshot_narrowing;
 mod static_locals;
 mod throw_points;
 mod var_docblocks;
@@ -82,6 +82,7 @@ pub(crate) use by_ref::*;
 pub(crate) use callable_inference::*;
 pub(crate) use closures::*;
 pub(crate) use cond_narrowing::*;
+pub(crate) use condition::*;
 pub(crate) use control_flow::*;
 pub(crate) use diagnostic_cache::*;
 pub(crate) use diagnostic_walk::*;
@@ -94,7 +95,6 @@ pub(crate) use param_seeding::*;
 pub(crate) use reachability::*;
 pub(crate) use receiver_mutation::*;
 pub(crate) use scope_state::*;
-pub(crate) use snapshot_narrowing::*;
 pub(crate) use throw_points::*;
 pub(crate) use var_docblocks::*;
 pub(crate) use walk_ctx::*;
@@ -132,11 +132,13 @@ pub(crate) fn walk_body_forward<'b>(
 
         // Check whether the cursor is inside a closure/arrow function
         // within this statement.  If so, we need to resolve within
-        // that closure's scope instead.
+        // that closure's scope instead.  The closure's body is walked
+        // with a cursor scope of its own; the statement's is not the
+        // place to record anything the search walks on the way there.
         let stmt_span = stmt.span();
         if ctx.cursor_offset >= stmt_span.start.offset
             && ctx.cursor_offset <= stmt_span.end.offset
-            && try_enter_closure(stmt, scope, ctx)
+            && try_enter_closure(stmt, scope, &ctx.with_cursor_scope(None))
         {
             return;
         }
@@ -159,80 +161,19 @@ pub(crate) fn walk_body_forward<'b>(
             record_scope_snapshot(stmt_span.start.offset, scope);
         }
 
-        process_statement(stmt, scope, ctx);
-
-        // On the per-request path, when the cursor is inside a ternary
-        // instanceof branch or match(true) arm, apply narrowing to the
-        // scope so the variable lookup sees the narrowed type.
-        if cursor_inside_stmt && !record_snapshots {
-            let expr_opt = match stmt {
-                Statement::Expression(es) => Some(es.expression),
-                Statement::Return(ret) => ret.value,
-                _ => None,
-            };
-            if let Some(expr) = expr_opt {
-                apply_cursor_ternary_narrowing(expr, scope, ctx);
+        if cursor_inside_stmt {
+            // The cursor can sit deep inside this statement's expression,
+            // where the scope is not the one around the statement: in the
+            // right operand of `&&`, in a ternary arm, after a write the
+            // expression made earlier.  The expression walk records the
+            // scope it reached the cursor with, and that is the answer.
+            let at_cursor = CursorScope::default();
+            process_statement(stmt, scope, &ctx.with_cursor_scope(Some(&at_cursor)));
+            if let Some(at_cursor) = at_cursor.take() {
+                *scope = at_cursor;
             }
-
-            // Also apply narrowing inside if/while conditions.
-            // E.g. `if ($e instanceof Foo && $e->errorInfo)` — the
-            // cursor on `$e->errorInfo` needs instanceof narrowing.
-            match stmt {
-                Statement::If(if_stmt) => {
-                    // An `elseif`'s own condition narrows its later `&&`
-                    // operands exactly as the leading `if`'s does, so both
-                    // are offered the cursor pass.
-                    for condition in
-                        std::iter::once(if_stmt.condition).chain(elseif_conditions(&if_stmt.body))
-                    {
-                        let cond_span = condition.span();
-                        if ctx.cursor_offset >= cond_span.start.offset
-                            && ctx.cursor_offset <= cond_span.end.offset
-                        {
-                            apply_cursor_ternary_narrowing(condition, scope, ctx);
-                            break;
-                        }
-                    }
-                }
-                Statement::While(while_stmt) => {
-                    let cond_span = while_stmt.condition.span();
-                    if ctx.cursor_offset >= cond_span.start.offset
-                        && ctx.cursor_offset <= cond_span.end.offset
-                    {
-                        apply_cursor_ternary_narrowing(while_stmt.condition, scope, ctx);
-                    }
-                }
-                Statement::DoWhile(dw) => {
-                    let cond_span = dw.condition.span();
-                    if ctx.cursor_offset >= cond_span.start.offset
-                        && ctx.cursor_offset <= cond_span.end.offset
-                    {
-                        apply_cursor_ternary_narrowing(dw.condition, scope, ctx);
-                    }
-                }
-                Statement::Foreach(foreach) => {
-                    let expr_span = foreach.expression.span();
-                    if ctx.cursor_offset >= expr_span.start.offset
-                        && ctx.cursor_offset <= expr_span.end.offset
-                    {
-                        apply_cursor_ternary_narrowing(foreach.expression, scope, ctx);
-                    }
-                }
-                // A `for` header holds a comma-separated condition list, so
-                // each entry needs its own containment check.
-                Statement::For(for_stmt) => {
-                    for condition in for_stmt.conditions.iter() {
-                        let cond_span = condition.span();
-                        if ctx.cursor_offset >= cond_span.start.offset
-                            && ctx.cursor_offset <= cond_span.end.offset
-                        {
-                            apply_cursor_ternary_narrowing(condition, scope, ctx);
-                            break;
-                        }
-                    }
-                }
-                _ => {}
-            }
+        } else {
+            process_statement(stmt, scope, ctx);
         }
 
         // When the diagnostic scope cache is active, walk closure and
@@ -248,6 +189,81 @@ pub(crate) fn walk_body_forward<'b>(
             record_scope_snapshot(stmt_span.end.offset, scope);
         }
     }
+}
+
+thread_local! {
+    /// When `Some`, the scope each walk to one position reached it with,
+    /// keyed by [`WalkKey`].  Activated with the rest of the request-scoped
+    /// type-engine memos.
+    ///
+    /// A walk answers every name asked about at its position, so the
+    /// variables and member paths one request resolves at the cursor
+    /// (`$this->a`, `$this->a->b()`, `$x`) share one walk of the body
+    /// instead of walking it again per name.
+    static WALK_MEMO: RefCell<Option<std::collections::HashMap<WalkKey, ScopeState>>> =
+        const { RefCell::new(None) };
+}
+
+/// What identifies one walk to a position: the source (`(pointer,
+/// length)`, see `variable::resolution`'s `VarQueryKey`), the span of the
+/// walked body, the cursor, the class the body belongs to, the
+/// body-inference context it is walked under (a body read for its return
+/// type seeds its parameters from the call site), and whether `global`
+/// statements could read the file's top-level scope (a walk started while
+/// that scope is still being built goes without it).
+type WalkKey = (
+    (usize, usize),
+    (u32, u32),
+    u32,
+    crate::atom::Atom,
+    u64,
+    bool,
+);
+
+/// The guard [`with_walk_memo`] hands back.
+pub(crate) type WalkMemoGuard =
+    crate::type_engine::MemoGuard<std::collections::HashMap<WalkKey, ScopeState>>;
+
+/// Activate [`WALK_MEMO`] for the current thread.  Nested activation is a
+/// no-op.
+pub(crate) fn with_walk_memo() -> WalkMemoGuard {
+    crate::type_engine::activate_memo(&WALK_MEMO)
+}
+
+/// The scope a walk of the body spanning `body` reaches the cursor with:
+/// `walk`'s answer, unless this request already walked there.
+fn walked_scope(
+    ctx: &ForwardWalkCtx<'_>,
+    body: (u32, u32),
+    walk: impl FnOnce() -> ScopeState,
+) -> ScopeState {
+    let key: WalkKey = (
+        (ctx.content.as_ptr() as usize, ctx.content.len()),
+        body,
+        ctx.cursor_offset,
+        ctx.current_class.name,
+        crate::type_engine::call_resolution::body_inference_context(),
+        ctx.top_level_scope.is_some(),
+    );
+    if let Some(hit) = WALK_MEMO.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|memo| memo.get(&key).cloned())
+    }) {
+        return hit;
+    }
+    let scope = walk();
+    WALK_MEMO.with(|cell| {
+        if let Some(memo) = cell.borrow_mut().as_mut() {
+            memo.insert(key, scope.clone());
+        }
+    });
+    scope
+}
+
+/// Where the last of `statements` ends, or `0` when there are none.
+fn statements_end(statements: &[&Statement<'_>]) -> u32 {
+    statements.last().map_or(0, |s| s.span().end.offset)
 }
 
 /// Resolve the target variable from a method body using the forward
@@ -266,36 +282,37 @@ pub(crate) fn resolve_in_method_body<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     let ctx = &ctx.for_declaration(method_span_start);
-    let mut scope = ScopeState::new();
+    let body: Vec<&Statement<'_>> = body_statements.collect();
+    let scope = walked_scope(ctx, (method_span_start, statements_end(&body)), || {
+        let mut scope = ScopeState::new();
 
-    let method_name = method_ctx.map(|(n, _)| n);
-    if !is_static {
-        seed_this(&mut scope, ctx);
-        readonly_properties::seed_constructor_readonly_properties(&mut scope, method_name, ctx);
-    }
+        let method_name = method_ctx.map(|(n, _)| n);
+        if !is_static {
+            seed_this(&mut scope, ctx);
+            readonly_properties::seed_constructor_readonly_properties(&mut scope, method_name, ctx);
+        }
 
-    let has_scope_attr = method_ctx.is_some_and(|(_, s)| s);
-    seed_params(
-        &mut scope,
-        parameters,
-        method_span_start,
-        method_name,
-        has_scope_attr,
-        ctx,
-    );
+        let has_scope_attr = method_ctx.is_some_and(|(_, s)| s);
+        seed_params(
+            &mut scope,
+            parameters,
+            method_span_start,
+            method_name,
+            has_scope_attr,
+            ctx,
+        );
 
-    // Suspend snapshot recording: this is a transient lookup of
-    // `var_name`'s type, not the authoritative scope build, so it must
-    // not write into an active diagnostic scope cache.  This body's
-    // `return`s likewise belong to it, not to any closure being walked
-    // for its by-reference captures further out.
-    {
+        // Suspend snapshot recording: this is a transient lookup, not the
+        // authoritative scope build, so it must not write into an active
+        // diagnostic scope cache.  This body's `return`s likewise belong
+        // to it, not to any closure being walked for its by-reference
+        // captures further out.
         let _suspend = suspend_snapshot_recording();
         let _barrier = suspend_return_edges();
-        let body: Vec<&Statement<'_>> = body_statements.collect();
         static_locals::seed_static_locals(&mut scope, &body, ctx);
         walk_body_forward(body.iter().copied(), &mut scope, ctx);
-    }
+        scope
+    });
 
     // Return `Some(types)` when the variable exists in scope (even if
     // the type list is empty — that means "unknown/narrowed-away"),
@@ -363,26 +380,29 @@ pub(crate) fn resolve_in_function_body<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     let ctx = &ctx.for_declaration(func.span().start.offset);
-    let mut scope = ScopeState::new();
+    let func_span = func.span();
+    let scope = walked_scope(ctx, (func_span.start.offset, func_span.end.offset), || {
+        let mut scope = ScopeState::new();
 
-    seed_params(
-        &mut scope,
-        func.parameter_list.parameters.iter(),
-        func.span().start.offset,
-        None,
-        false, // standalone functions are never scope methods
-        ctx,
-    );
+        seed_params(
+            &mut scope,
+            func.parameter_list.parameters.iter(),
+            func.span().start.offset,
+            None,
+            false, // standalone functions are never scope methods
+            ctx,
+        );
 
-    // Suspend snapshot recording (see `resolve_in_method_body`): this
-    // transient lookup must not pollute an active diagnostic scope cache.
-    {
+        // Suspend snapshot recording (see `resolve_in_method_body`): this
+        // transient lookup must not pollute an active diagnostic scope
+        // cache.
         let _suspend = suspend_snapshot_recording();
         let _barrier = suspend_return_edges();
         let body: Vec<&Statement<'_>> = func.body.statements.iter().collect();
         static_locals::seed_static_locals(&mut scope, &body, ctx);
         walk_body_forward(body.iter().copied(), &mut scope, ctx);
-    }
+        scope
+    });
 
     // Return `Some` when the variable exists in scope (even with
     // empty types), `None` when it was never seen.
@@ -413,20 +433,26 @@ pub(crate) fn resolve_in_top_level<'b>(
     statements: impl Iterator<Item = &'b Statement<'b>>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    let mut scope = ScopeState::new();
+    let statements: Vec<&Statement<'_>> = statements.collect();
+    let span = (
+        statements.first().map_or(0, |s| s.span().start.offset),
+        statements_end(&statements),
+    );
+    let scope = walked_scope(ctx, span, || {
+        let mut scope = ScopeState::new();
 
-    seed_superglobals(&mut scope);
+        seed_superglobals(&mut scope);
 
-    // Suspend snapshot recording (see `resolve_in_method_body`): this
-    // transient lookup must not pollute an active diagnostic scope
-    // cache.  Its statements can even belong to another file (return-type
-    // inference of a called function), whose offsets would otherwise
-    // collide with the outer file's.
-    {
+        // Suspend snapshot recording (see `resolve_in_method_body`): this
+        // transient lookup must not pollute an active diagnostic scope
+        // cache.  Its statements can even belong to another file
+        // (return-type inference of a called function), whose offsets
+        // would otherwise collide with the outer file's.
         let _suspend = suspend_snapshot_recording();
         let _barrier = suspend_return_edges();
-        walk_body_forward(statements, &mut scope, ctx);
-    }
+        walk_body_forward(statements.iter().copied(), &mut scope, ctx);
+        scope
+    });
 
     // Return `Some` when the variable exists in scope (even with
     // empty types), `None` when it was never seen.
@@ -440,19 +466,27 @@ pub(crate) fn resolve_in_top_level<'b>(
 /// Walk top-level statements to build a scope of variable types for
 /// `global` keyword resolution.  This runs the standard forward walk
 /// over the top-level statements (skipping class/function/interface/
-/// enum/trait bodies, which have isolated scopes).
-pub(crate) fn walk_top_level_for_globals<'b>(
+/// enum/trait bodies, which have isolated scopes), once per request.
+pub(crate) fn top_level_scope_for_globals<'b>(
     statements: impl Iterator<Item = &'b Statement<'b>>,
-    scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) {
-    seed_superglobals(scope);
-    // Suspend snapshot recording (see `resolve_in_method_body`): this
-    // transient `global`-resolution walk must not pollute an active
-    // diagnostic scope cache.
-    let _suspend = suspend_snapshot_recording();
-    let _barrier = suspend_return_edges();
-    walk_body_forward(statements, scope, ctx);
+) -> ScopeState {
+    let statements: Vec<&Statement<'_>> = statements.collect();
+    let span = (
+        statements.first().map_or(0, |s| s.span().start.offset),
+        statements_end(&statements),
+    );
+    walked_scope(ctx, span, || {
+        let mut scope = ScopeState::new();
+        seed_superglobals(&mut scope);
+        // Suspend snapshot recording (see `resolve_in_method_body`): this
+        // transient `global`-resolution walk must not pollute an active
+        // diagnostic scope cache.
+        let _suspend = suspend_snapshot_recording();
+        let _barrier = suspend_return_edges();
+        walk_body_forward(statements.iter().copied(), &mut scope, ctx);
+        scope
+    })
 }
 
 // ─── Generator yield reverse inference ──────────────────────────────────────

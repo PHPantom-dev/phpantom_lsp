@@ -9,13 +9,13 @@ use std::sync::Arc;
 use crate::atom::{Atom, atom, bytes_to_str};
 use crate::ci_map::fold;
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::{AssertionKind, ClassInfo, ClassLikeKind, ResolvedType};
+use crate::types::{ClassInfo, ClassLikeKind, ResolvedType};
 
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 use super::super::conditional::extract_class_string_from_expr;
-use crate::type_engine::resolver::{FunctionLoaderFn, ScopeVarResolverFn, VarResolutionCtx};
+use crate::type_engine::resolver::{FunctionLoaderFn, ScopeVarResolverFn};
 
 use super::*;
 
@@ -159,33 +159,9 @@ pub(in crate::type_engine) fn try_extract_member_exists_guard(
     }
 }
 
-/// Check whether a statement unconditionally exits the current scope.
-///
-/// A statement unconditionally exits if every code path through it
-/// ends with `return`, `throw`, `exit`, `continue`, or `break`.  This is
-/// used to detect guard clause patterns like:
-///
-/// ```text
-/// if (!$var instanceof Foo) {
-///     return;
-/// }
-/// // $var is Foo here
-/// ```
-///
-/// A call to a function or method declared `never` also exits, which
-/// takes type information rather than the AST alone; [`ExitCtx`] carries
-/// what that lookup needs.  The structural rules live in
-/// [`statement_leaves_block`], shared with the unreachable-code
-/// diagnostic, which asks the same question without types.
-pub(in crate::type_engine) fn statement_unconditionally_exits(
-    stmt: &Statement<'_>,
-    ctx: &ExitCtx<'_>,
-) -> bool {
-    statement_leaves_block(stmt, &|expr| expression_is_never_call(expr, ctx))
-}
-
-/// [`statement_unconditionally_exits`] for a statement list: whether
-/// control is gone by the end of it.  See [`statements_leave_block`].
+/// Whether every path through `stmts` leaves the block they sit in (see
+/// [`statements_leave_block`]), counting a call to a `never`-returning
+/// function or method as leaving it.
 pub(in crate::type_engine) fn statements_unconditionally_exit<'s>(
     stmts: impl Iterator<Item = &'s Statement<'s>>,
     ctx: &ExitCtx<'_>,
@@ -323,25 +299,12 @@ pub(crate) fn contains_entry_label(stmt: &Statement<'_>) -> bool {
     }
 }
 
-/// Check whether an `if` body's then-branch unconditionally exits.
-/// Used for guard clause detection where we only need the then-body
-/// to exit (no else clause required).
-fn then_body_unconditionally_exits(body: &IfBody<'_>, ctx: &ExitCtx<'_>) -> bool {
-    match body {
-        IfBody::Statement(stmt_body) => statement_unconditionally_exits(stmt_body.statement, ctx),
-        IfBody::ColonDelimited(colon_body) => {
-            statements_unconditionally_exit(colon_body.statements.iter(), ctx)
-        }
-    }
-}
-
-/// The type information [`statement_unconditionally_exits`] needs to
+/// The type information [`statements_unconditionally_exit`] needs to
 /// recognise a call to a `never`-returning function or method.
 ///
 /// Every consumer that asks "does this branch terminate?" builds one
 /// from its own resolution context, so a guard clause ending in
-/// `abort()` terminates the branch identically for local variables
-/// (forward walker) and for properties (property narrowing).
+/// `abort()` terminates the branch wherever the question comes from.
 pub(in crate::type_engine) struct ExitCtx<'a> {
     /// Enclosing class, used for `$this->…`, `self::`, `static::` and
     /// `parent::` receivers and for namespace-relative name resolution.
@@ -360,28 +323,6 @@ pub(in crate::type_engine) struct ExitCtx<'a> {
     /// `app()->abort()` and `$this->aborter->fail()` terminate a branch
     /// the same way `$app->abort()` does.  See [`ReceiverResolverFn`].
     pub receiver_resolver: ReceiverResolverFn<'a>,
-}
-
-impl<'a> ExitCtx<'a> {
-    /// Build an exit context from a variable-resolution context.
-    ///
-    /// The receiver resolver is supplied separately because the closure
-    /// it wraps has to outlive the context, which a constructor cannot
-    /// arrange for its own caller.
-    pub(in crate::type_engine) fn from_var_ctx(
-        ctx: &'a VarResolutionCtx<'a>,
-        receiver_resolver: ReceiverResolverFn<'a>,
-    ) -> Self {
-        Self {
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            class_loader: ctx.class_loader,
-            function_loader: ctx.loaders.function_loader,
-            resolved_class_cache: ctx.resolved_class_cache,
-            var_types: ctx.scope_var_resolver,
-            receiver_resolver,
-        }
-    }
 }
 
 /// Resolves a method-call receiver that is not a plain variable (a call
@@ -574,166 +515,6 @@ fn declared_method_returns_never(class_info: &ClassInfo, method_name: &str) -> O
 
 fn type_is_never(return_type: Option<&PhpType>) -> bool {
     return_type.is_some_and(|t| t.is_never())
-}
-
-/// Apply guard clause narrowing after an `if` statement whose
-/// then-body unconditionally exits (return/throw/continue/break)
-/// and which has no else/elseif clauses.
-///
-/// When a guard clause like:
-/// ```text
-/// if (!$var instanceof Foo) { return; }
-/// ```
-/// appears before the cursor, the code after it can only be reached
-/// when the condition was *false* — so we apply the inverse narrowing.
-///
-/// This handles:
-///   - `instanceof` / `is_a()` / `get_class()` / `::class` checks
-///   - `@phpstan-assert-if-true` / `@phpstan-assert-if-false` guards
-pub(in crate::type_engine) fn apply_guard_clause_narrowing(
-    if_stmt: &If<'_>,
-    ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ClassInfo>,
-) {
-    let receiver_resolver = |expr: &Expression<'_>| {
-        class_names_of(
-            &crate::type_engine::variable::rhs_resolution::resolve_rhs_expression(expr, ctx),
-        )
-    };
-    if !then_body_unconditionally_exits(
-        &if_stmt.body,
-        &ExitCtx::from_var_ctx(ctx, Some(&receiver_resolver)),
-    ) {
-        return;
-    }
-    if if_stmt.body.has_else_clause() || if_stmt.body.has_else_if_clauses() {
-        return;
-    }
-
-    // ── Compound OR guard clause ────────────────────────────────────
-    // `if ($x instanceof A || $x instanceof B) { return; }`
-    // After the if, $x is neither A nor B → exclude both.
-    if let Some(classes) = try_extract_compound_or_instanceof(if_stmt.condition, ctx.var_name)
-        && !classes.is_empty()
-    {
-        for cls_type in &classes {
-            apply_instanceof_exclusion(cls_type, ctx, results);
-        }
-        return;
-    }
-
-    // ── Compound negated AND guard clause ───────────────────────────
-    // `if (!$x instanceof A && !$x instanceof B) { return; }`
-    // The then-body exits when $x is neither A nor B.  After the if,
-    // the condition was false, so $x IS instanceof A or B → include both.
-    if let Some(classes) =
-        try_extract_compound_negated_and_instanceof(if_stmt.condition, ctx.var_name)
-        && !classes.is_empty()
-    {
-        let union = resolve_class_names_to_union(&classes, ctx);
-        if !union.is_empty() {
-            results.clear();
-            *results = union;
-        }
-        return;
-    }
-
-    // ── Heterogeneous OR guard clause ───────────────────────────────
-    // `if (!$a instanceof A || !$a->b instanceof B) { return; }`
-    // De Morgan: after the guard every disjunct's negation holds, so
-    // each disjunct narrows its own subject.  Apply the guard-inverse
-    // for whichever disjunct is an instanceof on the current subject
-    // (`ctx.var_name`).  This complements the same-subject compound OR
-    // handler above, which returns early when it matches.
-    {
-        let operands = collect_or_operands(if_stmt.condition);
-        if operands.len() > 1 {
-            let mut narrowed = false;
-            for operand in &operands {
-                if let Some(mut extraction) =
-                    try_extract_instanceof_with_negation(operand, ctx.var_name)
-                {
-                    resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
-                    // Positive disjunct → excluded after the guard;
-                    // negated disjunct → included after the guard.
-                    if extraction.negated {
-                        apply_instanceof_inclusion(
-                            &extraction.class_type,
-                            extraction.exact,
-                            ctx,
-                            results,
-                        );
-                    } else {
-                        apply_instanceof_exclusion(&extraction.class_type, ctx, results);
-                    }
-                    narrowed = true;
-                }
-            }
-            if narrowed {
-                return;
-            }
-        }
-    }
-
-    // ── instanceof / is_a / get_class / ::class narrowing ──
-    // The then-body exits, so subsequent code is the "else" — apply
-    // the inverse of the condition.
-    if let Some(mut extraction) =
-        try_extract_instanceof_with_negation(if_stmt.condition, ctx.var_name)
-    {
-        resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
-        // Positive instanceof + exit → exclude after (var is NOT that class)
-        // Negated instanceof + exit → include after (var IS that class)
-        if extraction.negated {
-            apply_instanceof_inclusion(&extraction.class_type, extraction.exact, ctx, results);
-        } else {
-            apply_instanceof_exclusion(&extraction.class_type, ctx, results);
-        }
-    }
-
-    // ── @phpstan-assert-if-true / @phpstan-assert-if-false ──
-    // When a function or static method with assert-if-true/false is the
-    // condition and the then-body exits, the code after runs when the
-    // callee returned the opposite boolean — apply the inverse narrowing.
-    let (func_call_expr, condition_negated) = unwrap_condition_negation(if_stmt.condition);
-
-    if let Expression::Call(call) = func_call_expr
-        && let Some(info) = extract_call_assertions(call, ctx)
-    {
-        // The then-body exits, so we're in the "else" conceptually.
-        // inverted=true, same logic as apply_phpstan_assert_condition_narrowing.
-        let function_returned_true = condition_negated;
-
-        for assertion in &info.assertions {
-            let applies_positively = match assertion.kind {
-                AssertionKind::IfTrue => function_returned_true,
-                AssertionKind::IfFalse => !function_returned_true,
-                AssertionKind::Always => continue,
-            };
-            // The equality form (`!=Type`) promises a comparison, and a
-            // comparison that fails rules nothing out, so it only speaks for
-            // the branch it names.  Inverting it the way the subtype form
-            // inverts would put Laravel's `filled()`/`blank()` promises in
-            // the wrong branch.
-            if !applies_positively && assertion.is_equality {
-                continue;
-            }
-
-            if let Some(arg_var) = find_assertion_arg_variable(
-                info.argument_list,
-                &assertion.param_name,
-                &info.parameters,
-            ) && arg_var == ctx.var_name
-            {
-                let should_exclude = assertion.negated ^ !applies_positively;
-                if should_exclude {
-                    apply_instanceof_exclusion(&assertion.asserted_type, ctx, results);
-                } else {
-                    apply_instanceof_inclusion(&assertion.asserted_type, false, ctx, results);
-                }
-            }
-        }
-    }
 }
 
 // ── in_array strict-mode narrowing ───────────────────────────────

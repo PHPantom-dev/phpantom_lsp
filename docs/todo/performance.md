@@ -960,29 +960,6 @@ procedural report builders do.
 
 ---
 
-## P50. Cache the top-level scope for `global` keyword resolution
-
-**Impact: Low-Medium · Complexity: High**
-
-Every `resolve_variable_types` call on a file containing `global `
-rebuilds the top-level scope by forward-walking every top-level
-statement with `cursor_offset = u32::MAX`. This is done once per
-variable query, so hovering three variables in the same file walks the
-top-level three times.
-
-Re-entry guards (added to fix #327) prevent the walk from recursing
-unboundedly, but the repeated cost remains. The preferred shape is
-pre-compute-and-cache: build the top-level scope once per file version
-(keyed by content hash or pointer) and reuse it across queries within
-the same request cycle.
-
-**Where to look:** `resolve_variable_in_statements` in
-`type_engine/variable/resolution.rs`, the `walk_top_level_for_globals`
-call. A per-request cache (similar to the chain resolution cache in
-`type_engine/resolver/context.rs`) would eliminate the redundant walks.
-
----
-
 ## P51. CI-gated scaling and memory invariants
 
 **Impact: Medium · Complexity: Low-Medium**
@@ -1092,46 +1069,6 @@ already have one, deref coercion covers the read sites, and the
 `resolve_variable_subject` in `diagnostics/deprecated.rs`, plus the
 `var_type_cache` declaration at the top of the collector.
 
-## P54. Property narrowing re-walks the whole body once per subject
-
-**Impact: Low · Complexity: Medium**
-
-Every `$this->prop` or `$h->getCall()` whose type the engine needs sends
-`apply_property_narrowing` back over the enclosing body from its first
-statement, looking for a check that refines that subject. Nothing
-remembers the answer, so a body holding n such subjects walks itself n
-times, and each walk resolves the expressions it passes, which resolves
-subjects of their own.
-
-`NARROWING_IN_PROGRESS` stops that from compounding without bound — a
-walk no longer starts while another is running over the same source —
-but the remaining growth is still superlinear: on the reproducer from
-#385 a release build measures under 0.05 s at 20 guard/chain pairs,
-0.1 s at 30, and 0.4 s at 60, so roughly quadratic in the number of
-narrowed subjects. Real code stays well under those sizes, which is why
-this is Low rather than a bug, but a generated file or a long legacy
-method can reach them.
-
-Memoising the walk would collapse it, and blocking nested walks is what
-makes that straightforward: every walk that runs now runs with nothing
-above it on the same source, so its answer no longer depends on which
-other walks happened to be in flight. The result depends on the source,
-the subject key, the cursor offset, and the classes handed in, so a
-per-request map keyed by those four and cleared with the rest of the
-request caches would turn the n walks into n lookups. The awkward part is
-that the walk mutates `results` in place and reports intersections
-through a separate flag, so the cached value has to carry both.
-
-T45 removes the re-walk altogether by carrying property and call subject
-keys in the threaded scope. The memo is the fix to take if this becomes a
-problem before T45 lands.
-
-**Where to look:** `apply_property_narrowing` in
-`type_engine/resolver/property_narrowing.rs`, and its three callers in
-`type_engine/resolver/mod.rs` (`SubjectExpr::CallExpr` and the property
-path) and `narrowed_by_rewalk` in
-`type_engine/variable/rhs_resolution/mod.rs`.
-
 ---
 
 ## P57. Narrowing deep-copies a class every time it crosses the `Arc` boundary
@@ -1152,11 +1089,6 @@ The narrowing layer pays that on every crossing, in both directions:
   narrowing left untouched has been deep-copied and re-allocated for
   nothing. Seventeen call sites reach it, covering every `instanceof`,
   `assert`, `in_array`, and identity guard the forward walk sees.
-- `apply_property_narrowing` unwraps the whole vector with
-  `Arc::unwrap_or_clone` and re-wraps it afterwards, with a comment
-  explaining that it does so because the walk functions take
-  `Vec<ClassInfo>`. The `Arc`s come out of the class index, so the
-  refcount is always above one and the clone branch always runs.
 - `resolved_type_with_lookup` clones a class out of the index only to
   hand it to `from_both`, which allocates a new `Arc` around the copy.
   Fifteen call sites, essentially every method-call return type.
@@ -1170,14 +1102,12 @@ on these paths. The fix is to change the narrowing contract from
 the `results` parameters in `narrowing::{instanceof,assertions,guards}`,
 `resolve_class_names_to_union`, and `ClassInfo::push_unique` — so a class
 is only allocated where one is genuinely constructed.
-`apply_property_narrowing`'s unwrap/rewrap then disappears.
 
 This is the same defect as [P53](#p53-the-deprecated-collector-deep-copies-a-class-per-member-access)
 on a different path, and it is worth measuring the two together.
 
 **Where to look:** `apply_narrowing`, `from_class`, `from_arc`,
 `from_both`, and `from_both_arc` in `types/resolved_type.rs`;
-`apply_property_narrowing` in `type_engine/resolver/property_narrowing.rs`;
 `resolved_type_with_lookup` in
 `type_engine/variable/rhs_resolution/mod.rs`;
 `type_engine/types/narrowing/{resolve,instanceof,assertions}.rs`.

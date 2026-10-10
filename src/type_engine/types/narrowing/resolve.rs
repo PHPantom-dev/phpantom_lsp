@@ -3,34 +3,13 @@
 
 use std::sync::Arc;
 
-use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
-use crate::php_type::{PhpType, TypeKind};
+use crate::atom::{bytes_to_str, literal_bytes_to_str};
+use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 
 use mago_syntax::cst::*;
 
 use crate::type_engine::resolver::VarResolutionCtx;
-
-use super::*;
-
-/// Resolve the `class_type` inside an `InstanceofExtraction` to its FQN.
-///
-/// When the extractor returns a short class name (e.g. `Foo`), the
-/// `class_loader` may know the fully-qualified name (`App\Foo`).
-/// Resolving early ensures that downstream comparisons (e.g.
-/// `out.contains(&cls_type)`) and `ResolvedType` hints carry the FQN
-/// rather than the short name.
-pub(in crate::type_engine) fn resolve_extraction_to_fqn(
-    extraction: &mut InstanceofExtraction,
-    class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<ClassInfo>>,
-) {
-    if let TypeKind::Named(name) = extraction.class_type.kind() {
-        let resolved = crate::util::resolve_name_via_loader(name, class_loader);
-        if resolved != *name {
-            extraction.class_type = PhpType::named(atom(&resolved));
-        }
-    }
-}
 
 /// Resolve the classes an `instanceof`-style check names.
 ///

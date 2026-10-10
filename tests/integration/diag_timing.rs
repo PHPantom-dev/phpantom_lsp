@@ -2408,15 +2408,13 @@ fn argument_diagnostics_scale_linearly_on_large_file() {
     );
 }
 
-/// Regression test for re-entrant property narrowing beside a chained
-/// call.
+/// Regression test for property narrowing beside a chained call.
 ///
-/// `if ($o->a)` sends the property pipeline back over the whole body
-/// looking for a check on `$o->a`.  That re-walk resolves the chained
-/// `$h->getWork()` it runs into, which re-enters the same walk for the
-/// call key, which resolves the chain again.  Without a cycle break each
-/// added pair multiplied the work by roughly ten: 6 pairs measured 0.4 s,
-/// 7 measured 3.5 s, and 8 measured 50 s.
+/// Each `if ($o->a)` reads a narrowing of `$o->a` among chained
+/// `$h->getWork()` calls.  A lookup that answers the narrowing by walking
+/// the body again, and re-enters that walk for every chained call it
+/// resolves on the way, multiplies the work by roughly ten per added
+/// pair: 6 pairs measured 0.4 s, 7 measured 3.5 s, and 8 measured 50 s.
 #[test]
 fn property_narrowing_beside_a_chained_call_stays_bounded() {
     const PAIRS: usize = 12;

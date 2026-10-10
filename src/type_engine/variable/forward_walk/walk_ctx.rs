@@ -6,6 +6,8 @@ use super::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use mago_span::HasSpan;
+
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::types::{ClassInfo, ResolvedType};
@@ -61,6 +63,48 @@ pub(crate) struct ForwardWalkCtx<'a> {
     /// An inline `@var` naming one of them is read through this, so an
     /// `@var array<T>` inside the body knows what its elements are.
     pub template_markers: Option<Arc<HashMap<String, PhpType>>>,
+    /// Where the expression walk records the scope it reached the cursor
+    /// with, while it walks the statement that holds the cursor; see
+    /// [`CursorScope`].
+    pub cursor_scope: Option<&'a CursorScope>,
+}
+
+/// The scope at the cursor, as the expression walk found it.
+///
+/// A walk answering a question about one position (hover, completion,
+/// go-to-definition) stops at the statement that holds the cursor, but the
+/// cursor can sit deep inside that statement's expression: in the right
+/// operand of `&&`, in a ternary arm, after a write the expression made
+/// earlier.  The expression walk records the scope it evaluates each node
+/// holding the cursor on, so what is left once the statement is walked is
+/// the scope of the innermost one, and the statement walk answers from
+/// that rather than from the scope around the statement.
+#[derive(Default)]
+pub(crate) struct CursorScope(std::cell::RefCell<Option<ScopeState>>);
+
+impl CursorScope {
+    /// Record `scope` as the one at the cursor, when `expr` holds it.
+    pub(crate) fn reached(&self, expr: &Expression<'_>, scope: &ScopeState, cursor: u32) {
+        let span = expr.span();
+        if span.start.offset <= cursor && cursor <= span.end.offset {
+            self.record(scope);
+        }
+    }
+
+    /// Record `scope` as the one at the cursor.
+    ///
+    /// Kept out of line: the expression walk calls this at every level of
+    /// a long `->method()` chain, and an inlined copy of the scope would
+    /// grow every one of those frames.
+    #[inline(never)]
+    pub(crate) fn record(&self, scope: &ScopeState) {
+        *self.0.borrow_mut() = Some(scope.clone());
+    }
+
+    /// The scope recorded last, if the walk reached the cursor.
+    pub(crate) fn take(&self) -> Option<ScopeState> {
+        self.0.borrow_mut().take()
+    }
 }
 
 impl<'a> ForwardWalkCtx<'a> {
@@ -98,6 +142,7 @@ impl<'a> ForwardWalkCtx<'a> {
             top_level_scope: ctx.top_level_scope.clone(),
             in_loop: false,
             template_markers: None,
+            cursor_scope: None,
         }
     }
 
@@ -121,6 +166,7 @@ impl<'a> ForwardWalkCtx<'a> {
             top_level_scope: self.top_level_scope.clone(),
             in_loop: self.in_loop,
             template_markers: self.template_markers.clone(),
+            cursor_scope: self.cursor_scope,
         }
     }
 
@@ -140,6 +186,30 @@ impl<'a> ForwardWalkCtx<'a> {
             top_level_scope: self.top_level_scope.clone(),
             in_loop,
             template_markers: self.template_markers.clone(),
+            cursor_scope: self.cursor_scope,
+        }
+    }
+
+    /// Return a copy of this context that records the scope at the cursor
+    /// in `cursor_scope`, or records it nowhere.
+    pub(crate) fn with_cursor_scope<'c>(
+        &'c self,
+        cursor_scope: Option<&'c CursorScope>,
+    ) -> ForwardWalkCtx<'c> {
+        ForwardWalkCtx {
+            current_class: self.current_class,
+            all_classes: self.all_classes,
+            content: self.content,
+            cursor_offset: self.cursor_offset,
+            class_loader: self.class_loader,
+            backend: self.backend,
+            loaders: self.loaders,
+            resolved_class_cache: self.resolved_class_cache,
+            enclosing_return_type: self.enclosing_return_type.clone(),
+            top_level_scope: self.top_level_scope.clone(),
+            in_loop: self.in_loop,
+            template_markers: self.template_markers.clone(),
+            cursor_scope,
         }
     }
 

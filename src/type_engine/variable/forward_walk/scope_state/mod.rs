@@ -524,7 +524,11 @@ impl ScopeState {
     /// proof about what that call returns, so evaluating it is the thing
     /// the proof is about rather than an event that invalidates it —
     /// dropping it would make the guard-then-use idiom hold for exactly
-    /// one use, which is not what a `@phpstan-assert` tag promises.
+    /// one use, which is not what a `@phpstan-assert` tag promises.  The
+    /// same goes for a proof read through what it returns: evaluating
+    /// `$s->getClassReflection()` on the way to
+    /// `$s->getClassReflection()->getParentClass()` leaves a guard on the
+    /// whole chain standing.
     pub fn invalidate_receiver_state(
         &mut self,
         receiver: &str,
@@ -534,6 +538,9 @@ impl ScopeState {
         let reads_receiver = |key: &str| {
             key != receiver
                 && Some(key) != made
+                && !made.is_some_and(|made| {
+                    crate::type_engine::types::narrowing::key_reads_variable(key, made)
+                })
                 && crate::type_engine::types::narrowing::key_reads_variable(key, receiver)
                 && match members {
                     MemberInvalidation::Calls => {

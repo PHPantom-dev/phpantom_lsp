@@ -74,7 +74,6 @@ unlikely to move the needle for most users.
 | C4  | Non-array functions with dynamic return types                                                                                                                               | Low         | High        |
 |     | **[Type Inference](todo/type-inference.md)**                                                                                                                                |             |             |
 | T20 | [Type narrowing reconciliation engine](todo/type-inference.md#t20-type-narrowing-reconciliation-engine) (CNF clause algebra, sure/sureNot tracking)                         | Medium-High | Very High   |
-| T45 | [Expressions should hand their scope, type and narrowing to the next expression](todo/type-inference.md#t45-expressions-should-hand-their-scope-type-and-narrowing-to-the-next-expression) (design with T20) | Medium-High | Very High   |
 | T41 | [`@param-out` is parsed but never read](todo/type-inference.md#t41-param-out-is-parsed-but-never-read)                                                                      | Medium      | Medium      |
 | T28 | [Template inference depth priority (shallowest bound wins)](todo/type-inference.md#t28-template-inference-depth-priority-shallowest-bound-wins)                             | Medium      | Medium-High |
 | T3  | [Property hooks (PHP 8.4)](todo/type-inference.md#t3-property-hooks-php-84)                                                                                                 | Medium      | Medium-High |
@@ -92,6 +91,7 @@ unlikely to move the needle for most users.
 | T31 | [Closure literal-return shape inference](todo/type-inference.md#t31-closure-literal-return-shape-inference)                                                                 | Low-Medium  | Medium-High |
 | T44 | [A single enum case has no type](todo/type-inference.md#t44-a-single-enum-case-has-no-type) | Low-Medium | High |
 | T4  | [Non-empty-\* type narrowing and propagation](todo/type-inference.md#t4-non-empty--type-narrowing-and-propagation)                                                          | Low-Medium  | High        |
+| T48 | [A sub-expression's type is resolved again by every consumer](todo/type-inference.md#t48-a-sub-expressions-type-is-resolved-again-by-every-consumer) | Low-Medium  | High        |
 | T5  | Fiber type resolution                                                                                                                                                       | Low         | Medium      |
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
@@ -198,14 +198,12 @@ unlikely to move the needle for most users.
 | P20 | [Content-hash gated resolution cache persistence](todo/performance.md#p20-content-hash-gated-resolution-cache-persistence)                                                  | Medium      | Very High   |
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Very High   |
 | P3  | Parallel pre-filter in `find_implementors`                                                                                                                                  | Low-Medium  | Medium-High |
-| P50 | [Cache the top-level scope for `global` keyword resolution](todo/performance.md#p50-cache-the-top-level-scope-for-global-keyword-resolution)                                 | Low-Medium  | High        |
 | P65 | [Every call site repeats the full function lookup, hit or miss](todo/performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss) | Low-Medium  | Medium      |
 | P70 | [Diagnostics on a long file find each access's context by scanning](todo/performance.md#p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning) | Low-Medium  | Medium      |
 | P58 | [A member-completion cache hit copies the whole item list](todo/performance.md#p58-a-member-completion-cache-hit-copies-the-whole-item-list)                                | Low         | Low         |
 | P66 | [Stub version filtering rescans a stub file once per symbol it declares](todo/performance.md#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares) | Low         | Low-Medium  |
 | P48 | [Higher-order collection proxy injection repeats work](todo/performance.md#p48-higher-order-collection-proxy-injection-repeats-work)                                        | Low         | Medium      |
 | P49 | [A very long method chain costs superlinear time to analyse](todo/performance.md#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse)                              | Low         | Medium      |
-| P54 | [Property narrowing re-walks the whole body once per subject](todo/performance.md#p54-property-narrowing-re-walks-the-whole-body-once-per-subject)                          | Low         | Medium      |
 | P56 | [Folding array shapes across branches costs superlinear time](todo/performance.md#p56-folding-array-shapes-across-branches-costs-superlinear-time)                            | Low         | Medium      |
 | P15 | [Two-phase stub index construction (eliminate `RwLock` on stub maps)](todo/performance.md#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps)              | Low         | Medium-High |
 | P6  | O(n²) transitive eviction in `evict_fqn`                                                                                                                                    | Low         | High        |

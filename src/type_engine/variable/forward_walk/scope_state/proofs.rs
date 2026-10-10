@@ -379,10 +379,22 @@ pub(super) fn join_implied_narrowings(
         // Triggers that identify `a` as the path that ran, and ones that
         // identify `b`.
         let (mut from_a, mut from_b) = (Vec::new(), Vec::new());
+        // A holder one path leaves exactly `null` and the other leaves
+        // holding a value identifies the path either way round: a value
+        // proves the second ran, and `null` proves the first did.  The
+        // second reading is what a guard written the other way round
+        // needs: past `if ($a === null && $b === null) { return; }`, an
+        // `if ($a === null)` is reached only where `$b` held a value.
         if is_definitely_null(a, key) && is_definitely_non_null(b, key) {
             from_b.push(ProofTrigger::NonNull);
+            from_a.push(ProofTrigger::Within(
+                a.locals.get(key).cloned().unwrap_or_default(),
+            ));
         } else if is_definitely_null(b, key) && is_definitely_non_null(a, key) {
             from_a.push(ProofTrigger::NonNull);
+            from_b.push(ProofTrigger::Within(
+                b.locals.get(key).cloned().unwrap_or_default(),
+            ));
         } else if let (Some(mine), Some(theirs)) = (a.locals.get(key), b.locals.get(key)) {
             if types_are_disjoint(mine, theirs) {
                 // Either path's value settles which one ran, so both are

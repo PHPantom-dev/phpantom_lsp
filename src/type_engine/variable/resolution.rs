@@ -8,8 +8,8 @@
 /// seeding, abstract-method parameter resolution) that the forward
 /// walker delegates to.
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 // scope for `global` keyword resolution.  The cycle is:
 //
 //   resolve_variable_types → resolve_variable_in_statements
-//   → walk_top_level_for_globals → RHS resolution → resolve_variable_types
+//   → top_level_scope_for_globals → RHS resolution → resolve_variable_types
 //
 // Two guards break this cycle at different levels:
 //
@@ -43,7 +43,7 @@ use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 
 thread_local! {
     /// Source content addresses currently building a top-level scope
-    /// via [`walk_top_level_for_globals`](super::forward_walk::walk_top_level_for_globals).
+    /// via [`top_level_scope_for_globals`](super::forward_walk::top_level_scope_for_globals).
     /// Keyed by `content.as_ptr() as usize`: re-entry within one call
     /// tree always borrows the same slice, so pointer identity marks
     /// exactly the cycle we want to break.  Two independent copies of
@@ -57,21 +57,6 @@ thread_local! {
     /// query is suppressed.
     static RESOLVING_VARS: RefCell<HashSet<VarQueryKey>> =
         RefCell::new(HashSet::new());
-
-    /// When `Some`, memoises what [`resolve_variable_types`] computed
-    /// the hard way, keyed by [`VarQueryKey`].  Activated with the rest
-    /// of the request-scoped type-engine memos, so it lives exactly as
-    /// long as one request / one file's diagnostic pass.
-    ///
-    /// Without it, a body is walked from its first statement once per
-    /// *ask*, not once per question: deciding whether a guard branch
-    /// exits resolves the receiver of every call it holds, and each of
-    /// those receivers sends the walker over the whole body again.  On a
-    /// long method whose branches each hold a chained call — the shape
-    /// `phpstan-src`'s `AnalyseCommand::execute` has — the same handful
-    /// of `(variable, offset)` questions get asked hundreds of times.
-    static VAR_TYPE_MEMO: RefCell<Option<HashMap<VarQueryKey, Vec<ResolvedType>>>> =
-        const { RefCell::new(None) };
 
     #[cfg(test)]
     static TEST_SCOPE_CACHE_HITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -96,11 +81,6 @@ pub(crate) fn test_scope_cache_hits() -> usize {
 /// The context is there because a body walked for its return type seeds
 /// its parameters with what the call site passed, so the same variable at
 /// the same offset answers differently for each caller.
-///
-/// The source is `(pointer, length)` rather than the pointer alone: the
-/// memo outlives any single query, so a freed buffer whose address is
-/// handed straight back to a different one would otherwise read as the
-/// same source.
 type VarQueryKey = ((usize, usize), u64, u32, Atom, u64);
 
 /// Build the key identifying one variable query.
@@ -128,17 +108,6 @@ fn var_query_key(
         class_name,
         crate::type_engine::call_resolution::body_inference_context(),
     )
-}
-
-/// Activate the variable-type memo for the current thread.
-/// The guard [`with_var_type_memo`] hands back. Nested activation is a
-/// no-op, so an inner pass cannot discard the entries an outer one is
-/// still relying on.
-pub(crate) type VarTypeMemoGuard =
-    crate::type_engine::MemoGuard<HashMap<VarQueryKey, Vec<ResolvedType>>>;
-
-pub(crate) fn with_var_type_memo() -> VarTypeMemoGuard {
-    crate::type_engine::activate_memo(&VAR_TYPE_MEMO)
 }
 
 /// RAII guard for [`BUILDING_TOP_LEVEL_SCOPE`].
@@ -318,17 +287,9 @@ pub(crate) fn resolve_variable_types(
 
     let key = var_query_key(content, var_name, cursor_offset, current_class.name);
 
-    // ── Memo ────────────────────────────────────────────────────
-    // Everything below walks the enclosing body from its first
-    // statement, which reaches the same answer every time the same
-    // question is asked within one pass.
-    if let Some(hit) = VAR_TYPE_MEMO.with(|cell| {
-        cell.borrow()
-            .as_ref()
-            .and_then(|memo| memo.get(&key).cloned())
-    }) {
-        return hit;
-    }
+    // The walk below is shared by every name asked about at the same
+    // position in one request (the forward walker's `WALK_MEMO`), so a
+    // repeated question costs a lookup into the scope it reached.
 
     // ── Re-entry guard (Guard 2) ────────────────────────────────
     // Break cycles where the same variable query re-enters through
@@ -344,7 +305,7 @@ pub(crate) fn resolve_variable_types(
         None => return vec![],
     };
 
-    let resolved = with_parsed_program(content, "resolve_variable_types", |program, _content| {
+    with_parsed_program(content, "resolve_variable_types", |program, _content| {
         resolve_variable_types_in_program(
             program,
             var_name,
@@ -356,15 +317,7 @@ pub(crate) fn resolve_variable_types(
             backend,
             loaders,
         )
-    });
-
-    VAR_TYPE_MEMO.with(|cell| {
-        if let Some(memo) = cell.borrow_mut().as_mut() {
-            memo.insert(key, resolved.clone());
-        }
-    });
-
-    resolved
+    })
 }
 
 /// The forward walk behind [`resolve_variable_types`], over a program the
@@ -767,7 +720,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
         // Guard 1: prevent re-entrant top-level scope construction for
         // the same file.  RHS resolution during the walk can trigger
         // another resolve_variable_types call, which would start a
-        // second walk_top_level_for_globals on the same file content.
+        // second top-level walk on the same file content.
         if let Some(_tl_guard) = try_acquire_top_level_guard(ctx.content) {
             let tl_fw_ctx = super::forward_walk::ForwardWalkCtx {
                 current_class: ctx.current_class,
@@ -782,13 +735,10 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
                 top_level_scope: None,
                 in_loop: false,
                 template_markers: None,
+                cursor_scope: None,
             };
-            let mut tl_scope = super::forward_walk::ScopeState::new();
-            super::forward_walk::walk_top_level_for_globals(
-                stmts.iter().copied(),
-                &mut tl_scope,
-                &tl_fw_ctx,
-            );
+            let tl_scope =
+                super::forward_walk::top_level_scope_for_globals(stmts.iter().copied(), &tl_fw_ctx);
             if tl_scope.locals.is_empty() {
                 None
             } else {
@@ -940,6 +890,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
             top_level_scope: None,
             in_loop: false,
             template_markers: None,
+            cursor_scope: None,
         };
         if let Some(fw_results) =
             super::forward_walk::resolve_in_top_level(ctx.var_name, stmts.iter().copied(), &fw_ctx)
@@ -1210,6 +1161,7 @@ fn try_resolve_in_function(
         top_level_scope: ctx.top_level_scope.clone(),
         in_loop: false,
         template_markers: None,
+        cursor_scope: None,
     };
     Some(
         super::forward_walk::resolve_in_function_body(ctx.var_name, func, &fw_ctx)
@@ -1365,6 +1317,7 @@ fn resolve_variable_in_members<'b>(
                         top_level_scope: ctx.top_level_scope.clone(),
                         in_loop: false,
                         template_markers: None,
+                        cursor_scope: None,
                     };
                     let method_name_str = bytes_to_str(method.name.value).to_string();
                     let is_static = method.modifiers.contains_static();
@@ -1433,6 +1386,7 @@ fn resolve_variable_in_property_hooks(
             top_level_scope: ctx.top_level_scope.clone(),
             in_loop: false,
             template_markers: None,
+            cursor_scope: None,
         };
 
         let mut scope = super::forward_walk::seed_property_hook_scope(property_hint, hook, &fw_ctx);
@@ -1488,6 +1442,7 @@ fn resolve_abstract_method_param(
             top_level_scope: ctx.top_level_scope.clone(),
             in_loop: false,
             template_markers: None,
+            cursor_scope: None,
         };
 
         let trait_prototype =

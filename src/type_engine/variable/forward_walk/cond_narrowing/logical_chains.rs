@@ -13,7 +13,7 @@ use super::*;
 /// Only chains delegate.  A `!` over a single check is a shape the
 /// extractors recognise in place, and routing it through the opposite
 /// pass would change which commit path it takes.
-pub(super) fn negated_logical_chain<'b>(expr: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
+pub(crate) fn negated_logical_chain<'b>(expr: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
     let (inner, negated) = narrowing::unwrap_condition_negation(expr);
     let is_chain = matches!(
         inner,
@@ -29,59 +29,15 @@ pub(super) fn negated_logical_chain<'b>(expr: &'b Expression<'b>) -> Option<&'b 
     (negated && is_chain).then_some(inner)
 }
 
-/// Narrow through an `&&` operand that is itself an `||` chain.
-///
-/// Entering the branch proves the disjunction as a whole, not any one leg,
-/// so the scope inside it is the join of the scopes the legs would each
-/// produce — exactly the shape [`ScopeState::merge_branch`] already
-/// handles for an `if`/`else`.  Going through the join is what records
-/// which leg proved what, so a check further down that rules the other
-/// legs out recovers the surviving leg's conclusions:
-///
-/// ```php
-/// if ($n->keyVar === null || ($n->keyVar instanceof Variable && is_string($n->keyVar->name))) {
-///     $name = $n->keyVar instanceof Variable ? $n->keyVar->name : null;   // string|null
-/// }
-/// ```
-///
-/// The join is the *only* treatment a disjunction gets: the passes that
-/// run before it are handed the chain's plain conjuncts alone, so what
-/// they leave behind is the base every leg starts from.  That ordering is
-/// what keeps a leg's own conclusion out of the branch body — reading
-/// `$v instanceof Variable || $flag` as though the `instanceof` had held
-/// dropped the `null` the guard never ruled out.
-///
-/// `pinned` names the subjects a conjunct already narrowed to a definite
-/// class.  Those the join leaves alone: `$b instanceof Generic && ($cls
-/// === Generic::class || $b instanceof Template)` proves `$b` is a
-/// `Generic`, and a leg naming an unrelated class replaces rather than
-/// intersects, so joining the legs would answer `Generic|Template` and
-/// lose what the conjunct established.
-pub(super) fn apply_disjunct_operand_narrowing<'b>(
-    disjunctions: &[&'b Expression<'b>],
-    pinned: &[String],
-    scope: &mut ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    for operand in disjunctions {
-        let legs = collect_or_chain_operands(unwrap_parens(operand));
-        if legs.len() < 2 {
-            continue;
-        }
-        apply_any_leg_narrowing(&legs, pinned, scope, ctx);
-    }
-}
-
 /// Narrow `scope` to what holds once any one of `legs` was truthy: each leg
 /// narrows its own copy of the scope, and the copies are joined.
 ///
-/// This is the truthy narrowing of `a || b`, and also what the body of a
-/// `match (true)` arm with the conditions `a, b` sees.  The subjects named in
-/// `pinned` keep the type `scope` already gave them (see
-/// [`apply_disjunct_operand_narrowing`]).
+/// This is what the body of a `match (true)` arm with the conditions `a, b`
+/// sees.  Unlike the legs of `a || b`, each condition is tested against the
+/// arm's own value with `===`, so a condition that did not match proves
+/// nothing the next one can build on, and every leg starts from `scope`.
 pub(super) fn apply_any_leg_narrowing<'b>(
     legs: &[&'b Expression<'b>],
-    pinned: &[String],
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
@@ -107,20 +63,14 @@ pub(super) fn apply_any_leg_narrowing<'b>(
     // for the whole disjunction.
     let refs: Vec<&ScopeState> = leg_scopes.iter().collect();
     retain_synthetic_keys_common_to_all(&mut joined, &refs);
-    for subject in pinned {
-        let key = atom(subject);
-        if let Some(types) = scope.locals.get(&key) {
-            joined.locals.insert(key, types.clone());
-        }
-    }
     *scope = joined;
 }
 
 /// Undo what a leg concluded about a subject the branch already knew
 /// something else about.
 ///
-/// The legs start from what the chain's conjuncts — and everything above
-/// the `if` — proved, and a leg can only refine that. When a leg lands on
+/// A leg starts from what everything evaluated before it proved, and can
+/// only refine that. When a leg lands on
 /// a type the base rules out, the leg describes a run that cannot happen:
 /// the `is_null($price)` half of `is_null($price) || $price->isZero()` on
 /// a `$price` a guard already proved non-null. Joining the `null` it
@@ -129,7 +79,7 @@ pub(super) fn apply_any_leg_narrowing<'b>(
 ///
 /// Only the entries the leg rewrote can disagree with the base, so only
 /// those are compared.
-fn drop_leg_answers_the_base_rules_out(leg: &mut ScopeState, base: &ScopeState) {
+pub(crate) fn drop_leg_answers_the_base_rules_out(leg: &mut ScopeState, base: &ScopeState) {
     let mut ruled_out: Vec<(Atom, Vec<ResolvedType>)> = Vec::new();
     let _ = leg
         .locals
@@ -144,4 +94,73 @@ fn drop_leg_answers_the_base_rules_out(leg: &mut ScopeState, base: &ScopeState) 
     for (name, base_types) in ruled_out {
         leg.locals.insert(name, base_types);
     }
+}
+
+/// Collect operands of a `&&` chain into a left-to-right list.
+///
+/// `a && b && c` is parsed as `(a && b) && c`.  This function flattens
+/// it into `[a, b, c]`.  Non-`&&` expressions return a single-element
+/// list.
+pub(crate) fn collect_and_chain_operands<'b>(expr: &'b Expression<'b>) -> Vec<&'b Expression<'b>> {
+    let mut operands = Vec::new();
+    collect_and_chain_operands_inner(expr, &mut operands);
+    operands
+}
+
+fn collect_and_chain_operands_inner<'b>(
+    expr: &'b Expression<'b>,
+    out: &mut Vec<&'b Expression<'b>>,
+) {
+    if let Expression::Binary(bin) = expr
+        && matches!(
+            bin.operator,
+            BinaryOperator::And(_) | BinaryOperator::LowAnd(_)
+        )
+    {
+        collect_and_chain_operands_inner(bin.lhs, out);
+        collect_and_chain_operands_inner(bin.rhs, out);
+        return;
+    }
+    // Also unwrap parenthesised `&&` chains.
+    if let Expression::Parenthesized(inner) = expr {
+        let inner_ops = collect_and_chain_operands(inner.expression);
+        if inner_ops.len() > 1 {
+            out.extend(inner_ops);
+            return;
+        }
+    }
+    out.push(narrowing::fold_negation_pairs(expr));
+}
+
+/// Collect operands of a `||` chain into a left-to-right list, the way
+/// [`collect_and_chain_operands`] does for `&&`.
+pub(crate) fn collect_or_chain_operands<'b>(expr: &'b Expression<'b>) -> Vec<&'b Expression<'b>> {
+    let mut operands = Vec::new();
+    collect_or_chain_operands_inner(expr, &mut operands);
+    operands
+}
+
+fn collect_or_chain_operands_inner<'b>(
+    expr: &'b Expression<'b>,
+    out: &mut Vec<&'b Expression<'b>>,
+) {
+    if let Expression::Binary(bin) = expr
+        && matches!(
+            bin.operator,
+            BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+        )
+    {
+        collect_or_chain_operands_inner(bin.lhs, out);
+        collect_or_chain_operands_inner(bin.rhs, out);
+        return;
+    }
+    // Also unwrap parenthesised `||` chains.
+    if let Expression::Parenthesized(inner) = expr {
+        let inner_ops = collect_or_chain_operands(inner.expression);
+        if inner_ops.len() > 1 {
+            out.extend(inner_ops);
+            return;
+        }
+    }
+    out.push(narrowing::fold_negation_pairs(expr));
 }

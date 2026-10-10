@@ -157,12 +157,6 @@ pub(crate) fn process_statement<'b>(
         Statement::Return(ret) => {
             if let Some(val) = ret.value {
                 process_assignment_expr(val, scope, ctx);
-
-                // Record narrowed snapshots inside match(true) arms
-                // and ternary instanceof branches.
-                if is_diagnostic_scope_active() {
-                    record_match_ternary_snapshots(val, scope, ctx);
-                }
             }
 
             // A `return` leaves the body with the types it holds *here*.
@@ -198,9 +192,6 @@ fn process_echoed_expression<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) {
     process_assignment_expr(value, scope, ctx);
-    if is_diagnostic_scope_active() {
-        record_match_ternary_snapshots(value, scope, ctx);
-    }
 }
 
 // ─── Expression statement handling ──────────────────────────────────────────
@@ -222,13 +213,14 @@ pub(crate) fn process_expression_statement<'b>(
 
     // Try inline `/** @var Type $x */` override first.
     // A `@var` block is authoritative over the assignment it annotates,
-    // so that one pass is skipped.  Only that one: everything else the
-    // statement carries — the ternary and short-circuit snapshots, assert
-    // narrowing, by-ref captures — still has to run, now against the scope
-    // the docblock just established.  Returning outright here left
+    // so that one write is skipped.  Only that one: everything else the
+    // statement does (the writes and narrowing inside its expression,
+    // assert narrowing, by-ref captures) still has to run, now against the
+    // scope the docblock just established.  Returning outright here left
     // `takesString($m->virtual ? $m->virtual : $m->title)` under a
-    // preceding `/** @var Model $m */` with no branch snapshots at all, so
-    // the truthy arm read the property's declared nullable type.
+    // preceding `/** @var Model $m */` with nothing narrowed, so the truthy
+    // arm read the property's declared nullable type.
+    //
     // What the assignment target held before the docblock retyped it. A
     // `@var` above an assignment describes the variable *after* it runs,
     // so the right-hand side still reads the old value:
@@ -245,6 +237,12 @@ pub(crate) fn process_expression_statement<'b>(
         },
         _ => None,
     };
+
+    // The target's entry as the right-hand side reads it, absent when the
+    // statement is what first assigns it.
+    let pre_override = assigned_var
+        .as_ref()
+        .and_then(|(name, _)| scope.locals.get(&atom(name)).cloned());
 
     let skip_assignment =
         match try_process_inline_var_override(expr, stmt_offset(outer), scope, ctx) {
@@ -275,44 +273,46 @@ pub(crate) fn process_expression_statement<'b>(
             VarOverrideResult::None => false,
         };
 
-    // The ternary and `match` arms read the scope the statement started
-    // from: `$x = $c ? $x->a() : null` reads the `$x` it is replacing.
-    let branch_scope =
-        (is_diagnostic_scope_active() && holds_branches(expr)).then(|| scope.clone());
-
     if !skip_assignment {
         process_assignment_expr(expr, scope, ctx);
     } else {
         // The docblock stands in for the outermost write alone; whatever
-        // the expression does on the way there still happens.
+        // the expression does on the way there still happens, and it reads
+        // the target as it was before the write the docblock describes.
         let value = match expr {
             Expression::Assignment(assignment) => assignment.rhs,
             _ => expr,
         };
-        process_expr(value, scope, ctx);
-    }
-
-    // Recorded after the walk above, so the finer snapshots inside the
-    // arms win over the ones the walk recorded at the same offsets.
-    if let Some(branch_scope) = branch_scope {
-        record_match_ternary_snapshots(expr, &branch_scope, ctx);
+        match &assigned_var {
+            Some((name, _)) => {
+                let key = atom(name);
+                let declared = scope.locals.get(&key).cloned();
+                match &pre_override {
+                    Some(types) => scope.locals.insert(key, types.clone()),
+                    None => scope.locals.remove(&key),
+                }
+                process_expr(value, scope, ctx);
+                match declared {
+                    Some(types) => scope.locals.insert(key, types),
+                    None => scope.locals.remove(&key),
+                }
+            }
+            None => {
+                process_expr(value, scope, ctx);
+            }
+        }
     }
 
     process_by_ref_closure_captures(expr, scope, ctx);
 
-    process_pass_by_ref(expr, scope, ctx);
-
     // Sits between the passes that *read* the statement's expressions and
-    // the passes that record what it *proves*.  The reads above see the
-    // state the call itself saw; a proof below describes the value the
-    // call handed back, so it must outlive the call's own invalidation
-    // (`assertNotNull($holder->find('a'))` proves something about the very
-    // call it makes).
+    // the passes that record what it *proves*: a proof below describes the
+    // value a call handed back, so it must outlive the call's own
+    // invalidation (`assertNotNull($holder->find('a'))` proves something
+    // about the very call it makes).
     process_receiver_mutation(expr, scope, ctx);
 
     process_assert_narrowing(expr, scope, ctx);
-
-    process_self_out_narrowing(expr, scope, ctx);
 }
 
 /// Identifies which callee parameter a call argument fills.
@@ -1624,7 +1624,8 @@ pub(crate) fn process_assert_narrowing<'b>(
 /// into the annotation's type before it replaces the receiver's tracked
 /// type: `$box->replace('x')` on a `MutableBox<int> $box`, where
 /// `replace(U $value)` declares `@psalm-this-out self<U>`, re-binds
-/// `$box` to `MutableBox<string>` for the rest of the block.
+/// `$box` to `MutableBox<string>` for whatever runs after the call, in
+/// the same expression or after it.
 ///
 /// Only fires for a receiver that is a plain variable already in scope
 /// with a resolved class — `$this` is excluded because there is no
@@ -1634,11 +1635,7 @@ pub(crate) fn process_self_out_narrowing<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let unwrapped = match expr {
-        Expression::Parenthesized(inner) => inner.expression,
-        other => other,
-    };
-    let (object, method, argument_list) = match unwrapped {
+    let (object, method, argument_list) = match expr {
         Expression::Call(Call::Method(mc)) => (mc.object, &mc.method, &mc.argument_list),
         Expression::Call(Call::NullSafeMethod(mc)) => (mc.object, &mc.method, &mc.argument_list),
         _ => return,
@@ -1765,6 +1762,30 @@ pub(crate) fn resolved_types_differ(a: &[ResolvedType], b: &[ResolvedType]) -> b
         }
     }
     false
+}
+
+/// Whether a narrowing pass changed a variable's resolved type.
+///
+/// Both halves of a `ResolvedType` matter. The type string carries most
+/// narrowings, but a member-existence guard (`property_exists($x, 'p')`)
+/// leaves it untouched and only swaps in a `ClassInfo` carrying the proven
+/// member, so the class side is compared by `Arc` identity too — every
+/// narrowing that rebuilds a `ClassInfo` yields a fresh allocation.
+///
+/// This is deliberately stricter than [`resolved_types_differ`], which
+/// compares classes by FQN: that one drives loop fix-point iteration, where
+/// treating a re-allocated but equal `ClassInfo` as a change would stop it
+/// converging.
+pub(crate) fn narrowing_changed_types(before: &[ResolvedType], after: &[ResolvedType]) -> bool {
+    before.len() != after.len()
+        || before.iter().zip(after).any(|(a, b)| {
+            a.type_string != b.type_string
+                || match (&a.class_info, &b.class_info) {
+                    (Some(x), Some(y)) => !std::sync::Arc::ptr_eq(x, y),
+                    (None, None) => false,
+                    _ => true,
+                }
+        })
 }
 
 /// Subtract from each argument the values a `never` branch of the callee's

@@ -1,40 +1,5 @@
 use super::*;
 
-/// Report whether `condition` contains a member-existence proof for any
-/// variable currently in `scope`: `property_exists($x, 'name')`,
-/// `method_exists($x, 'name')`, or `isset($x->name)` (all recognised by
-/// [`narrowing::try_extract_member_exists_guard`]).
-///
-/// Ternary branch narrowing runs only for conditions that add information
-/// the guarded branch relies on.  Like `instanceof`, these guards qualify:
-/// the then-branch of `property_exists($x, 'p') ? $x->p : …` depends on the
-/// proof that `$x->p` exists.
-pub(crate) fn condition_proves_member(condition: &Expression<'_>, scope: &ScopeState) -> bool {
-    let var_names = scope_keys_named_by(condition, scope);
-    collect_and_chain_operands(condition).iter().any(|operand| {
-        var_names
-            .iter()
-            .any(|vn| narrowing::try_extract_member_exists_guard(operand, vn.as_str()).is_some())
-    })
-}
-
-/// Like [`condition_proves_member`], but for the null/false/truthiness
-/// guards [`apply_null_narrowing_truthy`] recognises: `$x !== null`,
-/// `isset($x)`, `!empty($x)`, `$x !== false`, and the bare `$x` truthy
-/// check. The then-branch of `$x ? $x : $default` depends on the proof
-/// that `$x` is truthy exactly as much as an `if ($x) { … }` body does.
-pub(crate) fn condition_proves_null_or_truthy(condition: &Expression<'_>) -> bool {
-    collect_and_chain_operands(condition).iter().any(|operand| {
-        extract_non_null_check_var(operand).is_some()
-            || extract_non_false_check_var(operand).is_some()
-            || !extract_isset_vars(operand).is_empty()
-            || !extract_not_isset_vars(operand).is_empty()
-            || extract_null_equality_check_var(operand).is_some()
-            || extract_not_empty_var(operand).is_some()
-            || expr_to_subject(operand).is_some()
-    })
-}
-
 /// Apply `property_exists($var, 'name')` / `method_exists($var, 'name')`
 /// narrowing to the scope.
 ///

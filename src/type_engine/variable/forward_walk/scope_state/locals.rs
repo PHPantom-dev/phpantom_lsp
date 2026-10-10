@@ -95,6 +95,17 @@ impl Locals {
 
     /// Visit the keys the two maps do not share an entry for; see
     /// [`AtomTrie::diff`].
+    /// Whether any key holds a different entry here than in `other`.
+    ///
+    /// Entries are compared by identity, so this is cheap between a scope
+    /// and a copy of it: only the paths a write has since replaced are
+    /// visited.
+    pub fn differs_from(&self, other: &Locals) -> bool {
+        self.map
+            .diff::<()>(&other.map, |_, _, _| ControlFlow::Break(()))
+            .is_break()
+    }
+
     pub fn diff<'a, B>(
         &'a self,
         other: &'a Self,

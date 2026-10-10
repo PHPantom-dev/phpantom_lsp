@@ -324,9 +324,8 @@ class Parser {
     }
 }
 "#;
-    // preg_match passes $matches by reference — the forward walker
-    // should seed it via seed_pass_by_ref_in_condition so it doesn't
-    // fall through to the backward scanner.
+    // preg_match writes $matches through a reference parameter, and the
+    // condition's call writes it before the body reads it.
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
         diags.is_empty(),
