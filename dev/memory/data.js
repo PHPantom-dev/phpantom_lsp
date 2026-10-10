@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791644413043,
+  "lastUpdate": 1791646228176,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -36651,6 +36651,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "12da1fc4bde571aeb5b0cea812696362bce570d0",
+          "message": "A template next to other types in a parameter union binds only what they\nleave over",
+          "timestamp": "2026-10-10T17:17:05+02:00",
+          "tree_id": "24338c2e386da8b0d24a2d2d07885cc49312db08",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/12da1fc4bde571aeb5b0cea812696362bce570d0"
+        },
+        "date": 1791646218424,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.7,
             "unit": "MiB"
           }
         ]
