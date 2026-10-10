@@ -1071,17 +1071,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p76-literal-key-writes-under-separate-ifs-grow-far-faster-than-their-count" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P76. Literal-key writes under separate <code>if</code>s grow far faster than their count
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p77-a-long-method-chain-costs-the-cube-of-its-length" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1400,17 +1389,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p76-literal-key-writes-under-separate-ifs-grow-far-faster-than-their-count" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P76. Literal-key writes under separate <code>if</code>s grow far faster than their count
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p77-a-long-method-chain-costs-the-cube-of-its-length" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1557,47 +1535,6 @@ against that bar.</p>
 </tbody>
 </table>
 <hr />
-<h2 id="p76-literal-key-writes-under-separate-ifs-grow-far-faster-than-their-count">P76. Literal-key writes under separate <code>if</code>s grow far faster than their count<a class="headerlink" href="#p76-literal-key-writes-under-separate-ifs-grow-far-faster-than-their-count" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>A function that fills in an array one literal key at a time, each write
-under its own <code>if</code>, costs far more than the square of the number of
-writes. <code>benches/scaling.py</code>'s <code>conditional_array_writes</code> shape, on a
-release build:</p>
-<table>
-<thead>
-<tr>
-<th>Writes</th>
-<th>analyse wall clock</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>150</td>
-<td>0.08 s</td>
-</tr>
-<tr>
-<td>300</td>
-<td>2.2 s</td>
-</tr>
-<tr>
-<td>500</td>
-<td>7.2 s</td>
-</tr>
-<tr>
-<td>1,000</td>
-<td>140 s</td>
-</tr>
-</tbody>
-</table>
-<p>A settings or report array assembled this way can carry a few hundred
-keys. About 60% of the samples are in <code>ProofMap::push_unique</code>, called from
-<code>join_implied_narrowings</code> at each <code>if</code>'s join: the implied narrowings
-built up so far are compared item by item against the incoming ones, and
-cloning and dropping <code>Vec&lt;ImpliedNarrowing&gt;</code> takes most of the rest.</p>
-<p><strong>Where to look:</strong> <code>join_implied_narrowings</code> in
-<code>type_engine/variable/forward_walk/scope_state/proofs.rs</code> and
-<code>ProofMap::push_unique</code> in <code>scope_state/proof_map.rs</code>.</p>
-<hr />
 <h2 id="p77-a-long-method-chain-costs-the-cube-of-its-length">P77. A long method chain costs the cube of its length<a class="headerlink" href="#p77-a-long-method-chain-costs-the-cube-of-its-length" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Generated query builders and API clients produce fluent chains hundreds
@@ -1734,14 +1671,18 @@ and its callers in <code>php_type/subtype.rs</code>.</p>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>N <code>if</code>s each writing a different shape to <code>$data[$id]</code> cost time in
 proportion to the square of N. <code>benches/scaling.py</code>'s
-<code>conditional_dynamic_writes</code> shape, on a release build, takes 0.2 s at
-2,000 writes and 0.7 to 1.2 s at 4,000. The samples are spread over
-cloning and dropping <code>Vec&lt;ImpliedNarrowing&gt;</code> and <code>Vec&lt;ResolvedType&gt;</code> at
-each join and the allocator behind them, so the joins are likely copying
-state that grows with the writes before them. This may share a cause with
-P76.</p>
-<p><strong>Where to look:</strong> <code>join_implied_narrowings</code> in
-<code>type_engine/variable/forward_walk/scope_state/proofs.rs</code>.</p>
+<code>conditional_dynamic_writes</code> shape, on a release build, takes 1.6 s at
+2,000 writes and 6.6 s at 4,000. The array's value type is a union that
+gains one shape per <code>if</code>, and every join builds that union again from
+scratch: the samples are in <code>dedup_types</code>, <code>hash_for_dedup</code> and the shape
+index <code>join_runtime_value_types</code> builds to find which members could absorb
+which, each of them a pass over all the shapes so far. Joining one new
+member into a union that is already normalised would make each join cost
+only what it adds.</p>
+<p><strong>Where to look:</strong> <code>join_runtime_value_types</code> and <code>absorb_subsumed_shapes</code>
+in <code>php_type/normalize.rs</code>, reached from a join through
+<code>ResolvedType::collapse_redundant_runtime_literals</code> in
+<code>types/resolved_type.rs</code>.</p>
 <hr />
 <h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
 <h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>
