@@ -339,7 +339,127 @@ raw strings.
 
 ---
 
+## T45. Expressions should hand their scope, type and narrowing to the next expression
+**Impact: Medium-High · Complexity: Very High**
 
+The forward walker threads scope from statement to statement, and
+`process_expr` (`forward_walk/expr.rs`) threads it through one expression
+in evaluation order: writes (including `++`/`--`) land where they happen,
+the operands of `&&`/`||` run on the scope the earlier operands left,
+narrowed by what they proved, and the right side of `??` and the arms of a
+ternary or `match` run on their own copy. But the expression is still
+walked in further passes: `process_expression_statement`
+(`forward_walk/assignment.rs`) adds match/ternary snapshots, by-ref
+captures, receiver mutation, asserts and self-out, and an `if` condition is
+walked again by `seed_pass_by_ref_in_condition` and once more per branch by
+`apply_condition_narrowing{,_inverse}`, which itself runs about fifteen
+extractors that each pattern-match the whole condition. The expression's
+own type is resolved once against the scope after all its writes; the
+sub-expressions that read an earlier scope are typed where they ran and
+handed to the resolver by span (`ExprTypes`), but only
+`resolve_rhs_expression` and array-item inference consult them.
+
+PHPStan 2.3 replaced the same three-walker shape (`NodeScopeResolver`,
+`MutatingScope::resolveType`, `TypeSpecifier`) with one: processing a node
+returns an `ExpressionResult` holding the scope before and after it, a
+lazily computed type, and lazily computed truthy/falsey narrowing. Parents
+compose their children's results instead of re-resolving them:
+
+- `&&` processes its right operand on the left's truthy scope, and its own
+  truthy scope *is* the right operand's (`truthyScopeOverrideResult`), so a
+  narrowing from the left is never re-applied over a variable the right
+  reassigned. `||` mirrors this on the falsey side; `!` reuses the
+  operand's narrowing with the context flipped.
+- Array items, call arguments and the like pass each child's post-scope to
+  the next sibling, which is what makes `[$b = 1, $b + 1]` read `2`.
+- `$c++` is processed as a virtual pre-increment assignment: the post-scope
+  holds the new value, the node's own type is the old one.
+- A call with side effects invalidates receiver-rooted expressions inside
+  the expression walk, so `$this->a instanceof Foo && $this->reset()`
+  drops the narrowing before the next operand.
+- Every result is stored by node identity; rules, and `Scope::getType()`
+  for a node already processed, read the stored result. Recomputation
+  happens only for synthetic nodes or a scope that disagrees on a variable
+  the node reads.
+
+Their old engine re-specified the left side at every `&&` level, which is
+exponential and needed `BOOLEAN_EXPRESSION_MAX_PROCESS_DEPTH = 4`. Ours has
+no cap, and while a chain's operands are now narrowed once each, the
+branch narrowing still re-reads the whole condition, and each `elseif`
+re-applies the inverse of every earlier condition from scratch.
+
+B577 (condition narrowing applied after the fact instead of per operand) is
+the bug this shape still produces, filed separately so it can be fixed in
+place first.
+
+**Design.** `process_expr` today mutates the scope in place and returns an
+`ExprResult` that only says whether the expression wrote. It grows into
+`process_expr(expr, before: &ScopeState, ctx) -> Rc<ExprResult>`, with
+roughly:
+
+```rust
+struct ExprResult {
+    after: ScopeState,
+    ty: OnceCell<Vec<ResolvedType>>,
+    narrowing: OnceCell<[Narrowing; 2]>,      // truthy, falsey
+    truthy: OnceCell<ScopeState>,
+    falsey: OnceCell<ScopeState>,
+    truthy_override: Option<Rc<ExprResult>>,  // `&&`, `||` right operand
+    falsey_override: Option<Rc<ExprResult>>,
+    impure: bool,
+}
+```
+
+`ScopeState`'s persistent `Locals` trie already makes the before/after
+copies cheap. The extractors in `types/narrowing/` and
+`cond_narrowing/` become per-node narrowing producers that read the
+operand's result (an `instanceof` emits narrowing for its left operand's
+subject key) instead of scanning the whole condition for one variable
+name. That is the natural carrier for T20's sure/sure-not algebra, so the
+two should be designed together: T20 decides what a `Narrowing` holds,
+this item decides where it is produced and how it composes.
+
+Results are stored per file by span during the diagnostic walk. Hover and
+completion walk to the node containing the cursor and read its `before`
+scope, so they agree with diagnostics by construction instead of through
+the two code paths in `narrowed_subject_from_scope`.
+
+**What it retires.** `resolve_rhs_with_scope` and `ExprTypes` (become
+`.ty()`), `seed_pass_by_ref_in_condition`,
+`apply_condition_narrowing{,_inverse}` (become `.truthy()`/`.falsey()`),
+`record_match_ternary_snapshots`, `apply_cursor_ternary_narrowing`, the
+expression-level snapshots in `DIAGNOSTIC_SCOPE` (statement snapshots
+stay), `CHAIN_CACHE` (span keys make its variable-rooted exclusions
+unnecessary), most of `VAR_TYPE_MEMO`, and P54 entirely:
+`narrowed_by_rewalk`, the re-parse in `apply_property_narrowing`, and
+`NARROWING_IN_PROGRESS` go away because property and call subject keys
+live in the threaded scope.
+
+**Migration.** Incremental, behind the existing entry points. The first
+step (`process_expr` for array items, call arguments, binary operators,
+`&&`/`||`, `??`, ternary, `match` and `++`/`--`) is in; what is left:
+1. Move narrowing production into the per-node handlers and switch `if`,
+   `while` and `for` conditions to `.truthy()`/`.falsey()`. Thread the
+   `elseif` chain through the previous arm's falsey scope. Narrow ternary
+   and `match` arms inside `process_expr` too, which retires
+   `record_match_ternary_snapshots`: it still runs as its own pass from the
+   scope the statement started with, so an arm does not see a write made
+   earlier in the same statement.
+2. Store results by span, point hover/completion at them, and delete the
+   snapshot and re-walk machinery listed above.
+
+Each step should leave the full suite and the `projects/` diagnostic
+counts unchanged except for the bugs it fixes.
+
+**Where to look:** PHPStan 2.3's `src/Analyser/ExpressionResult.php`,
+`ExprHandler/BooleanAndHandler.php`, `ExprHandler/AssignHandler.php`,
+`ExprHandler/ArrayHandler.php`, `ExprHandler/PostIncHandler.php`,
+`ExprHandler/MethodCallHandler.php` (invalidation), and
+`MutatingScope::resolveTypeOfNewWorldHandlerNode`. Ours:
+`forward_walk/expr.rs`, `forward_walk/assignment.rs`,
+`forward_walk/if_else.rs`, `forward_walk/snapshot_narrowing.rs`,
+`cond_narrowing/apply.rs`,
+`rhs_resolution/mod.rs`, `resolver/property_narrowing.rs`.
 
 ---
 
@@ -482,6 +602,173 @@ key) the fallback can never be assigned, so `$string ??= 1` is still
 **References:**
 - Psalm: `Context::$vars_in_scope` and `Context::$vars_possibly_in_scope`
   (`Psalm\Context`)
+
+---
+
+## T46. Template arguments are not inferred from how the object is used later
+**Impact: Medium · Complexity: High**
+
+```php
+/** @template T */
+class Box {
+    /** @param T $item */
+    public function add($item): void {}
+    /** @return T */
+    public function first() {}
+}
+
+$box = new Box();
+$box->add(new Foo);
+$box->first()->  // PHPStan 2.3: Foo; PHPantom: mixed (`Box<mixed>`)
+```
+
+A `new` whose constructor leaves a template open erases it to its default,
+then its bound, then `mixed` (`default_type_arg` in
+`inheritance/generics.rs`, reached from `instantiate_class` in
+`call_resolution/template_binding.rs`), and members are substituted with
+that immediately. PHPStan 2.3 keeps the template open and fills it from
+the rest of the body. It ships behind the `unresolvedTemplateArguments`
+bleeding-edge flag, so it is not yet on by default there either.
+
+**How PHPStan does it.** The open template becomes a placeholder type
+(`UnresolvedTemplateArgumentType`) that answers every type question as its
+default or bound, so nothing downstream needs to know about it. While the
+body is walked, facts about each placeholder accumulate:
+
+- a value flows into it (`add(T $v)` called with `Foo`, `offsetSet` on an
+  `ArrayAccess`): a lower bound;
+- the object is passed to, returned as, or assigned to something declared
+  `Box<int>`: a send, with that position's variance;
+- the object is passed to `mixed` or an untyped slot: it escaped, and the
+  placeholder falls back to default or bound.
+
+Lower bounds are unioned (each first checked against the template's bound,
+so `add('x')` on `T of object` leaves `Box<object>`). An invariant send
+wins over lower bounds. Invariant sends between two placeholders unify
+them, so `$a->add(1); $b->add('x'); join($a, $b);` gives both
+`Box<1|'x'>`.
+
+The body is then walked a second time with the solved arguments. That is
+where the 1-3% cost comes from: statements before the first `new` replay
+from a recording, and a later statement is re-walked only if it holds a
+site or mentions a variable whose type changed (a syntactic check, cached
+on the AST node). Everything else replays its recorded scope delta. The
+second walk stops early once no variable differs and no site remains.
+(`StatementsHandler::processBodyStmtNodesTwoPass`,
+`Analyser/Generics/TemplateArgumentSolver.php`.)
+
+**What this means for an LSP.** In PHPStan an earlier line's type can
+depend on a later line: `$box->first()` hovered on the line before
+`takeInts($box)` reads `int`. Our cursor-bounded walk stops at the cursor's
+statement, so hover would read `mixed` there and `int` below, while
+diagnostics (which walk the whole body) would disagree with hover. The
+facts therefore have to come from a cursor-free pass over the whole body
+(`ctx.with_cursor_offset(u32::MAX)`, as `by_ref.rs` and `loops.rs` already
+do for discovery), cached per body and content version so hover and
+completion don't pay for a full walk per request. The solved arguments
+seed the cursor walk before any snapshot is recorded.
+
+Inferring from code below the cursor means half-typed code can flip a type
+while the user is typing. Two rules keep that stable: union lower bounds
+instead of PHPStan's "first invariant send wins" (which depends on order),
+and never narrow below default or bound from a lone escape.
+
+**First slice.** `new` with no arguments that bind the template, assigned
+to a plain variable; lower bounds from template-typed method parameters
+and `offsetSet`; union merging; no cross-variable unification. That covers
+the common "empty collection, then fill it" shape. Returns, property
+writes and sends to typed parameters can follow.
+
+**Shared work with T47.** Both need the same machinery: a cursor-free fact
+pass over the body, a per-body cache, and a "does this statement mention
+one of these variables" filter to limit the re-walk. `assignment_deps.rs`
+already collects the variables a statement reads and writes
+(`collect_rhs_variables`, `collect_assignment_target_vars`) and has a
+convergence check (`scope_has_changes`); `seed_by_ref_capture_fixed_point`
+in `by_ref.rs` is the closest existing probe-then-reseed pattern. Build it
+once, for whichever of the two lands first.
+
+**Where to look:** PHPStan 2.3's `src/Type/Generic/UnresolvedTemplateArgumentType.php`,
+`src/Analyser/Generics/`, `NewHandler::unresolvedArgumentList()`, and the
+`tests/PHPStan/Analyser/nsrt/template-argument-*.php` files. Ours:
+`rhs_resolution/instantiation.rs`, `call_resolution/template_binding.rs`,
+`forward_walk/mod.rs` (`resolve_in_method_body`, next to the existing
+whole-body pre-passes `seed_static_locals` and
+`try_generator_yield_inference`), `forward_walk/assignment.rs`
+(`process_expression_statement`, where receiver calls are already visited).
+
+---
+
+## T47. A closure assigned to a variable gets no parameter types from where it is used
+**Impact: Medium · Complexity: High**
+
+```php
+$byName = function ($a, $b) {
+    return $a->  // PHPStan 2.3: User; PHPantom: nothing
+};
+usort($users, $byName);   // list<User>
+```
+
+A closure literal passed straight to a typed callable parameter already
+gets its parameter types, generics included (`try_enter_closure_expr` →
+`infer_callable_params_for_call` in `forward_walk/closures.rs` and
+`callable_inference.rs`). Assigned to a variable first, it gets nothing:
+the assignment branch passes no inferred types, and the cursor walk stops
+before the statements that use it. This is the same blind spot from the
+other direction as T46, and the payoff is the same: completion and hover
+on an untyped parameter inside the body. PHPStan 2.3 ships it behind the
+`closureSignaturesFromUsages` bleeding-edge flag.
+
+**What PHPStan infers from.** Direct calls (`$f(1); $f(2);` gives `1|2`),
+passing the variable to a typed or generic callable parameter (`usort`,
+`array_map`, `array_filter`, `$collection->map($f)`, taking the parameter
+type after template resolution), aliases and ternaries (`$d = $f; $d(1);`),
+closures stored in array offsets or lists and called from there, and
+`return $f` / a typed property / `@var` against a declared `Closure(int):
+void`. All observed argument types are unioned. If the closure escapes
+(passed to `mixed`, bare `callable` or `Closure`, `call_user_func`, a
+by-ref parameter, `global`, `compact`/`extract`/`get_defined_vars`, `$$`),
+or the union doesn't fit the declared type, the declared type stands. A
+body is only observed when nothing outside it can reach its variables
+(`isClosedBody`).
+
+The mechanism is the two-pass walk described in T46: an untyped parameter
+starts as a placeholder that remembers its closure, and since it is an
+ordinary type it flows through variables, array shapes and foreach without
+special cases. Call sites add lower bounds, typed targets add bounds, and
+the second walk re-enters the closure body with the solved types.
+(`ClosureSignatureInference`, `TemplateArgumentObserver`,
+`TemplateArgumentSolver::resolveClosureSignatureObservation`; tests in
+`nsrt/closure-signature-from-usages*.php`.)
+
+**Plan.**
+1. When `try_enter_closure_expr` meets `$v = <closure>` (or an array
+   offset or list element) with the cursor inside it and untyped
+   parameters, scan the rest of the enclosing statement list for uses of
+   `$v` and its aliases. Run the syntactic escape check first and give up
+   on any hit.
+2. For a direct call `$v(...)`, resolve the arguments at that position.
+   For `$v` passed as an argument, reuse `infer_callable_params_for_call`
+   on that call to get the callable parameter types, so `usort`,
+   `array_map` and `->map()` come for free.
+3. Union the observations, keep the declared hint unless the union fits
+   inside it, and feed the result through the existing `inferred_params`
+   slot of `try_enter_closure_body` / `seed_closure_params`. Run the same
+   inference from `walk_closures_in_expr` so diagnostics and completion
+   agree.
+4. Later: give the variable's own type the inferred signature
+   (`infer_closure_literal_type`), so `$f('x')` and `->map($f)` see it.
+   That overlaps T13.
+
+Resolving each use's arguments must go through the shared walker (a
+cursor-free walk up to that offset, per T46's shared machinery), not a
+separate resolver. Lower-value cases can wait: `use (&$x)` fixed points,
+nested closures typed from an expected return type, generator escapes.
+
+**Where to look:** ours: `forward_walk/closures.rs`,
+`forward_walk/callable_inference.rs`, `diagnostic_walk.rs`
+(`walk_closures_in_call`, `seed_closure_params`), `rhs_resolution/calls.rs`
+(`$f()` reads only the variable's callable return type today).
 
 ---
 

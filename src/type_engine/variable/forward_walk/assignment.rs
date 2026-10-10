@@ -158,11 +158,6 @@ pub(crate) fn process_statement<'b>(
             if let Some(val) = ret.value {
                 process_assignment_expr(val, scope, ctx);
 
-                // Record `&&` and `||` chain snapshots so that member
-                // accesses after an instanceof/null guard see the
-                // narrowed type.  E.g. `return $x instanceof Foo && $x->bar()`
-                record_short_circuit_snapshots(val, scope, ctx);
-
                 // Record narrowed snapshots inside match(true) arms
                 // and ternary instanceof branches.
                 if is_diagnostic_scope_active() {
@@ -203,7 +198,6 @@ fn process_echoed_expression<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) {
     process_assignment_expr(value, scope, ctx);
-    record_short_circuit_snapshots(value, scope, ctx);
     if is_diagnostic_scope_active() {
         record_match_ternary_snapshots(value, scope, ctx);
     }
@@ -281,20 +275,27 @@ pub(crate) fn process_expression_statement<'b>(
             VarOverrideResult::None => false,
         };
 
-    // Record intermediate scope snapshots within `&&` and `||` chains
-    // so that member accesses after an instanceof/null guard see the
-    // narrowed type.  E.g. `$x instanceof Foo && $x->bar()` as an
-    // expression statement.
-    record_short_circuit_snapshots(expr, scope, ctx);
-
-    // Record narrowed snapshots inside match(true) arms and ternary
-    // instanceof branches within this expression.
-    if is_diagnostic_scope_active() {
-        record_match_ternary_snapshots(expr, scope, ctx);
-    }
+    // The ternary and `match` arms read the scope the statement started
+    // from: `$x = $c ? $x->a() : null` reads the `$x` it is replacing.
+    let branch_scope =
+        (is_diagnostic_scope_active() && holds_branches(expr)).then(|| scope.clone());
 
     if !skip_assignment {
         process_assignment_expr(expr, scope, ctx);
+    } else {
+        // The docblock stands in for the outermost write alone; whatever
+        // the expression does on the way there still happens.
+        let value = match expr {
+            Expression::Assignment(assignment) => assignment.rhs,
+            _ => expr,
+        };
+        process_expr(value, scope, ctx);
+    }
+
+    // Recorded after the walk above, so the finer snapshots inside the
+    // arms win over the ones the walk recorded at the same offsets.
+    if let Some(branch_scope) = branch_scope {
+        record_match_ternary_snapshots(expr, &branch_scope, ctx);
     }
 
     process_by_ref_closure_captures(expr, scope, ctx);
@@ -312,9 +313,6 @@ pub(crate) fn process_expression_statement<'b>(
     process_assert_narrowing(expr, scope, ctx);
 
     process_self_out_narrowing(expr, scope, ctx);
-
-    // Process increment/decrement: $a++, ++$a, $a--, --$a.
-    process_increment_decrement(expr, scope, ctx);
 }
 
 /// Identifies which callee parameter a call argument fills.
@@ -358,12 +356,15 @@ pub(crate) fn flatten_namespaced_statements<'b>(
 /// Incrementing `null` produces `1`, while decrementing it leaves `null`
 /// unchanged.
 #[derive(Clone, Copy)]
-enum IncrementDecrementKind {
+pub(super) enum IncrementDecrementKind {
     Increment,
     Decrement,
 }
 
-fn type_after_increment_decrement(ty: &PhpType, operation: IncrementDecrementKind) -> PhpType {
+pub(super) fn type_after_increment_decrement(
+    ty: &PhpType,
+    operation: IncrementDecrementKind,
+) -> PhpType {
     match ty.kind() {
         TypeKind::Union(members) => {
             let mut transformed = Vec::with_capacity(members.len());
@@ -435,51 +436,6 @@ fn type_after_increment_decrement(ty: &PhpType, operation: IncrementDecrementKin
             PhpType::union(vec![PhpType::int(), PhpType::float(), PhpType::string()])
         }
         _ => ty.clone(),
-    }
-}
-
-pub(crate) fn process_increment_decrement<'b>(
-    expr: &'b Expression<'b>,
-    scope: &mut ScopeState,
-    _ctx: &ForwardWalkCtx<'_>,
-) {
-    use mago_syntax::cst::unary::{UnaryPostfixOperator, UnaryPrefixOperator};
-
-    let (var_expr, operation) = match expr {
-        Expression::UnaryPostfix(postfix) => match &postfix.operator {
-            UnaryPostfixOperator::PostIncrement(_) => {
-                (postfix.operand, IncrementDecrementKind::Increment)
-            }
-            UnaryPostfixOperator::PostDecrement(_) => {
-                (postfix.operand, IncrementDecrementKind::Decrement)
-            }
-        },
-        Expression::UnaryPrefix(prefix) => match &prefix.operator {
-            UnaryPrefixOperator::PreIncrement(_) => {
-                (prefix.operand, IncrementDecrementKind::Increment)
-            }
-            UnaryPrefixOperator::PreDecrement(_) => {
-                (prefix.operand, IncrementDecrementKind::Decrement)
-            }
-            _ => return,
-        },
-        _ => return,
-    };
-
-    let var_name = match var_expr {
-        Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
-        _ => return,
-    };
-
-    let existing = scope.get(&var_name).to_vec();
-    if existing.is_empty() {
-        return;
-    }
-
-    let current_type = ResolvedType::types_joined(&existing);
-    let transformed = type_after_increment_decrement(&current_type, operation);
-    if transformed != current_type {
-        scope.set(&var_name, vec![ResolvedType::from_type_string(transformed)]);
     }
 }
 
@@ -565,12 +521,14 @@ pub(crate) fn process_assignment_expr<'b>(
         // `$ok = ($x = $map[$key])->truthy();`.  A right-hand side that
         // *is* an assignment is left to the chain handling below, which
         // knows shapes (destructuring, indexed writes) this does not.
-        if !matches!(
+        let expr_types = if matches!(
             crate::parser::unwrap_parens(assignment.rhs),
             Expression::Assignment(_)
         ) {
-            process_nested_assignments(assignment.rhs, scope, ctx);
-        }
+            ExprTypes::default()
+        } else {
+            process_expr(assignment.rhs, scope, ctx)
+        };
 
         if !assignment.operator.is_assign() {
             // Compound assignment: $x op= expr.
@@ -651,7 +609,8 @@ pub(crate) fn process_assignment_expr<'b>(
                     scope.invalidate_dependent_keys(&key);
                     return;
                 }
-                let mut rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+                let mut rhs_types =
+                    resolve_rhs_with_types(assignment.rhs, scope, ctx, Some(&expr_types));
                 adopt_declared_type_args(
                     assignment.lhs,
                     assignment.rhs,
@@ -694,7 +653,7 @@ pub(crate) fn process_assignment_expr<'b>(
             return;
         }
 
-        let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+        let rhs_types = resolve_rhs_with_types(assignment.rhs, scope, ctx, Some(&expr_types));
         // `$show = $limit !== null && …` makes `$show` stand for what the
         // expression proves, read off the scope the value was computed in.
         let condition_proofs =
@@ -757,7 +716,7 @@ pub(crate) fn process_assignment_expr<'b>(
     } else {
         // The expression assigns nothing at its root but may still assign
         // inside itself: `return ($x = $map[$key])->truthy();`.
-        process_nested_assignments(expr, scope, ctx);
+        process_expr(expr, scope, ctx);
     }
 }
 
@@ -1144,6 +1103,22 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
+    resolve_rhs_with_types(rhs, scope, ctx, None)
+}
+
+/// [`resolve_rhs_with_scope`], reading the sub-expression types
+/// [`process_expr`] recorded where they ran instead of re-deriving them
+/// from `scope`, which holds what the expression's writes left behind.
+pub(crate) fn resolve_rhs_with_types<'b>(
+    rhs: &'b Expression<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    expr_types: Option<&ExprTypes>,
+) -> Vec<ResolvedType> {
+    if let Some(recorded) = expr_types.and_then(|types| types.get(rhs)) {
+        return recorded.to_vec();
+    }
+
     // Chain assignment: `$a = $b = expr` — the value of an assignment
     // expression is the value of its RHS.  Recurse into the inner RHS
     // so that `$a` resolves to the same type as `$b`.  The RHS may be
@@ -1151,7 +1126,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
     if let Expression::Assignment(assignment) = crate::parser::unwrap_parens(rhs)
         && assignment.operator.is_assign()
     {
-        return resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+        return resolve_rhs_with_types(assignment.rhs, scope, ctx, expr_types);
     }
 
     // Compound assignment as RHS: `$a = ($x /= 2)` — the value of the
@@ -1165,8 +1140,8 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
         // survives: the target's non-null half, or the fallback that
         // replaced it.
         if matches!(assignment.operator, AssignmentOperator::Coalesce(_)) {
-            let lhs_types = resolve_rhs_with_scope(assignment.lhs, scope, ctx);
-            let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+            let lhs_types = resolve_rhs_with_types(assignment.lhs, scope, ctx, expr_types);
+            let rhs_types = resolve_rhs_with_types(assignment.rhs, scope, ctx, expr_types);
             let combined = coalesce_assign_value(lhs_types, rhs_types);
             if combined.is_empty() {
                 return vec![ResolvedType::from_type_string(PhpType::mixed())];
@@ -1181,7 +1156,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
                 }
                 _ => Vec::new(),
             },
-            || resolve_rhs_with_scope(assignment.rhs, scope, ctx),
+            || resolve_rhs_with_types(assignment.rhs, scope, ctx, expr_types),
         );
         if let Some(ty) = result_type {
             return vec![ResolvedType::from_type_string(ty)];
@@ -1256,7 +1231,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
         && let Some(ty) = super::super::rhs_resolution::unary_prefix_result_type(
             &prefix.operator,
             prefix.operand,
-            || resolve_rhs_with_scope(prefix.operand, scope, ctx),
+            || resolve_rhs_with_types(prefix.operand, scope, ctx, expr_types),
         )
     {
         return vec![ResolvedType::from_type_string(ty)];
@@ -1282,6 +1257,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
     let scope_contains = |var_name: &str| -> bool { scope_locals.contains_key(&atom(var_name)) };
     let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
         scope_contains_resolver: Some(&scope_contains),
+        expr_types,
         ..ctx.var_ctx_for_with_scope(dummy_var, rhs_offset, &scope_resolver, Some(scope.proofs()))
     };
 

@@ -22,16 +22,13 @@ pub(crate) fn process_while<'b>(
         return;
     }
 
-    // Record `&&` and `||` chain snapshots for the while condition.
-    record_short_circuit_snapshots(while_stmt.condition, scope, ctx);
-
     let pre_loop_scope = scope.clone();
 
     // Assignment in condition: `while ($x = expr())`.  Seeded before the
     // narrowing below so a condition that assigns and checks in one
     // expression (`while (($line = fgets($h)) !== false)`) finds the
     // variable in scope and can strip the sentinel from it.
-    process_nested_assignments(while_stmt.condition, scope, ctx);
+    process_expr(while_stmt.condition, scope, ctx);
 
     // Pass-by-reference in condition: `while (preg_match(..., $matches))`
     seed_pass_by_ref_in_condition(while_stmt.condition, scope, ctx);
@@ -92,7 +89,7 @@ pub(crate) fn process_while<'b>(
             if point != LoopSeedPoint::Entry {
                 return;
             }
-            process_nested_assignments(while_stmt.condition, next_scope, ctx);
+            process_expr(while_stmt.condition, next_scope, ctx);
             seed_pass_by_ref_in_condition(while_stmt.condition, next_scope, ctx);
             apply_condition_narrowing(while_stmt.condition, next_scope, ctx);
         },
@@ -160,30 +157,20 @@ pub(crate) fn process_for<'b>(
         process_assignment_expr(init_expr, scope, ctx);
     }
 
-    // Process condition assignments (e.g. `for (; $x = nextItem(); )`)
-    // and pass-by-ref in conditions (e.g. `for (; preg_match(..., $m); )`).
+    // Process condition assignments (e.g. `for (; $x = nextItem(); )`),
+    // the narrowing a clause's `&&` / `||` chain proves for its own later
+    // operands (`for (; $n && $n->next(); )`), and pass-by-ref in
+    // conditions (e.g. `for (; preg_match(..., $m); )`).
+    //
+    // A snapshot at each clause lets member accesses in it (which live on
+    // the `for` line, before any body statement) see the variables bound
+    // by the init clause and by the clauses before it.  Without this, a
+    // diagnostic on the condition would only find the pre-`for` snapshot
+    // and treat init-clause variables as unresolved.
     for cond_expr in for_stmt.conditions.iter() {
-        process_nested_assignments(cond_expr, scope, ctx);
+        record_scope_snapshot(cond_expr.span().start.offset, scope);
+        process_expr(cond_expr, scope, ctx);
         seed_pass_by_ref_in_condition(cond_expr, scope, ctx);
-    }
-
-    // Record a snapshot at each condition expression so that member
-    // accesses in the condition clause (which live on the `for` line,
-    // before any body statement) see the variables bound by the init
-    // clause.  Without this, a diagnostic on the condition would only
-    // find the pre-`for` snapshot and treat init-clause variables as
-    // unresolved.
-    if is_diagnostic_scope_active() {
-        for cond_expr in for_stmt.conditions.iter() {
-            record_scope_snapshot(cond_expr.span().start.offset, scope);
-        }
-    }
-
-    // A condition clause narrows its own operands the way an `if`
-    // condition does: `for (; $n && $n->next(); )` reaches `$n->next()`
-    // only with `$n` non-null.
-    for cond_expr in for_stmt.conditions.iter() {
-        record_short_circuit_snapshots(cond_expr, scope, ctx);
     }
 
     let pre_loop_scope = scope.clone();
@@ -254,7 +241,7 @@ pub(crate) fn process_for<'b>(
             }
             LoopSeedPoint::Entry => {
                 for cond_expr in for_stmt.conditions.iter() {
-                    process_nested_assignments(cond_expr, next_scope, ctx);
+                    process_expr(cond_expr, next_scope, ctx);
                     seed_pass_by_ref_in_condition(cond_expr, next_scope, ctx);
                     apply_condition_narrowing(cond_expr, next_scope, ctx);
                 }
@@ -350,7 +337,6 @@ fn process_for_updates<'b>(
 ) {
     for increment in for_stmt.increments.iter() {
         process_assignment_expr(increment, scope, ctx);
-        process_increment_decrement(increment, scope, ctx);
     }
 }
 
@@ -413,7 +399,7 @@ pub(crate) fn process_do_while<'b>(
                 apply_condition_narrowing(dw.condition, next_scope, ctx);
             }
             LoopSeedPoint::Entry => {
-                process_nested_assignments(dw.condition, next_scope, ctx);
+                process_expr(dw.condition, next_scope, ctx);
                 seed_pass_by_ref_in_condition(dw.condition, next_scope, ctx);
                 // The assignment above re-runs `$c = $c->getParent()` on
                 // the merged scope, which puts the declared `?Category`
@@ -426,10 +412,11 @@ pub(crate) fn process_do_while<'b>(
     );
     let exits = exit_frame.pop();
 
-    // The condition runs after the body, so its own `&&`/`||` narrowing
-    // is recorded against the scope the body leaves behind: that is where
-    // `do { $n = next(); } while ($n && $n->ok());` reads `$n` from.
-    record_short_circuit_snapshots(dw.condition, scope, ctx);
+    // The condition runs after the body, so it is walked on the scope the
+    // body leaves behind: that is where
+    // `do { $n = next(); } while ($n && $n->ok());` reads `$n` from, and
+    // what it writes is in force once the loop exits.
+    process_expr(dw.condition, scope, ctx);
 
     // After the do-while loop, the condition evaluated to false (that's
     // why the loop exited).  Apply the inverse of the condition to narrow

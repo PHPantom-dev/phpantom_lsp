@@ -289,18 +289,15 @@ pub(crate) fn walk_closures_in_expr<'b>(
             // Record the scope at the body expression.
             let body_span = arrow.expression.span();
             record_scope_snapshot(body_span.start.offset, &arrow_scope);
-            // The body is `return <expr>;`, and writes what that statement
-            // would, recording a snapshot at the end of each assignment.
+            // The body is `return <expr>;`, and writes and narrows what
+            // that statement would: a snapshot at the end of each
+            // assignment, and at each `&&` / `||` operand the narrowing
+            // the operands before it prove (`fn($x) => $x instanceof Foo
+            // && $x->bar()`).
             process_assignment_expr(arrow.expression, &mut arrow_scope, ctx);
             record_scope_snapshot(body_span.end.offset, &arrow_scope);
 
-            // The arrow body is a single return-value expression, so
-            // apply the same `&&` / `||` / match / ternary narrowing that
-            // a `return $x instanceof Foo && $x->bar()` statement would
-            // get.  Without this, a member access on a parameter narrowed
-            // by an earlier conjunct (e.g. `fn($x) => $x instanceof Foo
-            // && $x->bar()`) sees the un-narrowed parameter type.
-            record_short_circuit_snapshots(arrow.expression, &arrow_scope, ctx);
+            // The match / ternary narrowing a `return` statement gets.
             if is_diagnostic_scope_active() {
                 record_match_ternary_snapshots(arrow.expression, &arrow_scope, ctx);
             }

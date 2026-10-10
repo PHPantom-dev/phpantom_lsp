@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::Backend;
 
 use crate::php_type::PhpType;
-use crate::type_engine::variable::forward_walk::ScopeProofs;
+use crate::type_engine::variable::forward_walk::{ExprTypes, ScopeProofs};
 use crate::types::*;
 
 // ─── Thread-local chain resolution cache ────────────────────────────────────
@@ -373,6 +373,15 @@ pub(crate) struct VarResolutionCtx<'a> {
     /// a condition that tests a boolean recording an earlier check
     /// narrows that check's subject instead of only the boolean.
     pub scope_proofs: Option<ScopeProofs<'a>>,
+    /// The types of sub-expressions the forward walker evaluated against a
+    /// different scope than the one this resolution reads, keyed by span.
+    ///
+    /// An expression that writes partway through (`[$b, $b = 1]`,
+    /// `[$d++, $d]`) is resolved against the scope its writes leave
+    /// behind, which is wrong for whatever ran before them and for the old
+    /// value a `$d++` yields.  Those nodes are typed where they ran, and
+    /// the resolver reads them back from here instead of re-deriving them.
+    pub expr_types: Option<&'a ExprTypes>,
 }
 
 impl<'a> VarResolutionCtx<'a> {
@@ -414,7 +423,17 @@ impl<'a> VarResolutionCtx<'a> {
             scope_var_resolver: None,
             scope_contains_resolver: None,
             scope_proofs: None,
+            expr_types: None,
         }
+    }
+
+    /// The type the forward walker recorded for `expr` where it ran, if
+    /// it recorded one (see [`Self::expr_types`]).
+    pub(crate) fn recorded_expr_type(
+        &self,
+        expr: &mago_syntax::cst::Expression<'_>,
+    ) -> Option<&[crate::types::ResolvedType]> {
+        self.expr_types?.get(expr)
     }
 
     /// Create a [`ResolutionCtx`] from this variable resolution context.

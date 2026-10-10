@@ -375,11 +375,12 @@ pub(crate) fn process_foreach<'b>(
     }
 
     // The iterable expression is an expression position like any other,
-    // so the narrowing its own short-circuit chains, ternary branches and
-    // `match (true)` arms prove has to reach the code inside them.
+    // so the writes it makes and the narrowing its own short-circuit
+    // chains, ternary branches and `match (true)` arms prove have to reach
+    // the code inside them.
     // `foreach ($t instanceof UnionType ? $t->getTypes() : [$t] as $inner)`
     // reads `getTypes()` off the narrowed subject, not the declared one.
-    record_short_circuit_snapshots(foreach.expression, scope, ctx);
+    process_expr(foreach.expression, scope, ctx);
     if is_diagnostic_scope_active() {
         record_match_ternary_snapshots(foreach.expression, scope, ctx);
     }

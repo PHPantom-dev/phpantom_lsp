@@ -85,7 +85,8 @@ pub(crate) fn collect_or_chain_operands_inner<'b>(
 /// record snapshots at every sub-expression offset.  It writes them only
 /// inside match arms and ternary branches, where the branch scope can
 /// legitimately differ from the enclosing one.  This avoids polluting the
-/// scope cache with entries that could conflict with `&&`-chain snapshots.
+/// scope cache with entries that could conflict with the `&&`-chain
+/// snapshots [`process_expr`] records.
 pub(crate) fn record_match_ternary_snapshots<'b>(
     expr: &'b Expression<'b>,
     scope: &ScopeState,
@@ -188,8 +189,8 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
         }
         // The right operand of `&&` runs only once the left one was truthy,
         // and that of `||` only once it was falsy, so a ternary or `match`
-        // inside it starts from what that proved, the way
-        // `record_short_circuit_snapshots` reads the operand itself.
+        // inside it starts from what that proved, the way `process_expr`
+        // reads the operand itself.
         Expression::Binary(bin) => {
             record_match_ternary_snapshots(bin.lhs, scope, ctx);
             match short_circuit_kind(expr) {
@@ -258,7 +259,7 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
 ///
 /// Narrowing a scope for a short-circuit operand only pays off when there is
 /// a branch inside it to hand the scope to, so this is asked first.
-fn holds_branches(expr: &Expression<'_>) -> bool {
+pub(crate) fn holds_branches(expr: &Expression<'_>) -> bool {
     let any_argument = |args: &ArgumentList<'_>| {
         args.arguments
             .iter()
@@ -316,13 +317,15 @@ fn record_branch_snapshots<'b>(
 ) {
     record_scope_snapshot(expr.span().start.offset, scope);
     record_scope_snapshot_recursive(expr, scope);
-    record_short_circuit_snapshots(expr, scope, ctx);
+    // The branch runs on its own copy: what it writes is the enclosing
+    // walk's to apply, once it has joined the branches.
+    process_expr(expr, &mut scope.clone(), ctx);
     record_match_ternary_snapshots(expr, scope, ctx);
 }
 
 /// Which short-circuit operator joins a chain's operands.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ChainKind {
+pub(super) enum ChainKind {
     /// `&&` / `and`: every operand after the first runs only when all
     /// the ones before it were truthy.
     And,
@@ -347,201 +350,6 @@ fn short_circuit_kind(expr: &Expression<'_>) -> Option<ChainKind> {
         Expression::Parenthesized(inner) => short_circuit_kind(inner.expression),
         _ => None,
     }
-}
-
-/// Record intermediate scope snapshots within every `&&` / `||` chain
-/// an expression contains.
-///
-/// A chain proves something about its own operands: the right operand of
-/// `&&` runs only when the left was truthy, and the right operand of
-/// `||` only when the left was falsy.  For each operand after the first
-/// this records a scope snapshot carrying the accumulated proof, so that
-/// diagnostic lookups inside that operand see the narrowed types:
-///
-/// - `$x instanceof Foo && $x->bar()` — `$x` is `Foo` for `$x->bar()`.
-/// - `$x === null || $x->method()` — `$x` is non-null for `$x->method()`.
-///
-/// The chain does not have to be the whole expression.  A chain reaches
-/// the same conclusions about its operands wherever it sits, so this
-/// descends through the surrounding expression to find chains nested in
-/// an assignment's right-hand side, a call argument, an array element, a
-/// ternary condition, and so on.  Recording only for a chain that was
-/// itself the entire statement is what left
-/// `$ok = is_string($s) && strlen($s);` and
-/// `return is_array($this->d) && count($this->d) ? $this->d[$k] : null;`
-/// reading the un-narrowed type.
-///
-/// The narrowing is applied only to snapshots — it does NOT mutate the
-/// caller's scope, so subsequent statements see the original types.
-pub(crate) fn record_short_circuit_snapshots<'b>(
-    expr: &'b Expression<'b>,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    if !is_diagnostic_scope_active() {
-        return;
-    }
-    record_short_circuit_snapshots_inner(expr, scope, ctx);
-}
-
-fn record_short_circuit_snapshots_inner<'b>(
-    expr: &'b Expression<'b>,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    match short_circuit_kind(expr) {
-        Some(ChainKind::And) => {
-            let operands = collect_and_chain_operands(expr);
-            record_chain_snapshots(&operands, ChainKind::And, scope, ctx);
-        }
-        Some(ChainKind::Or) => {
-            let operands = collect_or_chain_operands(expr);
-            record_chain_snapshots(&operands, ChainKind::Or, scope, ctx);
-        }
-        None => descend_for_short_circuit(expr, scope, ctx),
-    }
-}
-
-/// Walk a chain's operands left to right, accumulating what each one
-/// proves for the operands that follow it.
-fn record_chain_snapshots<'b>(
-    operands: &[&'b Expression<'b>],
-    kind: ChainKind,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    if operands.len() < 2 {
-        // A single operand is not a chain: the parenthesised-unwrapping
-        // in the collectors can flatten `($a)` back to one element even
-        // though the root looked like a chain.
-        descend_for_short_circuit(operands[0], scope, ctx);
-        return;
-    }
-
-    let mut narrowed_scope = scope.clone();
-    for (i, operand) in operands.iter().enumerate() {
-        if i > 0 {
-            // Record a snapshot at this operand's start offset so that
-            // member accesses within it see the narrowed types, and
-            // recurse into its sub-expressions so accesses at deeper
-            // offsets (e.g. `is_array($x->errorInfo)`, where the access
-            // sits inside a call argument) see them too.
-            record_scope_snapshot(operand.span().start.offset, &narrowed_scope);
-            record_scope_snapshot_recursive(operand, &narrowed_scope);
-        }
-
-        // Refine chains nested inside this operand on top of the
-        // narrowing accumulated so far.  E.g. `$a && ($b instanceof Foo
-        // || $c) && $a->m()` — the inner `||` operands narrow
-        // independently.  These overwrite the coarser snapshots
-        // recorded above at the offsets that carry intra-chain
-        // narrowing.  The first operand gets this too: it proves
-        // nothing for itself, but `($a instanceof Foo && $a->m()) || $b`
-        // still holds a chain that narrows its own operands.
-        let operand_scope = if i > 0 { &narrowed_scope } else { scope };
-        record_short_circuit_snapshots_inner(operand, operand_scope, ctx);
-
-        match kind {
-            ChainKind::And => apply_condition_narrowing(operand, &mut narrowed_scope, ctx),
-            ChainKind::Or => apply_condition_narrowing_inverse(operand, &mut narrowed_scope, ctx),
-        }
-    }
-}
-
-/// Descend through an expression that is not itself a short-circuit
-/// chain, looking for chains nested inside it.
-///
-/// Ternary branches are deliberately left out: they run under their own
-/// polarity of the condition, and [`record_match_ternary_snapshots`]
-/// already recurses into them with that branch scope.  Descending into
-/// them here with the un-narrowed scope would record a worse snapshot at
-/// the same offsets.  The ternary *condition* is fair game, since it is
-/// evaluated in the enclosing scope.
-fn descend_for_short_circuit<'b>(
-    expr: &'b Expression<'b>,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    let visit = |sub: &'b Expression<'b>| record_short_circuit_snapshots_inner(sub, scope, ctx);
-
-    match expr {
-        Expression::Assignment(assignment) => visit(assignment.rhs),
-        Expression::Parenthesized(inner) => visit(inner.expression),
-        Expression::UnaryPrefix(prefix) => visit(prefix.operand),
-        Expression::Binary(bin) => {
-            visit(bin.lhs);
-            visit(bin.rhs);
-        }
-        Expression::Conditional(conditional) => visit(conditional.condition),
-        Expression::ArrayAccess(aa) => {
-            visit(aa.array);
-            visit(aa.index);
-        }
-        Expression::Call(call) => {
-            let args = match call {
-                Call::Function(fc) => {
-                    visit(fc.function);
-                    &fc.argument_list
-                }
-                Call::Method(mc) => {
-                    visit(mc.object);
-                    &mc.argument_list
-                }
-                Call::NullSafeMethod(mc) => {
-                    visit(mc.object);
-                    if !mc.argument_list.arguments.is_empty() {
-                        record_nullsafe_argument_snapshots(mc, scope, ctx);
-                    }
-                    return;
-                }
-                Call::StaticMethod(sc) => &sc.argument_list,
-            };
-            for arg in args.arguments.iter() {
-                visit(argument_value(arg));
-            }
-        }
-        Expression::Instantiation(inst) => {
-            if let Some(args) = &inst.argument_list {
-                for arg in args.arguments.iter() {
-                    visit(argument_value(arg));
-                }
-            }
-        }
-        Expression::Array(arr) => {
-            for elem in arr.elements.iter() {
-                match elem {
-                    ArrayElement::KeyValue(kv) => {
-                        visit(kv.key);
-                        visit(kv.value);
-                    }
-                    ArrayElement::Value(val) => visit(val.value),
-                    ArrayElement::Variadic(v) => visit(v.value),
-                    ArrayElement::Missing(_) => {}
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Record the scope the arguments of a `?->` call run under: the receiver
-/// is not null there, or the call would have short-circuited before
-/// reaching them.
-fn record_nullsafe_argument_snapshots<'b>(
-    call: &'b NullSafeMethodCall<'b>,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    let mut narrowed = scope.clone();
-    narrow_nullsafe_call_receiver(call.object, &mut narrowed, ctx);
-    for arg in call.argument_list.arguments.iter() {
-        let value = argument_value(arg);
-        record_scope_snapshot(value.span().start.offset, &narrowed);
-        record_scope_snapshot_recursive(value, &narrowed);
-        record_short_circuit_snapshots_inner(value, &narrowed, ctx);
-    }
-    // What follows the call reads the receiver as it was.
-    record_scope_snapshot(call.argument_list.span().end.offset, scope);
 }
 
 /// The expression an argument carries, whether it was passed

@@ -520,6 +520,9 @@ fn infer_element_type<'b>(
     value: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
+    if let Some(recorded) = ctx.recorded_expr_type(value) {
+        return (!recorded.is_empty()).then(|| crate::types::ResolvedType::types_joined(recorded));
+    }
     match value {
         // ── Nested array literals ──
         Expression::Array(arr) => infer_array_literal_raw_type(arr.elements.iter(), ctx)

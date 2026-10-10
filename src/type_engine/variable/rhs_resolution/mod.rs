@@ -627,6 +627,9 @@ pub(in crate::type_engine) fn resolve_rhs_expression<'b>(
     expr: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
+    if let Some(recorded) = ctx.recorded_expr_type(expr) {
+        return recorded.to_vec();
+    }
     let expr = peel_type_transparent(expr);
     match expr {
         Expression::Binary(binary) if binary.operator.is_null_coalesce() => {
@@ -652,7 +655,7 @@ pub(in crate::type_engine) fn resolve_rhs_expression<'b>(
 /// `$y = expr;` statement would.
 ///
 /// Recording the target itself, so a later read of `$y` sees this
-/// write, is the forward walker's job (`process_nested_assignments` /
+/// write, is the forward walker's job (`process_expr` /
 /// `process_assignment_expr`), not this read-only pipeline's.
 fn resolve_assignment_as_value<'b>(
     assignment: &'b Assignment<'b>,
@@ -751,7 +754,7 @@ fn coalesce_assign_value(
 /// `&$expr` used as a value (`$a =& $var`'s own value, an argument to a
 /// legacy by-ref call) is whatever `$expr` currently holds; the operator
 /// only affects how the *target* is bound, which is the forward walker's
-/// concern (`process_nested_assignments` / `process_assignment_expr`),
+/// concern (`process_expr` / `process_assignment_expr`),
 /// not this read-only pipeline's.
 fn peel_type_transparent<'b>(mut expr: &'b Expression<'b>) -> &'b Expression<'b> {
     loop {

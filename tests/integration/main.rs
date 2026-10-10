@@ -172,6 +172,7 @@ mod document_symbols;
 mod document_symbols_blade;
 mod duplicate_class_declarations;
 mod duplicate_function_declarations;
+mod expression_evaluation_order;
 mod fix_cli;
 mod folding_blade;
 mod folding_ranges;

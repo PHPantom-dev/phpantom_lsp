@@ -37,6 +37,39 @@ No outstanding items.
 
 ## Narrowing
 
+### B577. Condition narrowing is applied to the whole condition, not operand by operand
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+```php
+if ($x instanceof Foo && ($x = make())) {   // make(): Bar
+    $x;  // reads `Foo`; it is `Bar`
+}
+
+class Holder {
+    public mixed $a;
+    public function reset(): bool { $this->a = null; return true; }
+    public function m(): void {
+        if ($this->a instanceof Foo && $this->reset() && $this->a->x()) {}
+        // `$this->a` still reads `Foo` after reset() cleared it
+    }
+}
+```
+
+The then-branch narrowing comes from `apply_condition_narrowing` running
+over the finished condition, so a narrowing from an early operand is
+committed over a later operand's reassignment of the same variable, and a
+call with side effects between operands does not drop narrowings rooted in
+its receiver (receiver mutation is statement-level, in
+`process_expression_statement`). PHPStan avoids the first by making an
+`&&`'s truthy scope the right operand's own truthy scope, and the second by
+invalidating receiver-rooted expressions inside the expression walk.
+
+**Fix:** Produce narrowing per operand and invalidate after impure calls as
+the operands are processed. That is most of T45's next step; a narrower fix
+would skip committing a left-operand narrowing for a variable the right
+operand writes, and run receiver invalidation per `&&`/`||` operand.
+
 ### B568. A passing strict `in_array()` against `object` elements drops the needle's classes
 
 **Impact: Low · Complexity: Low-Medium**

@@ -33,25 +33,18 @@ pub(crate) fn process_if<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // Record `&&` chain snapshots for the condition expression so that
-    // member accesses after an instanceof/null guard within the condition
-    // see the narrowed type.  E.g. `if ($x !== null && $x->method())`
-    // — the `$x->method()` span needs `$x` narrowed to non-null.
-    // The `||` variant handles the short-circuit guard idiom
-    // `!$x instanceof Foo || $x->method()`.
-    record_short_circuit_snapshots(if_stmt.condition, scope, ctx);
-
-    // Cursor inside the condition: narrowing for member accesses there
-    // was already recorded above via the chain snapshots (diagnostics),
-    // or is applied by the caller after this returns (mod.rs's cursor
-    // narrowing pass for hover/completion), so leave scope untouched.
+    // Cursor inside the condition: narrowing for member accesses there is
+    // applied by the caller after this returns (mod.rs's cursor narrowing
+    // pass for hover/completion), so leave scope untouched.
     let cond_span = if_stmt.condition.span();
     if ctx.cursor_offset >= cond_span.start.offset && ctx.cursor_offset <= cond_span.end.offset {
         return;
     }
 
-    // Assignment in condition: `if ($x = expr())`
-    process_nested_assignments(if_stmt.condition, scope, ctx);
+    // Assignment in condition: `if ($x = expr())`, and the narrowing a
+    // `&&` / `||` chain proves for its later operands:
+    // `if ($x !== null && $x->method())`.
+    process_expr(if_stmt.condition, scope, ctx);
 
     // Pass-by-reference in condition: `if (preg_match(..., $matches))`
     seed_pass_by_ref_in_condition(if_stmt.condition, scope, ctx);
@@ -179,7 +172,7 @@ pub(crate) fn process_if_statement_body<'b>(
                 // truthy test can strip its falsy members, and
                 // `elseif (preg_match(…, $m))` has to seed `$m` before the
                 // test can rule out the failed match.
-                process_nested_assignments(ei.condition, scope, ctx);
+                process_expr(ei.condition, scope, ctx);
                 seed_pass_by_ref_in_condition(ei.condition, scope, ctx);
                 apply_condition_narrowing(ei.condition, scope, ctx);
                 walk_body_forward(std::iter::once(ei.statement), scope, ctx);
@@ -307,7 +300,7 @@ pub(crate) fn process_if_colon_body<'b>(
             for prev_ei in body.else_if_clauses.iter().take(idx) {
                 apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
             }
-            process_nested_assignments(ei.condition, scope, ctx);
+            process_expr(ei.condition, scope, ctx);
             seed_pass_by_ref_in_condition(ei.condition, scope, ctx);
             apply_condition_narrowing(ei.condition, scope, ctx);
             walk_body_forward(ei.statements.iter(), scope, ctx);
@@ -417,10 +410,7 @@ where
         if is_diagnostic_scope_active() {
             record_scope_snapshot(arm.condition.span().start.offset, &ei_scope);
         }
-        // An `elseif`'s own `&&` / `||` chain narrows its later operands
-        // just as the leading `if`'s does.
-        record_short_circuit_snapshots(arm.condition, &ei_scope, ctx);
-        process_nested_assignments(arm.condition, &mut ei_scope, ctx);
+        process_expr(arm.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(arm.condition, &mut ei_scope, ctx);
         apply_condition_narrowing(arm.condition, &mut ei_scope, ctx);
         walk_body_forward(arm.stmts.clone(), &mut ei_scope, ctx);
