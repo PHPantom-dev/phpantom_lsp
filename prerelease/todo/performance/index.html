@@ -3208,6 +3208,9 @@ per-request map keyed by those four and cleared with the rest of the
 request caches would turn the n walks into n lookups. The awkward part is
 that the walk mutates <code>results</code> in place and reports intersections
 through a separate flag, so the cached value has to carry both.</p>
+<p>T45 removes the re-walk altogether by carrying property and call subject
+keys in the threaded scope. The memo is the fix to take if this becomes a
+problem before T45 lands.</p>
 <p><strong>Where to look:</strong> <code>apply_property_narrowing</code> in
 <code>type_engine/resolver/property_narrowing.rs</code>, and its three callers in
 <code>type_engine/resolver/mod.rs</code> (<code>SubjectExpr::CallExpr</code> and the property

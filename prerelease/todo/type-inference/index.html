@@ -1284,6 +1284,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#t45-expressions-should-hand-their-scope-type-and-narrowing-to-the-next-expression" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T45. Expressions should hand their scope, type and narrowing to the next expression
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#t26-class-constants-named-as-docblock-types-foobar-foobar_" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1310,6 +1321,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T29. Definite vs possible variable existence tracking
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T46. Template arguments are not inferred from how the object is used later
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T47. A closure assigned to a variable gets no parameter types from where it is used
       </span>
     </span>
   </a>
@@ -1637,6 +1670,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#t45-expressions-should-hand-their-scope-type-and-narrowing-to-the-next-expression" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T45. Expressions should hand their scope, type and narrowing to the next expression
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#t26-class-constants-named-as-docblock-types-foobar-foobar_" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1663,6 +1707,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T29. Definite vs possible variable existence tracking
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T46. Template arguments are not inferred from how the object is used later
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T47. A closure assigned to a variable gets no parameter types from where it is used
       </span>
     </span>
   </a>
@@ -2087,6 +2153,115 @@ sets. The <code>Algebra</code> class provides pure functions:</p>
 landed, which makes reconciliation much simpler than working with
 raw strings.</p>
 <hr />
+<h2 id="t45-expressions-should-hand-their-scope-type-and-narrowing-to-the-next-expression">T45. Expressions should hand their scope, type and narrowing to the next expression<a class="headerlink" href="#t45-expressions-should-hand-their-scope-type-and-narrowing-to-the-next-expression" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Very High</strong></p>
+<p>The forward walker threads scope from statement to statement, and
+<code>process_expr</code> (<code>forward_walk/expr.rs</code>) threads it through one expression
+in evaluation order: writes (including <code>++</code>/<code>--</code>) land where they happen,
+the operands of <code>&amp;&amp;</code>/<code>||</code> run on the scope the earlier operands left,
+narrowed by what they proved, and the right side of <code>??</code> and the arms of a
+ternary or <code>match</code> run on their own copy. But the expression is still
+walked in further passes: <code>process_expression_statement</code>
+(<code>forward_walk/assignment.rs</code>) adds match/ternary snapshots, by-ref
+captures, receiver mutation, asserts and self-out, and an <code>if</code> condition is
+walked again by <code>seed_pass_by_ref_in_condition</code> and once more per branch by
+<code>apply_condition_narrowing{,_inverse}</code>, which itself runs about fifteen
+extractors that each pattern-match the whole condition. The expression's
+own type is resolved once against the scope after all its writes; the
+sub-expressions that read an earlier scope are typed where they ran and
+handed to the resolver by span (<code>ExprTypes</code>), but only
+<code>resolve_rhs_expression</code> and array-item inference consult them.</p>
+<p>PHPStan 2.3 replaced the same three-walker shape (<code>NodeScopeResolver</code>,
+<code>MutatingScope::resolveType</code>, <code>TypeSpecifier</code>) with one: processing a node
+returns an <code>ExpressionResult</code> holding the scope before and after it, a
+lazily computed type, and lazily computed truthy/falsey narrowing. Parents
+compose their children's results instead of re-resolving them:</p>
+<ul>
+<li><code>&amp;&amp;</code> processes its right operand on the left's truthy scope, and its own
+  truthy scope <em>is</em> the right operand's (<code>truthyScopeOverrideResult</code>), so a
+  narrowing from the left is never re-applied over a variable the right
+  reassigned. <code>||</code> mirrors this on the falsey side; <code>!</code> reuses the
+  operand's narrowing with the context flipped.</li>
+<li>Array items, call arguments and the like pass each child's post-scope to
+  the next sibling, which is what makes <code>[$b = 1, $b + 1]</code> read <code>2</code>.</li>
+<li><code>$c++</code> is processed as a virtual pre-increment assignment: the post-scope
+  holds the new value, the node's own type is the old one.</li>
+<li>A call with side effects invalidates receiver-rooted expressions inside
+  the expression walk, so <code>$this-&gt;a instanceof Foo &amp;&amp; $this-&gt;reset()</code>
+  drops the narrowing before the next operand.</li>
+<li>Every result is stored by node identity; rules, and <code>Scope::getType()</code>
+  for a node already processed, read the stored result. Recomputation
+  happens only for synthetic nodes or a scope that disagrees on a variable
+  the node reads.</li>
+</ul>
+<p>Their old engine re-specified the left side at every <code>&amp;&amp;</code> level, which is
+exponential and needed <code>BOOLEAN_EXPRESSION_MAX_PROCESS_DEPTH = 4</code>. Ours has
+no cap, and while a chain's operands are now narrowed once each, the
+branch narrowing still re-reads the whole condition, and each <code>elseif</code>
+re-applies the inverse of every earlier condition from scratch.</p>
+<p>B577 (condition narrowing applied after the fact instead of per operand) is
+the bug this shape still produces, filed separately so it can be fixed in
+place first.</p>
+<p><strong>Design.</strong> <code>process_expr</code> today mutates the scope in place and returns an
+<code>ExprResult</code> that only says whether the expression wrote. It grows into
+<code>process_expr(expr, before: &amp;ScopeState, ctx) -&gt; Rc&lt;ExprResult&gt;</code>, with
+roughly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">struct</span><span class="w"> </span><span class="nc">ExprResult</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">    </span><span class="n">after</span><span class="p">:</span><span class="w"> </span><span class="nc">ScopeState</span><span class="p">,</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="n">ty</span><span class="p">:</span><span class="w"> </span><span class="nc">OnceCell</span><span class="o">&lt;</span><span class="nb">Vec</span><span class="o">&lt;</span><span class="n">ResolvedType</span><span class="o">&gt;&gt;</span><span class="p">,</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="n">narrowing</span><span class="p">:</span><span class="w"> </span><span class="nc">OnceCell</span><span class="o">&lt;</span><span class="p">[</span><span class="n">Narrowing</span><span class="p">;</span><span class="w"> </span><span class="mi">2</span><span class="p">]</span><span class="o">&gt;</span><span class="p">,</span><span class="w">      </span><span class="c1">// truthy, falsey</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="n">truthy</span><span class="p">:</span><span class="w"> </span><span class="nc">OnceCell</span><span class="o">&lt;</span><span class="n">ScopeState</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="n">falsey</span><span class="p">:</span><span class="w"> </span><span class="nc">OnceCell</span><span class="o">&lt;</span><span class="n">ScopeState</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="n">truthy_override</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">Rc</span><span class="o">&lt;</span><span class="n">ExprResult</span><span class="o">&gt;&gt;</span><span class="p">,</span><span class="w">  </span><span class="c1">// `&amp;&amp;`, `||` right operand</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="n">falsey_override</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">Rc</span><span class="o">&lt;</span><span class="n">ExprResult</span><span class="o">&gt;&gt;</span><span class="p">,</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="n">impure</span><span class="p">:</span><span class="w"> </span><span class="kt">bool</span><span class="p">,</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>ScopeState</code>'s persistent <code>Locals</code> trie already makes the before/after
+copies cheap. The extractors in <code>types/narrowing/</code> and
+<code>cond_narrowing/</code> become per-node narrowing producers that read the
+operand's result (an <code>instanceof</code> emits narrowing for its left operand's
+subject key) instead of scanning the whole condition for one variable
+name. That is the natural carrier for T20's sure/sure-not algebra, so the
+two should be designed together: T20 decides what a <code>Narrowing</code> holds,
+this item decides where it is produced and how it composes.</p>
+<p>Results are stored per file by span during the diagnostic walk. Hover and
+completion walk to the node containing the cursor and read its <code>before</code>
+scope, so they agree with diagnostics by construction instead of through
+the two code paths in <code>narrowed_subject_from_scope</code>.</p>
+<p><strong>What it retires.</strong> <code>resolve_rhs_with_scope</code> and <code>ExprTypes</code> (become
+<code>.ty()</code>), <code>seed_pass_by_ref_in_condition</code>,
+<code>apply_condition_narrowing{,_inverse}</code> (become <code>.truthy()</code>/<code>.falsey()</code>),
+<code>record_match_ternary_snapshots</code>, <code>apply_cursor_ternary_narrowing</code>, the
+expression-level snapshots in <code>DIAGNOSTIC_SCOPE</code> (statement snapshots
+stay), <code>CHAIN_CACHE</code> (span keys make its variable-rooted exclusions
+unnecessary), most of <code>VAR_TYPE_MEMO</code>, and P54 entirely:
+<code>narrowed_by_rewalk</code>, the re-parse in <code>apply_property_narrowing</code>, and
+<code>NARROWING_IN_PROGRESS</code> go away because property and call subject keys
+live in the threaded scope.</p>
+<p><strong>Migration.</strong> Incremental, behind the existing entry points. The first
+step (<code>process_expr</code> for array items, call arguments, binary operators,
+<code>&amp;&amp;</code>/<code>||</code>, <code>??</code>, ternary, <code>match</code> and <code>++</code>/<code>--</code>) is in; what is left:
+1. Move narrowing production into the per-node handlers and switch <code>if</code>,
+   <code>while</code> and <code>for</code> conditions to <code>.truthy()</code>/<code>.falsey()</code>. Thread the
+   <code>elseif</code> chain through the previous arm's falsey scope. Narrow ternary
+   and <code>match</code> arms inside <code>process_expr</code> too, which retires
+   <code>record_match_ternary_snapshots</code>: it still runs as its own pass from the
+   scope the statement started with, so an arm does not see a write made
+   earlier in the same statement.
+2. Store results by span, point hover/completion at them, and delete the
+   snapshot and re-walk machinery listed above.</p>
+<p>Each step should leave the full suite and the <code>projects/</code> diagnostic
+counts unchanged except for the bugs it fixes.</p>
+<p><strong>Where to look:</strong> PHPStan 2.3's <code>src/Analyser/ExpressionResult.php</code>,
+<code>ExprHandler/BooleanAndHandler.php</code>, <code>ExprHandler/AssignHandler.php</code>,
+<code>ExprHandler/ArrayHandler.php</code>, <code>ExprHandler/PostIncHandler.php</code>,
+<code>ExprHandler/MethodCallHandler.php</code> (invalidation), and
+<code>MutatingScope::resolveTypeOfNewWorldHandlerNode</code>. Ours:
+<code>forward_walk/expr.rs</code>, <code>forward_walk/assignment.rs</code>,
+<code>forward_walk/if_else.rs</code>, <code>forward_walk/snapshot_narrowing.rs</code>,
+<code>cond_narrowing/apply.rs</code>,
+<code>rhs_resolution/mod.rs</code>, <code>resolver/property_narrowing.rs</code>.</p>
 <hr />
 <h2 id="t26-class-constants-named-as-docblock-types-foobar-foobar_">T26. Class constants named as docblock types (<code>Foo::BAR</code>, <code>Foo::BAR_*</code>)<a class="headerlink" href="#t26-class-constants-named-as-docblock-types-foobar-foobar_" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
@@ -2103,15 +2278,15 @@ in <code>tests/psalm_assertions/const_values.php</code> and
 <p>The wildcard form resolves a pattern like <code>Foo::BAR_*</code> to the union of all
 matching constant types on the class. PHPStan supports this syntax in
 docblock type strings:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Status {</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    const STATUS_ACTIVE = 1;</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    const STATUS_INACTIVE = 2;</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    const STATUS_PENDING = 3;</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">}</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">/** @param Status::STATUS_* $status */</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">function setStatus(int $status): void { ... }</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">// $status should resolve to 1|2|3</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">class Status {</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    const STATUS_ACTIVE = 1;</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    const STATUS_INACTIVE = 2;</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    const STATUS_PENDING = 3;</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">/** @param Status::STATUS_* $status */</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">function setStatus(int $status): void { ... }</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="x">// $status should resolve to 1|2|3</span>
 </code></pre></div>
 <p>When the type engine encounters a constant pattern containing <code>*</code>,
 it should:</p>
@@ -2135,19 +2310,19 @@ When the same template param receives bounds from multiple sources,
 the shallowest (most direct) match wins. Only union bounds at the
 same depth level.</p>
 <p>For example, given:
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @template T */</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">function wrap(T $value, array&lt;T&gt; $context): T { ... }</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">wrap(&quot;hello&quot;, [1, 2, 3]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">function wrap(T $value, array&lt;T&gt; $context): T { ... }</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">wrap(&quot;hello&quot;, [1, 2, 3]);</span>
 </code></pre></div></p>
 <p>The <code>$value</code> argument gives <code>T = string</code> at depth 0. The <code>$context</code>
 argument gives <code>T = int</code> at depth 1 (inside <code>array&lt;&gt;</code>). The shallow
 bound (<code>string</code>) should win, not produce <code>string|int</code>.</p>
 <p><strong>Design:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>struct TemplateBound {
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    ty: PhpType,
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    depth: u8,        // 0 = direct match, 1 = one generic layer deep, etc.
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    arg_offset: u8,   // which argument produced this bound
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>struct TemplateBound {
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    ty: PhpType,
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    depth: u8,        // 0 = direct match, 1 = one generic layer deep, etc.
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    arg_offset: u8,   // which argument produced this bound
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>}
 </code></pre></div>
 <p>When selecting the final type for a template param:
 1. Group bounds by depth.
@@ -2201,6 +2376,151 @@ key) the fallback can never be assigned, so <code>$string ??= 1</code> is still
 - Psalm: <code>Context::$vars_in_scope</code> and <code>Context::$vars_possibly_in_scope</code>
   (<code>Psalm\Context</code>)</p>
 <hr />
+<h2 id="t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later">T46. Template arguments are not inferred from how the object is used later<a class="headerlink" href="#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">class Box {</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    /** @param T $item */</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">    public function add($item): void {}</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">    /** @return T */</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">    public function first() {}</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">}</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="x">$box = new Box();</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="x">$box-&gt;add(new Foo);</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="x">$box-&gt;first()-&gt;  // PHPStan 2.3: Foo; PHPantom: mixed (`Box&lt;mixed&gt;`)</span>
+</code></pre></div>
+<p>A <code>new</code> whose constructor leaves a template open erases it to its default,
+then its bound, then <code>mixed</code> (<code>default_type_arg</code> in
+<code>inheritance/generics.rs</code>, reached from <code>instantiate_class</code> in
+<code>call_resolution/template_binding.rs</code>), and members are substituted with
+that immediately. PHPStan 2.3 keeps the template open and fills it from
+the rest of the body. It ships behind the <code>unresolvedTemplateArguments</code>
+bleeding-edge flag, so it is not yet on by default there either.</p>
+<p><strong>How PHPStan does it.</strong> The open template becomes a placeholder type
+(<code>UnresolvedTemplateArgumentType</code>) that answers every type question as its
+default or bound, so nothing downstream needs to know about it. While the
+body is walked, facts about each placeholder accumulate:</p>
+<ul>
+<li>a value flows into it (<code>add(T $v)</code> called with <code>Foo</code>, <code>offsetSet</code> on an
+  <code>ArrayAccess</code>): a lower bound;</li>
+<li>the object is passed to, returned as, or assigned to something declared
+  <code>Box&lt;int&gt;</code>: a send, with that position's variance;</li>
+<li>the object is passed to <code>mixed</code> or an untyped slot: it escaped, and the
+  placeholder falls back to default or bound.</li>
+</ul>
+<p>Lower bounds are unioned (each first checked against the template's bound,
+so <code>add('x')</code> on <code>T of object</code> leaves <code>Box&lt;object&gt;</code>). An invariant send
+wins over lower bounds. Invariant sends between two placeholders unify
+them, so <code>$a-&gt;add(1); $b-&gt;add('x'); join($a, $b);</code> gives both
+<code>Box&lt;1|'x'&gt;</code>.</p>
+<p>The body is then walked a second time with the solved arguments. That is
+where the 1-3% cost comes from: statements before the first <code>new</code> replay
+from a recording, and a later statement is re-walked only if it holds a
+site or mentions a variable whose type changed (a syntactic check, cached
+on the AST node). Everything else replays its recorded scope delta. The
+second walk stops early once no variable differs and no site remains.
+(<code>StatementsHandler::processBodyStmtNodesTwoPass</code>,
+<code>Analyser/Generics/TemplateArgumentSolver.php</code>.)</p>
+<p><strong>What this means for an LSP.</strong> In PHPStan an earlier line's type can
+depend on a later line: <code>$box-&gt;first()</code> hovered on the line before
+<code>takeInts($box)</code> reads <code>int</code>. Our cursor-bounded walk stops at the cursor's
+statement, so hover would read <code>mixed</code> there and <code>int</code> below, while
+diagnostics (which walk the whole body) would disagree with hover. The
+facts therefore have to come from a cursor-free pass over the whole body
+(<code>ctx.with_cursor_offset(u32::MAX)</code>, as <code>by_ref.rs</code> and <code>loops.rs</code> already
+do for discovery), cached per body and content version so hover and
+completion don't pay for a full walk per request. The solved arguments
+seed the cursor walk before any snapshot is recorded.</p>
+<p>Inferring from code below the cursor means half-typed code can flip a type
+while the user is typing. Two rules keep that stable: union lower bounds
+instead of PHPStan's "first invariant send wins" (which depends on order),
+and never narrow below default or bound from a lone escape.</p>
+<p><strong>First slice.</strong> <code>new</code> with no arguments that bind the template, assigned
+to a plain variable; lower bounds from template-typed method parameters
+and <code>offsetSet</code>; union merging; no cross-variable unification. That covers
+the common "empty collection, then fill it" shape. Returns, property
+writes and sends to typed parameters can follow.</p>
+<p><strong>Shared work with T47.</strong> Both need the same machinery: a cursor-free fact
+pass over the body, a per-body cache, and a "does this statement mention
+one of these variables" filter to limit the re-walk. <code>assignment_deps.rs</code>
+already collects the variables a statement reads and writes
+(<code>collect_rhs_variables</code>, <code>collect_assignment_target_vars</code>) and has a
+convergence check (<code>scope_has_changes</code>); <code>seed_by_ref_capture_fixed_point</code>
+in <code>by_ref.rs</code> is the closest existing probe-then-reseed pattern. Build it
+once, for whichever of the two lands first.</p>
+<p><strong>Where to look:</strong> PHPStan 2.3's <code>src/Type/Generic/UnresolvedTemplateArgumentType.php</code>,
+<code>src/Analyser/Generics/</code>, <code>NewHandler::unresolvedArgumentList()</code>, and the
+<code>tests/PHPStan/Analyser/nsrt/template-argument-*.php</code> files. Ours:
+<code>rhs_resolution/instantiation.rs</code>, <code>call_resolution/template_binding.rs</code>,
+<code>forward_walk/mod.rs</code> (<code>resolve_in_method_body</code>, next to the existing
+whole-body pre-passes <code>seed_static_locals</code> and
+<code>try_generator_yield_inference</code>), <code>forward_walk/assignment.rs</code>
+(<code>process_expression_statement</code>, where receiver calls are already visited).</p>
+<hr />
+<h2 id="t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used">T47. A closure assigned to a variable gets no parameter types from where it is used<a class="headerlink" href="#t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">$byName = function ($a, $b) {</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    return $a-&gt;  // PHPStan 2.3: User; PHPantom: nothing</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">};</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">usort($users, $byName);   // list&lt;User&gt;</span>
+</code></pre></div>
+<p>A closure literal passed straight to a typed callable parameter already
+gets its parameter types, generics included (<code>try_enter_closure_expr</code> →
+<code>infer_callable_params_for_call</code> in <code>forward_walk/closures.rs</code> and
+<code>callable_inference.rs</code>). Assigned to a variable first, it gets nothing:
+the assignment branch passes no inferred types, and the cursor walk stops
+before the statements that use it. This is the same blind spot from the
+other direction as T46, and the payoff is the same: completion and hover
+on an untyped parameter inside the body. PHPStan 2.3 ships it behind the
+<code>closureSignaturesFromUsages</code> bleeding-edge flag.</p>
+<p><strong>What PHPStan infers from.</strong> Direct calls (<code>$f(1); $f(2);</code> gives <code>1|2</code>),
+passing the variable to a typed or generic callable parameter (<code>usort</code>,
+<code>array_map</code>, <code>array_filter</code>, <code>$collection-&gt;map($f)</code>, taking the parameter
+type after template resolution), aliases and ternaries (<code>$d = $f; $d(1);</code>),
+closures stored in array offsets or lists and called from there, and
+<code>return $f</code> / a typed property / <code>@var</code> against a declared <code>Closure(int):
+void</code>. All observed argument types are unioned. If the closure escapes
+(passed to <code>mixed</code>, bare <code>callable</code> or <code>Closure</code>, <code>call_user_func</code>, a
+by-ref parameter, <code>global</code>, <code>compact</code>/<code>extract</code>/<code>get_defined_vars</code>, <code>$$</code>),
+or the union doesn't fit the declared type, the declared type stands. A
+body is only observed when nothing outside it can reach its variables
+(<code>isClosedBody</code>).</p>
+<p>The mechanism is the two-pass walk described in T46: an untyped parameter
+starts as a placeholder that remembers its closure, and since it is an
+ordinary type it flows through variables, array shapes and foreach without
+special cases. Call sites add lower bounds, typed targets add bounds, and
+the second walk re-enters the closure body with the solved types.
+(<code>ClosureSignatureInference</code>, <code>TemplateArgumentObserver</code>,
+<code>TemplateArgumentSolver::resolveClosureSignatureObservation</code>; tests in
+<code>nsrt/closure-signature-from-usages*.php</code>.)</p>
+<p><strong>Plan.</strong>
+1. When <code>try_enter_closure_expr</code> meets <code>$v = &lt;closure&gt;</code> (or an array
+   offset or list element) with the cursor inside it and untyped
+   parameters, scan the rest of the enclosing statement list for uses of
+   <code>$v</code> and its aliases. Run the syntactic escape check first and give up
+   on any hit.
+2. For a direct call <code>$v(...)</code>, resolve the arguments at that position.
+   For <code>$v</code> passed as an argument, reuse <code>infer_callable_params_for_call</code>
+   on that call to get the callable parameter types, so <code>usort</code>,
+   <code>array_map</code> and <code>-&gt;map()</code> come for free.
+3. Union the observations, keep the declared hint unless the union fits
+   inside it, and feed the result through the existing <code>inferred_params</code>
+   slot of <code>try_enter_closure_body</code> / <code>seed_closure_params</code>. Run the same
+   inference from <code>walk_closures_in_expr</code> so diagnostics and completion
+   agree.
+4. Later: give the variable's own type the inferred signature
+   (<code>infer_closure_literal_type</code>), so <code>$f('x')</code> and <code>-&gt;map($f)</code> see it.
+   That overlaps T13.</p>
+<p>Resolving each use's arguments must go through the shared walker (a
+cursor-free walk up to that offset, per T46's shared machinery), not a
+separate resolver. Lower-value cases can wait: <code>use (&amp;$x)</code> fixed points,
+nested closures typed from an expected return type, generator escapes.</p>
+<p><strong>Where to look:</strong> ours: <code>forward_walk/closures.rs</code>,
+<code>forward_walk/callable_inference.rs</code>, <code>diagnostic_walk.rs</code>
+(<code>walk_closures_in_call</code>, <code>seed_closure_params</code>), <code>rhs_resolution/calls.rs</code>
+(<code>$f()</code> reads only the variable's callable return type today).</p>
+<hr />
 <h2 id="t30-literal-type-collapse-limit">T30. Literal type collapse limit<a class="headerlink" href="#t30-literal-type-collapse-limit" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>When combining union types, if the number of literal type variants
@@ -2222,12 +2542,12 @@ blowup.</p>
 <p>A closure whose native return hint is just <code>array</code> but whose body
 returns a literal array should get the literal shape as its
 inferred return type, so <code>array_map()</code> results carry it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$declarations = array_map(function (ASTNode $child): array {</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    return [$child-&gt;getType(), $childChildren[1]];</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">}, $children);</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">[$type, $variable] = $declarations[$index];</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">$type-&gt;getImage();   // &quot;type of &#39;$type&#39; could not be resolved&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$declarations = array_map(function (ASTNode $child): array {</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    return [$child-&gt;getType(), $childChildren[1]];</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">}, $children);</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">[$type, $variable] = $declarations[$index];</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">$type-&gt;getImage();   // &quot;type of &#39;$type&#39; could not be resolved&quot;</span>
 </code></pre></div>
 <p>Found in the 2026-07 analyze triage: ~10 pdepend errors
 (<code>tests/.../PHP82/TrueTypeTest.php:89</code>,
@@ -2246,13 +2566,13 @@ unresolved. Depends on nothing else in this file.</p>
 <p>A class constant reached through a variable produces no type at all, so
 hover is blank and anything downstream of it loses the value. The same
 constant reached through a class name or <code>self</code> resolves fine.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    const INTEGER_CONSTANT = 1;</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">}</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">$foo = new Foo();</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">$a = Foo::INTEGER_CONSTANT;    // 1</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">$b = $foo::INTEGER_CONSTANT;   // (nothing — PHPStan: 1)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">    const INTEGER_CONSTANT = 1;</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">}</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">$foo = new Foo();</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">$a = Foo::INTEGER_CONSTANT;    // 1</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">$b = $foo::INTEGER_CONSTANT;   // (nothing — PHPStan: 1)</span>
 </code></pre></div>
 <p>The class-constant branch of <code>resolve_rhs_property_access</code> matches only
 <code>Identifier</code>, <code>Self_</code>, <code>Static</code>, and <code>Parent</code> for the left-hand side and
@@ -2275,17 +2595,17 @@ resolves to the value declared on the <em>current</em> class, even though a
 subclass may redeclare it. This is unsound in the false-positive
 direction, since the narrowed literal can drive a bogus argument-type
 mismatch or mark a live <code>match</code> arm dead.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    const NO_TYPE = 1;</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    /** @var string */</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    const TYPE = &#39;foo&#39;;</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">    public function doFoo(): void {</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">        self::NO_TYPE;      // 1      (correct)</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">        static::NO_TYPE;    // 1      (PHPStan: mixed — a child may redeclare it)</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="x">        static::TYPE;       // &#39;foo&#39;  (PHPStan: string — a child must respect @var)</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="x">    }</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    const NO_TYPE = 1;</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">    /** @var string */</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">    const TYPE = &#39;foo&#39;;</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">    public function doFoo(): void {</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">        self::NO_TYPE;      // 1      (correct)</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">        static::NO_TYPE;    // 1      (PHPStan: mixed — a child may redeclare it)</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="x">        static::TYPE;       // &#39;foo&#39;  (PHPStan: string — a child must respect @var)</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="x">    }</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="x">}</span>
 </code></pre></div>
 <p>PHPStan's model: <code>self::</code> always yields the declared value. <code>static::</code>
 (and <code>$this::</code>) yields the value only when it cannot be overridden, i.e.
@@ -2304,9 +2624,9 @@ assertions in <code>tests/phpstan_nsrt/class-constant-native-type.php</code> are
 <hr />
 <h2 id="t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument">T40. <code>pathinfo()</code> returns a shape or a string depending on the flags argument<a class="headerlink" href="#t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$parts = pathinfo($path);                      // array{dirname: …, basename: …, extension?: …, filename: …}</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">$name  = pathinfo($path, PATHINFO_FILENAME);   // string</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">needsString($name); // reported: got string|array{…} — a single component is always a string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$parts = pathinfo($path);                      // array{dirname: …, basename: …, extension?: …, filename: …}</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">$name  = pathinfo($path, PATHINFO_FILENAME);   // string</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">needsString($name); // reported: got string|array{…} — a single component is always a string</span>
 </code></pre></div>
 <p><code>pathinfo()</code> hands back an array of every component when its <code>$flags</code>
 argument is left at the default <code>PATHINFO_ALL</code>, and a plain string when
@@ -2328,14 +2648,14 @@ else keeps the declared union. Left over from the work that took the
 that accounted for the bulk of the volume.</p>
 <h2 id="t41-param-out-is-parsed-but-never-read">T41. <code>@param-out</code> is parsed but never read<a class="headerlink" href="#t41-param-out-is-parsed-but-never-read" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">/**</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x"> * @param-out list&lt;string&gt; $lines</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x"> */</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">function readInto(string $path, ?array &amp;$lines = null): int { … }</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">readInto($path, $lines);</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">$lines[0];   // list&lt;string&gt; is what the tag promises; the declared</span>
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="x">             // `?array` is what the caller gets</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/**</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x"> * @param-out list&lt;string&gt; $lines</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x"> */</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">function readInto(string $path, ?array &amp;$lines = null): int { … }</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">readInto($path, $lines);</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="x">$lines[0];   // list&lt;string&gt; is what the tag promises; the declared</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">             // `?array` is what the caller gets</span>
 </code></pre></div>
 <p><code>TagKind::ParamOut</code> exists in <code>docblock/tag_kind.rs</code> and nothing
 consumes it, so the only thing describing an argument after a call is
@@ -2371,25 +2691,25 @@ back <code>None</code> (not empty — no completion response at all), even when 
 receiving variable's type is separately pinned down by a <code>@var</code>
 annotation that makes the method's own template irrelevant.</p>
 <p>Minimal repro:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">class Product {</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    public function getPrice(): float { return 0.0; }</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">}</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">/** @template T */</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">class Box {</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">    /**</span>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">     * @template T</span>
-<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="x">     * @return self&lt;T&gt;</span>
-<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="x">     */</span>
-<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="x">    public static function make(): self { return new self(); }</span>
-<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>
-<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="x">    /** @return T */</span>
-<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="x">    public function get(): mixed {}</span>
-<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="x">}</span>
-<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>
-<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="x">/** @var Box&lt;Product&gt; $box */</span>
-<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="x">$box = Box::make();</span>
-<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="x">$box-&gt;get()-&gt;  // completion() returns None here, not just an empty list</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">class Product {</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x">    public function getPrice(): float { return 0.0; }</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x">}</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="x">class Box {</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="x">    /**</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="x">     * @template T</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="x">     * @return self&lt;T&gt;</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="x">     */</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="x">    public static function make(): self { return new self(); }</span>
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="x">    /** @return T */</span>
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a><span class="x">    public function get(): mixed {}</span>
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a><span class="x">}</span>
+<a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a>
+<a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a><span class="x">/** @var Box&lt;Product&gt; $box */</span>
+<a id="__codelineno-16-18" name="__codelineno-16-18" href="#__codelineno-16-18"></a><span class="x">$box = Box::make();</span>
+<a id="__codelineno-16-19" name="__codelineno-16-19" href="#__codelineno-16-19"></a><span class="x">$box-&gt;get()-&gt;  // completion() returns None here, not just an empty list</span>
 </code></pre></div>
 <p>Removing either the method-level <code>@template T</code> + <code>@return self&lt;T&gt;</code> on
 <code>make()</code> (letting it return a bare <code>self</code> and relying entirely on the
@@ -2425,19 +2745,19 @@ assert on exactly the completion this bug empties out.</p>
 <p>Found while porting Mago's <code>issue_870.php</code> (Test Porting Phase 4A). A
 class can declare its own <code>@type</code>/<code>@phpstan-type</code> alias and hand it to
 its own parent's template parameter via <code>self::</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/** @template TData as array&lt;string, mixed&gt; */</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">abstract class Car {</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    /** @return TData */</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">    abstract function getData(): array;</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">}</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">/**</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x"> * @type DataArray = array{&#39;Gewicht&#39;: int}</span>
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x"> * @extends Car&lt;self::DataArray&gt;</span>
-<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="x"> */</span>
-<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="x">class RedCar extends Car {</span>
-<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="x">    public function getData(): array { return [&#39;Gewicht&#39; =&gt; 1000]; }</span>
-<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">/** @template TData as array&lt;string, mixed&gt; */</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">abstract class Car {</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="x">    /** @return TData */</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="x">    abstract function getData(): array;</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="x">}</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="x">/**</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="x"> * @type DataArray = array{&#39;Gewicht&#39;: int}</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="x"> * @extends Car&lt;self::DataArray&gt;</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="x"> */</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="x">class RedCar extends Car {</span>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="x">    public function getData(): array { return [&#39;Gewicht&#39; =&gt; 1000]; }</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>getData()</code>'s inherited <code>@return TData</code> should resolve to the
 <code>DataArray</code> shape (offering <code>Gewicht</code> for array-key completion), but
@@ -2461,14 +2781,14 @@ before substituting it into the parent's template.</p>
 <hr />
 <h2 id="t44-a-single-enum-case-has-no-type">T44. A single enum case has no type<a class="headerlink" href="#t44-a-single-enum-case-has-no-type" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">enum Suit { case Hearts; case Spades; case Clubs; }</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">function f(Suit $s) {</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">    if ($s === Suit::Hearts) {</span>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">    } elseif ($s === Suit::Spades) {</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x">    } else {</span>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">        $s; // PHPStan: Suit::Clubs; PHPantom: Suit</span>
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="x">    }</span>
-<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">enum Suit { case Hearts; case Spades; case Clubs; }</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x">function f(Suit $s) {</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="x">    if ($s === Suit::Hearts) {</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="x">    } elseif ($s === Suit::Spades) {</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="x">    } else {</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="x">        $s; // PHPStan: Suit::Clubs; PHPantom: Suit</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="x">    }</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>Suit::Hearts</code> resolves to the enum class, so narrowing by comparing
 against cases can only ever say "some <code>Suit</code>". PHPStan and Psalm give each
@@ -2484,17 +2804,17 @@ and a branch that has compared away every case holds <code>never</code>.</p>
 <p>Since <code>value-of&lt;…&gt;</code> over an enum is evaluated, the gap also produces false
 positives. A case passed to a template binds the template to the whole
 enum, so the operator gives every case's value:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">/**</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x"> * @template T of Suit</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x"> * @param T $case</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x"> * @return value-of&lt;T&gt;</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x"> */</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="x">function backingValue(Suit $case) { return $case-&gt;value; }</span>
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="x">/** @param &#39;hearts&#39; $value */</span>
-<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="x">function acceptsHearts(string $value): void {}</span>
-<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>
-<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="x">acceptsHearts(backingValue(Suit::Hearts)); // reported: &#39;spades&#39; does not satisfy &#39;hearts&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">/**</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x"> * @template T of Suit</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="x"> * @param T $case</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x"> * @return value-of&lt;T&gt;</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="x"> */</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="x">function backingValue(Suit $case) { return $case-&gt;value; }</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="x">/** @param &#39;hearts&#39; $value */</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="x">function acceptsHearts(string $value): void {}</span>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="x">acceptsHearts(backingValue(Suit::Hearts)); // reported: &#39;spades&#39; does not satisfy &#39;hearts&#39;</span>
 </code></pre></div>
 <p>A case held in a variable loses its value the same way: after <code>$case =
 Suit::Hearts;</code>, <code>acceptsHearts($case-&gt;value)</code> is reported too. Found

@@ -5105,6 +5105,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>An assignment is seen by the rest of the expression it sits in.</strong> In <code>if (($user = find($id)) &amp;&amp; $user-&gt;isActive())</code>, the right-hand side now knows what <code>$user</code> holds, and <code>[$i++, $i]</code> holds the old <code>$i</code> in its first item and the incremented one in its second.</li>
 <li><strong>Variables inside a closure keep their types when another method is chained onto the call.</strong> In <code>$obj-&gt;with(function (string $s) { … })-&gt;run()</code>, hover and completion inside the closure again know the types of its parameters and locals.</li>
 <li><strong>Writing to a <code>global</code> variable is no longer reported as unused.</strong> The same goes for a write through a reference, such as <code>$first = &amp;$items[0]; $first = 5;</code>.</li>
 <li><strong>phpcbf fixes against the <code>[phpcs]</code> standard.</strong> With <code>standard</code> set in <code>.phpantom.toml</code>, formatting now applies the rules PHPCS reports instead of PHP_CodeSniffer's default standard.</li>

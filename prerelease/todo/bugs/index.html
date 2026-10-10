@@ -884,6 +884,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#b577-condition-narrowing-is-applied-to-the-whole-condition-not-operand-by-operand" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B577. Condition narrowing is applied to the whole condition, not operand by operand
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b568-a-passing-strict-in_array-against-object-elements-drops-the-needles-classes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1584,6 +1595,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#b577-condition-narrowing-is-applied-to-the-whole-condition-not-operand-by-operand" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B577. Condition narrowing is applied to the whole condition, not operand by operand
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b568-a-passing-strict-in_array-against-object-elements-drops-the-needles-classes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1809,14 +1831,41 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
+<h3 id="b577-condition-narrowing-is-applied-to-the-whole-condition-not-operand-by-operand">B577. Condition narrowing is applied to the whole condition, not operand by operand<a class="headerlink" href="#b577-condition-narrowing-is-applied-to-the-whole-condition-not-operand-by-operand" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">if ($x instanceof Foo &amp;&amp; ($x = make())) {   // make(): Bar</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    $x;  // reads `Foo`; it is `Bar`</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">}</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">class Holder {</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    public mixed $a;</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    public function reset(): bool { $this-&gt;a = null; return true; }</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    public function m(): void {</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">        if ($this-&gt;a instanceof Foo &amp;&amp; $this-&gt;reset() &amp;&amp; $this-&gt;a-&gt;x()) {}</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">        // `$this-&gt;a` still reads `Foo` after reset() cleared it</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    }</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">}</span>
+</code></pre></div>
+<p>The then-branch narrowing comes from <code>apply_condition_narrowing</code> running
+over the finished condition, so a narrowing from an early operand is
+committed over a later operand's reassignment of the same variable, and a
+call with side effects between operands does not drop narrowings rooted in
+its receiver (receiver mutation is statement-level, in
+<code>process_expression_statement</code>). PHPStan avoids the first by making an
+<code>&amp;&amp;</code>'s truthy scope the right operand's own truthy scope, and the second by
+invalidating receiver-rooted expressions inside the expression walk.</p>
+<p><strong>Fix:</strong> Produce narrowing per operand and invalidate after impure calls as
+the operands are processed. That is most of T45's next step; a narrower fix
+would skip committing a left-operand narrowing for a variable the right
+operand writes, and run receiver invalidation per <code>&amp;&amp;</code>/<code>||</code> operand.</p>
 <h3 id="b568-a-passing-strict-in_array-against-object-elements-drops-the-needles-classes">B568. A passing strict <code>in_array()</code> against <code>object</code> elements drops the needle's classes<a class="headerlink" href="#b568-a-passing-strict-in_array-against-object-elements-drops-the-needles-classes" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param list&lt;object&gt; $handlers */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function f(Foo|Bar|string $x, array $handlers): void {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    if (in_array($x, $handlers, true)) {</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        $x-&gt;run(); // `$x` reads `string`, though the object it equals can be a `Foo` or a `Bar`</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    }</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @param list&lt;object&gt; $handlers */</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function f(Foo|Bar|string $x, array $handlers): void {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    if (in_array($x, $handlers, true)) {</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">        $x-&gt;run(); // `$x` reads `string`, though the object it equals can be a `Foo` or a `Bar`</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    }</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>In the branch where the check held, <code>apply_in_array_narrowing</code>
 (<code>cond_narrowing/in_array.rs</code>) narrows the needle's class layer through
@@ -1836,8 +1885,8 @@ alone otherwise.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b565-a-plain-array-counts-as-a-subtype-of-an-unsealed-array-shape">B565. A plain array counts as a subtype of an unsealed array shape<a class="headerlink" href="#b565-a-plain-array-counts-as-a-subtype-of-an-unsealed-array-shape" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @param array{foo: int, ...} $shape */</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function takeOpen(array $shape): void {}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @param array{foo: int, ...} $shape */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function takeOpen(array $shape): void {}</span>
 </code></pre></div>
 <p><code>array&lt;string, int&gt;</code> is a subtype of <code>array{foo: int, ...}</code> as far as
 <code>is_subtype_of_typed</code> is concerned, and <code>non-empty-array&lt;string, int&gt;</code> is
@@ -1863,15 +1912,15 @@ these two functions; keep it that way, so that an array that merely might
 hold the entries stays unreported.</p>
 <h3 id="b566-a-list-parameter-rejects-a-docblock-shape-keyed-by-class-constants">B566. A <code>list</code> parameter rejects a docblock shape keyed by class constants<a class="headerlink" href="#b566-a-list-parameter-rejects-a-docblock-shape-keyed-by-class-constants" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Slots { const NAME = 0; const AGE = 1; }</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">/** @return array{Slots::NAME: string, Slots::AGE: int} */</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">function row(): array { return [&#39;Ann&#39;, 30]; }</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">/** @param list&lt;string|int&gt; $values */</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">function takeList(array $values): void {}</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">takeList(row()); // reported, though the keys are `0` and `1`</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Slots { const NAME = 0; const AGE = 1; }</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">/** @return array{Slots::NAME: string, Slots::AGE: int} */</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">function row(): array { return [&#39;Ann&#39;, 30]; }</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">/** @param list&lt;string|int&gt; $values */</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">function takeList(array $values): void {}</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">takeList(row()); // reported, though the keys are `0` and `1`</span>
 </code></pre></div>
 <p><code>shape_fits_array</code> (<code>src/diagnostics/type_errors/compatibility.rs</code>) holds
 the keys of a shape to the integers a list demands by their spelling, and
@@ -1891,7 +1940,7 @@ not contradict a list.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <h3 id="b571-a-with-no-after-it-is-read-as-a-raw-echo">B571. A <code>{{!!</code> with no <code>!!}</code> after it is read as a raw echo<a class="headerlink" href="#b571-a-with-no-after-it-is-read-as-a-raw-echo" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>&lt;p&gt;{{!!$flag}}&lt;/p&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>&lt;p&gt;{{!!$flag}}&lt;/p&gt;
 </code></pre></div>
 <p>A double negation written without a space. Blade compiles a raw echo only
 when a <code>!!}</code> follows the <code>{!!</code>, and with none the escaped echo compiles to
