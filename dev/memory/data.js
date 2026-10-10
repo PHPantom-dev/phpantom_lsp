@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791651761458,
+  "lastUpdate": 1791651788505,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -36889,6 +36889,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 82.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7e18be50b8b6121463ccc65c4736bc76d9d5d931",
+          "message": "Faster analysis of `switch` lookup tables",
+          "timestamp": "2026-10-10T18:49:32+02:00",
+          "tree_id": "9ec83c7e0647907fdd482c1eaa39a7a7efaccad8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7e18be50b8b6121463ccc65c4736bc76d9d5d931"
+        },
+        "date": 1791651778099,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.1,
             "unit": "MiB"
           }
         ]
