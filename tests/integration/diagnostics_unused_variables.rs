@@ -703,6 +703,64 @@ function foo() {
         );
     }
 
+    #[test]
+    fn no_diagnostic_for_global_only_written() {
+        // `global $x` binds `$x` to the global variable, so writing it
+        // updates global state even when this function never reads it.
+        let diags = collect(
+            r#"<?php
+function setup() {
+    global $config, $html, $pagination;
+    $config = ['name' => 'blog'];
+    $html['title'] = 'x';
+    $pagination['size'] = 10;
+}
+"#,
+        );
+        assert!(
+            diags.is_empty(),
+            "writes to globals should not be flagged unused: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_global_in_closure() {
+        let diags = collect(
+            r#"<?php
+function setup() {
+    $fn = function (): void {
+        global $counter;
+        $counter = 5;
+    };
+    $fn();
+}
+"#,
+        );
+        assert!(
+            diags.is_empty(),
+            "a global written inside a closure should not be flagged: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_write_through_reference_assignment() {
+        let diags = collect(
+            r#"<?php
+function setFirst(array &$items) {
+    $first = &$items[0];
+    $first = 5;
+}
+"#,
+        );
+        assert!(
+            diags.is_empty(),
+            "a write through a reference should not be flagged: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // List destructuring
     // ═══════════════════════════════════════════════════════════════

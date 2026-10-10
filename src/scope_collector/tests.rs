@@ -336,10 +336,16 @@ function test() {
         .collect();
     assert_eq!(closure_frames.len(), 1);
 
-    // Closure captures $x.
-    assert_eq!(closure_frames[0].captures.len(), 1);
-    assert_eq!(closure_frames[0].captures[0].0, "$x");
-    assert!(!closure_frames[0].captures[0].1); // not by reference
+    // Closure captures $x by value: it is written in the closure frame
+    // but not bound by reference.
+    let closure = closure_frames[0];
+    assert!(
+        scope_map
+            .accesses
+            .iter()
+            .any(|a| a.name == "$x" && a.offset == closure.start && a.kind == AccessKind::Write)
+    );
+    assert!(scope_map.reference_bindings.is_empty());
 }
 
 #[test]
@@ -360,8 +366,29 @@ function test() {
         .filter(|f| f.kind == FrameKind::Closure)
         .collect();
     assert_eq!(closure_frames.len(), 1);
-    assert_eq!(closure_frames[0].captures[0].0, "$x");
-    assert!(closure_frames[0].captures[0].1); // by reference
+    assert!(
+        scope_map
+            .reference_bindings
+            .iter()
+            .any(|b| b.name == "$x" && b.frame_start == closure_frames[0].start)
+    );
+}
+
+#[test]
+fn global_declaration_is_a_reference_binding() {
+    let php = r#"<?php
+function test() {
+    global $config;
+    $config = [];
+}
+"#;
+    let scope_map = collect_from_function(php);
+    assert!(
+        scope_map
+            .reference_bindings
+            .iter()
+            .any(|b| b.name == "$config")
+    );
 }
 
 #[test]

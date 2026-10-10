@@ -106,13 +106,6 @@ pub(crate) struct Frame {
     pub end: u32,
     /// What kind of scope boundary this frame represents.
     pub kind: FrameKind,
-    /// Variables explicitly captured via `use($x, &$y)` in closures.
-    /// Each entry is `(name_with_dollar, is_by_reference)`.
-    ///
-    /// Populated during collection; read by the unused-variable
-    /// diagnostic to skip by-reference captures, and by Extract Function
-    /// to detect closure captures that cross extraction boundaries.
-    pub captures: Vec<(String, bool)>,
     /// Parameter names (with `$` prefix) declared on this frame.
     ///
     /// Populated for functions, methods, closures, and arrow functions.

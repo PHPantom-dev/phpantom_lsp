@@ -284,15 +284,14 @@ fn check_scope(
                 continue;
             }
 
-            // Skip variables captured by reference (`use (&$var)`).
-            // A write to a by-reference capture inside the closure
-            // propagates to the outer scope, so the variable is never
-            // truly unused within the closure frame even if it is only
-            // written (and never read) here.
-            if frame
-                .captures
+            // Skip variables bound by reference (`global $var`,
+            // `use (&$var)`, `$var = &...`).  A write through the binding
+            // lands outside this frame, so it is used even if this frame
+            // never reads it back.
+            if scope
+                .reference_bindings
                 .iter()
-                .any(|(name, by_ref)| *by_ref && name == var_name)
+                .any(|b| b.frame_start == frame.start && b.name == var_name)
             {
                 continue;
             }

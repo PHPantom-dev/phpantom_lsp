@@ -280,7 +280,6 @@ pub(crate) fn collect_scope_with_resolver(
         start: body_start,
         end: body_end,
         kind: FrameKind::TopLevel,
-        captures: Vec::new(),
         parameters: Vec::new(),
     });
 
@@ -437,7 +436,6 @@ fn collect_scope_with_kind_and_resolver<'a>(
         start: body_start,
         end: body_end,
         kind,
-        captures: Vec::new(),
         parameters: param_names,
     });
 

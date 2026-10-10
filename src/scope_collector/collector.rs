@@ -232,7 +232,6 @@ pub(super) fn walk_statement(stmt: &Statement<'_>, collector: &mut Collector<'_>
                     start: catch_start,
                     end: catch_end,
                     kind: FrameKind::Catch,
-                    captures: Vec::new(),
                     parameters: catch_params,
                 });
                 if let Some(ref var) = catch.variable {
@@ -262,10 +261,14 @@ pub(super) fn walk_statement(stmt: &Statement<'_>, collector: &mut Collector<'_>
             }
         }
         Statement::Global(global) => {
+            // `global $x` is `$x = &$GLOBALS['x']`: later writes to `$x`
+            // land in the global scope.
             for var in global.variables.iter() {
                 if let Variable::Direct(dv) = var {
                     let name = bytes_to_str(dv.name).to_string();
-                    collector.push_access(name, dv.span().start.offset, AccessKind::Write);
+                    let offset = dv.span().start.offset;
+                    collector.push_access(name.clone(), offset, AccessKind::Write);
+                    collector.push_reference_binding(name, offset);
                 }
             }
         }
@@ -1152,7 +1155,6 @@ fn walk_closure(closure: &Closure<'_>, collector: &mut Collector<'_>) {
         start: body_start,
         end: body_end,
         kind: FrameKind::Closure,
-        captures: captures.clone(),
         parameters: param_names,
     });
 
@@ -1200,7 +1202,6 @@ fn walk_arrow_function(arrow: &ArrowFunction<'_>, collector: &mut Collector<'_>)
         start: body_start,
         end: body_end,
         kind: FrameKind::ArrowFunction,
-        captures: Vec::new(), // Arrow functions capture implicitly.
         parameters: param_names,
     });
 

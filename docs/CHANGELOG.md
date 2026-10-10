@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Writing to a `global` variable is no longer reported as unused.** The same goes for a write through a reference, such as `$first = &$items[0]; $first = 5;`.
 - **A class with `__toString()` is accepted as `Stringable`.** Passing one where `Stringable` or `string|Stringable` is expected no longer reports a false type mismatch, whether the method is declared on the class, a parent, or a trait.
 - **`->value` and `->name` on an enum read as its cases' values and names.** A `value-of<Enum>` parameter or return, or a declared literal union, no longer reports a false type mismatch when fed an enum's `->value`.
 - **A new import inside a braced `namespace { }` block is indented to match the block.** Imports added by completion, code actions and class moves no longer land flush left.
