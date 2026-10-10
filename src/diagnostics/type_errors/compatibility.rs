@@ -886,26 +886,17 @@ pub(crate) fn is_type_compatible(
     // expected, but only outside strict_types: under
     // declare(strict_types=1) passing a Stringable object where a
     // `string` parameter is expected is a TypeError. We only accept
-    // objects whose class implements \Stringable or declares
-    // __toString(). For bare `object` types (no class name) we stay
-    // permissive since we can't check.
+    // objects whose class is \Stringable, which PHP makes every class
+    // declaring __toString(). For bare `object` types (no class name) we
+    // stay permissive since we can't check.
     if !strict_types && param_type.is_string_type() && arg_type.is_object_like() {
         if let Some(class_name) = arg_type.base_name() {
-            if let Some(cls) = class_loader(class_name) {
-                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                    &cls,
-                    class_loader,
-                    crate::virtual_members::active_resolved_class_cache(),
-                );
-                let implements_stringable =
-                    crate::class_lookup::is_subtype_of(&cls, "Stringable", class_loader);
-                let has_to_string = merged.get_method_ci("__toString").is_some();
-                if implements_stringable || has_to_string {
-                    return true;
-                }
-                // Class loaded but doesn't implement Stringable — fall through
+            if let Some(cls) = class_loader(class_name)
+                && crate::class_lookup::is_subtype_of(&cls, "Stringable", class_loader)
+            {
+                return true;
             }
-            // Class can't be loaded — fall through to other checks
+            // Not Stringable, or not loadable — fall through to other checks
         } else {
             // Bare `object` type — stay permissive
             return true;

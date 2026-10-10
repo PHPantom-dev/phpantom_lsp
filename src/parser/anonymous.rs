@@ -45,7 +45,7 @@ impl Backend {
             .as_ref()
             .and_then(|ext| ext.types.first().map(|ident| atom_bytes(ident.value())));
 
-        let interfaces: Vec<Atom> = anon
+        let mut interfaces: Vec<Atom> = anon
             .implements
             .as_ref()
             .map(|imp| {
@@ -65,6 +65,7 @@ impl Backend {
             trait_aliases,
             ..
         } = Self::extract_class_like_members(anon.members.iter(), doc_ctx, &[]);
+        super::classes::add_implicit_stringable(&mut interfaces, &methods);
 
         let start_offset = anon.left_brace.start.offset;
         let end_offset = anon.right_brace.end.offset;

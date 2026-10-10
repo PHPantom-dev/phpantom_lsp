@@ -2381,6 +2381,67 @@ function test(Name $name): void {
     );
 }
 
+#[test]
+fn no_diagnostic_for_implicit_stringable_to_stringable_param() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace App;
+
+use Stringable;
+
+final class Direct {
+    public function __toString(): string { return 'x'; }
+}
+
+class Child extends Direct {}
+
+trait ToStr {
+    public function __toString(): string { return 'x'; }
+}
+
+class ViaTrait { use ToStr; }
+
+interface Named {
+    public function __toString(): string;
+}
+
+function takes_union(string|Stringable $thing): void {}
+function takes_stringable(Stringable $thing): void {}
+
+function test(Named $named): void {
+    takes_union(new Direct());
+    takes_stringable(new Direct());
+    takes_stringable(new ViaTrait());
+    takes_stringable($named);
+    takes_stringable(new class { public function __toString(): string { return ''; } });
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "Classes declaring __toString() are implicitly Stringable, got: {diags:?}"
+    );
+}
+
+#[test]
+fn type_error_for_class_without_to_string_to_stringable_param() {
+    let php = r#"<?php
+class Plain {}
+
+function takes_stringable(Stringable $thing): void {}
+
+function test(): void {
+    takes_stringable(new Plain());
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        has_type_error(&diags),
+        "Expected type error for a class without __toString() passed to Stringable, got: {diags:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // New rules: PHP type juggling
 // ═══════════════════════════════════════════════════════════════════════════

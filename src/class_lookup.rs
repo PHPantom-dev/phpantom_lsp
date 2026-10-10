@@ -459,6 +459,31 @@ pub(crate) fn is_subtype_of(
         }
     }
 
+    // The parser records the implicit `Stringable` on every class that
+    // declares `__toString()` itself, but PHP also adds it when the
+    // method comes from a trait, which is only known once traits load.
+    if ancestor.eq_ignore_ascii_case("Stringable") && class.kind != ClassLikeKind::Interface {
+        let declares = |c: &ClassInfo| {
+            c.methods
+                .iter()
+                .any(|m| m.name.eq_ignore_ascii_case("__toString"))
+        };
+        return crate::inheritance::find_declaring_trait(
+            &class.used_traits,
+            class_loader,
+            &declares,
+        )
+        .is_some()
+            || crate::inheritance::ancestors(class, class_loader).any(|(_, parent)| {
+                crate::inheritance::find_declaring_trait(
+                    &parent.used_traits,
+                    class_loader,
+                    &declares,
+                )
+                .is_some()
+            });
+    }
+
     false
 }
 

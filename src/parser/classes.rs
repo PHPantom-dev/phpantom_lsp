@@ -290,7 +290,7 @@ impl Backend {
                         .as_ref()
                         .and_then(|ext| ext.types.first().map(|ident| atom_bytes(ident.value())));
 
-                    let interfaces: Vec<Atom> = class
+                    let mut interfaces: Vec<Atom> = class
                         .implements
                         .as_ref()
                         .map(|imp| {
@@ -316,6 +316,7 @@ impl Backend {
                         doc_ctx,
                         &doc_info.template_params,
                     );
+                    add_implicit_stringable(&mut interfaces, &methods);
 
                     let mut use_generics: Vec<(Atom, Vec<PhpType>)> = doc_info.use_generics;
                     use_generics.extend(inline_use_generics);
@@ -414,7 +415,7 @@ impl Backend {
                     // compatibility with single-inheritance resolution,
                     // and all of them in `interfaces` so that transitive
                     // interface inheritance checks work correctly.
-                    let all_parents: Vec<Atom> = iface
+                    let mut all_parents: Vec<Atom> = iface
                         .extends
                         .as_ref()
                         .map(|ext| {
@@ -442,6 +443,7 @@ impl Backend {
                         doc_ctx,
                         &doc_info.template_params,
                     );
+                    add_implicit_stringable(&mut all_parents, &methods);
 
                     let keyword_offset = iface.interface.span.start.offset;
                     let decl_start_offset = iface
@@ -1814,6 +1816,23 @@ impl Backend {
             trait_aliases,
             inline_use_generics,
         }
+    }
+}
+
+/// PHP implicitly adds `Stringable` to every class and interface that
+/// declares `__toString()`.  Mirror that so hierarchy checks accept such
+/// a class wherever `Stringable` is expected.  The leading backslash
+/// keeps `resolve_name` from prepending the current namespace.
+pub(super) fn add_implicit_stringable(interfaces: &mut Vec<Atom>, methods: &[MethodInfo]) {
+    if methods
+        .iter()
+        .any(|m| m.name.eq_ignore_ascii_case("__toString"))
+        && !interfaces.iter().any(|i| {
+            i.trim_start_matches('\\')
+                .eq_ignore_ascii_case("Stringable")
+        })
+    {
+        interfaces.push(atom("\\Stringable"));
     }
 }
 
