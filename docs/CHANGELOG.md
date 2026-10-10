@@ -18,11 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster analysis of `switch` lookup tables.** A `switch` that assigns a different literal in each of hundreds of cases, such as a table of country or currency names, now takes well under a second instead of up to half a minute.
 - **Faster analysis of long files.** Checking a file of tens of thousands of lines, such as a legacy top-level script, no longer slows down out of proportion to its length. A 22,000-line script is checked in about a second instead of nearly five.
 - **Faster analysis of closures in long files.** A long script full of closures with typed parameters, called through the variables that hold them, no longer slows down out of proportion to its length. A 22,000-line script of them is checked in under half a second instead of nearly six.
+- **Faster analysis of arrays filled under many `if`s.** A function that adds one key at a time to an array, each under its own `if`, no longer slows down out of proportion to its length. With 1,000 such writes it is checked in under two seconds instead of over two minutes.
 - **Faster startup.** Hiding the standard library functions, classes, and constants that the project's PHP version no longer has takes a few milliseconds instead of about 50.
 - **Faster go-to-implementation on library classes.** Finding the implementations of a class or interface from a Composer package now reads only the files that could hold one, instead of loading every class the project depends on.
 
 ### Fixed
 
+- **An array filled under repeated checks keeps every key.** After `if ($flag) { $data['a'] = 1; }` followed by more `if ($flag)` blocks that each add a key, `$data` keeps all of the keys instead of losing the ones added in between.
 - **Constants next to a removed one are no longer hidden.** `ASSERT_EXCEPTION`, `MB_CASE_UPPER`, `MB_CASE_LOWER`, `MB_CASE_TITLE`, and `MCRYPT_BLOWFISH_COMPAT` resolve again on the PHP versions that have them, instead of being treated as removed along with the constant declared just before them.
 - **A `catch` block sees what the `try` body assigned before anything could throw.** A variable set by an immediately invoked closure, or by any statement that cannot throw, now keeps that value in the `catch` instead of reverting to what it held before the `try`.
 - **Convert to instance variable no longer redeclares an inherited property.** The action is not offered when a parent class or trait already declares the property.

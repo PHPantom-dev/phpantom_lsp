@@ -330,6 +330,33 @@ function f(bool $a, bool $b): void {{
     );
 }
 
+/// Writing an element changes the array's value, so what a branch proved
+/// the whole array held stops applying. Re-testing the condition that
+/// filled the first key must not put the array back to the one-key shape
+/// that branch left, dropping the keys written since.
+#[test]
+fn an_element_write_breaks_a_proof_about_the_whole_array() {
+    let backend = create_test_backend();
+    let uri = "file:///element_write_correlation.php";
+    let content = r#"<?php
+function f(bool $flag): void {
+    $data = [];
+    if ($flag) { $data['a'] = 1; }
+    if ($flag) { $data['b'] = 2; }
+    if ($flag) { $data['c'] = 3; }
+    $data; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    for key in ["a", "b", "c"] {
+        assert!(
+            text.contains(&format!("{key}?:")),
+            "every branch's key stays in the shape, got: {text}"
+        );
+    }
+}
+
 // ─── A type guard on a value of unknown type establishes it ────────────────
 
 /// `$row->version` on a bare `stdClass` resolves to nothing, and the

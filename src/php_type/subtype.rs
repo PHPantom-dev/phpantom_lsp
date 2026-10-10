@@ -1,6 +1,12 @@
 //! Subtype and equivalence checks.
 
+use std::collections::{HashMap, HashSet};
+
 use super::*;
+
+/// How long a supertype union has to be before checking a union against it
+/// builds a set of its members rather than scanning them.
+const UNION_SET_FROM_LEN: usize = 8;
 
 impl PhpType {
     pub fn equivalent(&self, other: &PhpType) -> bool {
@@ -138,6 +144,20 @@ impl PhpType {
 
         // ── Union subtype: every member must be a subtype ───────────
         if let TypeKind::Union(members) = self.kind() {
+            // A member the supertype lists too is one of its members, and
+            // interning lets that be found by identity. Against a long
+            // union that saves comparing it structurally with every member
+            // in turn, which made two unions that grow together (an array
+            // filled under one `if` after another) cost the square of
+            // their length to compare.
+            if let TypeKind::Union(wider) = supertype.kind()
+                && wider.len() >= UNION_SET_FROM_LEN
+            {
+                let listed: HashSet<&PhpType> = wider.iter().collect();
+                return members
+                    .iter()
+                    .all(|m| listed.contains(m) || m.is_subtype_of(supertype));
+            }
             return members.iter().all(|m| m.is_subtype_of(supertype));
         }
 
@@ -502,6 +522,9 @@ pub(crate) fn shape_is_subshape(
     if wider.is_list && !sub_is_list {
         return false;
     }
+    if wider.tail.is_none() && normalize::keys_rule_out_nesting(sub.entries, wider.entries) {
+        return false;
+    }
     let (Some(keys), Some(wider_keys)) = (
         runtime_shape_keys(sub.entries),
         runtime_shape_keys(wider.entries),
@@ -509,8 +532,13 @@ pub(crate) fn shape_is_subshape(
         return false;
     };
 
-    let listed_fit = sub.entries.iter().zip(&keys).all(|(entry, key)| {
-        match wider_keys.iter().position(|wider_key| wider_key == key) {
+    let wider_index = KeyPositions::new(&wider_keys);
+    let listed_fit = sub
+        .entries
+        .iter()
+        .zip(&keys)
+        .enumerate()
+        .all(|(at, (entry, key))| match wider_index.find(key, at) {
             Some(index) => {
                 (!entry.optional || wider.entries[index].optional)
                     && is_subtype(&entry.value_type, &wider.entries[index].value_type)
@@ -519,20 +547,25 @@ pub(crate) fn shape_is_subshape(
                 is_subtype(&shape_key_type(key), tail_key)
                     && is_subtype(&entry.value_type, tail_value)
             }),
-        }
-    });
+        });
     if !listed_fit {
         return false;
     }
 
-    let wider_fit = wider.entries.iter().zip(&wider_keys).all(|(entry, key)| {
-        keys.contains(key)
-            || (entry.optional
-                && sub.tail.is_none_or(|(tail_key, tail_value)| {
-                    !is_subtype(&shape_key_type(key), tail_key)
-                        || is_subtype(tail_value, &entry.value_type)
-                }))
-    });
+    let sub_index = KeyPositions::new(&keys);
+    let wider_fit = wider
+        .entries
+        .iter()
+        .zip(&wider_keys)
+        .enumerate()
+        .all(|(at, (entry, key))| {
+            sub_index.find(key, at).is_some()
+                || (entry.optional
+                    && sub.tail.is_none_or(|(tail_key, tail_value)| {
+                        !is_subtype(&shape_key_type(key), tail_key)
+                            || is_subtype(tail_value, &entry.value_type)
+                    }))
+        });
     if !wider_fit {
         return false;
     }
@@ -542,6 +575,49 @@ pub(crate) fn shape_is_subshape(
             is_subtype(tail_key, wider_key) && is_subtype(tail_value, wider_value)
         })
     })
+}
+
+/// Where each of a shape's keys sits, for comparing it against another
+/// shape key by key.
+///
+/// Two shapes compared are usually listed in the same order, one perhaps
+/// with a few more keys, so the key at the same position is tried first.
+/// Past that, a shape long enough for a scan per key to add up gets a map
+/// the first time the guess misses.
+struct KeyPositions<'a> {
+    keys: &'a [String],
+    by_key: std::cell::OnceCell<HashMap<&'a str, usize>>,
+}
+
+impl<'a> KeyPositions<'a> {
+    const MAP_FROM_LEN: usize = 16;
+
+    fn new(keys: &'a [String]) -> Self {
+        KeyPositions {
+            keys,
+            by_key: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// The position of `key`, which is most likely `hint`.
+    fn find(&self, key: &str, hint: usize) -> Option<usize> {
+        if self.keys.get(hint).is_some_and(|k| k == key) {
+            return Some(hint);
+        }
+        if self.keys.len() < Self::MAP_FROM_LEN {
+            return self.keys.iter().position(|k| k == key);
+        }
+        self.by_key
+            .get_or_init(|| {
+                self.keys
+                    .iter()
+                    .enumerate()
+                    .map(|(at, key)| (key.as_str(), at))
+                    .collect()
+            })
+            .get(key)
+            .copied()
+    }
 }
 
 /// Whether every array `array` describes is one the unsealed shape `wider`

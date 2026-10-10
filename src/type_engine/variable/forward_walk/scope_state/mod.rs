@@ -575,6 +575,44 @@ impl ScopeState {
             *subject == key
                 || crate::type_engine::types::narrowing::key_reads_variable(subject, var_name)
         };
+        self.drop_proofs(key, var_name, stale);
+        if !self.ruled_out.is_empty() {
+            self.ruled_out
+                .retain_mentioning(var_name, |subject, _| !stale(subject));
+        }
+        self.retain_key_facts(
+            |subject, key_var| !stale(subject) && *key_var != key,
+            |side| !stale(side),
+        );
+    }
+
+    /// Drop the proofs that writing an element into `key` invalidates,
+    /// where `key` is the array written into or one of the offsets on the
+    /// way down to the element.
+    ///
+    /// The value `key` holds changes, so whatever it stood for goes, along
+    /// with every proof about the value as a whole: a branch that proved
+    /// `$data` was `array{a: int}` says nothing once `$data["b"]` has been
+    /// added. A proof about one of its offsets (`$data["a"]`) is about a
+    /// value the write left alone and stays; the offset the write replaces
+    /// is [`Self::invalidate_proofs`]' business.
+    pub fn invalidate_whole_value_proofs(&mut self, key: &str) {
+        let atom_key = atom(key);
+        let stale = |subject: &Atom| {
+            *subject == atom_key
+                || (crate::type_engine::types::narrowing::key_reads_variable(subject, key)
+                    && !subject
+                        .as_str()
+                        .strip_prefix(key)
+                        .is_some_and(|rest| rest.starts_with('[') || rest.starts_with("->")))
+        };
+        self.drop_proofs(atom_key, key, stale);
+    }
+
+    /// Drop the proofs `key` stands for, and every proof whose holder or
+    /// subject `stale` accepts. `stale` has to accept only keys that spell
+    /// out `var_name`'s first `$name`.
+    fn drop_proofs(&mut self, key: Atom, var_name: &str, stale: impl Fn(&Atom) -> bool) {
         if !self.assertions.is_empty() {
             self.assertions.remove(&key);
             self.assertions
@@ -584,7 +622,7 @@ impl ScopeState {
             self.non_null_implications.remove(&key);
             self.non_null_implications
                 .retain_mentioning(var_name, |holder, implied| {
-                    !stale(holder) && !implied.iter().any(stale)
+                    !stale(holder) && !implied.iter().any(&stale)
                 });
         }
         if !self.implied_narrowings.is_empty() {
@@ -601,14 +639,6 @@ impl ScopeState {
                     !stale(holder) && !stale(&outcome.matches_var)
                 });
         }
-        if !self.ruled_out.is_empty() {
-            self.ruled_out
-                .retain_mentioning(var_name, |subject, _| !stale(subject));
-        }
-        self.retain_key_facts(
-            |subject, key_var| !stale(subject) && *key_var != key,
-            |side| !stale(side),
-        );
     }
 
     /// Whether `key_var` holds a key the array `subject` is known to have.

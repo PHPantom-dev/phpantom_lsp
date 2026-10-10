@@ -20,34 +20,6 @@ against that bar.
 
 ---
 
-## P76. Literal-key writes under separate `if`s grow far faster than their count
-
-**Impact: Medium · Complexity: Medium**
-
-A function that fills in an array one literal key at a time, each write
-under its own `if`, costs far more than the square of the number of
-writes. `benches/scaling.py`'s `conditional_array_writes` shape, on a
-release build:
-
-| Writes | analyse wall clock |
-| ------ | ------------------ |
-| 150    | 0.08 s             |
-| 300    | 2.2 s              |
-| 500    | 7.2 s              |
-| 1,000  | 140 s              |
-
-A settings or report array assembled this way can carry a few hundred
-keys. About 60% of the samples are in `ProofMap::push_unique`, called from
-`join_implied_narrowings` at each `if`'s join: the implied narrowings
-built up so far are compared item by item against the incoming ones, and
-cloning and dropping `Vec<ImpliedNarrowing>` takes most of the rest.
-
-**Where to look:** `join_implied_narrowings` in
-`type_engine/variable/forward_walk/scope_state/proofs.rs` and
-`ProofMap::push_unique` in `scope_state/proof_map.rs`.
-
----
-
 ## P77. A long method chain costs the cube of its length
 
 **Impact: Medium · Complexity: Medium**
@@ -177,15 +149,19 @@ and its callers in `php_type/subtype.rs`.
 
 N `if`s each writing a different shape to `$data[$id]` cost time in
 proportion to the square of N. `benches/scaling.py`'s
-`conditional_dynamic_writes` shape, on a release build, takes 0.2 s at
-2,000 writes and 0.7 to 1.2 s at 4,000. The samples are spread over
-cloning and dropping `Vec<ImpliedNarrowing>` and `Vec<ResolvedType>` at
-each join and the allocator behind them, so the joins are likely copying
-state that grows with the writes before them. This may share a cause with
-P76.
+`conditional_dynamic_writes` shape, on a release build, takes 1.6 s at
+2,000 writes and 6.6 s at 4,000. The array's value type is a union that
+gains one shape per `if`, and every join builds that union again from
+scratch: the samples are in `dedup_types`, `hash_for_dedup` and the shape
+index `join_runtime_value_types` builds to find which members could absorb
+which, each of them a pass over all the shapes so far. Joining one new
+member into a union that is already normalised would make each join cost
+only what it adds.
 
-**Where to look:** `join_implied_narrowings` in
-`type_engine/variable/forward_walk/scope_state/proofs.rs`.
+**Where to look:** `join_runtime_value_types` and `absorb_subsumed_shapes`
+in `php_type/normalize.rs`, reached from a join through
+`ResolvedType::collapse_redundant_runtime_literals` in
+`types/resolved_type.rs`.
 
 ---
 

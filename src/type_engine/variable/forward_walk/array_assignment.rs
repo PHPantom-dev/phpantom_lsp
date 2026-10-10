@@ -589,10 +589,37 @@ fn apply_array_write<'b>(
     );
     scope.set(base_name, vec![ResolvedType::from_type_string(merged)]);
     note_element_write(base_name, &subjects, &write_keys, append, scope);
+    forget_proofs_about_written_values(base_name, key_chain, append, scope);
 
     forget_overwritten_offsets(base_name, key_chain, append, scope);
     if !append {
         overwrite_written_offset(base_name, key_chain, rhs_types, scope);
+    }
+}
+
+/// Drop the proofs an element write made stale: the ones about the array
+/// and each offset on the way down to the element, which all hold a
+/// different value now, and every one about the element it replaced.
+fn forget_proofs_about_written_values(
+    base_name: &str,
+    key_chain: &[&Expression<'_>],
+    append: bool,
+    scope: &mut ScopeState,
+) {
+    scope.invalidate_whole_value_proofs(base_name);
+    let changed = if append {
+        key_chain.len()
+    } else {
+        key_chain.len().saturating_sub(1)
+    };
+    for depth in 1..=changed {
+        let Some(level) = array_write_synthetic_key(base_name, &key_chain[..depth]) else {
+            return;
+        };
+        scope.invalidate_whole_value_proofs(&level);
+    }
+    if !append && let Some(written) = array_write_synthetic_key(base_name, key_chain) {
+        scope.invalidate_proofs(&written);
     }
 }
 

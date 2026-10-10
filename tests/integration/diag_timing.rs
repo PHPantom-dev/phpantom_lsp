@@ -2474,6 +2474,139 @@ function probe(Holder $h): void {
     );
 }
 
+/// Regression test for an array filled one literal key at a time, each
+/// write under its own `if`.
+///
+/// Every join after such an `if` learns what the branch's shape of the
+/// array proves.  Those proofs used to pile up quadratically, each join
+/// compared the new ones against all of them, and a proof about the whole
+/// array outlived the writes that changed it: 300 writes took 2.2 s on a
+/// release build and 1,000 took 140 s.
+#[test]
+fn conditional_array_writes_stay_bounded() {
+    const WRITES: usize = 300;
+
+    let mut php = String::from(
+        "<?php\nfunction takesInt(int $x): void {}\nfunction build(bool $flag): void {\n    $data = [];\n",
+    );
+    for i in 0..WRITES {
+        php.push_str(&format!("    if ($flag) {{ $data['k{i}'] = {i}; }}\n"));
+    }
+    php.push_str("    takesInt($data);\n}\n");
+
+    let uri = "file:///test/conditional_array_writes.php";
+    let backend = create_test_backend();
+    backend.update_ast(uri, &php);
+
+    let start = Instant::now();
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, &php, &mut out);
+    let elapsed = start.elapsed();
+
+    eprintln!();
+    eprintln!("=== Conditional literal-key array writes ===");
+    eprintln!(
+        "  {} writes: {:>10.3?}  ({} diagnostics)",
+        WRITES,
+        elapsed,
+        out.len()
+    );
+    eprintln!();
+
+    // The array handed to `takesInt()` is the one mismatch, and it still
+    // carries the last key written.
+    assert_eq!(
+        out.len(),
+        1,
+        "expected one diagnostic, got: {:?}",
+        out.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let last_key = format!("k{}?:", WRITES - 1);
+    assert!(
+        out[0].message.contains(&last_key),
+        "expected the shape to keep every key, got: {}",
+        out[0].message
+    );
+
+    // Budget: 8 s in debug, 1 s in release.  This measures ~1 s and ~0.15 s
+    // respectively, against 2.2 s in release before the fix.
+    let budget_secs = if cfg!(debug_assertions) { 8.0 } else { 1.0 };
+    assert!(
+        elapsed.as_secs_f64() < budget_secs,
+        "{WRITES} conditional array writes took {elapsed:.3?} which exceeds \
+         the {budget_secs:.0} s budget.  The implied-narrowing join may have \
+         regressed.",
+    );
+}
+
+/// Regression test for an array written under one dynamic key, a
+/// different shape under each of many `if`s.
+///
+/// The array's value type is a union that gains a shape at every join, so
+/// any step that compares every pair of its members, or every member of
+/// one such union with every member of the next, makes the function cost
+/// the cube of its length: 400 writes took 3.8 s on a release build and
+/// 2,000 took over nine minutes.
+#[test]
+fn conditional_dynamic_writes_stay_bounded() {
+    const WRITES: usize = 400;
+
+    let mut php = String::from(
+        "<?php\nfunction takesInt(int $x): void {}\nfunction build(bool $flag, int $id): void {\n    $data = [];\n",
+    );
+    for i in 0..WRITES {
+        php.push_str(&format!(
+            "    if ($flag) {{ $data[$id] = ['v{i}' => {i}]; }}\n"
+        ));
+    }
+    php.push_str("    takesInt($data);\n}\n");
+
+    let uri = "file:///test/conditional_dynamic_writes.php";
+    let backend = create_test_backend();
+    backend.update_ast(uri, &php);
+
+    let start = Instant::now();
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, &php, &mut out);
+    let elapsed = start.elapsed();
+
+    eprintln!();
+    eprintln!("=== Conditional dynamic-key array writes ===");
+    eprintln!(
+        "  {} writes: {:>10.3?}  ({} diagnostics)",
+        WRITES,
+        elapsed,
+        out.len()
+    );
+    eprintln!();
+
+    // The array handed to `takesInt()` is the one mismatch, and its value
+    // type still holds every branch's shape.
+    assert_eq!(
+        out.len(),
+        1,
+        "expected one diagnostic, got: {:?}",
+        out.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    for i in [1, WRITES / 2, WRITES - 1] {
+        assert!(
+            out[0].message.contains(&format!("array{{v{i}: {i}}}")),
+            "expected the shape from write {i} in the union, got: {}",
+            out[0].message
+        );
+    }
+
+    // Budget: 8 s in debug, 1 s in release.  This measures ~0.1 s in
+    // release, against 3.8 s with the pairwise comparisons.
+    let budget_secs = if cfg!(debug_assertions) { 8.0 } else { 1.0 };
+    assert!(
+        elapsed.as_secs_f64() < budget_secs,
+        "{WRITES} conditional dynamic-key writes took {elapsed:.3?} which \
+         exceeds the {budget_secs:.0} s budget.  Union normalisation or \
+         union subtyping may have gone back to comparing every pair.",
+    );
+}
+
 /// Regression test for narrowing walks nesting inside one another.
 ///
 /// A chained call in a conditional is resolved to answer whether the

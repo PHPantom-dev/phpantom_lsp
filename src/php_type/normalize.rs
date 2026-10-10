@@ -303,6 +303,7 @@ impl PhpType {
         let non_literals: Vec<usize> = (0..flattened.len())
             .filter(|&index| flattened[index].as_literal().is_none())
             .collect();
+        let shapes = ShapeKeyIndex::new(&flattened);
         let keep: Vec<bool> = (0..flattened.len())
             .map(|index| {
                 let subsumed_by = |candidate: usize| {
@@ -313,6 +314,8 @@ impl PhpType {
                 };
                 if flattened[index].as_literal().is_some() {
                     !non_literals.iter().any(|&candidate| subsumed_by(candidate))
+                } else if let Some(candidates) = shapes.candidates(&flattened[index]) {
+                    !candidates.into_iter().any(subsumed_by)
                 } else {
                     !(0..flattened.len()).any(subsumed_by)
                 }
@@ -529,6 +532,11 @@ fn generic_array_contained_in(sub: &GenericArrayParts, sup: &GenericArrayParts) 
 /// `int` is covered by one holding `int|float`, but not by one holding only
 /// `float`.
 fn shape_values_contained_in(entries: &[ShapeEntry], is_list: bool, supertype: &PhpType) -> bool {
+    if let TypeKind::ArrayShape(wider) = supertype.kind()
+        && keys_rule_out_nesting(entries, wider)
+    {
+        return false;
+    }
     let value_fits = |value: &PhpType, wider: &PhpType| {
         wider.is_mixed()
             || equivalent_for_dedup(value, wider)
@@ -1252,6 +1260,7 @@ pub(crate) fn absorb_subsumed_shapes(types: &mut Vec<PhpType>) {
         return;
     }
 
+    let shapes = ShapeKeyIndex::new(types);
     let keep: Vec<bool> = types
         .iter()
         .enumerate()
@@ -1259,16 +1268,125 @@ pub(crate) fn absorb_subsumed_shapes(types: &mut Vec<PhpType>) {
             let TypeKind::ArrayShape(entries) = ty.kind() else {
                 return true;
             };
-            !types.iter().enumerate().any(|(other_index, other)| {
+            let subsumed_by = |other_index: usize| {
+                let other = &types[other_index];
                 other_index != index
                     && matches!(other.kind(), TypeKind::ArrayShape(_))
                     && shape_exactly_contained_in(entries, ty.is_list_shape(), other)
                     && (!shape_exactly_contained_in_reverse(other, ty) || other_index < index)
-            })
+            };
+            match shapes.candidates(ty) {
+                Some(candidates) => !candidates.into_iter().any(subsumed_by),
+                None => !(0..types.len()).any(subsumed_by),
+            }
         })
         .collect();
 
     crate::util::retain_by_mask(types, &keep);
+}
+
+/// Whether the keys two sealed shapes spell out already show that every
+/// array `narrower` describes is not one `wider` describes: `narrower` may
+/// hold a key `wider` does not list, or lacks one `wider` requires.
+///
+/// Only answers for small shapes whose keys are all named and plain, so it
+/// can compare spellings without numbering positional entries or working
+/// out what a class constant holds. Anything else is left to the full
+/// comparison, which has to allocate each shape's runtime keys first: a
+/// union of hundreds of one-key shapes compares every pair of them, and
+/// most pairs differ in the one key they hold.
+pub(crate) fn keys_rule_out_nesting(narrower: &[ShapeEntry], wider: &[ShapeEntry]) -> bool {
+    const MAX_ENTRIES: usize = 8;
+    let plain = |entries: &[ShapeEntry]| {
+        entries.len() <= MAX_ENTRIES
+            && entries.iter().all(|entry| {
+                entry
+                    .key
+                    .as_deref()
+                    .is_some_and(|key| !key.contains("::") && canonical_int_key(key).is_none())
+            })
+    };
+    if !plain(narrower) || !plain(wider) {
+        return false;
+    }
+    let lists = |entries: &[ShapeEntry], key: &Option<String>| {
+        entries.iter().any(|entry| entry.key == *key)
+    };
+    narrower.iter().any(|entry| !lists(wider, &entry.key))
+        || wider
+            .iter()
+            .any(|entry| !entry.optional && !lists(narrower, &entry.key))
+}
+
+/// A sealed shape's entries, when it holds at least one and every key it
+/// lists is named and plain: no positional entry, integer key, or class
+/// constant whose runtime key would have to be worked out.
+fn plain_shape_entries(ty: &PhpType) -> Option<&[ShapeEntry]> {
+    let TypeKind::ArrayShape(entries) = ty.kind() else {
+        return None;
+    };
+    let plain = !entries.is_empty()
+        && entries.iter().all(|entry| {
+            entry
+                .key
+                .as_deref()
+                .is_some_and(|key| !key.contains("::") && canonical_int_key(key).is_none())
+        });
+    plain.then_some(&entries[..])
+}
+
+/// The members of a union that are plain sealed shapes (see
+/// [`plain_shape_entries`]), by the keys they list.
+///
+/// A shape only nests in a sealed shape that lists every key it may hold,
+/// so the members a plain shape could nest in are the plain shapes that
+/// list its first key, and whichever members the index does not speak
+/// for. Looking only at those keeps a union of hundreds of shapes from
+/// comparing every pair of them. Built only for a union long enough for
+/// that to add up.
+struct ShapeKeyIndex<'a> {
+    by_key: HashMap<&'a str, Vec<usize>>,
+    /// The members that are not plain shapes.
+    others: Vec<usize>,
+    built: bool,
+}
+
+impl<'a> ShapeKeyIndex<'a> {
+    const FROM_LEN: usize = 16;
+
+    fn new(members: &'a [PhpType]) -> Self {
+        let mut index = ShapeKeyIndex {
+            by_key: HashMap::new(),
+            others: Vec::new(),
+            built: members.len() >= Self::FROM_LEN,
+        };
+        if !index.built {
+            return index;
+        }
+        for (at, member) in members.iter().enumerate() {
+            match plain_shape_entries(member) {
+                Some(entries) => {
+                    for key in entries.iter().filter_map(|entry| entry.key.as_deref()) {
+                        index.by_key.entry(key).or_default().push(at);
+                    }
+                }
+                None => index.others.push(at),
+            }
+        }
+        index
+    }
+
+    /// The positions of the members `member` could nest in, or `None` when
+    /// the index cannot narrow them down and every member has to be asked.
+    fn candidates(&self, member: &PhpType) -> Option<Vec<usize>> {
+        if !self.built {
+            return None;
+        }
+        let first = plain_shape_entries(member)?.first()?.key.as_deref()?;
+        let mut candidates = self.others.clone();
+        candidates.extend(self.by_key.get(first).into_iter().flatten().copied());
+        Some(candidates)
+    }
 }
 
 /// [`shape_exactly_contained_in`] with the arguments the other way round,
@@ -1290,7 +1408,7 @@ fn shape_exactly_contained_in(entries: &[ShapeEntry], is_list: bool, supertype: 
     let TypeKind::ArrayShape(wider) = supertype.kind() else {
         return false;
     };
-    if supertype.is_list_shape() && !is_list {
+    if supertype.is_list_shape() && !is_list || keys_rule_out_nesting(entries, wider) {
         return false;
     }
     let Some(keys) = runtime_shape_keys(entries) else {

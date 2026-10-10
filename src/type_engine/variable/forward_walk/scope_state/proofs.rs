@@ -1,6 +1,7 @@
 //! The proofs a scope carries beside its types, and how two paths' proofs
 //! join: exclusions, non-null implications and implied narrowings.
 
+use std::collections::HashMap;
 use std::ops::ControlFlow;
 
 use super::merge::same_types;
@@ -332,48 +333,76 @@ pub(super) fn join_implied_narrowings(
     differing: &[Atom],
 ) -> ProofMap<Vec<ImpliedNarrowing>> {
     let mut joined = a.implied_narrowings.clone();
-    let revisit = differing_holders(&a.implied_narrowings, &b.implied_narrowings);
-    for holder in &revisit {
-        joined.remove(holder);
-    }
-    let mut record = |holder: Atom, proof: ImpliedNarrowing| {
-        joined.push_unique(holder, proof, |p, q| {
-            p.key == q.key && same_trigger(&p.trigger, &q.trigger)
-        });
-    };
+    // The holders whose lists the join rebuilds or adds to, written back
+    // into `joined` once it is done.
+    let mut lists: HashMap<Atom, ProofList> = HashMap::new();
 
-    let survives = |side: &ScopeState, holder: &Atom, proof: &ImpliedNarrowing| {
-        side.implied_narrowings.get(holder).is_some_and(|proofs| {
-            proofs
-                .iter()
-                .any(|p| p.key == proof.key && same_types(&p.types, &proof.types))
-        }) || match &proof.trigger {
-            // The proof is vacuous on a path whose holder could never meet
-            // the trigger: that path cannot be the one a later test
-            // showing the trigger is pointing at.
-            ProofTrigger::NonNull => is_definitely_null(side, holder),
-            ProofTrigger::Within(trigger) => side
+    // Whether a proof the other path recorded is true of `side`, whose
+    // own proofs for the holder are `recorded`.
+    let survives = |side: &ScopeState,
+                    recorded: &[ImpliedNarrowing],
+                    index: &KeyIndex,
+                    holder: &Atom,
+                    proof: &ImpliedNarrowing| {
+        index.any(recorded, &proof.key, |p| same_types(&p.types, &proof.types))
+            || side
                 .locals
-                .get(holder)
-                .is_some_and(|held| types_are_disjoint(held, trigger)),
-            ProofTrigger::Outside(trigger) => side
-                .locals
-                .get(holder)
-                .is_some_and(|held| types_within(held, trigger)),
-        } || side
-            .locals
-            .get(&proof.key)
-            .is_some_and(|t| same_types(t, &proof.types))
+                .get(&proof.key)
+                .is_some_and(|t| same_types(t, &proof.types))
+            // Asked last because the holder's type can be a large shape
+            // and the trigger another one.
+            || match &proof.trigger {
+                // The proof is vacuous on a path whose holder could never
+                // meet the trigger: that path cannot be the one a later
+                // test showing the trigger is pointing at.
+                ProofTrigger::NonNull => is_definitely_null(side, holder),
+                ProofTrigger::Within(trigger) => side
+                    .locals
+                    .get(holder)
+                    .is_some_and(|held| types_are_disjoint(held, trigger)),
+                ProofTrigger::Outside(trigger) => side
+                    .locals
+                    .get(holder)
+                    .is_some_and(|held| types_within(held, trigger)),
+            }
     };
-    for holder in &revisit {
-        let mine = a.implied_narrowings.get(holder).into_iter().flatten();
-        let theirs = b.implied_narrowings.get(holder).into_iter().flatten();
-        for proof in mine.chain(theirs) {
-            if survives(a, holder, proof) && survives(b, holder, proof) {
-                record(*holder, proof.clone());
+    for holder in differing_holders(&a.implied_narrowings, &b.implied_narrowings) {
+        let mine = a
+            .implied_narrowings
+            .get(&holder)
+            .map_or(&[][..], Vec::as_slice);
+        let theirs = b
+            .implied_narrowings
+            .get(&holder)
+            .map_or(&[][..], Vec::as_slice);
+        let (mine_index, theirs_index) = (KeyIndex::of(mine), KeyIndex::of(theirs));
+        // A proof is true of the path that recorded it, so only the other
+        // one has to be asked. Neither path's list repeats itself, so the
+        // only repeat to skip is one of `b`'s that asks what one of `a`'s
+        // already does.
+        let mut kept: Vec<ImpliedNarrowing> = mine
+            .iter()
+            .filter(|proof| survives(b, theirs, &theirs_index, &holder, proof))
+            .cloned()
+            .collect();
+        let kept_index = KeyIndex::of(&kept);
+        let kept_from_mine = kept.len();
+        for proof in theirs {
+            let repeated = kept_index.any(&kept[..kept_from_mine], &proof.key, |p| {
+                same_trigger(&p.trigger, &proof.trigger)
+            });
+            if !repeated && survives(a, mine, &mine_index, &holder, proof) {
+                kept.push(proof.clone());
             }
         }
+        lists.insert(holder, ProofList::of(kept));
     }
+    let mut record = |holder: Atom, proof: ImpliedNarrowing| {
+        lists
+            .entry(holder)
+            .or_insert_with(|| ProofList::of(joined.get(&holder).cloned().unwrap_or_default()))
+            .push_unique(proof);
+    };
 
     // The keys the two paths disagree about, each with the triggers that
     // recognise the path whose value proved something.  Grouped by which
@@ -461,6 +490,7 @@ pub(super) fn join_implied_narrowings(
     }
     for (holder, taken_is_a, triggers) in flipped {
         let (taken, skipped) = if taken_is_a { (a, b) } else { (b, a) };
+        let pinned: Vec<PinnedOffsets> = triggers.iter().map(PinnedOffsets::new).collect();
         for key in differing {
             let Some(types) = taken.locals.get(key) else {
                 continue;
@@ -481,7 +511,10 @@ pub(super) fn join_implied_narrowings(
             if !differs {
                 continue;
             }
-            for trigger in &triggers {
+            for (trigger, pinned) in triggers.iter().zip(&pinned) {
+                if pinned.pins(&holder, key, types) {
+                    continue;
+                }
                 record(
                     holder,
                     ImpliedNarrowing {
@@ -494,5 +527,149 @@ pub(super) fn join_implied_narrowings(
         }
     }
 
+    for (holder, list) in lists {
+        if list.items.is_empty() {
+            joined.remove(&holder);
+        } else {
+            joined.insert(holder, list.items);
+        }
+    }
     joined
+}
+
+/// What a `Within` trigger's shape says each of the holder's offsets
+/// holds, read off the first time a proof about one of them comes up.
+///
+/// A proof that the holder being within the shape puts at offset `k` what
+/// the shape itself puts there tells a later test nothing the trigger does
+/// not, and a branch that fills an array one key at a time would otherwise
+/// record one such proof per key at every join.
+struct PinnedOffsets<'a> {
+    entries: Option<&'a [crate::php_type::ShapeEntry]>,
+    by_key: std::cell::OnceCell<HashMap<&'a str, &'a PhpType>>,
+}
+
+impl<'a> PinnedOffsets<'a> {
+    fn new(trigger: &'a ProofTrigger) -> Self {
+        let entries = match trigger {
+            ProofTrigger::Within(shapes) => match shapes.as_slice() {
+                [shape] => match shape.type_string.kind() {
+                    TypeKind::ArrayShape(entries) => Some(&entries[..]),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        };
+        PinnedOffsets {
+            entries,
+            by_key: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// Whether the trigger already says that `key`, one of `holder`'s
+    /// offsets, holds `types`.
+    fn pins(&self, holder: &Atom, key: &Atom, types: &[ResolvedType]) -> bool {
+        let (Some(entries), [only]) = (self.entries, types) else {
+            return false;
+        };
+        let Some(offset) = key
+            .as_str()
+            .strip_prefix(holder.as_str())
+            .and_then(|rest| rest.strip_prefix("[\""))
+            .and_then(|rest| rest.strip_suffix("\"]"))
+            .filter(|offset| !offset.contains("\"]"))
+        else {
+            return false;
+        };
+        self.by_key
+            .get_or_init(|| {
+                entries
+                    .iter()
+                    .filter(|entry| !entry.optional)
+                    .filter_map(|entry| Some((entry.key.as_deref()?, &entry.value_type)))
+                    .collect()
+            })
+            .get(offset)
+            .is_some_and(|held| **held == only.type_string)
+    }
+}
+
+/// Which items of a holder's proof list are about which key, kept once
+/// the list is long enough that scanning all of it for every proof the
+/// join looks up costs more than the index does.
+#[derive(Default)]
+struct KeyIndex(Option<HashMap<Atom, Vec<usize>>>);
+
+impl KeyIndex {
+    const FROM_LEN: usize = 16;
+
+    fn of(items: &[ImpliedNarrowing]) -> Self {
+        let mut index = KeyIndex::default();
+        if items.len() >= Self::FROM_LEN {
+            index.build(items);
+        }
+        index
+    }
+
+    fn build(&mut self, items: &[ImpliedNarrowing]) {
+        let mut by_key: HashMap<Atom, Vec<usize>> = HashMap::new();
+        for (at, item) in items.iter().enumerate() {
+            by_key.entry(item.key).or_default().push(at);
+        }
+        self.0 = Some(by_key);
+    }
+
+    /// Note the item just pushed onto `items`.
+    fn note_last(&mut self, items: &[ImpliedNarrowing]) {
+        match &mut self.0 {
+            Some(by_key) => {
+                let at = items.len() - 1;
+                by_key.entry(items[at].key).or_default().push(at);
+            }
+            None if items.len() >= Self::FROM_LEN => self.build(items),
+            None => {}
+        }
+    }
+
+    /// Whether `test` accepts an item of `items` about `key`.
+    fn any(
+        &self,
+        items: &[ImpliedNarrowing],
+        key: &Atom,
+        test: impl Fn(&ImpliedNarrowing) -> bool,
+    ) -> bool {
+        match &self.0 {
+            Some(by_key) => by_key
+                .get(key)
+                .is_some_and(|ats| ats.iter().any(|&at| test(&items[at]))),
+            None => items.iter().any(|item| item.key == *key && test(item)),
+        }
+    }
+}
+
+/// A holder's proof list as a join builds it.
+#[derive(Default)]
+struct ProofList {
+    items: Vec<ImpliedNarrowing>,
+    index: KeyIndex,
+}
+
+impl ProofList {
+    fn of(items: Vec<ImpliedNarrowing>) -> Self {
+        let index = KeyIndex::of(&items);
+        ProofList { items, index }
+    }
+
+    /// Add `proof` unless the list already asks the same of its holder
+    /// about the same key.
+    fn push_unique(&mut self, proof: ImpliedNarrowing) {
+        if self.index.any(&self.items, &proof.key, |p| {
+            same_trigger(&p.trigger, &proof.trigger)
+        }) {
+            return;
+        }
+        self.items.push(proof);
+        self.index.note_last(&self.items);
+    }
 }
