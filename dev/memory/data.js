@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791600051226,
+  "lastUpdate": 1791601927321,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -36345,6 +36345,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 80.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d218230b2c69951773a5964af6b601a107b1f091",
+          "message": "Variables inside a closure keep their types when another method is\nchained onto the call",
+          "timestamp": "2026-10-10T04:59:49+02:00",
+          "tree_id": "badf348297d7b213c1e67643e70ef95dba1ef73f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d218230b2c69951773a5964af6b601a107b1f091"
+        },
+        "date": 1791601917880,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.2,
             "unit": "MiB"
           }
         ]
