@@ -17,6 +17,6 @@ class HelloWorld
 }
 
 function(HelloWorld $hw): void {
-	assertType(X\Foo::class, $hw::B); // SKIP: a class constant read through an object ($obj::CONST) resolves to nothing
-	assertType(Foo::class, $hw::C); // SKIP: a class constant read through an object ($obj::CONST) resolves to nothing
+	assertType(X\Foo::class, $hw::B);
+	assertType(Foo::class, $hw::C);
 };

@@ -1,0 +1,25 @@
+// test: a static factory's own @template T returning self<T> keeps the chain resolvable through a @var hint
+// feature: completion
+// expect: getPrice(
+---
+<?php
+
+class Product {
+    public function getPrice(): float { return 0.0; }
+}
+
+/** @template T */
+class Box {
+    /**
+     * @template T
+     * @return self<T>
+     */
+    public static function make(): self { return new self(); }
+
+    /** @return T */
+    public function get(): mixed {}
+}
+
+/** @var Box<Product> $box */
+$box = Box::make();
+$box->get()-><>

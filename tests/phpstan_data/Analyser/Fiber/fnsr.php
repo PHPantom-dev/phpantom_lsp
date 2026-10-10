@@ -315,18 +315,18 @@ function (): void {
 	$cb = function () {
 		return 1;
 	};
-	assertType('Closure(): 1', $cb); // SKIP: a closure's inferred return type is not kept in the signature of the variable holding it
+	assertType('Closure(): 1', $cb);
 
 	$a = 1;
 	$cb = function () use (&$a) {
 		return 1;
 	};
-	assertType('Closure(): 1', $cb); // SKIP: a closure's inferred return type is not kept in the signature of the variable holding it
+	assertType('Closure(): 1', $cb);
 
 	$cb = function (string $s) {
 		return $s;
 	};
-	assertType('Closure(string): string', $cb); // SKIP: a closure's inferred return type is not kept in the signature of the variable holding it
+	assertType('Closure(string): string', $cb);
 };
 
 function (): void {

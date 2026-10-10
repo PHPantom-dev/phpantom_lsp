@@ -51,7 +51,13 @@ final class Foo
 		assertType('bool', self::BOOLEAN_CONSTANT);
 		assertType('null', self::NULL_CONSTANT);
 
-
+		$foo = new self();
+		assertType('1', $foo::INTEGER_CONSTANT);
+		assertType('1.0', $foo::FLOAT_CONSTANT);
+		assertType('\'foo\'', $foo::STRING_CONSTANT);
+		assertType('list{}', $foo::ARRAY_CONSTANT);
+		assertType('true', $foo::BOOLEAN_CONSTANT); // SKIP: a constant initialised with true or false reads as bool
+		assertType('null', $foo::NULL_CONSTANT);
 	}
 
 	public function newExpression(): void

@@ -749,6 +749,39 @@ function foo() {
     );
 }
 
+#[test]
+fn closure_parameters_keep_their_signature_in_the_docblock() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function demo(): void {
+    $fn = function (int $x): string { return (string) $x; };
+    $g = fn (int $y) => $y * 2;
+    $a = $fn(1) . $g(2);
+    echo $a;
+}
+";
+    // Select `$a = $fn(1) . $g(2);` — both closures become parameters.
+    let actions = get_code_actions(&backend, uri, content, 4, 4, 4, 24);
+    let action = find_extract_action(&actions).expect("should offer extract action");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
+
+    assert!(
+        result.contains("@param Closure(int): string $fn"),
+        "a closure parameter should carry its signature: {result}"
+    );
+    assert!(
+        result.contains("Closure(int): int"),
+        "an arrow function parameter should carry its signature: {result}"
+    );
+    assert!(
+        result.contains("(Closure $fn, Closure $g)"),
+        "the native hints should stay `Closure`: {result}"
+    );
+}
+
 // ── Extract method ──────────────────────────────────────────────────────────
 
 #[test]

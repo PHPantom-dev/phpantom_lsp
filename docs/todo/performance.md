@@ -8,6 +8,11 @@ underlying costs (parallel file processing, full background indexing).
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
+An item belongs here only when it saves at least 7% memory or 4% time
+on a realistic use case, or 8% for a High or Very High complexity
+change. Trivial fixes are batched and made without being weighed
+against that bar.
+
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
@@ -15,437 +20,267 @@ within the same impact tier.
 
 ---
 
-## P3. Parallel pre-filter in `find_implementors`
+## P3. Go-to-implementation on a vendor class parses the whole classmap
 
-**Impact: Medium · Complexity: Medium-High**
+**Impact: High · Complexity: Medium-High**
 
-`find_implementors` Phase 3 reads every unloaded classmap file
-sequentially: `fs::read_to_string`, string pre-filter for the target
-name, then `parse_and_cache_file`. On a project with thousands of
-vendor classes, this loop is dominated by I/O latency. The string
-pre-filter rejects most files (the target name appears in very few),
-so the vast majority of reads are wasted.
+Go-to-implementation and type-hierarchy subtypes both go through
+`find_implementors` (`definition/implementation.rs`). When the target is
+declared under `vendor/`, or the workspace index has not been built yet
+(the `composer`, `self` and `none` strategies until something builds it),
+Phase 2 calls the class loader on every entry of `fqn_uri_index`. That
+index holds the whole classmap, vendor included, so the first such
+request parses every class file the session has not loaded yet, and
+keeps all of them.
 
-### Fix
+Measured on a release build against a large Laravel project (about 19,000
+vendor files): go-to-implementation on `ShouldQueue` takes 4.2 s the first
+time and raises RSS from 406 MB to 697 MB for the rest of the session.
+Repeats take 0.3 s, which is still a full pass over the index plus the
+later phases.
 
-Split Phase 3 into two sub-phases:
+Phase 3 already does what Phase 2 needs: it reads each unloaded file's
+bytes (`read_for_scan`, mmap-backed for large files) and only parses the
+ones that mention the target's short name. Phase 2's blanket load exists
+because a transitive implementor need not mention the target (`class B
+extends A` where `A implements Target`), but the same pre-filter covers
+that when it is applied level by level: find the files naming the
+target, then the files naming each class found, until no new class turns
+up. Phase 4 has a smaller cost of its own: `stub_index` maps each stub
+class to its whole stub file, so a file is searched once for every class
+it declares (1,512 entries).
 
-1. **Parallel pre-filter.** Collect the candidate paths into a
-   `Vec<PathBuf>`, then use `std::thread::scope` to read files and
-   run the `raw.contains(target_short)` check in parallel. Return
-   only the paths that pass the filter along with their content.
+**Fix:** replace Phase 2's blanket load with the byte pre-filter,
+iterated over each newly found class name for transitive results, and
+search each stub file once rather than once per class. Parallelising the
+pre-filter, which is what this item originally proposed, can come on top,
+but the parses avoided are the bulk of the win.
 
-2. **Sequential parse.** For the (few) files that pass, call
-   `parse_and_cache_file` sequentially. This step mutates `uri_classes_index`
-   and calls `class_loader`, which may re-lock shared state.
-
-The same pattern applies to Phase 5 (PSR-4 directory walk for files
-not in the classmap). The pre-filter I/O is the bottleneck; the
-parse step processes very few files and is fast.
-
-Note that once the full workspace index is ready,
-`find_implementors` answers from Phase 1 alone — Phases 3 and 5
-only run during the startup window before indexing completes, which
-narrows how often this cost is paid.
-
-### Trade-off
-
-Thread spawning overhead is only worthwhile when the candidate set
-is large. Skip parallelism when the candidate count is below a
-threshold (e.g. 8 files).
-
----
-
-## P15. Two-phase stub index construction (eliminate `RwLock` on stub maps)
-
-**Impact: Low · Complexity: Medium-High**
-
-The three stub indexes (`stub_index`, `stub_function_index`,
-`stub_constant_index`) are write-once-read-many maps. They are
-populated at construction time from the compiled-in phpstorm-stubs
-arrays, then filtered once in `set_php_version` (called during
-`initialized`) to evict entries with `@removed X.Y` tags. After
-that single mutation they are never written again.
-
-Because the PHP version is not known at construction time (it comes
-from `composer.json` / `.phpantom.toml`, read during `initialized`),
-the maps are currently wrapped in `parking_lot::RwLock` so that
-`set_php_version` can call `.write().retain(…)`. The maps are now
-`Arc<RwLock<…>>`, shared across worker and request clones instead
-of deep-copied per thread, so only the read-lock cost remains.
-Every read — ~24 call sites across completion, resolution,
-diagnostics, hover, and definition — acquires a shared read lock. On the
-uncontended path this is a single atomic CAS (~1-5 ns), so the
-cost is negligible in practice, but it is architecturally wasteful
-for data that never changes after startup.
-
-### Ideal solution
-
-Split `Backend` construction into two phases so that the stub maps
-are plain `HashMap`s with zero synchronisation cost on reads:
-
-1. **Phase 1 — skeleton construction.** Create the `Backend` with
-   empty (or placeholder) stub maps. No `RwLock` needed because
-   nothing reads them yet.
-
-2. **Phase 2 — version-aware population.** In `initialized`, after
-   detecting the PHP version, build the filtered maps (applying
-   `is_stub_function_removed` / `is_stub_class_removed` during
-   construction rather than via `retain`) and store them on the
-   backend through a one-shot setter that consumes the maps by
-   value.
-
-The setter could use `std::sync::OnceLock<HashMap<…>>` (or simply
-an `UnsafeCell` behind a "set-exactly-once" assertion) to make the
-write safe without ongoing read-side cost. Alternatively, the
-fields can stay as plain `HashMap` if the `Backend` struct is built
-in `initialized` rather than `initialize` — moving construction
-after the version is known.
-
-### Prerequisites
-
-This interacts with the test helpers (`new_test`,
-`new_test_with_stubs`, etc.) which currently call
-`set_php_version` in the constructor. They would need to accept
-a `PhpVersion` parameter or build the filtered maps inline.
-
-### When to implement
-
-Low priority. The current `RwLock` overhead is unmeasurable in
-practice (~10-20 ns per completion request). Worth revisiting if
-the stub indexes grow significantly or if `Backend` construction
-is restructured for other reasons.
+**Where to look:** `find_implementors` and `check_candidate_fqn` in
+`definition/implementation.rs`; `read_for_scan` in
+`classmap_scanner/mod.rs`.
 
 ---
 
-## P16. Pre-parsed stub format (eliminate raw PHP embedding)
+## P72. A `switch` that assigns many distinct literals costs cubic time
 
-**Impact: High · Complexity: Very High**
+**Impact: Medium · Complexity: Medium**
 
-The ~530 phpstorm-stubs PHP files are embedded as raw source via
-`include_str!` (~9.8 MB in `.rodata`). This has three costs:
-
-1. **Permanent RSS.** The 9.8 MB is memory-mapped into every
-   process regardless of how many stubs are actually accessed.
-   That is ~17% of the current 59 MB baseline and will become a
-   larger relative share as vendor indexing grows the working set.
-
-2. **Parse cost on first access.** Each stub is parsed with the
-   full mago parser on first use (`parse_and_cache_content_versioned`).
-   Large files like `intl.php` (296 KB) take several milliseconds.
-   A Symfony project can trigger hundreds of stub parses as vendor
-   classes extend built-in types.
-
-3. **Duplicate data.** After parsing, the `Arc<ClassInfo>` lives in
-   `uri_classes_index` and `fqn_index`, but the raw PHP source stays resident
-   in `.rodata` forever. Both copies exist simultaneously.
-
-### Indexing order: stubs → vendor → user
-
-Background indexing will load data in dependency order:
-
-1. **Stubs** (built-in PHP classes, functions, constants)
-2. **Vendor** (Composer dependencies)
-3. **User** (project source)
-
-This ordering means every layer's parent types are already
-resolved before it starts. Vendor classes that extend `ArrayAccess`,
-`Iterator`, `JsonSerializable`, etc. find pre-populated
-`fqn_index` entries instead of triggering on-demand stub parses.
-User classes that extend vendor classes find those already indexed
-too.
-
-With the current raw-PHP stubs, the stubs phase itself involves
-parsing ~530 PHP files through the full mago pipeline. In a
-pre-parsed format, this phase becomes a single deserialization
-step (~5-10 ms), making the stubs layer essentially free and
-letting vendor indexing start immediately.
-
-### Cascade cost during first-file-open
-
-When the user opens a file before background indexing completes,
-the completion/hover path walks type chains synchronously. A
-typical Laravel file triggers a cascade like:
-
-- Model → `find_or_load_class` → classmap → parse vendor PHP
-- Model implements `ArrayAccess`, `JsonSerializable`, `Countable`,
-  uses `Traversable`, `Iterator`, `Stringable`, etc.
-- Each of these hits Phase 3 (stub lookup) → full mago parse of
-  the stub file containing it
-- Stub files contain multiple classes, so parsing `SPL/SPL.php`
-  for `ArrayAccess` also parses `Iterator`, `Countable`,
-  `SeekableIterator`, etc.
-
-A realistic first-open cascade triggers 20-40 stub file parses,
-costing 40-200 ms of CPU time on the critical path. With
-pre-parsed stubs, each stub lookup becomes a `HashMap::get`
-returning an `Arc<ClassInfo>` in nanoseconds, eliminating this
-cost entirely.
-
-### Solution
-
-Parse all stubs at build time in `build.rs` (mago becomes a build
-dependency) and serialize the extracted `ClassInfo`, `FunctionInfo`,
-and constant data into a compact binary blob using postcard (or
-bincode). Embed the blob via `include_bytes!`. At startup,
-deserialize the blob and populate `fqn_index` directly.
-
-**Version filtering.** Add `since: Option<PhpVersion>` and
-`until: Option<PhpVersion>` fields to `MethodInfo`, `ParameterInfo`,
-`FunctionInfo`, `ClassInfo`, and `ConstantInfo`. Embed one
-"maximal" blob containing all version variants. After
-deserialization, filter elements whose version range excludes the
-target PHP version. This replaces both the current byte-level
-`@removed` scanning at startup and the `is_available_for_version`
-AST filtering at parse time.
-
-**Serde on the type hierarchy.** Add `#[derive(Serialize, Deserialize)]`
-to the core structs (`ClassInfo`, `MethodInfo`, `PropertyInfo`,
-`ConstantInfo`, `FunctionInfo`, `ParameterInfo`, and their
-supporting enums). `SharedVec<T>` needs a custom serde impl that
-serializes as `Vec<T>` and deserializes into `SharedVec::from(vec)`.
-
-**What gets removed:**
-
-- The `STUB_FILES` array (raw PHP source embedding)
-- The `phpantom-stub://` URI scheme and associated `uri_classes_index` entries
-- The `parse_and_cache_content_versioned` path for stubs
-- The `is_stub_function_removed` / `is_stub_class_removed` byte
-  scanners (replaced by version fields on deserialized structs)
-- The `set_php_version` retain-based eviction (replaced by
-  post-deserialize filtering)
-
-**Go-to-definition.** Stubs are in-memory-only; the IDE cannot
-navigate to them anyway. No raw source needs to be preserved.
-
-**Hover.** The extracted fields (`class_docblock`, `deprecation_message`,
-`links`, `see_refs`, parameter type hints and names) are all
-carried in the serialized structs. Hover quality is preserved.
-
-### Estimated impact
-
-- **Binary:** −9.8 MB raw PHP, +2-3 MB serialized blob = net −7 MB
-- **RSS:** 9.8 MB `.rodata` no longer mapped; stubs loaded as
-  heap-allocated structs filtered to the target PHP version
-- **First-file-open:** 40-200 ms of stub parse time on the
-  critical path eliminated; stub lookups drop to nanoseconds
-- **Background indexing:** stubs phase drops from seconds (parsing
-  530 PHP files) to <10 ms (deserializing one blob), letting
-  vendor indexing start immediately
-- **Vendor indexing cascade:** every vendor class that extends a
-  built-in type no longer triggers a stub parse; the parent
-  `ClassInfo` is already in `fqn_index`
-- **Build time:** clean builds gain 10-30 s for the mago parse
-  step; incremental builds unaffected (`write_if_changed` caching)
-
-### Prerequisites
-
-- `serde` derive on the core type hierarchy (already in `Cargo.toml`)
-- `build.rs` already downloads stubs and generates code; extending
-  it to parse PHP is incremental
-- Interacts with P15 (stub index `RwLock` elimination): if stubs
-  are deserialized eagerly, the two-phase construction in P15
-  becomes the natural approach
-
-### When to implement
-
-High priority. This is a prerequisite for efficient stubs → vendor
-→ user indexing. The 9.8 MB static cost is already meaningful and
-will become the dominant fixed overhead once vendor indexing is
-deferred. Implementing this before full vendor indexing lands
-avoids hitting the memory ceiling and ensures the stubs layer is
-essentially free for both eager and deferred indexing paths.
-
----
-
-## P17. `mago-names` resolution on the parse hot path
-
-**Impact: Medium · Complexity: High**
-
-The `mago-names` name resolver runs synchronously inside
-`update_ast_inner`, adding a full AST walk plus an owned `HashMap`
-copy on every `didChange` event. Measured regression from `6a0737a`
-("Migrate to use mago-names"):
-
-| Benchmark        | Before | After | Δ    |
-| ---------------- | ------ | ----- | ---- |
-| with_narrowing   | 12 ms  | 15 ms | +25% |
-| 5_methods_chain  | 8 ms   | 10 ms | +25% |
-| carbon_class     | 250 ms | 340 ms | +36% |
-| large_file       | 150 ms | 210 ms | +40% |
-
-The resolved names are now consumed by many features through
-`resolve_name_at()` (rename, references, semantic tokens,
-go-to-definition, type hierarchy, highlight) and directly by
-function resolution and deprecated diagnostics — but all of those
-are on-demand request handlers. Nothing on the didChange or
-completion hot path requires this data to be computed eagerly, so
-lazy per-file-version resolution remains viable; it just has more
-consumers to invalidate correctly than when this was filed.
-
-### Fix
-
-Defer name resolution out of `update_ast_inner`. Options:
-
-- **Lazy resolution:** compute `OwnedResolvedNames` on first access
-  per file version, invalidate on the next `update_ast`. Moves the
-  cost off the typing hot path entirely.
-- **Diagnostic-worker resolution:** run the resolver in the
-  diagnostic worker clone of `Backend`, since diagnostics are the
-  primary consumer.
-
-### When to implement
-
-Low priority. The `mago-names` migration is complete, but the
-`use_map` is still used by several consumers. Further refactoring
-(migrating more consumers to byte-offset lookups, eventually
-removing `use_map`) will change the access patterns. Optimizing
-now would likely be reworked. Revisit once `use_map` usage is
-significantly reduced.
-
----
-
-## P18. Subtype result caching
-
-**Impact: Medium · Complexity: High**
-
-PHPStan caches subtype check results (`isSuperTypeOf()`) in a static
-`HashMap` keyed by type description strings. This avoids redundant
-class hierarchy walks when the same type pair is checked multiple
-times during a single request. PHPantom resolves class hierarchies
-repeatedly during completion (checking if a method override is
-covariant, checking if a class implements an interface, etc.). A
-per-request `HashMap<(String, String), bool>` cache for subtype
-results would reduce redundant hierarchy walks.
-
-PHPStan also uses a `hasTemplateOrLateResolvableType()` fast-path
-to skip expensive type traversal when a type has no template
-parameters. PHPantom could add a similar flag to its type
-representations to short-circuit template substitution on simple
-types. Most types in a typical codebase are concrete (no generics),
-so this fast-path would apply to the majority of checks.
-
-### Fix
-
-1. Add a thread-local or per-request
-   `HashMap<(Atom, Atom), bool>` that caches the result of
-   "is type A a subtype of type B?" lookups. Clear the map at the
-   start of each completion/hover/diagnostic request. Class names
-   are interned now (`TypeKind::Named` carries an `Atom`, `ClassInfo`
-   caches its FQN as an `Atom`), so the keys are `Copy` and
-   identity-hashed. Whole types are interned too, so a `(PhpType,
-   PhpType)` key would work as well and hash just as cheaply.
-
-2. Add a `has_template_params: bool` flag (or equivalent) to
-   `ClassInfo` or type representations. Set it during parsing when
-   `@template` tags or generic syntax are present. Before running
-   `apply_substitution`, check the flag and skip the substitution
-   walk entirely when it is `false`. (Today the equivalent guarding
-   is ad hoc emptiness checks on `template_params` and on the
-   substitution map.)
-
----
-
-## Appendix: Profiling
-
-### Commands
-
-```sh
-# Record (Ctrl-C after ~60s):
-perf record -g --call-graph dwarf -- \
-  ./target/release/phpantom_lsp analyze \
-  src/core/Purchase/Services/PurchaseFileService.php
-
-# Text report (top functions):
-perf report --stdio --no-children | head -80
-
-# Flamegraph (requires the `flamegraph` crate or perf-tools):
-perf script | flamegraph > /tmp/phpantom.svg
-
-# Instantaneous CPU utilisation over a run (% of one core, sampled
-# every 0.5 s), for machines where perf is unavailable
-# (kernel.perf_event_paranoid > 2):
-./target/release/phpantom_lsp analyze --project-root <dir> --no-colour \
-  >/dev/null 2>&1 & PID=$!; prev=0
-while kill -0 $PID 2>/dev/null; do
-  cur=$(awk '{print $14+$15}' /proc/$PID/stat 2>/dev/null) || break
-  [ -n "$cur" ] && echo $(( (cur - prev) * 2 )); prev=$cur; sleep 0.5
-done
+```php
+function countryName(string $code): string {
+    switch ($code) {
+        case 'AF': $name = 'Afghanistan'; break;
+        case 'AL': $name = 'Albania'; break;
+        // … one case per value …
+        default: $name = 'Unknown';
+    }
+    return strtoupper($name);
+}
 ```
 
-### Pathological test file
+Each case's exit joins into the scope after the `switch`, and the
+variable's type grows by one literal per case. The join normalises the
+union by comparing its members pairwise (`join_runtime_value_types` in
+`php_type/normalize.rs`, `drop_subsumed_entries` in
+`types/resolved_type.rs`), and `literals_equal` (`php_type/subtype.rs`)
+decodes both strings whenever their spellings differ, which for distinct
+literals is every time. One join is therefore quadratic in the literals
+collected so far, and the `switch` as a whole is cubic.
 
-`PurchaseFileService.php` (~700-line Eloquent-heavy service with
-~55 imports) is the most expensive single file encountered so far.
-The per-collector timing is controlled by a `>= 2s` threshold in
-`src/analyse.rs` Phase 2 (search for `⏱`). It prints a breakdown
-like:
+Release build, one function with N cases that each assign a distinct
+string:
 
-```
-⏱  63.2s  src/core/Purchase/Services/PurchaseFileService.php
-  [fast=1ms cls=40ms mem=23696ms fn=12ms unres=16781ms arg=22568ms impl=0ms depr=54ms]
-```
+| N cases | analyse wall clock |
+| ------- | ------------------ |
+| 250     | 0.6 s              |
+| 500     | 3.5 s              |
+| 1000    | 26 s               |
+
+The same 500 cases over 5 distinct values take under a second even in a
+debug build, so the cost follows the number of distinct literals, not
+the number of cases. A `match` with the same arms builds its union once
+and takes 1.1 s at 1000. The join belongs to the shared forward walker,
+so hover and completion below such a `switch` pay for it too. Lookup
+tables written this way (country, currency, MIME type or status code
+names) are common in older code.
+
+**Fix:** a literal only ever subsumes an equal literal or its base
+scalar, so the join can deduplicate literals by value through a hash set
+and keep the pairwise comparison for the non-literal members, which
+makes a join linear in its literal count. `literals_equal` can also skip
+decoding when neither spelling contains an escape, since two different
+spellings are then two different values. A cap that collapses an
+oversized union to its base scalar (Psalm uses 500 literals) bounds the
+type itself, but would not help below the cap.
+
+**Where to look:** `join_runtime_value_types` and
+`is_runtime_value_subtype` in `php_type/normalize.rs`, `literals_equal`
+in `php_type/subtype.rs`, `drop_subsumed_entries` and
+`collapse_redundant_runtime_literals` in `types/resolved_type.rs`, and
+`merge_local` in `type_engine/variable/forward_walk/scope_state/merge.rs`.
 
 ---
 
-## P20. Content-hash gated resolution cache persistence
+## P70. Diagnostics on a long file find each access's context by scanning
 
-**Impact: Medium · Complexity: Very High**
+**Impact: Medium · Complexity: Medium**
 
-The resolved-class cache (`resolved_class_cache`) is ephemeral — it
-lives only for the duration of the process. On LSP restart or cold
-start, all class resolution (inheritance merging, virtual members,
-template substitution) is re-computed from scratch even when files
-haven't changed.
+Several diagnostic collectors work out the context of a member access or
+call by scanning for it, so each access costs time in proportion to the
+length of the file and the whole pass costs its square. The forward walk
+over the same file no longer does. On a release build, a generated
+top-level script of repeated 11-line blocks (an `if`/`elseif`/`else`, a
+`switch`, a `try`, a `while`, a closure and a few calls each) takes:
 
-**Fix:** Persist resolved `ClassInfo` entries to a project-local cache
-directory, keyed by `xxh128(file_contents)`. On startup, walk the
-project, compare content hashes, and load cached entries for unchanged
-files. Only re-resolve classes whose source files (or dependency files)
-have changed.
+| Lines  | analyse wall clock |
+| ------ | ------------------ |
+| 5,500  | 0.7 s              |
+| 11,000 | 2.1 s              |
+| 22,000 | 8.1 s              |
 
-Psalm implements exactly this pattern with three cache layers:
-- Parser cache (serialized AST, keyed by file content hash)
-- File storage cache (classes-in-file, functions, constants)
-- ClassLike storage cache (methods, properties, template types,
-  parent chains — keyed by `xxh128(file_contents)`)
+with or without a `namespace` declaration. Legacy codebases do carry
+files this long, and every edit to one re-runs the whole pass. Well over
+half of the samples are in these lookups rather than in the walk:
 
-Each layer checks the hash on load and discards stale entries. Schema
-versioning (tracking `filemtime` of the storage struct source files)
-auto-invalidates all caches when internal types change.
+- `class_context_placeholder` (`class_lookup.rs`) calls
+  `text_scan::namespace_at_offset`, which searches the text backwards from
+  the access for a `namespace` keyword. In a namespaced file the
+  declaration sits near the top, so the search is just as long. It runs
+  once per call from `collect_argument_type_diagnostics`, the return-type
+  checks, the deprecated collector and the unknown-member collector
+  (about 30%). The namespace blocks are already recorded per file:
+  `Backend::namespace_at_offset` (`backend/file_access.rs`) answers from
+  them, but this path only has the content and an offset.
+- `SubjectCacheKey::build` (`diagnostics/subject_cache.rs`) calls
+  `SymbolMap::find_enclosing_scope` and `find_narrowing_block`, which test
+  every scope and every narrowing block in the file, plus
+  `active_var_def_offset`, which adds another scope scan and a linear
+  `find_var_definition` over every variable definition (about 15%).
+- String comparisons inside the unknown-member and deprecated collectors
+  themselves, not yet traced to a single call (about 12%).
 
-**Design:**
+The namespace blocks, scopes and narrowing blocks of a file are all known
+once it is parsed, so each lookup can be a binary search over ranges
+recorded at that point.
 
-1. Use `bincode` serialization (already evaluated in X6) for
-   `ClassInfo` entries.
-2. Key: `(fqn, content_hash)` → serialized `ClassInfo`.
-3. On startup: load cache entries where content hash matches current
-   file. Skip resolution for those classes entirely.
-4. On file change: evict entries for the changed file AND entries
-   whose classes depend on changed members (using the existing
-   dependency tracking from ER4).
-5. Schema version: embed a version constant derived from `ClassInfo`
-   struct layout. Invalidate entire cache on version mismatch.
+**Where to look:** `namespace_at_offset` in `text_scan.rs` and its
+callers, `find_enclosing_scope` and `find_narrowing_block` in
+`symbol_map/mod.rs`, and `SubjectCacheKey::build`.
 
-**Relationship to X6:** X6 (disk cache) is the broader evaluation of
-whether disk caching is worthwhile. P20 is the specific application
-to resolved-class storage, which is the most expensive thing to
-recompute. P20 can ship independently as a targeted optimization
-even if the broader X6 evaluation concludes that full disk caching
-isn't needed.
+---
 
-**References:**
-- Psalm: `ClassLikeStorageCacheProvider` in
-  `Psalm\Internal\Provider\ClassLikeStorageCacheProvider`
-- Psalm: `FileStorageCacheProvider` for the content-hash invalidation
-  pattern
-- A peer PHP LSP project persists its per-file index cache on disk
-  keyed by `blake3(uri || content)`. It originally keyed on
-  `mtime + size` and shipped a cache-staleness bug (a size-preserving
-  edit within the same mtime second was missed) before switching to
-  content hashing. Confirms the content-hash-as-authority choice
-  above; never trust mtime for correctness, at most as a cheap
-  pre-filter to skip hashing unchanged files.
+## P52. The diagnostic benchmarks measure a path no consumer takes
+
+**Impact: Medium · Complexity: Low**
+
+`bench_diagnostics_phpactor_fixtures` in `benches/completion.rs` calls
+four collectors directly:
+
+```rust
+backend.collect_deprecated_diagnostics(&uri, content, &mut out);
+backend.collect_unused_import_diagnostics(&uri, content, &mut out);
+backend.collect_unknown_class_diagnostics(&uri, content, &mut out);
+backend.collect_unknown_member_diagnostics(&uri, content, &mut out);
+```
+
+No consumer does this. Every real caller goes through
+`collect_slow_diagnostics_observed`, which first activates the shared
+chain resolution cache, the type-engine caches, the forward-walked
+diagnostic scope cache and the pass's line table, then runs the
+collectors in an order chosen so later ones read what earlier ones
+cached. The benchmark activates none of the shared ones (the deprecated
+and unknown-member collectors open only their own) and runs
+`deprecated_usage` first, cold, where production runs it about halfway
+through against warm caches.
+
+The result is a tracked number that moves for reasons users never
+experience. On the `method_chain` fixture the benchmark reports roughly
+twice the time the production pass takes on the same file while running
+a quarter of the collectors, and an optimisation to the cached path
+shows up as a fraction of its real effect: making chain cache keys lazy
+measured -25% on the production pass and -3.7% here, because without an
+active cache the probe never hits early and every key is needed anyway.
+
+Point the benchmark at `collect_slow_diagnostics`, so it measures what
+an editor keystroke and an `analyze` run actually pay for. This resets
+the tracked history for `diagnostics/fixture/*` once, which is worth it
+for a number that tracks the real path. Keep a separate uncached case
+only if there is a consumer that runs collectors without the guards.
+
+**Where to look:** `bench_diagnostics_phpactor_fixtures` in
+`benches/completion.rs`; `collect_slow_diagnostics_observed` in
+`diagnostics/mod.rs` for the guards and the collector order.
+
+---
+
+## P53. Diagnostics and type-hint resolution deep-copy classes they only read
+
+**Impact: Medium · Complexity: Low**
+
+`collect_deprecated_diagnostics` resolves each member access to a class
+and then clones the whole `ClassInfo` out of the `Arc` it just got:
+
+```rust
+.and_then(|name| self.find_or_load_class(&name))
+.map(|arc| ClassInfo::clone(&arc));
+```
+
+`resolve_variable_subject` does the same on its own path, and the
+per-variable cache stores `Option<ClassInfo>` rather than
+`Option<Arc<ClassInfo>>`, so its hits clone too. The class is only ever
+read afterwards (`get_method`, `get_property`, and a `&ClassInfo`
+argument to `resolve_class_fully_cached`), so every one of those copies
+is wasted, and the cost scales with the class's member count: a file
+whose accesses land on a large resolved class (an Eloquent `Builder`, a
+facade's concrete binding) pays for a full copy of its methods,
+properties, and constants once per access.
+
+`resolve_named_type` (`type_engine/types/resolution.rs`) has the same
+habit on every type-hint lookup. It takes the class out of its `Arc` with
+`Arc::unwrap_or_clone`, which deep-copies whenever the class is shared
+(a cached class always is), and wraps the copy in a fresh `Arc` even when
+nothing changed it. Only the Eloquent collection swap and the generic
+path modify the class.
+
+Hold `Arc<ClassInfo>` through the collector instead; both producers
+already have one, and deref coercion covers the read sites. In
+`resolve_named_type`, keep the `Arc` and copy only on the paths that
+modify the class.
+
+**Where to look:** `collect_deprecated_diagnostics` and
+`resolve_variable_subject` in `diagnostics/deprecated.rs`, plus the
+`var_type_cache` declaration at the top of the collector;
+`resolve_named_type` in `type_engine/types/resolution.rs`.
+
+---
+
+## P51. CI checks for how cost grows with input size
+
+**Impact: Medium · Complexity: Low-Medium**
+
+CI already catches regressions on fixed inputs: `benchmark-pr` fails a
+pull request when the `completion` bench regresses past 130% of its
+history, and `memory-benchmark-pr` does the same for
+`benches/memory_usage.py`. Two gaps remain:
+
+- Only `--bench completion` runs. `references`, `laravel_completion` and
+  `custom_builder` are registered in `Cargo.toml` but never run.
+- Nothing checks how cost grows with the size of an input. Every
+  performance problem users have hit so far was a growth problem on an
+  input of an unusual shape (thousands of calls to undefined functions,
+  hundreds of Blade views without a DocBlock, and the open items P3, P70
+  and P72), and a benchmark over fixed fixtures cannot see one until a
+  project that has the shape reports it.
+
+Add a scaling check: generate each known pathological shape (a long
+top-level script, a `switch` over N distinct literals, N conditional
+array writes, N calls to undefined functions, a long method chain) at N
+and 2N, analyse both, and fail when doubling the input more than about
+2.5 times the time. A ratio is independent of the machine's speed, so the
+check can run on a CI runner, and each shape fixed later joins the set.
+
+**Where to look:** `.github/workflows/ci.yml`'s `benchmark`/
+`benchmark-pr` jobs; `benches/` for the registered benches.
 
 ---
 
@@ -479,13 +314,12 @@ Psalm implements this with:
    - If diagnostic span is after the edit → shift by delta.
    - If diagnostic span is before the edit → keep as-is.
 4. Re-run diagnostics only for methods/functions whose spans overlap
-   with changed regions (use the member-level AST diff from ER4's
-   incremental repopulation).
+   with changed regions.
 5. Merge shifted cached diagnostics with freshly-computed ones.
 
-**Prerequisites:** The incremental repopulation (ER4) already
-identifies which members changed. This task extends that to the
-diagnostic layer.
+**Prerequisites:** a member-level diff. The edit path only compares
+class signatures today (`ast_update.rs`), so which members changed has
+to be worked out first.
 
 **References:**
 - Psalm: `FileDiffer` and `FileStatementsDiffer` in
@@ -494,623 +328,90 @@ diagnostic layer.
 
 ---
 
-## P30. Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`
+## P73. A lazily loaded file is parsed three times
 
-**Impact: Medium-High · Complexity: Very High**
+**Impact: Low-Medium · Complexity: Low**
 
-`mago-hir` is an intermediate representation that lowers the CST plus
-PHPDoc comments into a single flat,
-fully-resolved tree in one pass: names are resolved
-(`Local`/`Qualified`/`FullyQualified` + `imported` flag on every
-identifier), docblock tags are parsed into structured annotations
-(`@template`, `@extends`/`@implements` generics, `@mixin`,
-`@method`/`@property`, `@param`/`@return`/`@throws`,
-`@assert`/`@assert-if-true`/`@assert-if-false`, `@param-out`,
-`@self-out`, type aliases), and types are parsed into a full
-PHPStan/Psalm-grade type language (generics with resolved bounds,
-conditional types, `key-of`/`value-of`, array/object shapes,
-int-ranges, class-string variants, int-masks). `mago-phpdoc-syntax`
-already supplies the docblock and type half of that; what `mago-hir`
-adds on top is the resolved-name and single-tree lowering PHPantom
-hand-rolls across `parser/` and `names.rs`.
+`parse_and_cache_content_versioned` (`resolution.rs`) builds a loaded
+file's classes from three helpers, `parse_use_statements`,
+`parse_namespace` and `parse_php_classes_by_block`, and each runs its own
+mago parse of the same content (and copies it), because no parse cache
+is installed for the file. Every embedded stub and every vendor or
+project file loaded on demand is parsed three times where once would do.
 
-The IR threads three generic "hole" parameters
-(`IR<'arena, I, S, E>`, defaulting to `()`) through every node so a
-later inference pass can fill in resolved type information at
-item/statement/expression granularity without changing the tree
-shape — this is the "groundwork for the upcoming rule-based checker"
-azjezz described.
+Installing a parse cache for the content around the three calls removes
+the extra two. On a release build that takes about 2% off an `analyze`
+of a mid-sized Laravel project; paths dominated by on-demand loading
+(startup population, the scan in P3) spend a larger share of their time
+parsing. `parse_php_classes_by_block` already works out the use map and
+namespace internally, so the other two helpers could also read them from
+there.
 
-Confirmed by reading the source directly (docs.rs is only
-~1% documented, so don't rely on it): `mago-hir` depends only on
-crates we already use (`mago-syntax`, `mago-syntax-core`,
-`mago-phpdoc-syntax`, `mago-span`, `mago-database`,
-`mago-allocator`) plus the small `mago-flags` crate. It does **not**
-pull in `mago-codex`, `mago-analyzer`, or `mago-reflection`, so
-adopting it would not introduce a second type-resolution engine
-alongside our own (see the "no parallel type resolution systems"
-rule in `CLAUDE.md`) — it would replace the raw-parsing layer that
-currently *feeds* `ClassInfo` construction, not `ClassInfo` itself or
-`resolve_rhs_expression`/`resolve_expression_type`.
-
-Potential payoff if it holds up:
-
-- Deletes a large share of our hand-rolled docblock tag parsing,
-  type-string parsing, and name resolution, replacing it with a
-  single upstream-maintained pass.
-- A natural path to Blade support: lowering Blade's compiled-PHP
-  approximation (see `examples/laravel`/Blade handling) to the same
-  IR would let more code actions and diagnostics work uniformly on
-  Blade files instead of only a subset, as flagged in the Discord
-  discussion with azjezz.
-
-**Do not start this now.** The crate is ~19k LOC of essentially
-undocumented API with no consumers, and was described as under active
-redesign ("final touches... in the next branch" per azjezz).
-
-Note for anyone re-reading the history here: `mago-hir` did **not**
-arrive in 1.44.0. It first shipped in 1.40.0 (2026-06-24) and had
-already reached its current size by 1.43.0. The "brand new crate"
-framing in the original writeup was wrong, which matters because it
-means the API-settling clock below started earlier than assumed.
-
-**Triggers to revisit — start only once at least two of these hold:**
-
-- `mago-hir` has shipped unchanged (no breaking API changes) across
-  at least 2-3 minor mago releases, indicating the API has settled.
-- Upstream's own rule-based checker/analyzer ships on top of
-  `mago-hir` and is in real use, proving the IR's "holes" mechanism
-  works end-to-end for type inference, not just as a parse target.
-- rustdoc coverage for `mago-hir` is substantially more complete
-  (the 1.44.0 release is ~1% documented), or azjezz confirms the
-  shape is stable enough to build against.
-
-**Re-evaluated at mago 1.45.0 (2026-07-29): one of three triggers
-holds, so this stays parked and the prototype below was not run.**
-
-- *API settled — technically yes, but for the wrong reason.* The
-  `mago-hir` sources are byte-identical across 1.43.0, 1.44.0 and
-  1.45.0 (verified by unpacking the crates and diffing: zero changed
-  lines). That is not an API that settled through use, it is one that
-  has seen no development at all.
-- *Upstream checker builds on it — no, and upstream picked something
-  else.* `mago-analyzer`, `mago-linter` and `mago-codex` at 1.45.0
-  all depend on `mago-syntax` plus `mago-phpdoc-syntax` directly, and
-  none of them depends on `mago-hir`. `mago-hir` has zero reverse
-  dependencies on crates.io. Six releases and a month after it
-  appeared, the rule-based checker it was billed as groundwork for is
-  being built on a different foundation. This is the load-bearing
-  trigger: adopting the IR now would make PHPantom its first and only
-  user, betting the parse layer on an inference "holes" mechanism that
-  nothing has exercised end to end.
-- *rustdoc coverage — no.* 84 doc-comment lines against 876 `pub`
-  items in 1.45.0, still about the ~1% the original writeup found.
-
-The cheap way to re-check is the second trigger on its own: if
-anything in mago's own workspace starts depending on `mago-hir`, or
-its crates.io reverse-dependency count moves off zero, that flips the
-one trigger that carries real evidence and this becomes worth another
-look.
-
-**Re-checked at mago 1.46.0 (2026-08-13): unchanged.** `mago-hir` still
-has zero reverse dependencies on crates.io, and docs.rs coverage is
-still around 1%. Still parked.
-
-**Before committing to a full migration, prototype first:** feed
-`symbol_map` extraction (or `ClassInfo` construction) for a single
-file from `IR` behind a flag, on a branch, and compare output against
-the current extraction plus wall-clock time. Only proceed to a
-broader migration if the prototype reproduces current behavior and
-shows a real win; otherwise record the findings here and keep
-waiting on the triggers above.
+**Where to look:** `parse_and_cache_content_versioned` in
+`resolution.rs`; `with_parse_cache` in `parser/mod.rs`.
 
 ---
 
-## P47. The resolved-class cache lock caps concurrent class resolution
+## P74. Every class lookup by name re-parses and lowercases the name
 
-**Impact: Medium · Complexity: Very High**
+**Impact: Low-Medium · Complexity: Low**
 
-`ResolvedClassCache` is a single `RwLock<ResolvedCacheInner>`, and every
-resolution takes its write lock several times: twice per
-`resolve_class_fully_inner` call to mark and clear the cycle-break
-in-flight marker, once to insert the finished class, and once per
-transformed member that `intern_transformed_method` /
-`intern_transformed_property` has to build (the read side of interning
-takes the read lock even on a hit). Member interning dominates the
-volume by far, since a merge produces one lookup per inherited or
-synthesized member.
+`find_or_load_class(&str)` (`resolution.rs`) runs `PhpType::parse` on the
+name before looking it up, so that callers may pass `?Foo` or
+`Collection<int, User>`. Most callers pass a bare class name, and
+`try_parse` has no fast path for one: each lookup runs the full PHPDoc
+type parser, hyphenated-keyword rewriting included, before
+`class_loader_memo` is consulted. 119 call sites use the `&str` form.
+Separately, `is_scalar_name` and `is_keyword_type`
+(`php_type/keywords.rs`) allocate a lowercase copy of the name on every
+call, and `find_indexed_class` reaches them on every lookup, memo hits
+included.
 
-Measured with the eager-population worker pool
-(`populate_from_sorted`) swept from 1 to 32 workers on a 16-core / 32-thread
-SMT machine (Ryzen 9 5950X), release build, large Laravel projects: wall
-time falls steeply to ~8 workers, flattens through 16, and then
-*regresses* past that. On one project 2.1k classes went 0.62 s
-(1 worker) → 0.16 s (8) → 0.27 s (32), i.e. 32 workers were worse than
-4. Duplicated resolution is not the cause: the count of full resolutions
-rises only 5.9 % from 1 to 32 workers.
+On a release `analyze` of a mid-sized Laravel project the PHPDoc type
+parser is about 4% of CPU samples (part of it is this re-parse), and the
+two keyword checks about 2%.
 
-Two confounds on this hardware make the raw sweep numbers hard to read
-at face value. The 16→32 leg is SMT: past 16 threads two workers share
-a physical core's execution resources rather than getting one each,
-which degrades throughput on its own and independently amplifies any
-lock contention (a spinning waiter now trashes the lock-holder's cache
-lines on the same core instead of a separate one). More importantly,
-the 5950X is dual-CCD — cores 0-7 and 8-15 (and their SMT siblings
-16-23/24-31) sit behind two separate L3 caches (`lscpu -e=CPU,CORE,CACHE`
-shows the split), and cache-line traffic for anything shared, including
-this lock, crosses the Infinity Fabric between them at much higher
-latency than a same-CCD hop. An unpinned process asking for ≤8 threads
-tends to get packed onto one CCD by the scheduler; past 8 it necessarily
-spills onto the second. Confirmed directly with `taskset`: 8 workers
-pinned to `0-7` (one CCD, no SMT) averaged 1.79 s wall for the same
-whole-project run that split 4+4 across both CCDs (`0,1,2,3,8,9,10,11`,
-still 8 distinct physical cores, still no SMT) averaged 2.02-2.17 s —
-15-20 % slower from CCD-crossing alone, with identical core count and
-no hyperthreading involved. So the knee at 8 in the original unpinned
-sweep is at least partly a topology artifact of this machine, not
-solely "how much lock contention exists at that many workers" — the
-same experiment on a single-CCD or single-die machine would likely
-plateau at a different worker count. `MAX_POPULATE_WORKERS` is pinned
-to 8 regardless: it is the largest value that stayed reliably within
-one CCD's worth of cores in testing, so it also happens to dodge the
-cross-CCD lock-traffic penalty as a side effect, not just diminishing
-per-lock-acquisition returns.
+**Fix:** give `PhpType::try_parse` a fast path for input made only of
+identifier characters and backslashes that is not a keyword, returning
+the named type directly, and compare against the keyword lists with
+`eq_ignore_ascii_case` (or a stack buffer) instead of allocating. An
+earlier attempt at allocation-free `CiMap` lookups regressed slightly
+under mimalloc, so confirm this one with an order-swapped A/B run.
 
-Implication for the fix: fixing the lock removes the *within-CCD*
-contention this section measured, and should let population usefully
-raise `MAX_POPULATE_WORKERS` above 8. But raising it past one CCD's
-core count re-introduces cross-CCD traffic for whatever of the lock
-(sharded or not) is still shared — a plain `Vec<Mutex<Shard>>` does not
-avoid that on its own. Re-run the `taskset` same-CCD-vs-split comparison
-above after any lock-splitting change before raising the cap past 8, to
-check how much of the remaining ceiling is the lock versus the CCD
-boundary.
-
-The same lock is on the diagnostic pass's hot path (see P35), so
-splitting it should also help there. Directions, cheapest first:
-
-1. **Take the in-flight set off the shared lock.** It is already keyed
-   `(ThreadId, FQN)` purely to emulate a thread-local, so making it an
-   actual thread-local `HashSet<Atom>` removes two write locks per
-   resolution with no semantic change. Measured on its own this did
-   *not* move the sweep, so it is a prerequisite rather than the fix,
-   but it is nearly free.
-2. **Shard the interning tables.** `substituted_methods` /
-   `substituted_properties` are keyed by origin pointer and a
-   fingerprint hash, so they shard cleanly (e.g. by low bits of the
-   key) into independent locks without changing what gets shared. This
-   is where the volume is.
-3. **Separate the interning tables from the class map entirely.** The
-   two have different access patterns (interning is
-   write-heavy-then-read-heavy per merge; the class map is one insert
-   per class) and only share a lock for convenience. Note the member
-   sharing they provide is load-bearing for memory, so any change must
-   keep cross-class sharing intact rather than falling back to
-   per-thread tables.
-
-Before implementing, confirm the attribution by counting lock
-acquisitions per site during a population run: the sweep above proves
-*a* lock is the ceiling but not which acquirer dominates.
+**Where to look:** `find_or_load_class` in `resolution.rs`,
+`PhpType::try_parse` in `php_type/parse.rs`, `is_scalar_name` and
+`is_keyword_type` in `php_type/keywords.rs`.
 
 ---
 
-## P35. Diagnostic passes reach only a fraction of available cores
+## P66. Stub version filtering rescans a stub file once per symbol it declares
 
-**Impact: Medium-High · Complexity: Very High**
+**Impact: Low-Medium · Complexity: Low-Medium**
 
-Measured on a 32-core machine against large Laravel projects (release
-build): the `analyze` Phase 2 diagnostic pass spawns one worker per
-core with atomic work-stealing but does not keep them busy. Three
-offenders are fixed. The original one was every worker deep-cloning
-the embedded stub class/function/constant indexes twice per file via
-`clone_for_diagnostic_worker`; the indexes are Arc-shared now. The
-second was the Laravel string-key enumerations
-(`cached_route_names`/`cached_config_keys`/`cached_view_names`/
-`cached_trans_keys`/`cached_config_trees`): each walks the workspace
-from disk, and the plain check-then-fill cache stampeded, so all 32
-workers missed the same empty slot at once and each repeated the same
-gitignore-aware walk. They are guarded by
-`LaravelStringKeyBuildLocks` now, which took Phase 2 on a large
-Laravel project from 11.6 to 22.6 of 32 cores (1.91 s → 1.31 s) and
-whole-run wall clock down ~15%.
+`set_php_version` drops every stub symbol marked `@removed` at or before
+the target version. For a file that mentions `@removed` at all,
+`is_stub_function_removed` and its class and constant counterparts locate
+each symbol with `source.find("function NAME(")` from the start of the
+file, so a stub file declaring n symbols is scanned n times. 49 of the
+537 stub files mention `@removed`, and they declare about 3,700 symbols
+between them.
 
-The third was the name → class loader itself. `find_or_load_class_typed`
-was called 3.68 M times in a 1.2 s Phase 2 over a few thousand distinct
-types, and every call hashed the name case-insensitively for a read
-lock on `class_not_found_cache` and another on `fqn_class_index`. That
-cluster (`find_or_load_class_typed`, `find_class_in_uri_classes_index`,
-`CiMap::get`, `sip::Hasher::write`, `RawRwLock::lock_shared_slow`,
-kernel `osq_lock`) was ~22% of Phase 2 samples, and both lock symbols
-have since dropped out of the profile entirely. `class_loader_memo`
-memoises the loader per worker on the interned `PhpType` handle, keyed
-by `SymbolIndex::id` and stamped with `class_lookup_generation` so an
-answer is never staler than the two caches it derives from. Phase 2 fell
-~25-32% (1.23 s → 0.93 s and 0.72 s → 0.49 s on the two largest Laravel
-projects benchmarked) at ~26.8 → ~28.6 of 32 cores, with whole-run wall
-clock down 8-12% and user CPU down 17-34% across three large Laravel
-projects. Every smaller project benchmarked improved as well, RSS did
-not move, and diagnostic output was byte-identical on all ten.
+The server pays this once at startup and `analyze` once per run, on the
+serial path before any worker starts. On a release build it is about
+three quarters of an empty project's 0.07 s `analyze`, roughly 50 ms, or
+about 4% of a 1.2 s `analyze` of a mid-sized Laravel project. Every test
+that uses `new_test_with_full_stubs`, including each fixture the
+assertType runner checks, pays it too, about 0.45 s each in a debug
+build.
 
-Sampling `/proc/<pid>/task/*/stat` is the fastest way to see the
-remaining ceiling: workers in `S` rather than `R` are blocked, not
-computing. What is left, re-profiled after the memo:
+Scanning each such file once for its `@removed` docblocks and recording
+the name of the declaration that follows each one would give a per-file
+set of removed names, turning the filter into set lookups.
 
-- Type strings are still parsed during the diagnostic pass rather than
-  at index time: `TypeTokenStream::fill_buffer_slow`, `PhpType::parse`,
-  `LocalArena::alloc_slice_copy` and `parse_primary_type` together are
-  ~6.5% of Phase 2 samples. Class-level `@method` / `@property` tags
-  are now parsed at extraction time; the remaining cost is method,
-  parameter and return type strings.
-- malloc/free/memmove remains diffuse. `is_scalar_name` and
-  `is_keyword_type` (~2.3% between them) allocate a lowercase `String`
-  per call and are reached from `base_name`, the subtype checks and the
-  narrowing paths; the ~150 other `to_ascii_lowercase()` calls in
-  `php_type/` do the same. A stack buffer plus a length pre-filter
-  would make them allocation-free, but see the reverted attempt below
-  before assuming that wins.
-- The `PhpType` interner (`php_type::intern` + `intern::lookup`) is
-  ~4.6% of Phase 2 samples and its 64 shards are now the largest
-  remaining lock, though the memo removed enough traffic that
-  `lock_shared_slow` no longer registers at all. An earlier count put
-  the interner at ~13 M hits per pass with roughly a quarter falling
-  through the shard read lock to the write path; that has not been
-  re-counted since. A per-thread direct-mapped memo in front of the
-  shard read (the same shape as `class_loader_memo`) is the obvious
-  next attempt.
-- `ensure_workspace_indexed_with_progress` still re-walks the whole
-  workspace on every call, so the four surviving string-key
-  enumerations do four full walks per diagnostic pass (down from ~44).
-  The walk is deliberate — it is how PHP files created outside the
-  editor get discovered — so removing it needs a change to that
-  contract, not just another cache.
-- `class_loader_memo`'s own hit rate is bounded by how often
-  `note_class_lookup_change` fires: 1,169 times in Phase 2, once per
-  lazily parsed vendor file, each retiring every worker's table. A
-  build with invalidation removed (unsound, for sizing only) reached
-  0.80 s against the 0.93 s shipped, so ~14% of the memo's prize is
-  still on the table. Recovering it means either loading fewer vendor
-  classes lazily (the reverted experiment below, whose calculus this
-  changes) or splitting the generation so an additive insert only
-  retires negative answers. The latter is not sound as stated: a
-  positive answer reached through PSR-4 or a stub is matched by short
-  name, so it is not always backed by an `fqn_class_index` entry under
-  the name that was looked up, and a later first-time insert of that
-  exact name can change it.
-
-The LSP workspace diagnostics pass uses the same collectors and has the
-same ceiling. Re-measure with `perf` (frame-pointer build) or the
-CPU-sampling loop in the Appendix after any change.
-
-**Tried and reverted (vendor classes in eager population):** an
-earlier revision of this item claimed that projects keeping
-substantial code in `vendor/` pay extra because eager population only
-walks the indexed user files, leaving every vendor class to be parsed
-and resolved lazily mid-diagnostic — serialising workers on the load
-path, with cycle-break re-merges that dependency-first ordering would
-have avoided. Seeding eager population with vendor classes was
-implemented in two escalating variants and benchmarked (10-run,
-order-swapped wall/user-CPU averages against the two largest Laravel
-projects benchmarked): (1) expanding the toposort input with the
-transitive inheritance closure of the user classes (parents, traits,
-interfaces, mixins, generic arguments, loaded via
-`find_or_load_class`), and (2) additionally seeding every `use`-import
-target found in `fqn_uri_index`, with parallel frontier loading and
-Kahn-levelled parallel resolution to keep Phase 1.5 off the critical
-path. Neither moved wall clock on any project. Variant 1 cut lazy
-Phase 2 resolutions only ~2% (950 → 931) because vendor ancestors
-were already being resolved as nested resolutions during eager
-population; variant 2 cut them to a third (931 → 276) but cost ~3%
-more user CPU (duplicated nested provider resolutions across level
-workers) and ~10 MB RSS for classes the pass never needed resolved.
-The predicted cycle-break re-merges also failed to reproduce: Phase 2
-hits 0 on one of them and 18 on the other, and all
-18 are genuine dependency cycles (`Schedule` ↔
-`PendingEventAttributes`, Spatie `Role` ↔ `Permission`) that
-dependency-first ordering cannot avoid — the toposort has to break
-them somewhere too. Conclusion: after the stampede fix, lazy vendor
-class loading no longer serialises the diagnostic pass measurably;
-the remaining ceiling is the clone/interner traffic above. Diagnostic
-output was byte-identical in every configuration.
-
-**Tried and reverted:** a single `perf` snapshot attributed ~4% of
-Phase 2 time to `core::hash::sip::Hasher::write`, called from
-`CiMap`/`CiSet` (`fqn_class_index`, `class_not_found_cache`) inside
-`find_or_load_class` — the single hottest function in the profile.
-Two independent fixes were tried: swapping `CiMap`/`CiSet`'s `HashMap`
-from `std`'s default SipHash to a hand-rolled FxHash-style hasher, and
-avoiding `fold()`'s per-lookup heap allocation with a stack buffer.
-Both looked sound in isolation and passed all tests, but 10-run
-wall-clock/user-CPU averages against a large Laravel project (order-swapped
-to rule out warm-cache bias) showed a small, consistent *regression*
-(~2% more user CPU) for the hasher swap alone, the allocation-avoidance
-alone, and the two combined. Likely cause: `mimalloc` already makes
-these transient allocations cheap, and the hand-rolled hasher's
-sequential dependency chain (`rotate_left` → `xor` → `wrapping_mul` per
-word) didn't beat `std`'s SipHash13 for these short keys on this
-hardware. Lesson for next attempt: a single `perf --stdio` percentage
-is not sufficient evidence — confirm with repeated, order-controlled
-wall-clock measurement before committing a "hot function" fix; sampling
-noise and inlining attribution can point at the wrong function. The
-re-measurement did surface a more promising lead: `RawRwLock::lock_shared_slow`
-rose from 3.78% to 4.36% of samples once the hashing/allocation cost
-was removed, suggesting the read lock on `fqn_class_index` (contended
-by 32 workers doing `find_or_load_class` concurrently) is closer to the
-real ceiling than the hashing was.
+**Where to look:** `set_php_version` in `lib.rs` and the
+`is_stub_*_removed` family in `stubs.rs`.
 
 ---
-
-## P48. Higher-order collection proxy injection repeats work
-
-**Impact: Low · Complexity: Medium**
-
-Grafting the item type's members onto a
-`HigherOrderCollectionProxy<TKey, TValue, 'method', Collection>` runs
-inside `resolve_class_fully_with_generics`, on the generic-substitution
-path. Two avoidable costs sit there. Neither is a correctness problem
-and both are linear rather than exponential, which is why they were left
-when the feature landed; the outer `(FQN, generic_args)` cache absorbs
-most of the repetition.
-
-1. **The value type is resolved twice.** The framework annotates the
-   proxy `@mixin \Illuminate\Support\Enumerable<TKey, TValue>` *and*
-   `@mixin TValue`. The second is a template-parameter mixin, so the
-   "Template-param mixin resolution" block in
-   `type_engine/types/resolution.rs` resolves the value class and merges
-   its members after `inject_higher_order_proxy_members` has already
-   grafted the same members with their proxied types. The injected
-   members win (`merge_virtual_members` keeps whichever arrived first),
-   so the second pass is pure waste. Skipping the template-param mixin
-   for a tagged proxy, or letting the injection mark `TValue` as already
-   consumed, avoids it.
-
-2. **Grafted members are not interned.** `inject_higher_order_proxy_members`
-   builds each `MethodInfo`/`PropertyInfo` directly, where every other
-   transform site in the codebase goes through
-   `intern_transformed_method` / `intern_transformed_property` so that
-   applying the same transform to the same origin shares one `Arc`. The
-   proxied members of one item type are byte-identical across every
-   proxy that wraps it with the same result shape, so the same model's
-   members are re-allocated once per distinct `(proxied method, owning
-   collection)` pair rather than shared.
-
-**Where to look:** `virtual_members/laravel/higher_order_proxy.rs`,
-`virtual_members/resolve.rs`, and the template-param mixin block in
-`type_engine/types/resolution.rs`.
-
-## P49. A very long method chain costs superlinear time to analyse
-
-**Impact: Low · Complexity: Medium**
-
-Resolving a receiver spine no longer recurses per link, so a fluent chain
-of any length parses, hovers, and analyses without overflowing the stack.
-The work is still superlinear in the chain's length, though: a 1000-link
-chain takes roughly eight times as long to run diagnostics over as a
-500-link one on a debug build, so a generated query builder or generated
-API client long enough turns a diagnostic pass into a multi-second stall.
-
-Two costs compound along the spine, each linear in the prefix and paid
-once per link:
-
-1. **Subject text is rebuilt per link.** `extract_call_expr` calls
-   `expr_to_subject_text(method_call.object)` for every link, which
-   renders the whole prefix, so the symbol map spends O(n²) bytes on one
-   chain. Rendering the spine once and handing each link a slice of the
-   result would make it linear.
-
-2. **Chain cache keys are rebuilt per link.** `chain_cache_key` calls
-   `SubjectExpr::to_subject_text`, which renders the whole prefix. A
-   spine the chain cache answers at its outermost link only pays for one
-   key, but a cold spine, or any resolution running without the cache
-   active, needs a key per link and so renders O(n²) bytes. The keys of a
-   spine are prefixes of one another, so one render plus per-link lengths
-   would do.
-
-**Where to look:** `symbol_map/extraction/expressions/calls.rs` for the
-first, `chain_cache_key` in `type_engine/resolver/mod.rs` for the second.
-Neither is a correctness problem, and hand-written code never reaches the
-lengths where it shows.
-
-
----
-
-## P56. Folding array shapes across branches costs superlinear time
-
-**Impact: Low · Complexity: Medium**
-
-`join_shapes` keeps a variable at one tracked shape no matter how many
-branches write to it, which is what stops a merge from having to compare
-a variant per branch pairwise. The fold itself is not free, though:
-`join_shape_entries` builds a fresh `Vec<ShapeEntry>` and interns a new
-shape on every merge, so a variable that gains a key per branch pays for
-hashing a shape whose entry count grows with the branch count. The work
-is quadratic in the number of conditional writes.
-
-Measured on a release build, over a generated function assigning a
-distinct array shape under each of N sequential `if`s:
-
-| N writes | analyse wall clock |
-| -------- | ------------------ |
-| 400      | 0.30s              |
-| 800      | 0.90s              |
-| 1200     | 2.10s              |
-
-Doubling the writes roughly triples the time, and the same file with the
-shapes left un-merged (each write pushing its own alternative instead)
-runs in half of that, so folding is the more expensive of the two
-strategies at these sizes. It is still the right default: the variant-per-
-branch alternative grows the *type* without bound, which costs every
-later consumer rather than just the merge. What is missing is the cheap
-exit that would make the fold linear in the common case:
-
-1. **Skip the rebuild when nothing changes.** Most merges join a shape
-   with one whose keys it already covers, and the result is the existing
-   shape. Comparing entry lists before allocating would return the
-   interned handle unchanged rather than rebuilding and re-hashing it.
-
-2. **Fold in place along a chain of merges.** A run of merges against the
-   same variable rebuilds the accumulator from scratch each time. Joining
-   into a reusable buffer and interning once at the end of the run would
-   drop the repeated hashing.
-
-**Where to look:** `join_shapes`, `join_shape_entries`, and `join_values`
-in `php_type/mod.rs`, and the shape-folding branch of `merge_branch` in
-`type_engine/variable/forward_walk/scope_state/merge.rs`. Hand-written code
-does not reach the sizes where this shows; generated code and long
-procedural report builders do.
-
----
-
-## P51. CI-gated scaling and memory invariants
-
-**Impact: Medium · Complexity: Low-Medium**
-
-`.github/workflows/ci.yml`'s `benchmark`/`benchmark-pr` jobs only run
-the `completion` bench and publish it to the tracking dashboard; a
-regression is visible after the fact (someone has to look at the
-dashboard) rather than failing the PR. `references.rs` and
-`laravel_completion.rs` under `benches/` exist but aren't wired into
-CI at all, and none of our benchmarks assert an absolute ceiling —
-only relative-to-history comparison.
-
-Add CI-gated invariants that fail the build outright when crossed,
-not just recorded for later inspection:
-
-- **Per-edit republish scaling.** A synthetic workspace ingested at
-  several sizes (e.g. 100 → 5000 files); assert republish-after-edit
-  wall time stays flat (or sub-linear) as file count grows, catching
-  an accidental O(n) or worse regression on the republish path before
-  it ships.
-- **Cold/warm start wall time.** Time to `indexReady` on a pinned
-  fixture workspace (a vendored copy of a real Laravel/Symfony
-  project, or one of the public corpora already used by `analyze`
-  triage), gated on an absolute ceiling, both cold (no cache) and warm
-  (repeat run).
-- **Session RSS guard.** `benches/memory_usage.py` already measures
-  resident memory on two workloads; run it in CI and fail if RSS
-  exceeds a fixed ceiling instead of only exposing the script for
-  manual use.
-
-**Where to look:** `.github/workflows/ci.yml`'s `benchmark`/
-`benchmark-pr` jobs; `benches/memory_usage.py`; `benches/references.rs`
-and `benches/laravel_completion.rs` for benches that exist but aren't
-CI-gated yet.
-
----
-
-## P52. The diagnostic benchmarks measure a path no consumer takes
-
-**Impact: Medium · Complexity: Low**
-
-`bench_diagnostics_phpactor_fixtures` in `benches/completion.rs` calls
-four collectors directly:
-
-```rust
-backend.collect_deprecated_diagnostics(&uri, content, &mut out);
-backend.collect_unused_import_diagnostics(&uri, content, &mut out);
-backend.collect_unknown_class_diagnostics(&uri, content, &mut out);
-backend.collect_unknown_member_diagnostics(&uri, content, &mut out);
-```
-
-No consumer does this. Every real caller goes through
-`collect_slow_diagnostics_observed`, which first activates the chain
-resolution cache, the type-engine caches, and the forward-walked
-diagnostic scope cache, then runs the collectors in an order chosen so
-later ones read what earlier ones cached. The benchmark activates none
-of them and runs `deprecated_usage` first, cold, where production runs
-it last against warm caches.
-
-The result is a tracked number that moves for reasons users never
-experience. On the `method_chain` fixture the benchmark reports roughly
-twice the time the production pass takes on the same file while running
-a quarter of the collectors, and an optimisation to the cached path
-shows up as a fraction of its real effect: making chain cache keys lazy
-measured -25% on the production pass and -3.7% here, because without an
-active cache the probe never hits early and every key is needed anyway.
-
-Point the benchmark at `collect_slow_diagnostics`, so it measures what
-an editor keystroke and an `analyze` run actually pay for. This resets
-the tracked history for `diagnostics/fixture/*` once, which is worth it
-for a number that tracks the real path. Keep a separate uncached case
-only if there is a consumer that runs collectors without the guards.
-
-**Where to look:** `bench_diagnostics_phpactor_fixtures` in
-`benches/completion.rs`; `collect_slow_diagnostics_observed` in
-`diagnostics/mod.rs` for the guards and the collector order.
-
----
-
-## P53. The deprecated collector deep-copies a class per member access
-
-**Impact: Medium · Complexity: Low**
-
-`collect_deprecated_diagnostics` resolves each member access to a class
-and then clones the whole `ClassInfo` out of the `Arc` it just got:
-
-```rust
-.and_then(|name| self.find_or_load_class(&name))
-.map(|arc| ClassInfo::clone(&arc));
-```
-
-`resolve_variable_subject` does the same on its own path, and the
-per-variable cache stores `Option<ClassInfo>` rather than
-`Option<Arc<ClassInfo>>`, so its hits clone too. The class is only ever
-read afterwards (`get_method`, `get_property`, and a `&ClassInfo`
-argument to `resolve_class_fully_cached`), so every one of those copies
-is wasted, and the cost scales with the class's member count: a file
-whose accesses land on a large resolved class (an Eloquent `Builder`, a
-facade's concrete binding) pays for a full copy of its methods,
-properties, and constants once per access.
-
-Hold `Arc<ClassInfo>` through the collector instead. Both producers
-already have one, deref coercion covers the read sites, and the
-`enclosing_class` clone a few lines below is the same pattern.
-
-**Where to look:** `collect_deprecated_diagnostics` and
-`resolve_variable_subject` in `diagnostics/deprecated.rs`, plus the
-`var_type_cache` declaration at the top of the collector.
-
----
-
-## P57. Narrowing deep-copies a class every time it crosses the `Arc` boundary
-
-**Impact: Medium · Complexity: Medium-High**
-
-A `ClassInfo`'s members are `SharedVec`s, so the struct is often called
-cheap to clone, but it still owns a `method_index` with one entry per
-method plus a dozen other `Vec`/`AtomMap` fields. For an
-inheritance-merged Eloquent model that is a few hundred entries and a
-dozen-plus allocations per copy.
-
-The narrowing layer pays that on every crossing, in both directions:
-
-- `ResolvedType::apply_narrowing` collects `arc.as_ref().clone()` for
-  every candidate on the way in, and pushes survivors back through
-  `from_class`, which wraps each copy in a *fresh* `Arc`. A class that
-  narrowing left untouched has been deep-copied and re-allocated for
-  nothing. Seventeen call sites reach it, covering every `instanceof`,
-  `assert`, `in_array`, and identity guard the forward walk sees.
-- `resolved_type_with_lookup` clones a class out of the index only to
-  hand it to `from_both`, which allocates a new `Arc` around the copy.
-  Fifteen call sites, essentially every method-call return type.
-- `narrowing/resolve.rs`, `narrowing/instanceof.rs`, and
-  `narrowing/assertions.rs` repeat the pattern, the last one deep-copying
-  a `MethodInfo` out of its `Arc`.
-
-`ResolvedType::from_arc` and `from_both_arc` already exist and are unused
-on these paths. The fix is to change the narrowing contract from
-`Vec<ClassInfo>` to `Vec<Arc<ClassInfo>>` — `apply_narrowing`'s closure,
-the `results` parameters in `narrowing::{instanceof,assertions,guards}`,
-`resolve_class_names_to_union`, and `ClassInfo::push_unique` — so a class
-is only allocated where one is genuinely constructed.
-
-This is the same defect as [P53](#p53-the-deprecated-collector-deep-copies-a-class-per-member-access)
-on a different path, and it is worth measuring the two together.
-
-**Where to look:** `apply_narrowing`, `from_class`, `from_arc`,
-`from_both`, and `from_both_arc` in `types/resolved_type.rs`;
-`resolved_type_with_lookup` in
-`type_engine/variable/rhs_resolution/mod.rs`;
-`type_engine/types/narrowing/{resolve,instanceof,assertions}.rs`.
 
 ## P58. A member-completion cache hit copies the whole item list
 
@@ -1131,99 +432,39 @@ cloning only the items that survive.
 `filter_member_completion_items` in
 `completion/handler/member_access.rs`.
 
-## P65. Every call site repeats the full function lookup, hit or miss
-
-**Impact: Low-Medium · Complexity: Medium**
-
-The forward walker asks `find_or_load_function` about the same call
-several times per statement (by-reference out-parameters, `@assert`
-narrowing, the return type), and nothing remembers the answer. A hit
-clones the whole `FunctionInfo` out of `global_functions`; a miss, which
-is every call to a function the project never declares, walks all four
-phases again, including cloning `autoload_file_paths` and building a URI
-per path. Every hover re-walks the enclosing body from its first
-statement, so the cost lands once per call site per hover.
-
-PHPStan's `nsrt/if.php` (a 545-line closure calling undeclared helpers
-such as `foo()` and `doFoo()`) measures about 70 ms per hover near its
-end in a release build, with `find_or_load_function`,
-`resolve_function_name_at`, and the `CiMap` lookups they make taking the
-top of the profile. Real code rarely calls hundreds of undeclared
-functions, but it does call the same declared ones over and over, and
-each of those pays the clone.
-
-The same file takes 53 s under the assertType runner in a debug build,
-which is why it is not among the ported fixtures in `tests/phpstan_nsrt/`
-yet; port it once this lands. Re-measured on 2026-09-27 it takes about
-210 s at `HEAD` (5f6422d3), so the cost has grown since. PHPStan's
-`nsrt/filterVar.php` (315 `filter_var()` calls in one function) takes
-about 540 s the same way, and `nsrt/array-functions.php` about 97 s;
-confirm with a profile that they are this item before counting them in.
-
-Caching the resolved `Arc<FunctionInfo>` (and a negative entry) per
-request, keyed by the candidate names, would turn the repeats into
-lookups. Returning an `Arc` rather than a clone is the larger half of
-the saving on its own.
-
-**Where to look:** `find_or_load_function` in `resolution.rs`, and the
-`function_loader` closures built for `VarResolutionCtx`.
-
 ---
 
-## P66. Stub version filtering rescans a stub file once per symbol it declares
+## Appendix: Profiling
 
-**Impact: Low · Complexity: Low-Medium**
+### Commands
 
-`set_php_version` drops every stub symbol marked `@removed` at or before
-the target version. For a file that mentions `@removed` at all,
-`is_stub_function_removed` and its class and constant counterparts locate
-each symbol with `source.find("function NAME(")` from the start of the
-file, so a stub file declaring n symbols is scanned n times. Whether a
-file mentions `@removed` is now answered once per file, which halved the
-cost, but the per-symbol search remains: building a full-stub backend in
-a debug build still spends about 0.45 s there, and every test that uses
-`new_test_with_full_stubs` (including each fixture the assertType runner
-checks) pays it. The server pays it once at startup, far less in a
-release build.
+```sh
+# Flat profile of a whole-project run. The release build has symbols but
+# no debug info or frame pointers, so for call graphs build with
+# RUSTFLAGS="-C force-frame-pointers=yes" and record with `-g`.
+perf record -F 999 -- ./target/release/phpantom_lsp analyze \
+  --project-root <dir> --no-colour
 
-Scanning each such file once for its `@removed` docblocks and recording
-the name of the declaration that follows each one would give a per-file
-set of removed names, turning the filter into set lookups.
+# Text report (top functions):
+perf report --stdio --no-children --sort symbol | head -80
 
-**Where to look:** `set_php_version` in `lib.rs` and the
-`is_stub_*_removed` family in `stubs.rs`.
+# Flamegraph (requires the `flamegraph` crate or perf-tools):
+perf script | flamegraph > /tmp/phpantom.svg
 
----
+# Instantaneous CPU utilisation over a run (% of one core, sampled
+# every 0.5 s), for machines where perf is unavailable
+# (kernel.perf_event_paranoid > 2):
+./target/release/phpantom_lsp analyze --project-root <dir> --no-colour \
+  >/dev/null 2>&1 & PID=$!; prev=0
+while kill -0 $PID 2>/dev/null; do
+  cur=$(awk '{print $14+$15}' /proc/$PID/stat 2>/dev/null) || break
+  [ -n "$cur" ] && echo $(( (cur - prev) * 2 )); prev=$cur; sleep 0.5
+done
+```
 
-## P70. Diagnostics on a long file find each access's context by scanning
+### Growth checks
 
-**Impact: Low-Medium · Complexity: Medium**
-
-Several diagnostic collectors work out the context of a member access or
-call by scanning for it, so each access costs time in proportion to the
-length of the file and the whole pass costs its square. The forward walk
-over the same file no longer does: on a generated top-level script of N
-repeated blocks (an `if`/`elseif`/`else`, a `switch`, a `try`, a `while`,
-a closure and a few calls each), N = 4,000 (76,000 lines) takes 13.5s on a
-release build, doubling N roughly quadruples it, and well over half of
-the samples are in these lookups rather than in the walk:
-
-- `class_context_placeholder` (`class_lookup.rs`) calls
-  `text_scan::namespace_at_offset`, which searches the text backwards from
-  the access for a `namespace` keyword. A file without one is searched all
-  the way to its start, once per call from `collect_argument_type_diagnostics`,
-  the deprecated collector and the unknown-member collector (about 30%).
-- `SubjectCacheKey::build` (`diagnostics/subject_cache.rs`) calls
-  `SymbolMap::find_enclosing_scope` and `find_narrowing_block`, which test
-  every scope and every narrowing block in the file, plus
-  `active_var_def_offset` (about 15%).
-- String comparisons inside the unknown-member and deprecated collectors
-  themselves, not yet traced to a single call (about 12%).
-
-The namespace blocks, scopes and narrowing blocks of a file are all known
-once it is parsed, so each lookup can be a binary search over ranges
-recorded at that point.
-
-**Where to look:** `namespace_at_offset` in `text_scan.rs` and its
-callers, `find_enclosing_scope` and `find_narrowing_block` in
-`symbol_map/mod.rs`, and `SubjectCacheKey::build`.
+A whole-project profile hides a cost that only grows on one unusual
+input. Generate the input at N and 2N (a long top-level script, a
+`switch` over N distinct literals, N conditional writes to one array)
+and compare the two times: doubling N should roughly double the time.

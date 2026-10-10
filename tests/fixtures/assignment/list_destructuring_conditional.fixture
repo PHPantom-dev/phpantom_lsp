@@ -1,7 +1,6 @@
 // test: list destructuring from conditional produces union — both types' members visible
 // feature: completion
 // Adapted from phpactor assignment/list_assignment.test
-// ignore: ternary expression as RHS of list destructuring not yet resolved
 // expect: fooMethod(
 // expect: barMethod(
 ---

@@ -174,7 +174,7 @@ way the supertype-where-subtype hatch was retired.
 
 ## D19. `invalid_member_access` cannot tell a property read from a write
 
-**Impact: Low-Medium · Complexity: Medium**
+**Impact: Medium · Complexity: Medium**
 
 PHP dispatches an unreachable property to a different magic method
 depending on what is being done to it: `__get` for a read, `__set` for a
@@ -187,10 +187,20 @@ The result is a missed report rather than a wrong one. A class that
 declares `__set` but no `__get` silences a read it would in fact fatal
 on, and the same holds for every other mismatched pairing.
 
+PHP 8.4's asymmetric visibility needs the same distinction. A
+`public private(set)` or `public protected(set)` property, plain or
+promoted (and static, since PHP 8.5), can be read from anywhere but
+written only from inside its scope. `PropertyInfo` records a single
+visibility (`extract_visibility` in `parser/mod.rs` keeps the first
+modifier it finds), so a write from outside goes unreported, and
+completion offers the property in write positions too.
+
 **Fix:** Carry the operation on the `MemberAccess` span — read, write,
 `isset`, `unset` — the way `readonly_writes.rs` recovers write targets
 from the AST, and require the handler that matches it. The same
 information would let the readonly check drop its own separate walk.
+Record a property's set-visibility as an optional `set_visibility` on
+`PropertyInfo` and check writes against it.
 
 ---
 
@@ -366,7 +376,9 @@ stay quiet there if a comparison on a backed enum's `->value` narrows the
 enum itself, so `$s->value === 'H'` has to remove `Suit::Hearts` from `$s`
 on the fall-through path. Without that narrowing the check would be a new
 false positive. PHPStan and Psalm report the second function too, and the
-suite counts that against them.
+suite counts that against them. Removing a case from an enum-typed
+variable needs a type for the single case, which is
+[T44](type-inference.md#t44-a-single-enum-case-has-no-type).
 
 Found running the php-typing-conformance suite
 (`regressions_backed_enum_value_narrowing.php`). A quick fix to add the

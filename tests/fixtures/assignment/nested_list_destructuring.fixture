@@ -1,7 +1,6 @@
 // test: nested list destructuring resolves inner element types
 // feature: completion
 // Adapted from phpactor assignment/list_desconstruct_nested.test
-// ignore: nested array shape destructuring not yet resolved
 // expect: fooMethod(
 ---
 <?php

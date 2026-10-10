@@ -1,0 +1,28 @@
+// test: a static factory binding its own K, V from an array argument and returning self<K, V> feeds the instance method chained on it
+// feature: completion
+// expect: getPrice(
+---
+<?php
+
+class Product {
+    public function getPrice(): float { return 0.0; }
+}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Coll {
+    /**
+     * @template K of array-key
+     * @template V
+     * @param array<K, V> $items
+     * @return self<K, V>
+     */
+    public static function fromArray(array $items): self { return new self(); }
+
+    /** @return TValue */
+    public function first(): mixed {}
+}
+
+Coll::fromArray(['a' => new Product()])->first()-><>
