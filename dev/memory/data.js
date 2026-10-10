@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791643283866,
+  "lastUpdate": 1791644413043,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -36617,6 +36617,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 87.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "05cd281502591a0bced2e1a3789da145cee85005",
+          "message": "A passing strict `in_array()` against `object` elements keeps the\nneedle's classes",
+          "timestamp": "2026-10-10T16:47:19+02:00",
+          "tree_id": "a7e4498f15f1fbf2d0fabdef39cef20d8758308c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/05cd281502591a0bced2e1a3789da145cee85005"
+        },
+        "date": 1791644404231,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.6,
             "unit": "MiB"
           }
         ]
