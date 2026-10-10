@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791655114759,
+  "lastUpdate": 1791655884593,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -37025,6 +37025,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 84.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8bab2657ceabf8589fec0f22358be8ecfd4a34d2",
+          "message": "A `catch` block sees what the `try` body assigned before anything could\nthrow",
+          "timestamp": "2026-10-10T19:57:35+02:00",
+          "tree_id": "0232f1ceb3b72ab4307b5d71f138065e5f27822d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8bab2657ceabf8589fec0f22358be8ecfd4a34d2"
+        },
+        "date": 1791655873336,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.2,
             "unit": "MiB"
           }
         ]
