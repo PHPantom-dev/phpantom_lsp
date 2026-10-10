@@ -170,10 +170,10 @@ unlikely to move the needle for most users.
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Medium      |
 |     | **[Performance](todo/performance.md)**                                                                                       |             |             |
-| P70 | [Diagnostics on a long file find each access's context by scanning](todo/performance.md#p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning)             | Medium      | Medium      |
 | P52 | [The diagnostic benchmarks measure a path no consumer takes](todo/performance.md#p52-the-diagnostic-benchmarks-measure-a-path-no-consumer-takes)                            | Medium      | Low         |
 | P53 | [Diagnostics and type-hint resolution deep-copy classes they only read](todo/performance.md#p53-diagnostics-and-type-hint-resolution-deep-copy-classes-they-only-read)     | Medium      | Low         |
 | P51 | [CI checks for how cost grows with input size](todo/performance.md#p51-ci-checks-for-how-cost-grows-with-input-size)                                                      | Medium      | Low-Medium  |
+| P75 | [Closures and calls through a variable on a long file rescan it](todo/performance.md#p75-closures-and-calls-through-a-variable-on-a-long-file-rescan-it)                 | Medium      | Medium      |
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Very High   |
 | P73 | [A lazily loaded file is parsed three times](todo/performance.md#p73-a-lazily-loaded-file-is-parsed-three-times)                                                          | Low-Medium  | Low         |
 | P74 | [Every class lookup by name re-parses and lowercases the name](todo/performance.md#p74-every-class-lookup-by-name-re-parses-and-lowercases-the-name)                      | Low-Medium  | Low         |

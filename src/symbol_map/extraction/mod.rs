@@ -12,9 +12,9 @@ use super::docblock::{
     extract_docblock_symbols_covering, get_docblock_text_with_offset, is_navigable_type,
 };
 use super::{
-    CallSite, ClassRefContext, DocblockMemberRef, SelfStaticParentKind, SubjectText, SymbolKind,
-    SymbolMap, SymbolSpan, TemplateParamDef, UntypedClosureSite, VarDefKind, VarDefSite,
-    ViewReceiverClass, ViewReceiverSite,
+    CallSite, ClassRefContext, DocblockMemberRef, NestedRanges, SelfStaticParentKind, SubjectText,
+    SymbolKind, SymbolMap, SymbolSpan, TemplateParamDef, UntypedClosureSite, VarDefKind,
+    VarDefSite, ViewReceiverClass, ViewReceiverSite,
 };
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::names::OwnedResolvedNames;
@@ -315,8 +315,12 @@ fn extract_symbol_map_inner(
             .then(a.offset.cmp(&b.offset))
     });
 
-    ctx.scopes.sort_by_key(|s| s.0);
-    ctx.narrowing_blocks.sort_by_key(|s| s.0);
+    let mut var_defs_by_name: Vec<u32> = (0..ctx.var_defs.len() as u32).collect();
+    var_defs_by_name.sort_by(|&a, &b| {
+        let (a, b) = (&ctx.var_defs[a as usize], &ctx.var_defs[b as usize]);
+        (a.scope_start, &a.name, a.offset).cmp(&(b.scope_start, &b.name, b.offset))
+    });
+
     ctx.assert_narrowing_offsets.sort();
 
     // Sort template_defs by name_offset for binary search / reverse scan.
@@ -346,10 +350,11 @@ fn extract_symbol_map_inner(
         conditional_laravel_spans: ctx.conditional_laravel_spans,
         member_access_indices,
         var_defs: ctx.var_defs,
-        scopes: ctx.scopes,
+        var_defs_by_name,
+        scopes: NestedRanges::new(ctx.scopes),
         arrow_fn_scopes: ctx.arrow_fn_scopes,
         body_scopes: ctx.body_scopes,
-        narrowing_blocks: ctx.narrowing_blocks,
+        narrowing_blocks: NestedRanges::new(ctx.narrowing_blocks),
         assert_narrowing_offsets: ctx.assert_narrowing_offsets,
         template_defs: ctx.template_defs,
         call_sites: ctx.call_sites,

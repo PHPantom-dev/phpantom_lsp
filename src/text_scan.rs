@@ -282,10 +282,10 @@ pub(crate) fn decode_php_string_literal(raw: &str) -> Option<Cow<'_, str>> {
 ///
 /// This scans the source text rather than the AST because the callers
 /// that need it (the stand-in class built when the cursor sits outside a
-/// class body) only ever have the file content and a byte offset.
+/// class body) only ever have the file content and a byte offset.  A
+/// caller asking about many offsets in the same text should scan it once
+/// into [`NamespaceDecls`] instead.
 pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> {
-    const KEYWORD: &[u8] = b"namespace";
-
     let bytes = content.as_bytes();
     let mut end = offset.min(bytes.len());
     while let Some(pos) = memchr::memmem::rfind(&bytes[..end], KEYWORD) {
@@ -296,6 +296,49 @@ pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> 
         return namespace_name_after(content, pos + KEYWORD.len());
     }
     None
+}
+
+const KEYWORD: &[u8] = b"namespace";
+
+/// Every `namespace` declaration in a text, so the namespace in force at
+/// an offset is a binary search rather than the backward scan
+/// [`namespace_at_offset`] does.  Both recognise declarations the same
+/// way and give the same answer.
+#[derive(Debug, Default)]
+pub(crate) struct NamespaceDecls {
+    /// The offset of each declaration's keyword, in source order, with the
+    /// byte range of the name it declares (`None` for `namespace { … }`).
+    decls: Vec<(usize, Option<(usize, usize)>)>,
+}
+
+impl NamespaceDecls {
+    pub(crate) fn scan(content: &str) -> Self {
+        let bytes = content.as_bytes();
+        let decls = memchr::memmem::find_iter(bytes, KEYWORD)
+            .filter(|&pos| is_namespace_statement(bytes, pos, KEYWORD.len()))
+            .map(|pos| {
+                let name = namespace_name_after(content, pos + KEYWORD.len()).map(|name| {
+                    let start = name.as_ptr() as usize - content.as_ptr() as usize;
+                    (start, start + name.len())
+                });
+                (pos, name)
+            })
+            .collect();
+        Self { decls }
+    }
+
+    /// The namespace in force at `offset` in `content`, which must be the
+    /// text these declarations were scanned from.
+    pub(crate) fn at<'a>(&self, content: &'a str, offset: usize) -> Option<&'a str> {
+        let end = offset.min(content.len());
+        // The backward scan only sees a keyword that ends at or before
+        // `offset`.
+        let before = self
+            .decls
+            .partition_point(|&(pos, _)| pos + KEYWORD.len() <= end);
+        let (_, name) = self.decls.get(before.checked_sub(1)?)?;
+        name.map(|(start, end)| &content[start..end])
+    }
 }
 
 /// Check that the `namespace` keyword at `pos` opens a declaration rather

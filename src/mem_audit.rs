@@ -162,7 +162,7 @@ fn s(o: &Option<String>) -> Sz {
 
 fn vs(v: &[String]) -> Sz {
     let mut z = Sz::default();
-    z.add(v.len() * size_of::<String>());
+    z.add(size_of_val(v));
     for x in v {
         z.add(x.capacity());
     }
@@ -1340,10 +1340,11 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             for v in &sm.var_defs {
                 sym.add(v.name.capacity());
             }
-            sym.add(sm.scopes.capacity() * 8);
+            sym.add(sm.var_defs_by_name.capacity() * 4);
+            sym.add(sm.scopes.heap_bytes());
             sym.add(sm.arrow_fn_scopes.capacity() * 4);
             sym.add(sm.body_scopes.capacity() * 8);
-            sym.add(sm.narrowing_blocks.capacity() * 8);
+            sym.add(sm.narrowing_blocks.heap_bytes());
             sym.add(sm.assert_narrowing_offsets.capacity() * 4);
             sym.add(sm.template_defs.capacity() * size_of::<crate::symbol_map::TemplateParamDef>());
             sym.add(sm.call_sites.capacity() * size_of::<crate::symbol_map::CallSite>());
@@ -1510,8 +1511,11 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         if let Some(keys) = &c.config_keys {
             laravel_keys += vs(keys);
         }
-        for v in [&c.view_names, &c.trans_keys].into_iter().flatten() {
-            laravel_keys += vs(v);
+        if let Some(names) = &c.view_names {
+            laravel_keys += vs(names);
+        }
+        if let Some(catalog) = &c.translations {
+            laravel_keys += vs(&catalog.keys);
         }
         if let Some(discovery) = &c.routes {
             if let Some(first) = discovery.routes.first() {

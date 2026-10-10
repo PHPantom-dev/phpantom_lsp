@@ -57,3 +57,65 @@ No outstanding items.
 
 ## Miscellaneous
 
+### B580. Convert to instance variable rewrites positions where a property access is invalid
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+class Foo {
+    public function bar() {
+        $x = 1;                                  // cursor here
+        $f = function () use ($x) { return $x; };
+        $h = fn() => $x;
+        try {} catch (\Exception $x) {}
+        static $x;
+        global $x;
+        return compact('x');
+    }
+}
+```
+
+The action produces `use ($this->x)`, `use (&$this->x)`,
+`catch (\Exception $this->x)`, `static $this->x;` and `global $this->x;`,
+all syntax errors. It leaves `$x` inside the closure body and the arrow
+function untouched, so those now read an undefined local, and `compact('x')`
+silently loses the variable.
+
+`resolve_convert_to_instance_variable` replaces every occurrence
+`ScopeMap::all_occurrences` returns, and that list does not say which
+occurrences sit in a declaring position (closure `use`, `catch`, `static`,
+`global`, parameters) or how a nested closure or arrow function captures the
+variable.
+
+**Fix:** Carry the syntactic role of each occurrence out of the scope
+collector. Rewrite a closure `use` capture by dropping it from the `use` list
+and converting the closure body's occurrences, and convert arrow-function
+bodies directly (both bind `$this`). Decline the action when the variable
+appears in a `catch`, `static`, or `global` declaration, or by name in
+`compact()` / `extract()` / `$$`.
+
+### B581. Convert to instance variable redeclares an inherited property
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+class Base { protected $x; }
+class Foo extends Base {
+    public function bar() {
+        $x = 1; // cursor here
+    }
+}
+```
+
+The action adds `private $x;` to `Foo`, which is a fatal error ("Access level
+to Foo::$x must be protected (as in class Base) or weaker"). Even with a
+compatible visibility it would shadow the inherited property instead of
+reusing it.
+
+`property_exists` in `convert_to_instance_variable.rs` only scans the class's
+own members and promoted constructor parameters.
+
+**Fix:** Check the fully resolved class (parents, traits) for an existing
+property. When an inherited, accessible one exists, either decline the action
+or convert to `$this->x` without declaring a new property.
+

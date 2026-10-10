@@ -103,7 +103,7 @@ fn runs_into_declaration(between: &str) -> bool {
 /// `Foo::bar()` inside `namespace App` to the global `\Foo` even when
 /// `App\Foo` exists.
 pub(crate) fn class_context_placeholder(content: &str, cursor_offset: u32) -> ClassInfo {
-    placeholder_in_namespace(crate::text_scan::namespace_at_offset(
+    placeholder_in_namespace(crate::parser::namespace_at_offset(
         content,
         cursor_offset as usize,
     ))

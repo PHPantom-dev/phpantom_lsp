@@ -20,54 +20,6 @@ against that bar.
 
 ---
 
-## P70. Diagnostics on a long file find each access's context by scanning
-
-**Impact: Medium · Complexity: Medium**
-
-Several diagnostic collectors work out the context of a member access or
-call by scanning for it, so each access costs time in proportion to the
-length of the file and the whole pass costs its square. The forward walk
-over the same file no longer does. On a release build, a generated
-top-level script of repeated 11-line blocks (an `if`/`elseif`/`else`, a
-`switch`, a `try`, a `while`, a closure and a few calls each) takes:
-
-| Lines  | analyse wall clock |
-| ------ | ------------------ |
-| 5,500  | 0.7 s              |
-| 11,000 | 2.1 s              |
-| 22,000 | 8.1 s              |
-
-with or without a `namespace` declaration. Legacy codebases do carry
-files this long, and every edit to one re-runs the whole pass. Well over
-half of the samples are in these lookups rather than in the walk:
-
-- `class_context_placeholder` (`class_lookup.rs`) calls
-  `text_scan::namespace_at_offset`, which searches the text backwards from
-  the access for a `namespace` keyword. In a namespaced file the
-  declaration sits near the top, so the search is just as long. It runs
-  once per call from `collect_argument_type_diagnostics`, the return-type
-  checks, the deprecated collector and the unknown-member collector
-  (about 30%). The namespace blocks are already recorded per file:
-  `Backend::namespace_at_offset` (`backend/file_access.rs`) answers from
-  them, but this path only has the content and an offset.
-- `SubjectCacheKey::build` (`diagnostics/subject_cache.rs`) calls
-  `SymbolMap::find_enclosing_scope` and `find_narrowing_block`, which test
-  every scope and every narrowing block in the file, plus
-  `active_var_def_offset`, which adds another scope scan and a linear
-  `find_var_definition` over every variable definition (about 15%).
-- String comparisons inside the unknown-member and deprecated collectors
-  themselves, not yet traced to a single call (about 12%).
-
-The namespace blocks, scopes and narrowing blocks of a file are all known
-once it is parsed, so each lookup can be a binary search over ranges
-recorded at that point.
-
-**Where to look:** `namespace_at_offset` in `text_scan.rs` and its
-callers, `find_enclosing_scope` and `find_narrowing_block` in
-`symbol_map/mod.rs`, and `SubjectCacheKey::build`.
-
----
-
 ## P52. The diagnostic benchmarks measure a path no consumer takes
 
 **Impact: Medium · Complexity: Low**
@@ -168,7 +120,7 @@ history, and `memory-benchmark-pr` does the same for
   performance problem users have hit so far was a growth problem on an
   input of an unusual shape (thousands of calls to undefined functions,
   hundreds of Blade views without a DocBlock, a `switch` assigning
-  hundreds of distinct literals, and the open item P70), and a
+  hundreds of distinct literals, a long top-level script), and a
   benchmark over fixed fixtures cannot see one until a project that has
   the shape reports it.
 
@@ -181,6 +133,44 @@ check can run on a CI runner, and each shape fixed later joins the set.
 
 **Where to look:** `.github/workflows/ci.yml`'s `benchmark`/
 `benchmark-pr` jobs; `benches/` for the registered benches.
+
+---
+
+## P75. Closures and calls through a variable on a long file rescan it
+
+**Impact: Medium · Complexity: Medium**
+
+Two lookups still cost time in proportion to the length of the file at
+each use, so a long file that has many of them costs the square. On a
+release build, a generated top-level script of repeated 11-line blocks,
+each with a closure that has a typed parameter (`function (Foo $p)`) and a
+call through the variable holding it (`$f($a)`), takes:
+
+| Lines  | analyse wall clock |
+| ------ | ------------------ |
+| 5,500  | 0.6 s              |
+| 11,000 | 1.7 s              |
+| 22,000 | 5.8 s              |
+
+where the same script without those two lines takes 0.9 s at 22,000.
+Nearly all of the difference is in:
+
+- `seed_closure_params` (forward walk) asks
+  `declared_param_docblock_type` for each closure parameter, which falls
+  back to `find_iterable_raw_type_in_source` (`docblock/tags.rs`). That
+  scans the text backwards line by line, counting braces, until it leaves
+  the enclosing scope. A closure at file scope has no enclosing scope, so
+  the scan runs to the top of the file.
+- `extract_callable_target_from_variable` (`signature_help.rs`), reached
+  from `collect_argument_type_diagnostics` through
+  `resolve_callable_target_inner`, walks every statement in the file
+  (`find_fcc_target_in_stmts`) looking for the last first-class-callable
+  assignment to the variable.
+
+**Where to look:** `declared_param_docblock_type` in
+`type_engine/variable/resolution.rs`, `find_iterable_raw_type_in_source`
+in `docblock/tags.rs`, and `find_fcc_target_in_stmts` in
+`signature_help.rs`.
 
 ---
 

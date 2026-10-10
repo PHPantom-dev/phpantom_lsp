@@ -856,6 +856,82 @@ pub(crate) struct CallSite {
     pub spread_arg_indices: Vec<u32>,
 }
 
+// ─── Nested range index ─────────────────────────────────────────────────────
+
+/// Ranges `(start, end)`, both inclusive, sorted by start and indexed so
+/// the innermost one containing an offset is found without testing every
+/// range in the file.
+///
+/// A long top-level script holds thousands of sibling blocks, and the
+/// diagnostic pass asks for the innermost one at every member access, so
+/// a linear scan here makes the pass quadratic in the file's length.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NestedRanges {
+    ranges: Vec<(u32, u32)>,
+    /// For each range, the index of the closest earlier range that ends
+    /// after it does, or [`Self::NONE`].  A range that ends before an
+    /// offset rules out every range between it and this one, since those
+    /// all end no later than it.
+    wider: Vec<u32>,
+}
+
+impl NestedRanges {
+    const NONE: u32 = u32::MAX;
+
+    pub(crate) fn new(mut ranges: Vec<(u32, u32)>) -> Self {
+        ranges.sort_by_key(|r| r.0);
+        let mut wider = Vec::with_capacity(ranges.len());
+        for (i, &(_, end)) in ranges.iter().enumerate() {
+            let mut candidate = i.checked_sub(1).map_or(Self::NONE, |p| p as u32);
+            while candidate != Self::NONE && ranges[candidate as usize].1 <= end {
+                candidate = wider[candidate as usize];
+            }
+            wider.push(candidate);
+        }
+        Self { ranges, wider }
+    }
+
+    /// The start of the range with the greatest start that contains
+    /// `offset`, or `0` when none does.
+    pub(crate) fn innermost_start(&self, offset: u32) -> u32 {
+        let mut candidate = match self.ranges.partition_point(|r| r.0 <= offset) {
+            0 => return 0,
+            n => (n - 1) as u32,
+        };
+        while candidate != Self::NONE {
+            let (start, end) = self.ranges[candidate as usize];
+            if offset <= end {
+                return start;
+            }
+            candidate = self.wider[candidate as usize];
+        }
+        0
+    }
+
+    /// Heap bytes held, for the memory audit.
+    #[cfg(feature = "mem-audit")]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.ranges.capacity() * size_of::<(u32, u32)>() + self.wider.capacity() * size_of::<u32>()
+    }
+}
+
+impl std::ops::Deref for NestedRanges {
+    type Target = [(u32, u32)];
+
+    fn deref(&self) -> &Self::Target {
+        &self.ranges
+    }
+}
+
+impl<'a> IntoIterator for &'a NestedRanges {
+    type Item = &'a (u32, u32);
+    type IntoIter = std::slice::Iter<'a, (u32, u32)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.ranges.iter()
+    }
+}
+
 // ─── Variable definition site structures ────────────────────────────────────
 
 /// A variable definition site discovered during the AST walk.
@@ -972,10 +1048,14 @@ pub(crate) struct SymbolMap {
     pub member_access_indices: crate::atom::AtomMap<Vec<usize>>,
     /// Variable definition sites, sorted by `(scope_start, offset)`.
     pub var_defs: Vec<VarDefSite>,
+    /// Indices into [`Self::var_defs`] sorted by `(scope_start, name,
+    /// offset)`, so the definitions of one variable in one scope are a
+    /// contiguous run found by binary search.
+    pub var_defs_by_name: Vec<u32>,
     /// Scope boundaries `(start_offset, end_offset)` for functions,
     /// methods, closures, and arrow functions.  Used by
     /// `find_enclosing_scope` to determine which scope the cursor is in.
-    pub scopes: Vec<(u32, u32)>,
+    pub scopes: NestedRanges,
     /// Scope start offsets of arrow functions.  Arrow functions inherit
     /// the enclosing scope's variables (unlike closures which isolate
     /// their scope).  Used by variable name completion to walk up
@@ -1006,7 +1086,7 @@ pub(crate) struct SymbolMap {
     /// can share a cache entry, while accesses in different blocks
     /// (e.g. different if/else branches) may resolve to different types
     /// and need independent entries.
-    pub narrowing_blocks: Vec<(u32, u32)>,
+    pub narrowing_blocks: NestedRanges,
     /// Offsets of `assert($var instanceof ...)` statements, sorted.
     ///
     /// These act as sequential narrowing boundaries: accesses before and
@@ -1237,13 +1317,7 @@ impl SymbolMap {
     /// function/method/closure body that contains the cursor, or `0` when
     /// the cursor is in top-level code.
     pub fn find_enclosing_scope(&self, offset: u32) -> u32 {
-        let mut best: u32 = 0;
-        for &(start, end) in &self.scopes {
-            if start <= offset && offset <= end && start > best {
-                best = start;
-            }
-        }
-        best
+        self.scopes.innermost_start(offset)
     }
 
     /// Determine the effective scope for a variable reference at `offset`.
@@ -1290,13 +1364,7 @@ impl SymbolMap {
     /// the same value from this method will have identical instanceof
     /// narrowing applied and can safely share a diagnostic cache entry.
     pub fn find_narrowing_block(&self, offset: u32) -> u32 {
-        let mut best: u32 = 0;
-        for &(start, end) in &self.narrowing_blocks {
-            if start <= offset && offset <= end && start > best {
-                best = start;
-            }
-        }
-        best
+        self.narrowing_blocks.innermost_start(offset)
     }
 
     /// Find the offset of the last `assert($var instanceof …)` statement
@@ -1348,12 +1416,21 @@ impl SymbolMap {
         // Prefer the most recent one, but if a shallower (outer) definition
         // exists, prefer it over a deeper (conditional) one when the cursor
         // is outside the conditional block.
+        let key = |&i: &u32| {
+            let d = &self.var_defs[i as usize];
+            (d.scope_start, d.name.as_str())
+        };
+        let first = self
+            .var_defs_by_name
+            .partition_point(|i| key(i) < (scope_start, var_name));
+        let run = self.var_defs_by_name[first..]
+            .iter()
+            .take_while(|i| key(i) == (scope_start, var_name))
+            .map(|&i| &self.var_defs[i as usize]);
+
         let mut best: Option<&VarDefSite> = None;
-        for d in self.var_defs.iter() {
-            if d.name != var_name
-                || d.scope_start != scope_start
-                || d.effective_from > cursor_offset
-            {
+        for d in run {
+            if d.effective_from > cursor_offset {
                 continue;
             }
             match best {

@@ -1,12 +1,23 @@
-//! Unit tests for [`super::namespace_at_offset`].
+//! Unit tests for [`super::namespace_at_offset`] and [`super::NamespaceDecls`].
 
-use super::namespace_at_offset;
+use super::{NamespaceDecls, namespace_at_offset};
 
 /// Return the namespace in force where `|` sits in `src` (the marker is
 /// stripped before scanning).
+///
+/// Also checks that the precomputed index agrees with the backward scan at
+/// every offset of the fixture, not just the marked one.
 fn ns_at_marker(src: &str) -> Option<String> {
     let offset = src.find('|').expect("fixture needs a `|` cursor marker");
     let stripped = src.replace('|', "");
+    let decls = NamespaceDecls::scan(&stripped);
+    for at in 0..=stripped.len() + 1 {
+        assert_eq!(
+            decls.at(&stripped, at),
+            namespace_at_offset(&stripped, at),
+            "index and scan disagree at offset {at}"
+        );
+    }
     namespace_at_offset(&stripped, offset).map(str::to_string)
 }
 

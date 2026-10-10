@@ -770,6 +770,18 @@ struct CachedFile {
     /// The arena that owns the AST nodes, and a pointer to the `Program`
     /// allocated in it.  Unset until the first parse of this file.
     parsed: std::cell::OnceCell<(mago_allocator::LocalArena, *const ())>,
+    /// The file's `namespace` declarations, scanned on first use.
+    namespaces: std::cell::OnceCell<crate::text_scan::NamespaceDecls>,
+    /// Address and length of each borrowed copy of `content` a live
+    /// [`ParseCacheGuard`] registered this file from.
+    ///
+    /// [`with_parse_cache`] copies borrowed text into the cache, so the
+    /// caller's own `&str`, which is what every later lookup passes, never
+    /// shares an address with `content`.  Without these, each lookup would
+    /// compare the whole file byte by byte.  An entry lives only as long as
+    /// the guard that added it, whose lifetime keeps the borrowed text
+    /// alive and unchanged, so an address match here is a content match.
+    aliases: RefCell<Vec<(usize, usize)>>,
 }
 
 impl CachedFile {
@@ -777,6 +789,8 @@ impl CachedFile {
         Rc::new(Self {
             content,
             parsed: std::cell::OnceCell::new(),
+            namespaces: std::cell::OnceCell::new(),
+            aliases: RefCell::new(Vec::new()),
         })
     }
 
@@ -784,7 +798,9 @@ impl CachedFile {
         // The pointer comparison includes the length, so a prefix of the
         // cached text, which starts at the same address, is not mistaken
         // for the whole of it.
-        std::ptr::eq(self.content.as_str(), content) || self.content.as_str() == content
+        std::ptr::eq(self.content.as_str(), content)
+            || self.aliases.borrow().contains(&text_address(content))
+            || self.content.as_str() == content
     }
 
     fn program(&self) -> &Program<'_> {
@@ -818,20 +834,19 @@ impl ParseCache {
 
     /// Make `content` available to the pass, evicting the oldest other
     /// file when that leaves too many.
-    fn register(&mut self, content: &str, to_arc: impl FnOnce() -> Arc<String>) {
-        match self.files.iter().position(|file| file.holds(content)) {
-            Some(0) => {}
-            Some(index) => {
-                let file = self.files.remove(index);
-                self.files.push(file);
-            }
+    fn register(&mut self, content: &str, to_arc: impl FnOnce() -> Arc<String>) -> Rc<CachedFile> {
+        let file = match self.files.iter().position(|file| file.holds(content)) {
+            Some(0) => return Rc::clone(&self.files[0]),
+            Some(index) => self.files.remove(index),
             None => {
                 if self.files.len() > MAX_CACHED_OTHER_FILES {
                     self.files.remove(1);
                 }
-                self.files.push(CachedFile::new(to_arc()));
+                CachedFile::new(to_arc())
             }
-        }
+        };
+        self.files.push(Rc::clone(&file));
+        file
     }
 
     fn evict(&mut self, file: &Rc<CachedFile>) {
@@ -848,14 +863,26 @@ thread_local! {
 /// Created by [`with_parse_cache`].  Must not be leaked (e.g. via
 /// `std::mem::forget`) — doing so would leave the cache active past the
 /// pass it belongs to.
-pub(crate) struct ParseCacheGuard {
+pub(crate) struct ParseCacheGuard<'a> {
     /// `true` when this guard owns the cache and must clear it on drop.
     /// Nested guards have `owns_cache = false` and leave it untouched.
     owns_cache: bool,
+    /// The file and the address of the borrowed text this guard added to
+    /// its [`CachedFile::aliases`], withdrawn on drop.
+    alias: Option<(std::rc::Weak<CachedFile>, (usize, usize))>,
+    _content: std::marker::PhantomData<&'a str>,
 }
 
-impl Drop for ParseCacheGuard {
+impl Drop for ParseCacheGuard<'_> {
     fn drop(&mut self) {
+        if let Some((file, address)) = self.alias.take()
+            && let Some(file) = file.upgrade()
+        {
+            let mut aliases = file.aliases.borrow_mut();
+            if let Some(index) = aliases.iter().position(|a| *a == address) {
+                aliases.swap_remove(index);
+            }
+        }
         if self.owns_cache {
             PARSE_CACHE.with(|cell| {
                 *cell.borrow_mut() = None;
@@ -1027,8 +1054,12 @@ pub(crate) fn try_for_each_if_branch<B>(
 ///
 /// Called while a cache is already active, this adds `content` to it for
 /// the rest of the outer pass and returns a guard that does nothing.
-pub(crate) fn with_parse_cache(content: &str) -> ParseCacheGuard {
-    install_parse_cache(content, || Arc::new(content.to_string()))
+pub(crate) fn with_parse_cache(content: &str) -> ParseCacheGuard<'_> {
+    let (mut guard, file) = install_parse_cache(content, || Arc::new(content.to_string()));
+    let address = text_address(content);
+    file.aliases.borrow_mut().push(address);
+    guard.alias = Some((Rc::downgrade(&file), address));
+    guard
 }
 
 /// [`with_parse_cache`] for a caller that already holds the content
@@ -1036,28 +1067,39 @@ pub(crate) fn with_parse_cache(content: &str) -> ParseCacheGuard {
 ///
 /// Every LSP request passes through here, so the copy would otherwise be
 /// paid once per request whether or not anything goes on to parse.
-pub(crate) fn with_parse_cache_arc(content: Arc<String>) -> ParseCacheGuard {
+pub(crate) fn with_parse_cache_arc(content: Arc<String>) -> ParseCacheGuard<'static> {
     let text = Arc::clone(&content);
-    install_parse_cache(&text, move || content)
+    install_parse_cache(&text, move || content).0
 }
 
-fn install_parse_cache(content: &str, to_arc: impl FnOnce() -> Arc<String>) -> ParseCacheGuard {
+fn text_address(content: &str) -> (usize, usize) {
+    (content.as_ptr() as usize, content.len())
+}
+
+fn install_parse_cache<'a>(
+    content: &str,
+    to_arc: impl FnOnce() -> Arc<String>,
+) -> (ParseCacheGuard<'a>, Rc<CachedFile>) {
     PARSE_CACHE.with(|cell| {
         let mut cache = cell.borrow_mut();
-        match cache.as_mut() {
-            Some(cache) => {
-                cache.register(content, to_arc);
-                ParseCacheGuard { owns_cache: false }
-            }
+        let (file, owns_cache) = match cache.as_mut() {
+            Some(cache) => (cache.register(content, to_arc), false),
             None => {
                 // Store only the content.  The parse is deferred until the
                 // first `with_parsed_program` call that asks for it.
+                let file = CachedFile::new(to_arc());
                 *cache = Some(ParseCache {
-                    files: vec![CachedFile::new(to_arc())],
+                    files: vec![Rc::clone(&file)],
                 });
-                ParseCacheGuard { owns_cache: true }
+                (file, true)
             }
-        }
+        };
+        let guard = ParseCacheGuard {
+            owns_cache,
+            alias: None,
+            _content: std::marker::PhantomData,
+        };
+        (guard, file)
     })
 }
 
@@ -1125,6 +1167,24 @@ pub(crate) fn with_parsed_program<T: Default>(
             tracing::error!("PHPantom: parser panicked in {}", method_name);
             T::default()
         }
+    }
+}
+
+/// The namespace in force at `offset` in `content`, or `None` for the
+/// global namespace.
+///
+/// A file in the active parse cache answers from declarations scanned
+/// once per pass, so a pass that asks at every access in a long file does
+/// not rescan the text up to each one.  Other text falls back to
+/// [`text_scan::namespace_at_offset`](crate::text_scan::namespace_at_offset).
+pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> {
+    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    match cached {
+        Some(file) => file
+            .namespaces
+            .get_or_init(|| crate::text_scan::NamespaceDecls::scan(&file.content))
+            .at(content, offset),
+        None => crate::text_scan::namespace_at_offset(content, offset),
     }
 }
 

@@ -1599,6 +1599,38 @@ fn find_enclosing_scope_inside_function() {
     );
 }
 
+#[test]
+fn nested_ranges_agree_with_testing_every_range() {
+    // Nested, sibling, equal-start, equal-end and partially overlapping
+    // ranges, in no particular order.
+    let ranges = vec![
+        (40, 90),
+        (2, 100),
+        (10, 30),
+        (12, 18),
+        (20, 30),
+        (50, 60),
+        (55, 95),
+        (50, 52),
+        (70, 70),
+        (0, 5),
+    ];
+    let index = NestedRanges::new(ranges.clone());
+    for offset in 0..=110 {
+        let expected = ranges
+            .iter()
+            .filter(|&&(start, end)| start <= offset && offset <= end)
+            .map(|&(start, _)| start)
+            .max()
+            .unwrap_or(0);
+        assert_eq!(
+            index.innermost_start(offset),
+            expected,
+            "innermost range at offset {offset}"
+        );
+    }
+}
+
 // ── find_var_definition tests ───────────────────────────────────────
 
 #[test]
