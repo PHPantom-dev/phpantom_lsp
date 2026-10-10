@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791662312845,
+  "lastUpdate": 1791667243899,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -37263,6 +37263,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 80.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1c94a8a0cdc23c91941db6b591fb3291cecf55c3",
+          "message": "Faster analysis of arrays filled under many `if`s",
+          "timestamp": "2026-10-10T23:06:37+02:00",
+          "tree_id": "4e796f57486e1f684e47492df83ff216fc6eb910",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1c94a8a0cdc23c91941db6b591fb3291cecf55c3"
+        },
+        "date": 1791667233390,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.9,
             "unit": "MiB"
           }
         ]
