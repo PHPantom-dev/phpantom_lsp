@@ -1137,17 +1137,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P66. Stub version filtering rescans a stub file once per symbol it declares
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1477,17 +1466,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P66. Stub version filtering rescans a stub file once per symbol it declares
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1763,28 +1741,6 @@ under mimalloc, so confirm this one with an order-swapped A/B run.</p>
 <p><strong>Where to look:</strong> <code>find_or_load_class</code> in <code>resolution.rs</code>,
 <code>PhpType::try_parse</code> in <code>php_type/parse.rs</code>, <code>is_scalar_name</code> and
 <code>is_keyword_type</code> in <code>php_type/keywords.rs</code>.</p>
-<hr />
-<h2 id="p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares">P66. Stub version filtering rescans a stub file once per symbol it declares<a class="headerlink" href="#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<p><code>set_php_version</code> drops every stub symbol marked <code>@removed</code> at or before
-the target version. For a file that mentions <code>@removed</code> at all,
-<code>is_stub_function_removed</code> and its class and constant counterparts locate
-each symbol with <code>source.find("function NAME(")</code> from the start of the
-file, so a stub file declaring n symbols is scanned n times. 49 of the
-537 stub files mention <code>@removed</code>, and they declare about 3,700 symbols
-between them.</p>
-<p>The server pays this once at startup and <code>analyze</code> once per run, on the
-serial path before any worker starts. On a release build it is about
-three quarters of an empty project's 0.07 s <code>analyze</code>, roughly 50 ms, or
-about 4% of a 1.2 s <code>analyze</code> of a mid-sized Laravel project. Every test
-that uses <code>new_test_with_full_stubs</code>, including each fixture the
-assertType runner checks, pays it too, about 0.45 s each in a debug
-build.</p>
-<p>Scanning each such file once for its <code>@removed</code> docblocks and recording
-the name of the declaration that follows each one would give a per-file
-set of removed names, turning the filter into set lookups.</p>
-<p><strong>Where to look:</strong> <code>set_php_version</code> in <code>lib.rs</code> and the
-<code>is_stub_*_removed</code> family in <code>stubs.rs</code>.</p>
 <hr />
 <h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
 <h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>
