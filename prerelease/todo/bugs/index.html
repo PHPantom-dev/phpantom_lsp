@@ -1044,17 +1044,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b549-throws-and-namespaced-function-completions-plan-their-import-against-the-whole-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B549. <code>@throws</code> and namespaced-function completions plan their import against the whole file
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1744,17 +1733,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b549-throws-and-namespaced-function-completions-plan-their-import-against-the-whole-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B549. <code>@throws</code> and namespaced-function completions plan their import against the whole file
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1938,18 +1916,6 @@ is set, even with no ruleset file or <code>require-dev</code> entry, but
 formatter, though the comment there promises the linter and its fixer
 never disagree. Treat a set standard as evidence in <code>detected</code> too,
 still yielding to a <code>mago.toml</code> <code>[formatter]</code> table.</p>
-<h3 id="b549-throws-and-namespaced-function-completions-plan-their-import-against-the-whole-file">B549. <code>@throws</code> and namespaced-function completions plan their import against the whole file<a class="headerlink" href="#b549-throws-and-namespaced-function-completions-plan-their-import-against-the-whole-file" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<p>The <code>@throws</code> smart items (<code>src/completion/phpdoc/mod.rs</code>), the <code>@throws</code>
-imports of docblock generation (<code>build_throws_import_edits</code> in
-<code>src/completion/phpdoc/generation/mod.rs</code>) and <code>build_function_completions</code>
-(<code>src/completion/context/function_completion.rs</code>) build their <code>use</code> edit
-from <code>analyze_use_block(content)</code>, the whole file. In a file with several
-<code>namespace</code> blocks the import can land in another block, which every other
-import edit stopped doing this cycle; in a Blade template it lands in the
-virtual prologue, so the completion carrying it is dropped. Plan them
-through <code>Backend::use_block_for</code> with the block the cursor is in, as class
-completion does.</p>
 
 
 
