@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A passing strict `in_array()` against `object` elements keeps the needle's classes.** A `Foo|Bar|string` needle checked against a `list<object>` still reads as `Foo` or `Bar` inside the branch.
 - **A typed array no longer proves it holds the keys an open array shape requires.** A parameter declared `array<string, int>` or `list<int>` is no longer taken to match an `array{foo: int, ...}` or `list{int, ...}` it says nothing about.
 - **Shape keys spelled as class constants are read as the keys they hold.** A docblock shape like `array{Slots::NAME: string, Slots::AGE: int}` whose constants are `0` and `1` is now accepted where a `list` is expected.
 - **Blade `{{!!$flag}}`.** A double negation written without a space is an escaped echo again, instead of a raw echo that broke the rest of the template.

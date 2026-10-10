@@ -125,9 +125,24 @@ pub(crate) fn apply_in_array_narrowing<'b>(
                     continue;
                 }
                 let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-                ResolvedType::apply_narrowing(&mut results, |classes| {
-                    narrowing::apply_instanceof_inclusion(&element_type, false, &var_ctx, classes)
-                });
+                // An element that can hold an object yet names no class
+                // that loads (`object`, an unknown class) may be an
+                // ancestor of the needle's classes, so they stay.
+                let every_object_element_loads =
+                    element_type.union_members().into_iter().all(|member| {
+                        !member.is_object_like()
+                            || !narrowing::resolve_narrowing_target(member, &var_ctx).is_empty()
+                    });
+                if every_object_element_loads {
+                    ResolvedType::apply_narrowing(&mut results, |classes| {
+                        narrowing::apply_instanceof_inclusion(
+                            &element_type,
+                            false,
+                            &var_ctx,
+                            classes,
+                        )
+                    });
+                }
                 // `apply_narrowing` works on the class layer, so a needle
                 // with no class behind it (`?string`, `int|string`) comes
                 // back untouched.  Strict equality against the haystack's

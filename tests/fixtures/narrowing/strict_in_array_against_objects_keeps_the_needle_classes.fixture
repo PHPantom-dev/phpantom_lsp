@@ -1,0 +1,22 @@
+// test: a strict in_array against `object` elements keeps the needle's classes
+// feature: hover
+// `object` could be any object, so the needle can still be a `Foo`.
+// expect: $kept = Foo
+// expect: $kept = Bar
+---
+<?php
+
+class Bar {}
+class Foo {
+    public function run(): void {}
+}
+
+class Gate {
+    /** @param list<object> $handlers */
+    public function check(Foo|Bar|string $x, array $handlers): void {
+        if (in_array($x, $handlers, true)) {
+            $kept = $x;
+            echo $ke<>pt;
+        }
+    }
+}

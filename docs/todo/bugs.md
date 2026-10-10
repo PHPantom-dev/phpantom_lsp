@@ -37,31 +37,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B568. A passing strict `in_array()` against `object` elements drops the needle's classes
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @param list<object> $handlers */
-function f(Foo|Bar|string $x, array $handlers): void {
-    if (in_array($x, $handlers, true)) {
-        $x->run(); // `$x` reads `string`, though the object it equals can be a `Foo` or a `Bar`
-    }
-}
-```
-
-In the branch where the check held, `apply_in_array_narrowing`
-(`cond_narrowing/in_array.rs`) narrows the needle's class layer through
-`apply_instanceof_inclusion`, which keeps only the classes the element type
-resolves to. An element that names no class it can load, such as `object`
-or a class that is not found, resolves to none, so every class goes and
-only the needle's scalar alternatives are left. The branch already skips an
-element that could be anything (`mixed`), but `object` can be any object as
-well, and a class that cannot be loaded may be an ancestor of the needle's.
-
-**Fix:** Narrow the class layer only when every element alternative that
-can hold an object names a class that loads, and leave the needle's classes
-alone otherwise.
+No outstanding items.
 
 ## Arithmetic
 
