@@ -18,6 +18,8 @@ pub(super) struct Collector<'a> {
     pub(super) frames: Vec<Frame>,
     pub(super) has_this_or_self: bool,
     pub(super) reference_bindings: Vec<ReferenceBinding>,
+    pub(super) closure_use_lists: Vec<ClosureUseList>,
+    pub(super) dynamic_scope_accesses: Vec<DynamicScopeAccess>,
     /// Frames currently being walked, innermost last, as
     /// `(start, kind)`.  Used to attribute a `&$var` binding to the
     /// scope that owns it.
@@ -37,6 +39,8 @@ impl<'a> Collector<'a> {
             frames: Vec::new(),
             has_this_or_self: false,
             reference_bindings: Vec::new(),
+            closure_use_lists: Vec::new(),
+            dynamic_scope_accesses: Vec::new(),
             scope_stack: Vec::new(),
             by_ref_resolver: None,
             enclosing_class_name: None,
@@ -55,7 +59,27 @@ impl<'a> Collector<'a> {
     }
 
     fn push_access(&mut self, name: String, offset: u32, kind: AccessKind) {
-        self.accesses.push(VarAccess { name, offset, kind });
+        self.push_access_with_role(name, offset, kind, AccessRole::Expression);
+    }
+
+    pub(super) fn push_access_with_role(
+        &mut self,
+        name: String,
+        offset: u32,
+        kind: AccessKind,
+        role: AccessRole,
+    ) {
+        self.accesses.push(VarAccess {
+            name,
+            offset,
+            kind,
+            role,
+        });
+    }
+
+    fn push_dynamic_scope_access(&mut self, offset: u32, name: Option<String>) {
+        self.dynamic_scope_accesses
+            .push(DynamicScopeAccess { offset, name });
     }
 
     /// Record that `name` is bound by reference from `offset` onwards.
@@ -233,10 +257,16 @@ pub(super) fn walk_statement(stmt: &Statement<'_>, collector: &mut Collector<'_>
                     end: catch_end,
                     kind: FrameKind::Catch,
                     parameters: catch_params,
+                    is_static: false,
                 });
                 if let Some(ref var) = catch.variable {
                     let name = bytes_to_str(var.name).to_string();
-                    collector.push_access(name, var.span().start.offset, AccessKind::Write);
+                    collector.push_access_with_role(
+                        name,
+                        var.span().start.offset,
+                        AccessKind::Write,
+                        AccessRole::CatchBinding,
+                    );
                 }
                 for s in catch.block.statements.iter() {
                     walk_statement(s, collector);
@@ -267,7 +297,12 @@ pub(super) fn walk_statement(stmt: &Statement<'_>, collector: &mut Collector<'_>
                 if let Variable::Direct(dv) = var {
                     let name = bytes_to_str(dv.name).to_string();
                     let offset = dv.span().start.offset;
-                    collector.push_access(name.clone(), offset, AccessKind::Write);
+                    collector.push_access_with_role(
+                        name.clone(),
+                        offset,
+                        AccessKind::Write,
+                        AccessRole::GlobalDeclaration,
+                    );
                     collector.push_reference_binding(name, offset);
                 }
             }
@@ -276,7 +311,12 @@ pub(super) fn walk_statement(stmt: &Statement<'_>, collector: &mut Collector<'_>
             for item in static_stmt.items.iter() {
                 let dv = item.variable();
                 let name = bytes_to_str(dv.name).to_string();
-                collector.push_access(name, dv.span().start.offset, AccessKind::Write);
+                collector.push_access_with_role(
+                    name,
+                    dv.span().start.offset,
+                    AccessKind::Write,
+                    AccessRole::StaticDeclaration,
+                );
                 // Note: we don't walk the default value expression of
                 // static items — it's evaluated once at first call and
                 // rarely contains variable references.
@@ -325,6 +365,7 @@ pub(super) fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'
         // ── Function / method / static-method calls ──
         Expression::Call(call) => match call {
             Call::Function(func_call) => {
+                record_by_name_scope_call(func_call, collector);
                 walk_expression(func_call.function, collector);
                 walk_function_call_arguments(func_call, collector);
             }
@@ -603,9 +644,11 @@ fn walk_expression_as_write(expr: &Expression<'_>, collector: &mut Collector<'_>
             collector.push_access(name, dv.span().start.offset, AccessKind::Write);
         }
         Expression::Variable(Variable::Indirect(iv)) => {
+            collector.push_dynamic_scope_access(iv.span().start.offset, None);
             walk_expression(iv.expression, collector);
         }
         Expression::Variable(Variable::Nested(nv)) => {
+            collector.push_dynamic_scope_access(nv.span().start.offset, None);
             walk_variable_read(nv.variable, collector);
         }
         Expression::Array(array) => {
@@ -732,12 +775,74 @@ fn walk_variable_read(var: &Variable<'_>, collector: &mut Collector<'_>) {
             collector.push_access(name, offset, AccessKind::Read);
         }
         Variable::Indirect(iv) => {
+            collector.push_dynamic_scope_access(iv.span().start.offset, None);
             walk_expression(iv.expression, collector);
         }
         Variable::Nested(nv) => {
+            collector.push_dynamic_scope_access(nv.span().start.offset, None);
             walk_variable_read(nv.variable, collector);
         }
     }
+}
+
+/// Record a call to a function that reaches local variables by name
+/// (`compact()`, `extract()`, `get_defined_vars()`).
+fn record_by_name_scope_call(call: &FunctionCall<'_>, collector: &mut Collector<'_>) {
+    let Expression::Identifier(ident) = call.function else {
+        return;
+    };
+    let name = ident.value();
+    let name = name.strip_prefix(b"\\").unwrap_or(name);
+    let offset = call.span().start.offset;
+    if name.eq_ignore_ascii_case(b"compact") {
+        let mut names = Vec::new();
+        let mut complete = true;
+        for arg in call.argument_list.arguments.iter() {
+            complete &= collect_compact_names(arg.value(), &mut names);
+        }
+        if !complete {
+            collector.push_dynamic_scope_access(offset, None);
+        }
+        for name in names {
+            collector.push_dynamic_scope_access(offset, Some(name));
+        }
+    } else if name.eq_ignore_ascii_case(b"extract")
+        || name.eq_ignore_ascii_case(b"get_defined_vars")
+    {
+        collector.push_dynamic_scope_access(offset, None);
+    }
+}
+
+/// Collect the variable names (with `$` prefix) one `compact()` argument
+/// names: a string literal, or an array of them, nested arbitrarily.
+/// Returns `false` when part of the argument is only known at runtime.
+fn collect_compact_names(expr: &Expression<'_>, names: &mut Vec<String>) -> bool {
+    match unwrap_parens(expr) {
+        Expression::Literal(Literal::String(s)) => {
+            match s.value.and_then(crate::atom::literal_bytes_to_str) {
+                Some(value) => {
+                    names.push(format!("${value}"));
+                    true
+                }
+                None => false,
+            }
+        }
+        Expression::Array(array) => collect_compact_element_names(&array.elements, names),
+        Expression::LegacyArray(array) => collect_compact_element_names(&array.elements, names),
+        _ => false,
+    }
+}
+
+fn collect_compact_element_names(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    names: &mut Vec<String>,
+) -> bool {
+    elements.iter().all(|element| match element {
+        ArrayElement::KeyValue(kv) => collect_compact_names(kv.value, names),
+        ArrayElement::Value(v) => collect_compact_names(v.value, names),
+        ArrayElement::Variadic(_) => false,
+        ArrayElement::Missing(_) => true,
+    })
 }
 
 /// Walk an assignment expression.
@@ -1126,10 +1231,19 @@ fn walk_closure(closure: &Closure<'_>, collector: &mut Collector<'_>) {
 
     let mut captures = Vec::new();
     if let Some(ref use_clause) = closure.use_clause {
+        let mut items = Vec::new();
         for var in use_clause.variables.iter() {
             let name = bytes_to_str(var.variable.name).to_string();
             let is_ref = var.ampersand.is_some();
             captures.push((name.clone(), is_ref));
+            let var_span = var.variable.span();
+            items.push(ClosureUseItem {
+                name: name.clone(),
+                start: var
+                    .ampersand
+                    .map_or(var_span.start.offset, |a| a.start.offset),
+                end: var_span.end.offset,
+            });
 
             // The captured variable is a read in the outer scope at the
             // `use(...)` site.  A by-reference capture is also a write
@@ -1140,8 +1254,19 @@ fn walk_closure(closure: &Closure<'_>, collector: &mut Collector<'_>) {
             } else {
                 AccessKind::Read
             };
-            collector.push_access(name, var.variable.span().start.offset, kind);
+            collector.push_access_with_role(
+                name,
+                var_span.start.offset,
+                kind,
+                AccessRole::ClosureUse,
+            );
         }
+        collector.closure_use_lists.push(ClosureUseList {
+            frame_start: body_start,
+            clause_start: use_clause.r#use.span().start.offset,
+            clause_end: use_clause.right_parenthesis.end.offset,
+            items,
+        });
     }
 
     let param_names: Vec<String> = closure
@@ -1156,12 +1281,18 @@ fn walk_closure(closure: &Closure<'_>, collector: &mut Collector<'_>) {
         end: body_end,
         kind: FrameKind::Closure,
         parameters: param_names,
+        is_static: closure.r#static.is_some(),
     });
 
     for param in closure.parameter_list.parameters.iter() {
         let name = bytes_to_str(param.variable.name).to_string();
         let offset = param.variable.span().start.offset;
-        collector.push_access(name.clone(), offset, AccessKind::Write);
+        collector.push_access_with_role(
+            name.clone(),
+            offset,
+            AccessKind::Write,
+            AccessRole::Parameter,
+        );
         if param.ampersand.is_some() {
             collector.push_reference_binding(name, offset);
         }
@@ -1170,7 +1301,12 @@ fn walk_closure(closure: &Closure<'_>, collector: &mut Collector<'_>) {
     // Record captures as writes in the closure frame.  A `use (&$x)`
     // capture aliases the outer variable for the whole closure body.
     for (cap_name, is_ref) in &captures {
-        collector.push_access(cap_name.clone(), body_start, AccessKind::Write);
+        collector.push_access_with_role(
+            cap_name.clone(),
+            body_start,
+            AccessKind::Write,
+            AccessRole::ClosureCapture,
+        );
         if *is_ref {
             collector.push_reference_binding(cap_name.clone(), body_start);
         }
@@ -1203,12 +1339,18 @@ fn walk_arrow_function(arrow: &ArrowFunction<'_>, collector: &mut Collector<'_>)
         end: body_end,
         kind: FrameKind::ArrowFunction,
         parameters: param_names,
+        is_static: arrow.r#static.is_some(),
     });
 
     for param in arrow.parameter_list.parameters.iter() {
         let name = bytes_to_str(param.variable.name).to_string();
         let offset = param.variable.span().start.offset;
-        collector.push_access(name.clone(), offset, AccessKind::Write);
+        collector.push_access_with_role(
+            name.clone(),
+            offset,
+            AccessKind::Write,
+            AccessRole::Parameter,
+        );
         if param.ampersand.is_some() {
             collector.push_reference_binding(name, offset);
         }

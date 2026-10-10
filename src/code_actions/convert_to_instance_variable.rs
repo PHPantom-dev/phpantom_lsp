@@ -5,7 +5,10 @@
 //!
 //! 1. Creates a new `private` property on the enclosing class
 //! 2. Replaces `$result` with `$this->result` (or `self::$result` for static methods)
-//! 3. Replaces all other occurrences of `$result` within the same method scope
+//! 3. Replaces all other occurrences of `$result` within the same method scope,
+//!    including inside arrow functions and closures that capture it (a
+//!    closure's `use ($result)` capture is dropped, since the property
+//!    reaches the closure through `$this`)
 //!
 //! ### Checks
 //!
@@ -13,6 +16,10 @@
 //!   constructor parameters), the action is **not** offered.
 //! - The `$this` variable is never offered for conversion.
 //! - Only works inside a method body of a class-like declaration.
+//! - The action is **not** offered when the variable sits somewhere a
+//!   property access cannot (a parameter, `catch`, `static`, or `global`
+//!   declaration), is reached by name (`compact()`, `extract()`, `$$name`),
+//!   or is captured by a `static` closure that has no `$this`.
 
 use std::sync::Arc;
 
@@ -30,19 +37,35 @@ use crate::class_lookup::find_class_at_offset;
 use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::code_actions::{CodeActionData, detect_indent_from_members, make_code_action_data};
 use crate::parser::with_parsed_program;
-use crate::scope_collector::collect_function_scope;
+use crate::scope_collector::{
+    AccessRole, ClosureUseList, Frame, FrameKind, ScopeMap, collect_function_scope,
+};
 use crate::text_position::{offset_to_position, position_to_byte_offset};
 use crate::types::{ClassInfo, Visibility};
 use crate::virtual_members::resolve_class_fully_cached;
 
 // ─── AST helpers ────────────────────────────────────────────────────────────
 
-/// Information gathered in Phase 1 about the assignment at the cursor.
-struct ConvertInfo {
+/// Everything the conversion of the assignment at the cursor needs.
+struct Conversion {
     /// The variable name including `$` prefix (e.g. `"$result"`).
     var_name: String,
     /// Whether the enclosing method is static.
     is_static: bool,
+    /// Byte offset where the property declaration is inserted.
+    insert_offset: usize,
+    /// The property declaration, including indentation and newlines.
+    property_text: String,
+    /// The changes inside the method body.
+    rewrites: Vec<Rewrite>,
+}
+
+/// One change inside the method body.
+enum Rewrite {
+    /// Replace the `$var` at this offset with the property access.
+    Replace(u32),
+    /// Delete the bytes in `[start, end)`.
+    Delete(u32, u32),
 }
 
 /// Check whether a property with the given bare name already exists on the class,
@@ -132,14 +155,16 @@ fn find_property_insertion_point<'a>(
     }
 }
 
-/// Try to collect convert-to-instance-variable info from the parsed AST.
+/// Plan the conversion of the assignment at the cursor.
 ///
-/// Returns `None` if the cursor is not on a suitable assignment in a method body.
-fn collect_info(content: &str, cursor_offset: u32) -> Option<ConvertInfo> {
+/// Returns `None` if the cursor is not on a suitable assignment in a
+/// method body, or if some occurrence of the variable cannot become a
+/// property access.
+fn plan_conversion(content: &str, cursor_offset: u32) -> Option<Conversion> {
     with_parsed_program(
         content,
         "convert_to_instance_variable",
-        |program, _content| {
+        |program, content| {
             let ctx = find_cursor_context(&program.statements, cursor_offset);
 
             let (method, all_members) = match ctx {
@@ -172,12 +197,138 @@ fn collect_info(content: &str, cursor_offset: u32) -> Option<ConvertInfo> {
 
             let is_static = method.modifiers.iter().any(|m| m.is_static());
 
-            Some(ConvertInfo {
+            let scope_map = collect_function_scope(
+                &method.parameter_list,
+                block.statements.as_slice(),
+                block.left_brace.start.offset,
+                block.right_brace.end.offset,
+            );
+            let frame = scope_map.enclosing_frame(block.left_brace.start.offset)?;
+            // The body's occurrences would become the property while the
+            // parameter still supplies the value read before the assignment.
+            if frame.parameters.contains(&var_name) {
+                return None;
+            }
+            let mut rewrites = Vec::new();
+            plan_rewrites(
+                &scope_map,
+                frame,
+                &var_name,
+                is_static,
+                false,
+                content,
+                &mut rewrites,
+            )?;
+
+            let indent = detect_indent_from_members(all_members, content);
+            let insert_offset = find_property_insertion_point(all_members, content);
+            let has_properties = all_members
+                .iter()
+                .any(|m| matches!(m, ClassLikeMember::Property(_)));
+            let static_kw = if is_static { "static " } else { "" };
+            let trailer = if has_properties { "\n" } else { "\n\n" };
+            let property_text = format!("{indent}private {static_kw}${bare_name};{trailer}");
+
+            Some(Conversion {
                 var_name,
                 is_static,
+                insert_offset,
+                property_text,
+                rewrites,
             })
         },
     )
+}
+
+/// Collect the rewrites that turn every occurrence of `name` in `frame`
+/// into a property access, descending into the arrow functions and
+/// closures that capture it.
+///
+/// Returns `None` when an occurrence cannot become a property access.
+/// `in_static_closure` is set inside a `static` closure or arrow function,
+/// where `$this` does not exist.
+fn plan_rewrites(
+    map: &ScopeMap,
+    frame: &Frame,
+    name: &str,
+    is_static: bool,
+    in_static_closure: bool,
+    content: &str,
+    out: &mut Vec<Rewrite>,
+) -> Option<()> {
+    let reached_by_name = map
+        .dynamic_scope_accesses
+        .iter()
+        .any(|d| map.frame_owns(frame, d.offset) && d.name.as_deref().is_none_or(|n| n == name));
+    if reached_by_name {
+        return None;
+    }
+
+    for access in map.accesses_in_frame(name, frame) {
+        match access.role {
+            AccessRole::Expression => {
+                if in_static_closure && !is_static {
+                    return None;
+                }
+                out.push(Rewrite::Replace(access.offset));
+            }
+            // A nested closure's or arrow function's own parameter, or
+            // either side of a `use` capture, which the closure handles.
+            AccessRole::Parameter | AccessRole::ClosureUse | AccessRole::ClosureCapture => {}
+            AccessRole::CatchBinding
+            | AccessRole::StaticDeclaration
+            | AccessRole::GlobalDeclaration => return None,
+        }
+    }
+
+    for child in map.child_frames(frame) {
+        let captures = match child.kind {
+            FrameKind::Closure => {
+                let removal = map
+                    .closure_use_lists
+                    .iter()
+                    .find(|list| list.frame_start == child.start)
+                    .and_then(|list| {
+                        let index = list.items.iter().position(|item| item.name == name)?;
+                        Some(use_item_removal(list, index, content))
+                    });
+                if let Some((start, end)) = removal {
+                    out.push(Rewrite::Delete(start, end));
+                }
+                removal.is_some()
+            }
+            FrameKind::ArrowFunction => !child.parameters.iter().any(|p| p == name),
+            _ => false,
+        };
+        if captures {
+            plan_rewrites(
+                map,
+                child,
+                name,
+                is_static,
+                in_static_closure || child.is_static,
+                content,
+                out,
+            )?;
+        }
+    }
+
+    Some(())
+}
+
+/// The byte range to delete to drop item `index` from a closure's `use`
+/// list, along with its separating comma.  Dropping the only item removes
+/// the whole clause.
+fn use_item_removal(list: &ClosureUseList, index: usize, content: &str) -> (u32, u32) {
+    let items = &list.items;
+    if items.len() == 1 {
+        let before = &content[..list.clause_start as usize];
+        (before.trim_end().len() as u32, list.clause_end)
+    } else if index + 1 < items.len() {
+        (items[index].start, items[index + 1].start)
+    } else {
+        (items[index - 1].end, items[index].end)
+    }
 }
 
 /// Walk statements to find a simple `$var = expr;` assignment at cursor.
@@ -346,9 +497,9 @@ impl Backend {
 
     /// Collect "Convert to Instance Variable" code actions (Phase 1).
     ///
-    /// This is a lightweight check that verifies the cursor is on a local
-    /// variable assignment inside a method body, and that no property with
-    /// the same name already exists.
+    /// Verifies the cursor is on a local variable assignment inside a
+    /// method body, that no property with the same name already exists,
+    /// and that every occurrence of the variable can become one.
     pub(crate) fn collect_convert_to_instance_variable_actions(
         &self,
         uri: &str,
@@ -358,9 +509,8 @@ impl Backend {
     ) {
         let cursor_offset = position_to_byte_offset(content, params.range.start) as u32;
 
-        let info = match collect_info(content, cursor_offset) {
-            Some(i) => i,
-            None => return,
+        let Some(info) = plan_conversion(content, cursor_offset) else {
+            return;
         };
 
         if self.inherits_property(uri, cursor_offset, &info.var_name) {
@@ -402,121 +552,49 @@ impl Backend {
     ) -> Option<WorkspaceEdit> {
         let cursor_offset = position_to_byte_offset(content, data.range.start) as u32;
 
-        let info = collect_info(content, cursor_offset)?;
-        if self.inherits_property(&data.uri, cursor_offset, &info.var_name) {
+        let conversion = plan_conversion(content, cursor_offset)?;
+        if self.inherits_property(&data.uri, cursor_offset, &conversion.var_name) {
             return None;
         }
-
-        let result = with_parsed_program(
-            content,
-            "convert_to_instance_variable",
-            |program, _content| {
-                let ctx = find_cursor_context(&program.statements, cursor_offset);
-
-                let (method, all_members) = match ctx {
-                    CursorContext::InClassLike {
-                        member: MemberContext::Method(method, true),
-                        all_members,
-                        ..
-                    } => (method, all_members),
-                    _ => return None,
-                };
-
-                let block = match &method.body {
-                    MethodBody::Concrete(block) => block,
-                    _ => return None,
-                };
-
-                let assignment_info =
-                    find_assignment_in_block(block.statements.as_slice(), cursor_offset)?;
-                let var_name = assignment_info.0;
-
-                if var_name == "$this" {
-                    return None;
-                }
-
-                let bare_name = var_name.strip_prefix('$').unwrap_or(&var_name).to_string();
-
-                if property_exists(all_members, &bare_name) {
-                    return None;
-                }
-
-                let is_static = method.modifiers.iter().any(|m| m.is_static());
-                let indent = detect_indent_from_members(all_members, content);
-                let insert_offset = find_property_insertion_point(all_members, content);
-
-                // Build the property declaration text.
-                let has_properties = all_members
-                    .iter()
-                    .any(|m| matches!(m, ClassLikeMember::Property(_)));
-
-                let property_text = if is_static {
-                    if has_properties {
-                        format!("{}private static ${};\n", indent, bare_name)
-                    } else {
-                        format!("{}private static ${};\n\n", indent, bare_name)
-                    }
-                } else if has_properties {
-                    format!("{}private ${};\n", indent, bare_name)
-                } else {
-                    format!("{}private ${};\n\n", indent, bare_name)
-                };
-
-                // Collect all occurrences of the variable in the method scope.
-                let body_start = block.left_brace.start.offset;
-                let body_end = block.right_brace.end.offset;
-                let scope_map = collect_function_scope(
-                    &method.parameter_list,
-                    block.statements.as_slice(),
-                    body_start,
-                    body_end,
-                );
-
-                // Find an occurrence offset for scope lookup — use the first
-                // occurrence in the method body.
-                let occurrences = scope_map.all_occurrences(&var_name, body_start);
-
-                // Build replacement text.
-                let replacement = if is_static {
-                    format!("self::${}", bare_name)
-                } else {
-                    format!("$this->{}", bare_name)
-                };
-
-                Some((
-                    insert_offset,
-                    property_text,
-                    occurrences,
-                    var_name,
-                    replacement,
-                ))
-            },
-        )?;
-
-        let (insert_offset, property_text, occurrences, var_name, replacement) = result;
 
         let doc_uri: Url = data.uri.parse().ok()?;
         let mut edits: Vec<TextEdit> = Vec::new();
 
-        // 1. Property insertion edit.
-        let insert_pos = offset_to_position(content, insert_offset);
+        let insert_pos = offset_to_position(content, conversion.insert_offset);
         edits.push(TextEdit {
             range: Range {
                 start: insert_pos,
                 end: insert_pos,
             },
-            new_text: property_text,
+            new_text: conversion.property_text,
         });
 
-        // 2. Replace each occurrence of $varname with the instance/static access.
-        for (offset, _kind) in &occurrences {
-            if let Some(edit) = crate::code_actions::occurrence_replacement_edit(
-                content,
-                *offset as usize,
-                &var_name,
-                &replacement,
-            ) {
-                edits.push(edit);
+        let var_name = &conversion.var_name;
+        let bare_name = var_name.strip_prefix('$').unwrap_or(var_name);
+        let replacement = if conversion.is_static {
+            format!("self::${bare_name}")
+        } else {
+            format!("$this->{bare_name}")
+        };
+        for rewrite in &conversion.rewrites {
+            match *rewrite {
+                Rewrite::Replace(offset) => {
+                    if let Some(edit) = crate::code_actions::occurrence_replacement_edit(
+                        content,
+                        offset as usize,
+                        var_name,
+                        &replacement,
+                    ) {
+                        edits.push(edit);
+                    }
+                }
+                Rewrite::Delete(start, end) => edits.push(TextEdit {
+                    range: Range {
+                        start: offset_to_position(content, start as usize),
+                        end: offset_to_position(content, end as usize),
+                    },
+                    new_text: String::new(),
+                }),
             }
         }
 

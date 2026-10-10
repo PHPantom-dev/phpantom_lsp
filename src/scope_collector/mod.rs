@@ -46,4 +46,7 @@ pub(crate) use build::{
     collect_function_scope_with_kind, collect_function_scope_with_kind_and_resolver,
     collect_function_scope_with_resolver, collect_hook_scope_with_resolver, hook_body_span,
 };
-pub(crate) use scope_map::{AccessKind, ByRefCallKind, ByRefResolver, Frame, FrameKind, ScopeMap};
+pub(crate) use scope_map::{
+    AccessKind, AccessRole, ByRefCallKind, ByRefResolver, ClosureUseList, Frame, FrameKind,
+    ScopeMap,
+};

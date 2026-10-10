@@ -281,6 +281,7 @@ pub(crate) fn collect_scope_with_resolver(
         end: body_end,
         kind: FrameKind::TopLevel,
         parameters: Vec::new(),
+        is_static: false,
     });
 
     for stmt in statements {
@@ -296,6 +297,8 @@ pub(crate) fn collect_scope_with_resolver(
         frames: collector.frames,
         has_this_or_self: collector.has_this_or_self,
         reference_bindings: collector.reference_bindings,
+        closure_use_lists: collector.closure_use_lists,
+        dynamic_scope_accesses: collector.dynamic_scope_accesses,
     }
 }
 
@@ -309,11 +312,12 @@ fn collect_parameters(params: &FunctionLikeParameterList<'_>, collector: &mut Co
     for param in params.parameters.iter() {
         let name = bytes_to_str(param.variable.name).to_string();
         let offset = param.variable.span().start.offset;
-        collector.accesses.push(VarAccess {
-            name: name.clone(),
+        collector.push_access_with_role(
+            name.clone(),
             offset,
-            kind: AccessKind::Write,
-        });
+            AccessKind::Write,
+            AccessRole::Parameter,
+        );
         if param.ampersand.is_some() {
             collector.push_reference_binding(name, offset);
         }
@@ -437,6 +441,7 @@ fn collect_scope_with_kind_and_resolver<'a>(
         end: body_end,
         kind,
         parameters: param_names,
+        is_static: false,
     });
 
     // Record parameters as writes.
@@ -455,5 +460,7 @@ fn collect_scope_with_kind_and_resolver<'a>(
         frames: collector.frames,
         has_this_or_self: collector.has_this_or_self,
         reference_bindings: collector.reference_bindings,
+        closure_use_lists: collector.closure_use_lists,
+        dynamic_scope_accesses: collector.dynamic_scope_accesses,
     }
 }

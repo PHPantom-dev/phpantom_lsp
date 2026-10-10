@@ -71,6 +71,31 @@ pub(crate) struct ReferenceBinding {
     pub frame_start: u32,
 }
 
+/// The syntactic position a [`VarAccess`] occupies.
+///
+/// Refactorings that rewrite a variable into another expression (such as
+/// `$this->x`) need this: only an [`AccessRole::Expression`] occurrence
+/// accepts an arbitrary variable-like expression in its place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AccessRole {
+    /// An ordinary expression position (`$x = 1`, `foo($x)`, `[$x] = …`).
+    Expression,
+    /// A function, method, closure, or arrow-function parameter.
+    Parameter,
+    /// The variable bound by `catch (E $x)`.
+    CatchBinding,
+    /// A `static $x;` declaration.
+    StaticDeclaration,
+    /// A `global $x;` declaration.
+    GlobalDeclaration,
+    /// The enclosing scope's side of a closure `use ($x)` capture,
+    /// recorded at the variable inside the `use` list.
+    ClosureUse,
+    /// The closure body's side of a `use ($x)` capture, recorded at the
+    /// body's opening brace where no `$x` is actually spelled.
+    ClosureCapture,
+}
+
 /// A single variable access (read or write) at a specific byte offset.
 #[derive(Debug, Clone)]
 pub(crate) struct VarAccess {
@@ -80,6 +105,45 @@ pub(crate) struct VarAccess {
     pub offset: u32,
     /// Whether this is a read, write, or read-write access.
     pub kind: AccessKind,
+    /// Where in the syntax the access sits.
+    pub role: AccessRole,
+}
+
+/// One variable in a closure's `use (…)` list.
+#[derive(Debug, Clone)]
+pub(crate) struct ClosureUseItem {
+    /// Variable name **with** `$` prefix.
+    pub name: String,
+    /// Byte offset where the item starts, including a leading `&`.
+    pub start: u32,
+    /// Byte offset just past the variable name.
+    pub end: u32,
+}
+
+/// A closure's `use (…)` clause.
+#[derive(Debug, Clone)]
+pub(crate) struct ClosureUseList {
+    /// `start` of the closure body's [`Frame`].
+    pub frame_start: u32,
+    /// Byte offset of the `use` keyword.
+    pub clause_start: u32,
+    /// Byte offset just past the closing `)`.
+    pub clause_end: u32,
+    /// The captured variables, in source order.
+    pub items: Vec<ClosureUseItem>,
+}
+
+/// A construct that reads or writes local variables by a name that is not
+/// spelled as a `$var` expression: `compact('x')`, `extract()`,
+/// `get_defined_vars()`, or a variable variable (`$$name`, `${expr}`).
+#[derive(Debug, Clone)]
+pub(crate) struct DynamicScopeAccess {
+    /// Byte offset of the construct.
+    pub offset: u32,
+    /// The variable named (with `$` prefix) when it is known statically,
+    /// as for each string literal passed to `compact()`.  `None` when the
+    /// construct can reach any variable in the scope.
+    pub name: Option<String>,
 }
 
 /// A scope frame representing a function, closure, or arrow function body.
@@ -114,6 +178,9 @@ pub(crate) struct Frame {
     /// before the frame's `start` and cannot be distinguished from
     /// outer-scope writes by offset alone).
     pub parameters: Vec<String>,
+    /// Whether the frame is a `static` closure or arrow function, which
+    /// has no `$this`.
+    pub is_static: bool,
 }
 
 /// The kind of scope boundary a [`Frame`] represents.
@@ -152,6 +219,10 @@ pub(crate) struct ScopeMap {
     /// Used by Extract Function to detect when by-reference semantics
     /// would make extraction unsafe.
     pub reference_bindings: Vec<ReferenceBinding>,
+    /// Every closure `use (…)` clause, in source order.
+    pub closure_use_lists: Vec<ClosureUseList>,
+    /// Every by-name access to local variables, in source order.
+    pub dynamic_scope_accesses: Vec<DynamicScopeAccess>,
 }
 
 /// Variables classified by their role relative to a byte range.
@@ -223,17 +294,41 @@ impl ScopeMap {
     pub(crate) fn accesses_in_frame<'a>(&'a self, name: &str, frame: &Frame) -> Vec<&'a VarAccess> {
         self.accesses
             .iter()
-            .filter(|a| a.name == name && a.offset >= frame.start && a.offset <= frame.end)
-            .filter(|a| {
-                !self.frames.iter().any(|f| {
-                    f.start > frame.start
-                        && f.end < frame.end
-                        && a.offset >= f.start
-                        && a.offset <= f.end
-                        && f.kind != FrameKind::Catch
-                })
-            })
+            .filter(|a| a.name == name && self.frame_owns(frame, a.offset))
             .collect()
+    }
+
+    /// Whether `offset` lies in `frame` itself rather than in a closure or
+    /// arrow function nested inside it.  `catch` blocks are transparent.
+    pub(crate) fn frame_owns(&self, frame: &Frame, offset: u32) -> bool {
+        offset >= frame.start
+            && offset <= frame.end
+            && !self.frames.iter().any(|f| {
+                // A nested frame can end exactly where its parent does
+                // (`fn() => function () {…}`), so only the start tells
+                // the two apart.
+                f.start > frame.start
+                    && f.end <= frame.end
+                    && offset >= f.start
+                    && offset <= f.end
+                    && f.kind != FrameKind::Catch
+            })
+    }
+
+    /// The closures and arrow functions nested directly in `frame`, with
+    /// no other closure or arrow function in between.
+    pub(crate) fn child_frames<'a>(&'a self, frame: &'a Frame) -> impl Iterator<Item = &'a Frame> {
+        self.frames.iter().filter(move |c| {
+            c.kind != FrameKind::Catch
+                && c.start > frame.start
+                && c.end <= frame.end
+                && !self.frames.iter().any(|f| {
+                    f.kind != FrameKind::Catch
+                        && f.start > frame.start
+                        && f.start < c.start
+                        && c.end <= f.end
+                })
+        })
     }
 
     /// Classify variables relative to a byte range `[start, end)`.

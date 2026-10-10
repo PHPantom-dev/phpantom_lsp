@@ -158,3 +158,171 @@ fn rejects_this_variable() {
         "should not offer action for $this"
     );
 }
+
+// ── Closures, arrow functions, and declaring positions ─────────────
+
+/// Run the conversion on a method `bar` whose body is `body` (with the
+/// cursor on its first statement) and return the rewritten method body,
+/// or `None` when the action is not offered.
+fn convert_body(body: &str, is_static: bool) -> Option<String> {
+    let modifier = if is_static { "static " } else { "" };
+    let php = format!(
+        "<?php\nclass Foo {{\n    public {modifier}function bar() {{\n        /*|*/$x = 1;\n{body}\n    }}\n}}"
+    );
+    let content = php.replace("/*|*/", "");
+    let edits = run_convert(&php)?;
+    let result = apply_edits(&content, &edits);
+    assert!(result.contains("x = 1;\n") && !result.contains(" $x = 1;"));
+    let start = result.find("x = 1;\n").map(|i| i + "x = 1;\n".len())?;
+    let end = result.rfind("\n    }\n}")?;
+    Some(result[start..end].to_string())
+}
+
+#[test]
+fn closure_use_capture_is_dropped_and_body_converted() {
+    let body = convert_body("        $f = function () use ($x) { return $x; };", false)
+        .expect("action should be offered");
+    assert_eq!(body, "        $f = function () { return $this->x; };");
+}
+
+#[test]
+fn closure_use_capture_is_dropped_from_a_longer_list() {
+    let body = convert_body(
+        "        $a = 2;\n        $f = function () use ($a, &$x) { $x++; return $a; };\n        $g = function () use ($x, $a): int { return $x + $a; };",
+        false,
+    )
+    .expect("action should be offered");
+    assert_eq!(
+        body,
+        "        $a = 2;\n        $f = function () use ($a) { $this->x++; return $a; };\n        $g = function () use ($a): int { return $this->x + $a; };"
+    );
+}
+
+#[test]
+fn arrow_function_body_is_converted() {
+    let body =
+        convert_body("        $h = fn() => $x + 1;", false).expect("action should be offered");
+    assert_eq!(body, "        $h = fn() => $this->x + 1;");
+}
+
+#[test]
+fn arrow_function_parameter_shadows_the_variable() {
+    let body = convert_body("        $h = fn($x) => $x + 1;\n        return $x;", false)
+        .expect("action should be offered");
+    assert_eq!(
+        body,
+        "        $h = fn($x) => $x + 1;\n        return $this->x;"
+    );
+}
+
+#[test]
+fn closure_without_capture_keeps_its_own_variable() {
+    let body = convert_body(
+        "        $f = function () { $x = 2; return $x; };\n        return $x;",
+        false,
+    )
+    .expect("action should be offered");
+    assert_eq!(
+        body,
+        "        $f = function () { $x = 2; return $x; };\n        return $this->x;"
+    );
+}
+
+#[test]
+fn nested_captures_are_converted() {
+    let body = convert_body(
+        "        $f = function () use ($x) { return fn() => function () use ($x) { return $x; }; };",
+        false,
+    )
+    .expect("action should be offered");
+    assert_eq!(
+        body,
+        "        $f = function () { return fn() => function () { return $this->x; }; };"
+    );
+}
+
+#[test]
+fn rejects_static_closure_capture_in_instance_method() {
+    assert!(convert_body("        $f = static fn() => $x;", false).is_none());
+    assert!(
+        convert_body(
+            "        $f = static function () use ($x) { return $x; };",
+            false
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn static_closure_capture_converts_in_static_method() {
+    let body = convert_body(
+        "        $f = static function () use ($x) { return $x; };",
+        true,
+    )
+    .expect("action should be offered");
+    assert_eq!(
+        body,
+        "        $f = static function () { return self::$x; };"
+    );
+}
+
+#[test]
+fn rejects_declaring_positions() {
+    for body in [
+        "        try {} catch (\\Exception $x) {}",
+        "        static $x;",
+        "        global $x;",
+    ] {
+        assert!(
+            convert_body(body, false).is_none(),
+            "should not offer action with `{body}`"
+        );
+    }
+}
+
+#[test]
+fn rejects_access_by_name() {
+    for body in [
+        "        return compact('x');",
+        "        return compact(['y', 'x']);",
+        "        extract([]);",
+        "        $name = 'x';\n        return $$name;",
+    ] {
+        assert!(
+            convert_body(body, false).is_none(),
+            "should not offer action with `{body}`"
+        );
+    }
+}
+
+#[test]
+fn compact_of_other_variables_is_allowed() {
+    let body = convert_body(
+        "        $y = 2;\n        return compact('y') + [$x];",
+        false,
+    )
+    .expect("action should be offered");
+    assert_eq!(
+        body,
+        "        $y = 2;\n        return compact('y') + [$this->x];"
+    );
+}
+
+#[test]
+fn access_by_name_in_unrelated_closure_is_allowed() {
+    let body = convert_body(
+        "        $f = function () { return compact('x'); };\n        return $x;",
+        false,
+    )
+    .expect("action should be offered");
+    assert_eq!(
+        body,
+        "        $f = function () { return compact('x'); };\n        return $this->x;"
+    );
+}
+
+#[test]
+fn rejects_variable_that_is_a_method_parameter() {
+    let php = "<?php\nclass Foo {\n    public function bar($x) {\n        echo $x;\n        /*|*/$x = 1;\n    }\n}";
+    assert!(run_convert(php).is_none());
+}
