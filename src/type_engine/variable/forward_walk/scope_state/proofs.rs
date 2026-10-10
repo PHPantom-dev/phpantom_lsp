@@ -1,12 +1,12 @@
 //! The proofs a scope carries beside its types, and how two paths' proofs
 //! join: exclusions, non-null implications and implied narrowings.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
 use super::merge::same_types;
 use super::*;
-use crate::php_type::TypeKind;
+use crate::php_type::{TypeKind, dedup_hash};
 use crate::type_engine::variable::forward_walk::is_synthetic_key;
 
 /// Whether no single value could be described by both type lists.
@@ -73,11 +73,74 @@ pub(crate) fn types_are_disjoint(a: &[ResolvedType], b: &[ResolvedType]) -> bool
         }
     }
 
+    /// The alternatives [`disjoint`] ends up comparing `ty` by.
+    fn alternatives(ty: &PhpType, out: &mut Vec<PhpType>) {
+        match ty.kind() {
+            TypeKind::Union(members) => members.iter().for_each(|m| alternatives(m, out)),
+            TypeKind::Nullable(inner) => {
+                alternatives(inner, out);
+                out.push(PhpType::null());
+            }
+            _ => out.push(ty.clone()),
+        }
+    }
+
+    /// [`disjoint`], without comparing every literal of one side with every
+    /// literal of the other.  Two literals are disjoint exactly when they
+    /// are not equal, so a set of one side's literals answers for all of
+    /// them at once.  Comparing them pairwise made joining the scopes of a
+    /// `switch` that assigns a different literal in every case cost the
+    /// square of its length.
+    fn disjoint_alternatives(x: &PhpType, y: &PhpType) -> bool {
+        let is_union = |ty: &PhpType| matches!(ty.kind(), TypeKind::Union(_));
+        if !is_union(x) || !is_union(y) {
+            return disjoint(x, y);
+        }
+        let (mut xs, mut ys) = (Vec::new(), Vec::new());
+        alternatives(x, &mut xs);
+        alternatives(y, &mut ys);
+        let (x_literals, x_rest): (Vec<PhpType>, Vec<PhpType>) =
+            xs.into_iter().partition(|ty| ty.as_literal().is_some());
+        let (y_literals, y_rest): (Vec<PhpType>, Vec<PhpType>) =
+            ys.into_iter().partition(|ty| ty.as_literal().is_some());
+        let rest_disjoint = x_rest
+            .iter()
+            .all(|p| y_rest.iter().chain(&y_literals).all(|q| disjoint(p, q)))
+            && x_literals
+                .iter()
+                .all(|p| y_rest.iter().all(|q| disjoint(p, q)));
+        if !rest_disjoint {
+            return false;
+        }
+        if x_literals.len() * y_literals.len() < LITERAL_SET_FROM_PAIRS {
+            return x_literals
+                .iter()
+                .all(|p| y_literals.iter().all(|q| disjoint(p, q)));
+        }
+        let (fewer, more) = if x_literals.len() <= y_literals.len() {
+            (&x_literals, &y_literals)
+        } else {
+            (&y_literals, &x_literals)
+        };
+        let hashes: HashSet<u64> = fewer.iter().map(dedup_hash).collect();
+        // A hash shared by two literals that differ is a collision, so a
+        // hit is confirmed against the literals themselves.
+        !more
+            .iter()
+            .any(|q| hashes.contains(&dedup_hash(q)) && fewer.iter().any(|p| !disjoint(p, q)))
+    }
+
+    /// How many literal pairs two types have to make before
+    /// [`disjoint_alternatives`] hashes them rather than comparing each.
+    const LITERAL_SET_FROM_PAIRS: usize = 64;
+
     if a.is_empty() || b.is_empty() {
         return false;
     }
-    a.iter()
-        .all(|x| b.iter().all(|y| disjoint(&x.type_string, &y.type_string)))
+    a.iter().all(|x| {
+        b.iter()
+            .all(|y| disjoint_alternatives(&x.type_string, &y.type_string))
+    })
 }
 
 /// Whether `side` has shown that `key` cannot be holding any of `types`.

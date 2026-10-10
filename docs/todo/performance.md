@@ -64,32 +64,6 @@ to be worked out first.
 
 ---
 
-## P78. A `switch` over thousands of distinct literals is still quadratic
-
-**Impact: Low-Medium · Complexity: Medium**
-
-A `switch` that assigns a different literal in each case is fast at the
-sizes real lookup tables reach, but each case's join still costs time in
-proportion to the cases before it. `benches/scaling.py`'s
-`switch_literals` shape, on a release build:
-
-| Cases | analyse wall clock |
-| ----- | ------------------ |
-| 2,000 | 0.45 s             |
-| 4,000 | 1.6 s              |
-| 8,000 | 6.3 s              |
-
-About a fifth of the samples are in `decode_php_string_literal`, decoding
-the same literals again at each join, and most of the rest are in
-`dedup_types` and `is_subtype_of` comparing the growing union against
-itself.
-
-**Where to look:** `dedup_types` and `hash_for_dedup` in
-`php_type/normalize.rs`, `decode_php_string_literal` in `text_scan.rs`
-and its callers in `php_type/subtype.rs`.
-
----
-
 ## Appendix: Profiling
 
 ### Commands

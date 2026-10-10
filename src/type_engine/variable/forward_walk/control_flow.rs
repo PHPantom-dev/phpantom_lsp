@@ -308,15 +308,9 @@ pub(crate) fn process_switch<'b>(
         group_has_default = false;
     }
 
-    if branch_scopes.is_empty() {
+    let Some(mut merged) = ScopeState::join_all(branch_scopes) else {
         return;
-    }
-
-    // Merge all branch scopes.
-    let mut merged = branch_scopes[0].clone();
-    for s in &branch_scopes[1..] {
-        merged.merge_branch(s);
-    }
+    };
 
     // If there is no default case, the switch might not execute any
     // arm at all, so merge with the pre-switch scope.

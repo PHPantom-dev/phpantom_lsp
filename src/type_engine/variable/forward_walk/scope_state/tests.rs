@@ -220,6 +220,58 @@ fn literals_from_every_path_join_into_one_entry() {
 }
 
 #[test]
+fn joining_all_paths_keeps_them_in_order() {
+    let paths: Vec<ScopeState> = ["a", "b", "c", "b", "d"]
+        .iter()
+        .map(|value| {
+            let mut scope = ScopeState::new();
+            scope.set("$x", typed(PhpType::literal_string_value(value)));
+            scope
+        })
+        .collect();
+
+    let joined = ScopeState::join_all(paths).expect("there are paths to join");
+
+    assert_eq!(type_strings(&joined, "$x"), vec!["'a'|'b'|'c'|'d'"]);
+    assert!(ScopeState::join_all(Vec::new()).is_none());
+}
+
+#[test]
+fn long_literal_unions_are_disjoint_only_without_a_shared_literal() {
+    use super::proofs::types_are_disjoint;
+
+    let strings = |range: std::ops::Range<usize>, extra: &[PhpType]| {
+        let mut members: Vec<PhpType> = range
+            .map(|i| PhpType::literal_string_value(format!("v{i}")))
+            .collect();
+        members.extend_from_slice(extra);
+        typed(PhpType::union(members))
+    };
+
+    assert!(types_are_disjoint(
+        &strings(0..20, &[]),
+        &strings(20..40, &[])
+    ));
+    assert!(!types_are_disjoint(
+        &strings(0..20, &[]),
+        &strings(19..40, &[])
+    ));
+    // A non-literal alternative still meets the literals on the other side.
+    assert!(!types_are_disjoint(
+        &strings(0..20, &[PhpType::string()]),
+        &strings(20..40, &[])
+    ));
+    assert!(types_are_disjoint(
+        &strings(0..20, &[PhpType::int()]),
+        &strings(20..40, &[PhpType::null()])
+    ));
+    assert!(!types_are_disjoint(
+        &strings(0..20, &[PhpType::null()]),
+        &typed(PhpType::nullable(PhpType::parse("'v40'|'v41'"))),
+    ));
+}
+
+#[test]
 fn unions_that_share_a_member_are_not_disjoint() {
     use super::proofs::types_are_disjoint;
 

@@ -883,6 +883,15 @@ fn hash_named_identifier<H: Hasher>(value: &str, state: &mut H) {
     hash_identifier(value, state);
 }
 
+/// A hash that agrees with the equivalence [`dedup_types`] merges by: two
+/// types it would merge hash the same.  For two literals that equivalence
+/// is [`literals_equal`].
+pub(crate) fn dedup_hash(ty: &PhpType) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hash_for_dedup(ty, &mut hasher);
+    hasher.finish()
+}
+
 fn hash_for_dedup<H: Hasher>(ty: &PhpType, state: &mut H) {
     std::mem::discriminant(ty.kind()).hash(state);
     match ty.kind() {

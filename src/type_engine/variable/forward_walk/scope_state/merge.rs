@@ -199,6 +199,32 @@ impl ScopeState {
         self.ruled_out = exclusions;
     }
 
+    /// Join every scope in `scopes`, as folding
+    /// [`merge_branch`](Self::merge_branch) over them left to right would,
+    /// or `None` when there are none.
+    ///
+    /// Neighbours are joined pairwise, then the results pairwise again, so
+    /// that the alternatives stay in the order the paths came in.  Folding
+    /// one path at a time into an accumulator instead would rebuild the
+    /// accumulator's growing types at every step: a `switch` that assigns a
+    /// different literal in each of thousands of cases costs the square of
+    /// its length that way, and only a logarithmic factor more than its
+    /// length this way.
+    pub fn join_all(mut scopes: Vec<ScopeState>) -> Option<ScopeState> {
+        while scopes.len() > 1 {
+            let mut joined = Vec::with_capacity(scopes.len().div_ceil(2));
+            let mut paths = scopes.into_iter();
+            while let Some(mut left) = paths.next() {
+                if let Some(right) = paths.next() {
+                    left.merge_branch(&right);
+                }
+                joined.push(left);
+            }
+            scopes = joined;
+        }
+        scopes.pop()
+    }
+
     /// Join `other`'s entry for one local into `self`, as one step of
     /// [`merge_branch`](Self::merge_branch).
     fn merge_local(&mut self, name: &Atom, other_types: &[ResolvedType], other: &ScopeState) {
