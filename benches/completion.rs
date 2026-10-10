@@ -765,10 +765,7 @@ fn bench_diagnostics_phpactor_fixtures(c: &mut Criterion) {
                 backend.update_ast(&uri, content);
                 b.iter(|| {
                     let mut out = Vec::new();
-                    backend.collect_deprecated_diagnostics(&uri, black_box(content), &mut out);
-                    backend.collect_unused_import_diagnostics(&uri, content, &mut out);
-                    backend.collect_unknown_class_diagnostics(&uri, content, &mut out);
-                    backend.collect_unknown_member_diagnostics(&uri, content, &mut out);
+                    backend.collect_slow_diagnostics(&uri, black_box(content), &mut out);
                     black_box(out)
                 })
             },

@@ -20,50 +20,6 @@ against that bar.
 
 ---
 
-## P52. The diagnostic benchmarks measure a path no consumer takes
-
-**Impact: Medium · Complexity: Low**
-
-`bench_diagnostics_phpactor_fixtures` in `benches/completion.rs` calls
-four collectors directly:
-
-```rust
-backend.collect_deprecated_diagnostics(&uri, content, &mut out);
-backend.collect_unused_import_diagnostics(&uri, content, &mut out);
-backend.collect_unknown_class_diagnostics(&uri, content, &mut out);
-backend.collect_unknown_member_diagnostics(&uri, content, &mut out);
-```
-
-No consumer does this. Every real caller goes through
-`collect_slow_diagnostics_observed`, which first activates the shared
-chain resolution cache, the type-engine caches, the forward-walked
-diagnostic scope cache and the pass's line table, then runs the
-collectors in an order chosen so later ones read what earlier ones
-cached. The benchmark activates none of the shared ones (the deprecated
-and unknown-member collectors open only their own) and runs
-`deprecated_usage` first, cold, where production runs it about halfway
-through against warm caches.
-
-The result is a tracked number that moves for reasons users never
-experience. On the `method_chain` fixture the benchmark reports roughly
-twice the time the production pass takes on the same file while running
-a quarter of the collectors, and an optimisation to the cached path
-shows up as a fraction of its real effect: making chain cache keys lazy
-measured -25% on the production pass and -3.7% here, because without an
-active cache the probe never hits early and every key is needed anyway.
-
-Point the benchmark at `collect_slow_diagnostics`, so it measures what
-an editor keystroke and an `analyze` run actually pay for. This resets
-the tracked history for `diagnostics/fixture/*` once, which is worth it
-for a number that tracks the real path. Keep a separate uncached case
-only if there is a consumer that runs collectors without the guards.
-
-**Where to look:** `bench_diagnostics_phpactor_fixtures` in
-`benches/completion.rs`; `collect_slow_diagnostics_observed` in
-`diagnostics/mod.rs` for the guards and the collector order.
-
----
-
 ## P53. Diagnostics and type-hint resolution deep-copy classes they only read
 
 **Impact: Medium · Complexity: Low**
