@@ -1148,17 +1148,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p58-a-member-completion-cache-hit-copies-the-whole-item-list" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P58. A member-completion cache hit copies the whole item list
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1499,17 +1488,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p58-a-member-completion-cache-hit-copies-the-whole-item-list" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P58. A member-completion cache hit copies the whole item list
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1807,21 +1785,6 @@ the name of the declaration that follows each one would give a per-file
 set of removed names, turning the filter into set lookups.</p>
 <p><strong>Where to look:</strong> <code>set_php_version</code> in <code>lib.rs</code> and the
 <code>is_stub_*_removed</code> family in <code>stubs.rs</code>.</p>
-<hr />
-<h2 id="p58-a-member-completion-cache-hit-copies-the-whole-item-list">P58. A member-completion cache hit copies the whole item list<a class="headerlink" href="#p58-a-member-completion-cache-hit-copies-the-whole-item-list" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>The member-completion cache exists so that each keystroke in
-<code>$model-&gt;wh…</code> reuses the unfiltered member list instead of re-resolving
-it. A hit clones the cached <code>Vec&lt;CompletionItem&gt;</code> wholesale, which for an
-Eloquent model is several hundred items each carrying several <code>String</code>s
-and an optional documentation block — and the prefix filter then throws
-most of them away. The cache is capped, so this is CPU rather than a
-leak, but it is paid on the keystroke the cache was added to make fast.</p>
-<p>Store an <code>Arc&lt;Vec&lt;CompletionItem&gt;&gt;</code> and have the filter take a slice,
-cloning only the items that survive.</p>
-<p><strong>Where to look:</strong> <code>member_completion_cache</code> and
-<code>filter_member_completion_items</code> in
-<code>completion/handler/member_access.rs</code>.</p>
 <hr />
 <h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
 <h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>
