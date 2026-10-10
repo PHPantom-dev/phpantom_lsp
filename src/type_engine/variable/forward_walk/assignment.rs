@@ -699,6 +699,13 @@ pub(crate) fn process_assignment_expr<'b>(
             // entry is the plain unknown a join treats as top.
             scope.set_untyped(&lhs_name);
         }
+        // `$write = function () use (&$out) { … };` — remember which
+        // closure `$write` holds, so `$write();` can run its body.
+        if let Expression::Closure(closure) = crate::parser::unwrap_parens(assignment.rhs)
+            && !by_ref_captured_names(closure).is_empty()
+        {
+            scope.set_closure_literal(&lhs_name, closure.span().start.offset);
+        }
         // `$isHtml = $raw instanceof HtmlString` makes `$isHtml` stand
         // for the check, so testing it later narrows `$raw`.
         record_assertion_variable(&lhs_name, assignment.rhs, scope);

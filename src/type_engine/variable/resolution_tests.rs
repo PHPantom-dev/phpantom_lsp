@@ -2101,8 +2101,39 @@ $foo;
 
 #[test]
 fn by_ref_closure_capture_widens_when_closure_stored_in_variable() {
-    // A closure assigned to a variable may run later (PHPStan widens at
-    // the definition, not the call), so the outer type becomes a union.
+    // A closure assigned to a variable may run later, so the outer type
+    // becomes a union at the definition.
+    let content = r#"<?php
+$foo = null;
+
+$fn = function () use (&$foo) {
+    $foo = 1;
+};
+
+$foo;
+"#;
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$foo",
+        &ClassInfo::default(),
+        &[],
+        content,
+        cursor_offset,
+        &|_| None,
+        None,
+        Loaders::default(),
+    );
+
+    assert!(!results.is_empty(), "Should resolve $foo to a type");
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "null|1");
+}
+
+#[test]
+fn by_ref_closure_capture_propagates_when_closure_variable_is_called() {
+    // Calling the variable runs the closure it was assigned right there,
+    // so the closure's final state replaces the outer type.
     let content = r#"<?php
 $foo = null;
 
@@ -2128,7 +2159,7 @@ $foo;
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "null|1");
+    assert_eq!(ts, "1");
 }
 
 #[test]

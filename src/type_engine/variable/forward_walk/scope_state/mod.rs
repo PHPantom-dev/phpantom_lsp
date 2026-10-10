@@ -320,6 +320,15 @@ pub(crate) struct ScopeState {
     /// a variable's identity.
     pub closure_captures: AtomTrie<Vec<ClosureCaptureEffect>>,
 
+    /// Variable name → start offset of the closure literal it was last
+    /// assigned, for a closure that captures by reference, so calling the
+    /// variable (`$write()`) can run that closure's body right there.
+    ///
+    /// Dropped by every write to the variable, not just an assignment: a
+    /// stale entry would make a call run a closure the variable no longer
+    /// holds.
+    pub closure_literals: AtomTrie<u32>,
+
     /// What this path knows about which keys arrays hold; see
     /// [`KeyFacts`]. Boxed and `None` while there is nothing to say, which
     /// is almost always: scopes are cloned and cached by the thousand.
@@ -358,6 +367,7 @@ impl ScopeState {
             unresolved: AtomTrie::default(),
             ruled_out: ProofMap::default(),
             closure_captures: AtomTrie::default(),
+            closure_literals: AtomTrie::default(),
             key_facts: None,
             unreachable: false,
         }
@@ -385,6 +395,25 @@ impl ScopeState {
             return;
         }
         self.closure_captures.insert(atom(var_name), effects);
+    }
+
+    /// Where the by-reference capturing closure literal `var_name` holds
+    /// starts, if it holds one.
+    pub fn closure_literal_offset(&self, var_name: &str) -> Option<u32> {
+        self.closure_literals.get(&atom(var_name)).copied()
+    }
+
+    /// Record that `var_name` now holds the closure literal starting at
+    /// `offset`.  Must follow the write that put it there, which drops
+    /// whatever the variable held before.
+    pub fn set_closure_literal(&mut self, var_name: &str, offset: u32) {
+        self.closure_literals.insert(atom(var_name), offset);
+    }
+
+    fn forget_closure_literal(&mut self, key: &Atom) {
+        if !self.closure_literals.is_empty() {
+            self.closure_literals.remove(key);
+        }
     }
 
     /// Borrow the proofs this scope holds that are not variable types.
@@ -427,6 +456,7 @@ impl ScopeState {
         }
         let key = atom(var_name);
         self.unresolved.remove(&key);
+        self.forget_closure_literal(&key);
         self.locals.insert(key, types);
     }
 
@@ -448,6 +478,7 @@ impl ScopeState {
     /// it from erasing the other paths' types at the next join.
     pub fn set_unknown(&mut self, var_name: &str) {
         let key = atom(var_name);
+        self.forget_closure_literal(&key);
         self.locals.insert(key, Vec::new());
         self.unresolved.insert(key, ());
     }
@@ -464,6 +495,7 @@ impl ScopeState {
     /// way an unresolved entry does.
     pub fn set_untyped(&mut self, var_name: &str) {
         let key = atom(var_name);
+        self.forget_closure_literal(&key);
         self.locals.insert(key, Vec::new());
         self.unresolved.remove(&key);
     }
@@ -475,6 +507,7 @@ impl ScopeState {
         }
         let key = atom(var_name);
         self.unresolved.remove(&key);
+        self.forget_closure_literal(&key);
         self.locals.insert(key, types);
     }
 
@@ -571,6 +604,7 @@ impl ScopeState {
     pub fn invalidate_proofs(&mut self, var_name: &str) {
         let key = atom(var_name);
         self.closure_captures.remove(&key);
+        self.forget_closure_literal(&key);
         let stale = |subject: &Atom| {
             *subject == key
                 || crate::type_engine::types::narrowing::key_reads_variable(subject, var_name)
