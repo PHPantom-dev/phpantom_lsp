@@ -1071,17 +1071,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P70. Diagnostics on a long file find each access's context by scanning
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p52-the-diagnostic-benchmarks-measure-a-path-no-consumer-takes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1108,6 +1097,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P51. CI checks for how cost grows with input size
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p75-closures-and-calls-through-a-variable-on-a-long-file-rescan-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P75. Closures and calls through a variable on a long file rescan it
       </span>
     </span>
   </a>
@@ -1433,17 +1433,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P70. Diagnostics on a long file find each access's context by scanning
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p52-the-diagnostic-benchmarks-measure-a-path-no-consumer-takes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1470,6 +1459,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P51. CI checks for how cost grows with input size
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p75-closures-and-calls-through-a-variable-on-a-long-file-rescan-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P75. Closures and calls through a variable on a long file rescan it
       </span>
     </span>
   </a>
@@ -1623,64 +1623,6 @@ against that bar.</p>
 </tbody>
 </table>
 <hr />
-<h2 id="p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning">P70. Diagnostics on a long file find each access's context by scanning<a class="headerlink" href="#p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Several diagnostic collectors work out the context of a member access or
-call by scanning for it, so each access costs time in proportion to the
-length of the file and the whole pass costs its square. The forward walk
-over the same file no longer does. On a release build, a generated
-top-level script of repeated 11-line blocks (an <code>if</code>/<code>elseif</code>/<code>else</code>, a
-<code>switch</code>, a <code>try</code>, a <code>while</code>, a closure and a few calls each) takes:</p>
-<table>
-<thead>
-<tr>
-<th>Lines</th>
-<th>analyse wall clock</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>5,500</td>
-<td>0.7 s</td>
-</tr>
-<tr>
-<td>11,000</td>
-<td>2.1 s</td>
-</tr>
-<tr>
-<td>22,000</td>
-<td>8.1 s</td>
-</tr>
-</tbody>
-</table>
-<p>with or without a <code>namespace</code> declaration. Legacy codebases do carry
-files this long, and every edit to one re-runs the whole pass. Well over
-half of the samples are in these lookups rather than in the walk:</p>
-<ul>
-<li><code>class_context_placeholder</code> (<code>class_lookup.rs</code>) calls
-  <code>text_scan::namespace_at_offset</code>, which searches the text backwards from
-  the access for a <code>namespace</code> keyword. In a namespaced file the
-  declaration sits near the top, so the search is just as long. It runs
-  once per call from <code>collect_argument_type_diagnostics</code>, the return-type
-  checks, the deprecated collector and the unknown-member collector
-  (about 30%). The namespace blocks are already recorded per file:
-  <code>Backend::namespace_at_offset</code> (<code>backend/file_access.rs</code>) answers from
-  them, but this path only has the content and an offset.</li>
-<li><code>SubjectCacheKey::build</code> (<code>diagnostics/subject_cache.rs</code>) calls
-  <code>SymbolMap::find_enclosing_scope</code> and <code>find_narrowing_block</code>, which test
-  every scope and every narrowing block in the file, plus
-  <code>active_var_def_offset</code>, which adds another scope scan and a linear
-  <code>find_var_definition</code> over every variable definition (about 15%).</li>
-<li>String comparisons inside the unknown-member and deprecated collectors
-  themselves, not yet traced to a single call (about 12%).</li>
-</ul>
-<p>The namespace blocks, scopes and narrowing blocks of a file are all known
-once it is parsed, so each lookup can be a binary search over ranges
-recorded at that point.</p>
-<p><strong>Where to look:</strong> <code>namespace_at_offset</code> in <code>text_scan.rs</code> and its
-callers, <code>find_enclosing_scope</code> and <code>find_narrowing_block</code> in
-<code>symbol_map/mod.rs</code>, and <code>SubjectCacheKey::build</code>.</p>
-<hr />
 <h2 id="p52-the-diagnostic-benchmarks-measure-a-path-no-consumer-takes">P52. The diagnostic benchmarks measure a path no consumer takes<a class="headerlink" href="#p52-the-diagnostic-benchmarks-measure-a-path-no-consumer-takes" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low</strong></p>
 <p><code>bench_diagnostics_phpactor_fixtures</code> in <code>benches/completion.rs</code> calls
@@ -1759,7 +1701,7 @@ history, and <code>memory-benchmark-pr</code> does the same for
   performance problem users have hit so far was a growth problem on an
   input of an unusual shape (thousands of calls to undefined functions,
   hundreds of Blade views without a DocBlock, a <code>switch</code> assigning
-  hundreds of distinct literals, and the open item P70), and a
+  hundreds of distinct literals, a long top-level script), and a
   benchmark over fixed fixtures cannot see one until a project that has
   the shape reports it.</li>
 </ul>
@@ -1771,6 +1713,55 @@ and 2N, analyse both, and fail when doubling the input more than about
 check can run on a CI runner, and each shape fixed later joins the set.</p>
 <p><strong>Where to look:</strong> <code>.github/workflows/ci.yml</code>'s <code>benchmark</code>/
 <code>benchmark-pr</code> jobs; <code>benches/</code> for the registered benches.</p>
+<hr />
+<h2 id="p75-closures-and-calls-through-a-variable-on-a-long-file-rescan-it">P75. Closures and calls through a variable on a long file rescan it<a class="headerlink" href="#p75-closures-and-calls-through-a-variable-on-a-long-file-rescan-it" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Two lookups still cost time in proportion to the length of the file at
+each use, so a long file that has many of them costs the square. On a
+release build, a generated top-level script of repeated 11-line blocks,
+each with a closure that has a typed parameter (<code>function (Foo $p)</code>) and a
+call through the variable holding it (<code>$f($a)</code>), takes:</p>
+<table>
+<thead>
+<tr>
+<th>Lines</th>
+<th>analyse wall clock</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5,500</td>
+<td>0.6 s</td>
+</tr>
+<tr>
+<td>11,000</td>
+<td>1.7 s</td>
+</tr>
+<tr>
+<td>22,000</td>
+<td>5.8 s</td>
+</tr>
+</tbody>
+</table>
+<p>where the same script without those two lines takes 0.9 s at 22,000.
+Nearly all of the difference is in:</p>
+<ul>
+<li><code>seed_closure_params</code> (forward walk) asks
+  <code>declared_param_docblock_type</code> for each closure parameter, which falls
+  back to <code>find_iterable_raw_type_in_source</code> (<code>docblock/tags.rs</code>). That
+  scans the text backwards line by line, counting braces, until it leaves
+  the enclosing scope. A closure at file scope has no enclosing scope, so
+  the scan runs to the top of the file.</li>
+<li><code>extract_callable_target_from_variable</code> (<code>signature_help.rs</code>), reached
+  from <code>collect_argument_type_diagnostics</code> through
+  <code>resolve_callable_target_inner</code>, walks every statement in the file
+  (<code>find_fcc_target_in_stmts</code>) looking for the last first-class-callable
+  assignment to the variable.</li>
+</ul>
+<p><strong>Where to look:</strong> <code>declared_param_docblock_type</code> in
+<code>type_engine/variable/resolution.rs</code>, <code>find_iterable_raw_type_in_source</code>
+in <code>docblock/tags.rs</code>, and <code>find_fcc_target_in_stmts</code> in
+<code>signature_help.rs</code>.</p>
 <hr />
 <h2 id="p21-offset-shifting-for-cached-diagnostics-on-partial-edits">P21. Offset-shifting for cached diagnostics on partial edits<a class="headerlink" href="#p21-offset-shifting-for-cached-diagnostics-on-partial-edits" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Very High</strong></p>
