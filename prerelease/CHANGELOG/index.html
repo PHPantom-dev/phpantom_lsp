@@ -5108,6 +5108,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Blade <code>{{!!$flag}}</code>.</strong> A double negation written without a space is an escaped echo again, instead of a raw echo that broke the rest of the template.</li>
 <li><strong>An assignment is seen by the rest of the expression it sits in.</strong> In <code>if (($user = find($id)) &amp;&amp; $user-&gt;isActive())</code>, the right-hand side now knows what <code>$user</code> holds, and <code>[$i++, $i]</code> holds the old <code>$i</code> in its first item and the incremented one in its second.</li>
 <li><strong>Narrowing follows the order a condition is evaluated in.</strong> In <code>if ($x instanceof Foo &amp;&amp; ($x = make()))</code> the body sees what <code>make()</code> returned, and a call that changes an object between two checks drops what the first one proved. A check inside one argument no longer narrows the arguments after it.</li>
 <li><strong>Ternary and <code>match</code> arms see what was assigned earlier in the statement.</strong> In <code>[$x = 1, $x &gt; 0 ? needInt($x) : 0]</code>, the arm reads the <code>1</code> rather than what <code>$x</code> held before the statement.</li>
