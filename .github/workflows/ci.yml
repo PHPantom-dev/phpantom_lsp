@@ -148,7 +148,9 @@ jobs:
           # unused -- and the restored target cache leaves a partial one
           # behind that it then errors on for every benchmark.
           rm -rf target/criterion
-          cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
+          cargo bench --bench completion --bench references \
+            --bench laravel_completion --bench custom_builder \
+            -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         shell: bash
         run: |
@@ -201,7 +203,9 @@ jobs:
         shell: bash
         run: |
           rm -rf target/criterion
-          cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
+          cargo bench --bench completion --bench references \
+            --bench laravel_completion --bench custom_builder \
+            -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         if: steps.check-gh-pages.outputs.exists == 'true'
         shell: bash
@@ -227,6 +231,30 @@ jobs:
           alert-threshold: "130%"
           fail-on-alert: true
           alert-comment-cc-users: "@AJenbo"
+
+  scaling:
+    name: Scaling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.CARGO_BUILD_TARGET }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: build
+      - name: Set up musl build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools mold
+          mkdir -p .cargo
+          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
+      - name: Build release binary
+        run: cargo build --release
+      # Compares the time of each pathological input shape at N and 2N,
+      # so it needs no history and holds on any runner.
+      - name: Check how analysis cost grows with input size
+        run: python3 benches/scaling.py --binary "target/$CARGO_BUILD_TARGET/release/phpantom_lsp"
 
   memory-benchmark:
     name: Memory Benchmark

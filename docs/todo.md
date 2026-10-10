@@ -170,11 +170,14 @@ unlikely to move the needle for most users.
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Medium      |
 |     | **[Performance](todo/performance.md)**                                                                                       |             |             |
-| P51 | [CI checks for how cost grows with input size](todo/performance.md#p51-ci-checks-for-how-cost-grows-with-input-size)                                                      | Medium      | Low-Medium  |
 | P75 | [Closures and calls through a variable on a long file rescan it](todo/performance.md#p75-closures-and-calls-through-a-variable-on-a-long-file-rescan-it)                 | Medium      | Medium      |
+| P76 | [Literal-key writes under separate `if`s grow far faster than their count](todo/performance.md#p76-literal-key-writes-under-separate-ifs-grow-far-faster-than-their-count)  | Medium      | Medium      |
+| P77 | [A long method chain costs the cube of its length](todo/performance.md#p77-a-long-method-chain-costs-the-cube-of-its-length)                                                | Medium      | Medium      |
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Very High   |
 | P73 | [A lazily loaded file is parsed three times](todo/performance.md#p73-a-lazily-loaded-file-is-parsed-three-times)                                                          | Low-Medium  | Low         |
 | P74 | [Every class lookup by name re-parses and lowercases the name](todo/performance.md#p74-every-class-lookup-by-name-re-parses-and-lowercases-the-name)                      | Low-Medium  | Low         |
+| P78 | [A `switch` over thousands of distinct literals is still quadratic](todo/performance.md#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic)                | Low-Medium  | Medium      |
+| P79 | [Writes under the same dynamic key in separate `if`s are quadratic](todo/performance.md#p79-writes-under-the-same-dynamic-key-in-separate-ifs-are-quadratic)                | Low-Medium  | Medium      |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |
 | X6  | Disk cache (evaluate later)                                                                                                                                                 | Medium      | Very High   |

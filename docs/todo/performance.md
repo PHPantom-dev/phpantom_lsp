@@ -20,37 +20,6 @@ against that bar.
 
 ---
 
-## P51. CI checks for how cost grows with input size
-
-**Impact: Medium · Complexity: Low-Medium**
-
-CI already catches regressions on fixed inputs: `benchmark-pr` fails a
-pull request when the `completion` bench regresses past 130% of its
-history, and `memory-benchmark-pr` does the same for
-`benches/memory_usage.py`. Two gaps remain:
-
-- Only `--bench completion` runs. `references`, `laravel_completion` and
-  `custom_builder` are registered in `Cargo.toml` but never run.
-- Nothing checks how cost grows with the size of an input. Every
-  performance problem users have hit so far was a growth problem on an
-  input of an unusual shape (thousands of calls to undefined functions,
-  hundreds of Blade views without a DocBlock, a `switch` assigning
-  hundreds of distinct literals, a long top-level script), and a
-  benchmark over fixed fixtures cannot see one until a project that has
-  the shape reports it.
-
-Add a scaling check: generate each known pathological shape (a long
-top-level script, a `switch` over N distinct literals, N conditional
-array writes, N calls to undefined functions, a long method chain) at N
-and 2N, analyse both, and fail when doubling the input more than about
-2.5 times the time. A ratio is independent of the machine's speed, so the
-check can run on a CI runner, and each shape fixed later joins the set.
-
-**Where to look:** `.github/workflows/ci.yml`'s `benchmark`/
-`benchmark-pr` jobs; `benches/` for the registered benches.
-
----
-
 ## P75. Closures and calls through a variable on a long file rescan it
 
 **Impact: Medium · Complexity: Medium**
@@ -68,6 +37,7 @@ call through the variable holding it (`$f($a)`), takes:
 | 22,000 | 5.8 s              |
 
 where the same script without those two lines takes 0.9 s at 22,000.
+`benches/scaling.py`'s `long_script_closure_calls` shape reproduces it.
 Nearly all of the difference is in:
 
 - `seed_closure_params` (forward walk) asks
@@ -86,6 +56,63 @@ Nearly all of the difference is in:
 `type_engine/variable/resolution.rs`, `find_iterable_raw_type_in_source`
 in `docblock/tags.rs`, and `find_fcc_target_in_stmts` in
 `signature_help.rs`.
+
+---
+
+## P76. Literal-key writes under separate `if`s grow far faster than their count
+
+**Impact: Medium · Complexity: Medium**
+
+A function that fills in an array one literal key at a time, each write
+under its own `if`, costs far more than the square of the number of
+writes. `benches/scaling.py`'s `conditional_array_writes` shape, on a
+release build:
+
+| Writes | analyse wall clock |
+| ------ | ------------------ |
+| 150    | 0.08 s             |
+| 300    | 2.2 s              |
+| 500    | 7.2 s              |
+| 1,000  | 140 s              |
+
+A settings or report array assembled this way can carry a few hundred
+keys. About 60% of the samples are in `ProofMap::push_unique`, called from
+`join_implied_narrowings` at each `if`'s join: the implied narrowings
+built up so far are compared item by item against the incoming ones, and
+cloning and dropping `Vec<ImpliedNarrowing>` takes most of the rest.
+
+**Where to look:** `join_implied_narrowings` in
+`type_engine/variable/forward_walk/scope_state/proofs.rs` and
+`ProofMap::push_unique` in `scope_state/proof_map.rs`.
+
+---
+
+## P77. A long method chain costs the cube of its length
+
+**Impact: Medium · Complexity: Medium**
+
+Generated query builders and API clients produce fluent chains hundreds
+of links long. `benches/scaling.py`'s `method_chain` shape (one chain of
+`->self()` links on a `@return static` method), on a release build:
+
+| Links | analyse wall clock |
+| ----- | ------------------ |
+| 200   | 0.46 s             |
+| 300   | 1.0 s              |
+| 400   | 2.5 s              |
+| 600   | 7.1 s              |
+
+Most of the samples are in building and splitting the text of each link's
+subject: `SubjectExpr::to_subject_text`, `split_last_arrow_raw`,
+`subject_scope_key` and hashing the result. Each link renders the text of
+the whole receiver chain before it and then rescans that text, so every
+link costs time in proportion to the chain's length, and the chain's
+links are resolved more than once over.
+
+**Where to look:** `split_last_arrow_raw` and
+`SubjectExpr::to_subject_text` in `type_engine/subject_expr.rs`,
+`subject_scope_key` and `resolve_target_classes_expr` in
+`type_engine/resolver/mod.rs`.
 
 ---
 
@@ -186,6 +213,50 @@ under mimalloc, so confirm this one with an order-swapped A/B run.
 **Where to look:** `find_or_load_class` in `resolution.rs`,
 `PhpType::try_parse` in `php_type/parse.rs`, `is_scalar_name` and
 `is_keyword_type` in `php_type/keywords.rs`.
+
+---
+
+## P78. A `switch` over thousands of distinct literals is still quadratic
+
+**Impact: Low-Medium · Complexity: Medium**
+
+A `switch` that assigns a different literal in each case is fast at the
+sizes real lookup tables reach, but each case's join still costs time in
+proportion to the cases before it. `benches/scaling.py`'s
+`switch_literals` shape, on a release build:
+
+| Cases | analyse wall clock |
+| ----- | ------------------ |
+| 2,000 | 0.45 s             |
+| 4,000 | 1.6 s              |
+| 8,000 | 6.3 s              |
+
+About a fifth of the samples are in `decode_php_string_literal`, decoding
+the same literals again at each join, and most of the rest are in
+`dedup_types` and `is_subtype_of` comparing the growing union against
+itself.
+
+**Where to look:** `dedup_types` and `hash_for_dedup` in
+`php_type/normalize.rs`, `decode_php_string_literal` in `text_scan.rs`
+and its callers in `php_type/subtype.rs`.
+
+---
+
+## P79. Writes under the same dynamic key in separate `if`s are quadratic
+
+**Impact: Low-Medium · Complexity: Medium**
+
+N `if`s each writing a different shape to `$data[$id]` cost time in
+proportion to the square of N. `benches/scaling.py`'s
+`conditional_dynamic_writes` shape, on a release build, takes 0.2 s at
+2,000 writes and 0.7 to 1.2 s at 4,000. The samples are spread over
+cloning and dropping `Vec<ImpliedNarrowing>` and `Vec<ResolvedType>` at
+each join and the allocator behind them, so the joins are likely copying
+state that grows with the writes before them. This may share a cause with
+P76.
+
+**Where to look:** `join_implied_narrowings` in
+`type_engine/variable/forward_walk/scope_state/proofs.rs`.
 
 ---
 
