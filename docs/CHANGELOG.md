@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A template next to other types in a parameter union binds only what they leave over.** Passing `string|float|bool|null` values to a `@param array<K, T|string|null>` now binds `T` to `float|bool`, so the call's return type no longer brings back the `null` the function filtered out. Closes #435.
+- **A failed call with several `@phpstan-assert-if-true` tags narrows none of its arguments.** When `bothDefined($start, $end)` returns false, `$start` and `$end` are no longer both taken to be `null`, since only one of the promises has to have failed.
+- **A template next to other types in a parameter union binds only what they leave over.** Passing `string|float|bool|null` values to a `@param array<K, T|string|null>` now binds `T` to `float|bool`, so the call's return type no longer brings back the `null` the function filtered out.
 - **A passing strict `in_array()` against `object` elements keeps the needle's classes.** A `Foo|Bar|string` needle checked against a `list<object>` still reads as `Foo` or `Bar` inside the branch.
 - **A typed array no longer proves it holds the keys an open array shape requires.** A parameter declared `array<string, int>` or `list<int>` is no longer taken to match an `array{foo: int, ...}` or `list{int, ...}` it says nothing about.
 - **Shape keys spelled as class constants are read as the keys they hold.** A docblock shape like `array{Slots::NAME: string, Slots::AGE: int}` whose constants are `0` and `1` is now accepted where a `list` is expected.
@@ -76,12 +77,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Blade only recognizes the directives your Laravel version has.** A directive newer than the installed Laravel is plain text, the way Blade itself treats it. A `"@context"` key in a JSON-LD block no longer produces a cascade of syntax errors on Laravel versions before 11.
 - **A container binding removed from a service provider stops resolving.** Deleting the last `$this->app->bind(...)` from your providers no longer leaves the old key resolving to its class until restart.
 - **Member actions appear when the selection starts in the indentation.** Getter/setter, property hooks, visibility and other actions on a property or method are now offered with the cursor at column 0, on a whole-line selection, or when the selection begins on the line above.
-- **A `match (true)` arm knows the arms above it did not match.** `match (true) { $name === null => 'none', default => strtoupper($name) }` no longer reports `$name` as possibly `null` in the `default` arm. Hover, completion, and the value of the `match` see the same narrowing, wherever `default` is written. Contributed by @phcorp. Closes #464.
+- **A `match (true)` arm knows the arms above it did not match.** `match (true) { $name === null => 'none', default => strtoupper($name) }` no longer reports `$name` as possibly `null` in the `default` arm. Hover, completion, and the value of the `match` see the same narrowing, wherever `default` is written. Contributed by @phcorp.
 - **Imports of non-ASCII class names no longer break a file.** An import such as `use App\Models\Øl;` no longer stops the file's diagnostics and code actions.
 - **Files outside the project no longer break indexing.** A PHP file opened from elsewhere, or a file change in another folder of the editor's workspace, no longer stops the server when the configuration changes or drops the other file changes reported with it.
 - **Blade `@break` and `@continue` keep their condition.** `@break($done)` and `@continue($skip)` in a loop now only leave the iteration when the condition holds, instead of being read as an unconditional jump.
-- **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp. Closes #467.
-- **Type checks narrow properties the way they narrow variables.** `if (\is_resource($this->stream)) { fclose($this->stream); }` on a `resource|null` property no longer reports "expects resource, got resource|null". Every type-check function now narrows a property, with or without a leading backslash. Contributed by @phcorp. Closes #466.
+- **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp.
+- **Type checks narrow properties the way they narrow variables.** `if (\is_resource($this->stream)) { fclose($this->stream); }` on a `resource|null` property no longer reports "expects resource, got resource|null". Every type-check function now narrows a property, with or without a leading backslash. Contributed by @phcorp.
 - **`\extract()` and `\compact()` are recognised with a leading backslash.** Variables they define or read are no longer reported as undefined or unused.
 - **A Blade template's first import no longer breaks the view.** When a template's first line opens a block, such as `@if` or a component tag, completing a class adds its `@use` above that line instead of inside the block, where the view would no longer compile. A template that opens with `@php` gets the import as a `use` statement inside that block.
 - **Unused `@use` imports in Blade templates are dimmed.** A `@use` directive that nothing in the template uses is now shown as unused, the way an unused PHP import is, and `phpantom_lsp fix` removes it.
@@ -150,7 +151,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Exclude paths and add PHP extensions.** `[indexing] exclude` in `.phpantom.toml` takes gitignore-style patterns to skip during indexing and `analyze`, and `[indexing] extensions` adds file types to treat as PHP (e.g. `["module", "inc", "theme"]` for Drupal). Open files are always served. Contributed by @syntlyx.
 - **Editor file settings reach the index.** The `[indexing]` lists can also come from the editor. VS Code and Cursor send `files.exclude` and `files.associations` automatically, and other editors can pass them as initialization options (see [Editor Setup](editor-setup.md)). Editor and project settings are combined, and changes from either apply mid-session without a restart.
-- **Symlinked directories are indexed.** Code linked into the project from elsewhere resolves like any other project code, and paths keep their symlinked spelling. Contributed by @liudashuang. Closes #383.
+- **Symlinked directories are indexed.** Code linked into the project from elsewhere resolves like any other project code, and paths keep their symlinked spelling. Contributed by @liudashuang.
 
 #### Tooling and platform
 
@@ -356,7 +357,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Blade templates
 
 - **Blade parsing follows the compiler.** An `@` inside a word is not a directive, `)` or `]` inside PHP comments no longer closes directive arguments, a directive ends a multi-line echo that contains it, quotes in `@verbatim` no longer leak into PHP, and a commented-out `@use` is not an import.
-- **Escaped frontend interpolations are left alone.** `@{{ name }}` and `@{!! name !!}` are not parsed as PHP, including across lines. Contributed by @shuvroroy. Closes #419.
+- **Escaped frontend interpolations are left alone.** `@{{ name }}` and `@{!! name !!}` are not parsed as PHP, including across lines. Contributed by @shuvroroy.
 - **Highlighting and hover agree with the compiler.** `@@if`, `@{{ … }}`, and `@verbatim`/`@php` content are no longer coloured as Blade, and echo-delimiter lookalikes no longer trigger hover or go-to-definition.
 - **Unbalanced-directive and slot checks.** Two-argument `@push`, `@prepend`, and `@slot` are not unclosed blocks, `<x-slot:title>` is closed by `</x-slot>`, and `<x-slot name="footer">` shows as `x-slot:footer` in the outline.
 - **Component attributes are typed from the right expression** even when `@class`, `@style`, or `@json` appear earlier.
@@ -369,9 +370,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Editor features
 
-- **Go-to-definition on a subclass name no longer jumps to its parent.** At its own declaration it answers with itself, so "Declaration or Usages" in PhpStorm and Zed can show usages. The `extends` clause still navigates to the parent. Closes #389.
-- **Go-to-definition on a member declaration no longer jumps to the prototype.** Methods, constants, and enum cases answer with their own location, and Go to Implementation and the `implements`/`extends` clauses still reach the prototype. Contributed by @EranNL. Closes #412.
-- **Methods implementing an interface keep their reference-count lens** alongside the prototype lens. Closes #412.
+- **Go-to-definition on a subclass name no longer jumps to its parent.** At its own declaration it answers with itself, so "Declaration or Usages" in PhpStorm and Zed can show usages. The `extends` clause still navigates to the parent.
+- **Go-to-definition on a member declaration no longer jumps to the prototype.** Methods, constants, and enum cases answer with their own location, and Go to Implementation and the `implements`/`extends` clauses still reach the prototype. Contributed by @EranNL.
+- **Methods implementing an interface keep their reference-count lens** alongside the prototype lens.
 - **Go to Implementation finds trait methods.** Methods a class takes from a trait are listed, as are classes using a trait's abstract method. Contributed by @sidux.
 - **Find References is more reliable.** It finds implementations inside dependencies, no longer mixes up cached results between files, and shows progress for constants.
 - **The reference-count lens stays accurate** when files are closed or changed on disk, and new files are counted.
@@ -396,7 +397,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Formatting and command line
 
-- **phpcbf works on projects without a `phpcs.xml`.** Closes #440.
+- **phpcbf works on projects without a `phpcs.xml`.**
 - **phpcbf exit codes 2 and 4 no longer fail formatting.** These report remaining or conflicting issues, not errors.
 - **Pint uses the project's `pint.json`.** External formatters now run from the workspace root.
 - **Pint no longer stalls on large files.**
@@ -435,7 +436,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Blade templates
 
-- **Template variables come from a clear priority chain.** A template's variables are resolved from, in order: a `@bladestan-signature` docblock, `@props` and `@aware`, the component class (or Livewire's `$this`), `View::share()` and `View::composer()` registrations, the layout it extends, and finally the data passed at its render sites. Completion, hover, go-to-definition, and undefined-variable diagnostics all use the same set, alongside the variables Blade injects itself. Closes #296.
+- **Template variables come from a clear priority chain.** A template's variables are resolved from, in order: a `@bladestan-signature` docblock, `@props` and `@aware`, the component class (or Livewire's `$this`), `View::share()` and `View::composer()` registrations, the layout it extends, and finally the data passed at its render sites. Completion, hover, go-to-definition, and undefined-variable diagnostics all use the same set, alongside the variables Blade injects itself.
 - **Every way of rendering a template is recognised.** `view()`, `View::make()`, `Route::view()`, `Response::view()`, the view factory's render helpers, mailable views, and Blade's `@include` family, `@extends`, and `@each` all navigate, hover, complete, and pass their data to the template. This works however the view factory or mailable is obtained, and data passed as a typed array is read from its type. Contributed by @shuvroroy (#337).
 - **Render calls are checked against the template's contract.** When a template declares what it needs, a missing variable, a variable of the wrong type, or a key the template never reads is reported at the render call, matching what Bladestan reports in CI. Templates that declare nothing are not checked, so this is opt-in.
 - **Blade components are first-class.** `<x-alert>`, `<x-forms.date-picker>`, and `<livewire:counter>` navigate to their class or template, complete after `<x-` or `<livewire:`, and complete attributes from the constructor, `mount()`, or `@props`. Wrong attribute types and missing required attributes are reported on the tag, and `$component` works inside the tag body.
@@ -499,7 +500,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **One parser for all PHPDoc.** `@psalm-` and `@phpstan-` prefixed tags are treated as the same tag as their plain form everywhere, with the prefixed version taking precedence. Multi-line types, variance annotations, tags indented with extra spaces, and half-written docblocks are all handled more reliably, and prose after a type no longer leaks into it.
 - **Property hover shows the effective type on a `var` line.** Like method hover, the resolved type is shown above the code, and the code itself shows only the native declaration. Contributed by @calebdw.
 - **Live progress counts.** Indexing progress advances file by file with live counts (e.g. "Scanning vendor packages (3201/8544 files)"). Go to Implementation, Find References, and Type Hierarchy show the same live progress.
-- **One slow file no longer stops workspace diagnostics.** Previously a single file the analyser could not finish froze the progress bar and left the rest of the project undiagnosed. Now the other files keep going, a file still running after two seconds is named in the progress message, and one that takes more than ten is skipped and logged so it can be reported. Opening the file still diagnoses it normally. Closes #361.
+- **One slow file no longer stops workspace diagnostics.** Previously a single file the analyser could not finish froze the progress bar and left the rest of the project undiagnosed. Now the other files keep going, a file still running after two seconds is named in the progress message, and one that takes more than ten is skipped and logged so it can be reported. Opening the file still diagnoses it normally.
 - **External tool re-runs only refresh files that changed.** A project-wide PHPStan, PHPCS, or Mago run no longer re-sends diagnostics for every file, only for files whose results differ.
 - **Updated the bundled mago toolchain to 1.46.0.** Contributed by @enwi in https://github.com/PHPantom-dev/phpantom_lsp/pull/234.
 - **Updated embedded phpstorm-stubs.** Adds PHP 8.6 coverage and corrects several signatures, including Redis, FFI, enchant, xmlreader, `openssl_x509_parse()`, and `htmlspecialchars()`.
@@ -531,14 +532,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Narrowing
 
 - **`instanceof` narrows to exactly what it proves.** A successful check keeps a generic's type arguments (`Collection<User>` stays `Collection<User>`), replaces a wider type such as `object|null` instead of adding the class beside it, and drops the array half of a union like `UploadedFile|array<UploadedFile>|null`. Ruling a class out of a class-and-scalar union such as `Decimal|float` now leaves the scalar instead of dropping the whole union, and the `if (!$x instanceof Foo) { throw … }` guard narrows the same way as `assert()`.
-- **An `instanceof` check on an `object|string` value narrows it to the class.** `if ($server instanceof Server)` on a route parameter typed `object|string` used to give `object|string|Server`, so passing it on was reported as a type error. The check's result is now the whole answer, including in guards like `if (! $server instanceof Server || ! canManage($server))`. Closes #359.
+- **An `instanceof` check on an `object|string` value narrows it to the class.** `if ($server instanceof Server)` on a route parameter typed `object|string` used to give `object|string|Server`, so passing it on was reported as a type error. The check's result is now the whole answer, including in guards like `if (! $server instanceof Server || ! canManage($server))`.
 - **`instanceof` on a nested property keeps the declared class.** `$this->holder->service instanceof MockInterface` now gives both the declared class and the interface, as the one-level form already did.
 - **A value proven to be two types at once is an intersection.** `$x instanceof Reader && $x instanceof Writer`, or `assertInstanceOf()` and `assert()` on a mock, now give `Reader&Writer` (or `MethodNode&MockObject`) instead of a union that satisfies neither. An existing intersection narrows within itself, and an `||` check still only proves one of its alternatives.
 - **`is_a($x, Foo::class, true)` keeps the class-string case.** On an `object|string` value the check now narrows to `Foo|class-string<Foo>`, so a following `is_string()` check is no longer reported as always false.
 - **`get_class($v) !== Foo::class` keeps subclasses.** A subclass's `get_class()` names the subclass, so it now survives the check instead of being ruled out with `Foo`.
 - **`match ($value::class)` narrows its subject in each arm.** Each arm narrows the subject to the classes it names, so handlers typed for those classes no longer report a mismatch.
 - **Negated `null` checks are read correctly.** `!($v != null)` no longer narrows to `null` (loose equality also matches `''`, `0`, and `[]`), and `!($v === null)` now proves the value is not null.
-- **`filled()` and `blank()` narrow their argument.** `if (filled($search))` now removes `null` from a `?string`. Assertions written as unions (`!=null|''`) work, and equality-form assertion tags no longer narrow the opposite branch to a wrong type. Closes #375.
+- **`filled()` and `blank()` narrow their argument.** `if (filled($search))` now removes `null` from a `?string`. Assertions written as unions (`!=null|''`) work, and equality-form assertion tags no longer narrow the opposite branch to a wrong type.
 - **Laravel's bail-out helpers narrow the code after them.** After `abort_if($user === null, 404)`, `abort_unless()`, `throw_if()`, or `throw_unless()`, the value is narrowed with every guard form an `if` understands. More generally, any function whose conditional return type has a `never` branch now narrows the argument that would select it, for variables, properties, and array elements.
 - **Calling a `never` function or method ends the branch.** Guards like `if (!$x instanceof Foo) { abort(); }` narrow what follows when `abort()` returns `never`, for functions, static calls, and methods (declared, inherited, or from a trait), whatever the call is written on (`app()->abort(422)`, `$this->responder->abort(422)`, …). Assignments in such a branch are treated as dead code.
 - **Guards written with `if: … endif;` narrow.** The colon syntax now exits the same way the brace form does.
@@ -559,7 +560,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ternaries and `match` arms see what their condition proved.** Each arm of a ternary is resolved under its own side of the condition, wherever the ternary appears (assignments, arguments, returns, `throw`, `new Foo(…)`), for every kind of check, including the explicit `$x ? $x : ''` form and repeated properties like `$article->alt ? $article->alt : $article->title`. `match (true)` arms narrow their results the same way, and later arms know the earlier ones failed.
 - **A guard inside an `echo` narrows.** Ternaries, `&&` chains, and `match (true)` in an echoed expression now narrow, which fixes Blade `{{ … }}` echoes as well as plain PHP.
 - **Checks on a function or static call carry to the same call written again.** `if (currentUser()) { render(currentUser()); }`, `Session::current()`, and guards like `if (mb_strpos($slug, $m) !== false) { … mb_strpos($slug, $m) … }` now narrow the repeated call. Arguments are part of the match, and the proof ends when anything the call reads is written, at the end of the branch, or on the next loop iteration. Calls that return something different each time (`fgets()`, `array_shift()`, `time()`, `rand()`) are never remembered.
-- **A check on a method call narrows the same call.** `if ($this->getHttpKernel() instanceof TerminableInterface) { $this->getHttpKernel()->terminate(...); }` and scalar checks like `$this->value() !== false` now narrow the repeated argument-less call, through `instanceof`, `assert()`, `is_a()`, and truthy or null tests, including where the call is passed as an argument. Completion, hover, and go-to-definition see it too. Closes #333.
+- **A check on a method call narrows the same call.** `if ($this->getHttpKernel() instanceof TerminableInterface) { $this->getHttpKernel()->terminate(...); }` and scalar checks like `$this->value() !== false` now narrow the repeated argument-less call, through `instanceof`, `assert()`, `is_a()`, and truthy or null tests, including where the call is passed as an argument. Completion, hover, and go-to-definition see it too.
 - **Remembered checks expire when their state may have changed.** A call on a receiver drops what was proven about other calls, properties, and elements read through it (unless the callee is `@pure`), and assigning a new object to `$a` ends earlier checks on `$a->value`. Properties checked before a method call on the same object keep their narrowing.
 - **`?->` chains narrow their receivers.** Inside `if ($image?->file_id !== null)`, after `$period = $agreement?->latestPeriod(); if (!$period instanceof Period) { return; }`, and when a `?->` chain is compared with a non-null value, every receiver along the chain is known to be non-null.
 - **Static properties remember writes and checks.** The lazy-initialisation idiom `if (self::$repo === null) { self::$repo = new Repo(); } return self::$repo;` now returns `Repo`, not `?Repo`.
@@ -608,12 +609,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Union types are cleaner.** Repeated alternatives are dropped, a class and its generic form are not listed twice, `true|false` becomes `bool`, and `(A|B)&C` keeps its parentheses in hover and messages. Two classes with the same short name in different namespaces are no longer collapsed into one.
 - **An untypeable branch widens the result instead of vanishing.** `array_key_exists('k', $s) ? $s['k'] : 'exception'` on `array|string|null` no longer resolves to just `'exception'`, and reading an offset from a string gives `string`.
 - **Writes through `__set` no longer change what `__get` returns.** `$bag->a = 9` on a class with a magic setter no longer makes the next read `9`.
-- **Assignments through a by-reference closure capture are kept.** A closure with `use (&$var)` now widens the outer variable even when PHPantom cannot prove when it runs, as PHPStan does. Closes #329.
+- **Assignments through a by-reference closure capture are kept.** A closure with `use (&$var)` now widens the outer variable even when PHPantom cannot prove when it runs, as PHPStan does.
 - **`$this` in nested `@param-closure-this` closures resolves to the innermost binding.** Nested route groups and macros resolve `$this`, `self::`, and `static::` correctly, including when the outer closure is stored in a variable or returned. The tag's class is now looked up in the file that declares it, not the calling file.
 - **Static calls resolve as accurately as instance calls.** `Foo::bar()` now handles `@phpstan-type` aliases, inherited generic return types, and the `__callStatic()` fallback.
 - **`$string::method()` is not reported as scalar access.** A static call on a `string` is valid PHP and is now left unchecked, and on a `class-string<T>` it resolves against `T` (`$job->class_name::dispatch()`).
 - **Every feature resolves types as well as hover does.** Return types inferred from method bodies, Laravel auth guard models, and validation rule shapes were only used by hover, completion, and diagnostics. Go-to-definition, references, signature help, code actions, rename, and inlay hints now use them too.
-- **PHP 8.4 property hook bodies are analysed.** Navigation, hover, and completion now work inside `get` and `set` hooks, including hooks on promoted constructor properties, with `$this` and `$value` typed. Closes #342.
+- **PHP 8.4 property hook bodies are analysed.** Navigation, hover, and completion now work inside `get` and `set` hooks, including hooks on promoted constructor properties, with `$this` and `$value` typed.
 - **Parent property hook calls are understood.** `parent::$label::get()` is no longer reported as two missing members, and an ordinary `Registry::$instance::get('service')` is no longer mistaken for a hook call.
 
 #### Generics and templates
@@ -625,7 +626,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Templates bind from every place they appear.** A template used by several parameters (`@param T[] $first, @param T[] $second`) is the union of all of them, a template in one alternative of a union `@param` (`Collection<TKey, TValue>|array<TKey, TValue>`, `iterable<…>|TWrapValue`) binds from the alternative the argument matches, and a property argument (`$this->items`) binds as well as a local does.
 - **Templates keep the full type of an argument.** `passthrough(Carbon::create(2024))` now binds `?Carbon` rather than `Carbon`, the same as when the call is assigned to a variable first.
 - **An argument is not checked against a template only it bound.** `assertSame(url('/login'), $x)` and `$this->travelTo(Carbon::create(2024))` no longer report circular mismatches.
-- **Callback return types bind templates correctly.** Every template in a callback's declared return shape now binds (so `Collection::flatMap()` gives the right key and value types), and the body is used when the closure's annotation says less. Closes #332.
+- **Callback return types bind templates correctly.** Every template in a callback's declared return shape now binds (so `Collection::flatMap()` gives the right key and value types), and the body is used when the closure's annotation says less.
 - **A callback whose body is a call binds the template it returns.** `->keyBy(fn (Review $r) => $r->getRating())` now binds `int` as the key.
 - **Closure parameters typed `array` take the element type from the call.** `array_map(static fn (array $case) => $case[0]->name, …)` now types `$case` from the array, including when the array is an inline call like `iterator_to_array(self::cases())`.
 - **Named arguments bind to the right parameters.** Reordered or skipped named arguments no longer break template bindings or closure parameter types.
@@ -637,7 +638,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Arrays and built-in functions
 
-- **`array_filter()` narrows what survives.** A callback that tests values (`fn ($v) => $v !== null`, `'is_int'`, `instanceof`) narrows the element type, one that tests keys narrows the key type, and both narrow together with `ARRAY_FILTER_USE_BOTH`. This also works for `array<T>` and `T[]`. Closes #376.
+- **`array_filter()` narrows what survives.** A callback that tests values (`fn ($v) => $v !== null`, `'is_int'`, `instanceof`) narrows the element type, one that tests keys narrows the key type, and both narrow together with `ARRAY_FILTER_USE_BOTH`. This also works for `array<T>` and `T[]`.
 - **`array_filter()` without a callback removes falsy values.** An `array<string, string|null>` comes back without `null`. This also improves `if ($x)` and `$x ?:` on unions.
 - **A filtered list is no longer a `list`.** `array_filter()` keeps keys, so its result is `array<int, T>`. `array_values()` still gives a list.
 - **Array builtins answer in terms of the array they were given.** `array_keys()`, `array_values()`, `array_search()`, `array_key_first()`, `array_key_last()`, and `key()` use the array's real key and value types. `array_pop()`, `array_slice()`, `array_merge()`, `current()`, and the rest now keep scalar element types (a `list<string>` pops a `string`) and unwrap nested arrays by one level.
@@ -672,7 +673,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Name resolution
 
-- **Names resolve against the current namespace like PHP does.** Unqualified and qualified class names (`B::x()`, `new View\Event()`) in a namespace now resolve to the same-namespace class before a global one, and imports of the first segment take precedence. This applies inside plain functions, file-scope closures, and top-level code as well as classes. Closes #299.
+- **Names resolve against the current namespace like PHP does.** Unqualified and qualified class names (`B::x()`, `new View\Event()`) in a namespace now resolve to the same-namespace class before a global one, and imports of the first segment take precedence. This applies inside plain functions, file-scope closures, and top-level code as well as classes.
 - **Files with several `namespace` blocks are analysed correctly.** Code after the second `namespace` line is resolved against that namespace, calls to functions in another block of the same file have their return type, and classes in a global `namespace { }` block keep their global name (`PDO` is no longer `Pdo\PDO`).
 - **Functions called through an imported namespace are found.** `use Core\Ip;` followed by `Ip\isIpAllowed()` is no longer reported as undefined. Contributed by @petrovo-as.
 - **Namespaced constants are found however they are written.** `Config\GRADES`, `\App\Config\GRADES`, `use const` imports, and fully-qualified globals like `\PHP_EOL` now resolve.
@@ -715,18 +716,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Laravel
 
-- **Custom Eloquent builders keep their model.** `SiteCertificate::query()->whereKey($id)->firstOrFail()` now returns `SiteCertificate` when the model uses a custom builder, with or without generics and at any depth of builder inheritance. Closes #362.
+- **Custom Eloquent builders keep their model.** `SiteCertificate::query()->whereKey($id)->firstOrFail()` now returns `SiteCertificate` when the model uses a custom builder, with or without generics and at any depth of builder inheritance.
 - **Custom builders are no longer cached half-built.** A builder could get stuck without its virtual members and mixin methods until the file was edited.
 - **Query chains keep the model through `Query\Builder` methods.** Methods reached through `@mixin` (such as `lockForUpdate()`) keep `Builder<TModel>`, including on relations. Contributed by @calebdw.
 - **Eloquent inference works for aliased models.** `use App\Models\Channel as ChannelModel` now types `ChannelModel::whereName(...)->firstOrFail()` correctly. Contributed by @calebdw.
-- **Builder methods chained on a relation stay on the relation.** `$this->belongsTo(Author::class)->withTrashed()` returns a `BelongsTo`, so methods declared `: BelongsTo` are no longer reported. Closes #354.
+- **Builder methods chained on a relation stay on the relation.** `$this->belongsTo(Author::class)->withTrashed()` returns a `BelongsTo`, so methods declared `: BelongsTo` are no longer reported.
 - **Queries return the model's own collection class.** `get()`, relation properties, and relation queries now return the collection set by `#[CollectedBy]`, `HasCollection`, or `newCollection()`.
 - **Models always have a primary key.** `$model->id` resolves without a migration, honouring `$primaryKey` and `$keyType`.
 - **Framework internals no longer appear as model properties.** Methods like `hasMany` and `belongsTo` are no longer offered as relationship properties.
 - **Factories use their declared `$model`.** A factory's `$model` property now decides the model for `make()`, `create()`, and the rest, through shared base factories too, and a nullable `count()` keeps the model-or-collection union. Contributed by @shuvroroy (#364).
 - **Factories keep their model through a shared base factory.** Naming conventions now apply to the concrete factory, not the base. Contributed by @shuvroroy (#356).
 - **Collection re-keying methods rebind keys correctly.** `keyBy()`, `groupBy()`, and `mapWithKeys()` work on collection subclasses that only use `@extends`, `mapWithKeys()` binds the array's key rather than the whole array, and `static fn` and unannotated callbacks bind the key from their body.
-- **`auth()->user()` and `Auth::user()` return the configured model.** Completion, hover, navigation, and diagnostics see the concrete model. Closes #298.
+- **`auth()->user()` and `Auth::user()` return the configured model.** Completion, hover, navigation, and diagnostics see the concrete model.
 - **`App::make()`, `makeWith()`, and `resolve()` return the requested class.** `App::make(CurrencyHelper::class)->format()` now resolves, including when chained directly.
 - **Facade static calls keep concrete return types.** Calls through facades resolve via `getFacadeAccessor()` and `@mixin` targets before `__callStatic()`. Contributed by @calebdw.
 - **Dotted container keys are not truncated.** `app('demo.bakery')` no longer resolves to a class named `Demo`.
@@ -738,7 +739,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`view('name')` returns the concrete `Illuminate\View\View`.** Components declaring `render(): View` no longer report a mismatch.
 - **View names with `/` resolve.** `view('redirects/create')` and `@include('partials/modal')` work like the dotted spelling.
 - **Custom view directories are recognized.** Views under paths registered in `config/view.php` resolve, complete, and navigate.
-- **Routes under dynamic groups are not reported as unknown.** Groups named with a variable (`Route::name($panelId)`, `Route::name('filament.' . $panelId . '.')`, `Route::group(['as' => $dynamic], …)`, as Filament does) no longer flag the routes they register, while other route names are still checked. Closes #373.
+- **Routes under dynamic groups are not reported as unknown.** Groups named with a variable (`Route::name($panelId)`, `Route::name('filament.' . $panelId . '.')`, `Route::group(['as' => $dynamic], …)`, as Filament does) no longer flag the routes they register, while other route names are still checked.
 - **`Route::resource()` names with a slash are correct.** `Route::resource('photos/comments', …)` registers `comments.show`, not `photos.comments.show`. Contributed by @shuvroroy (#308).
 - **Laravel Folio page routes are recognized.** Named Folio pages complete, hover, navigate, and are no longer reported as unknown routes.
 - **Service provider changes apply immediately.** Container bindings, view and translation paths, routes, config files, and component namespaces registered by a provider update when it is edited or added.
@@ -747,7 +748,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Blade templates
 
-- **Raw echoes work.** `{!! $html !!}` is now analysed as PHP, and each echo form only closes at its own terminator. Closes #370.
+- **Raw echoes work.** `{!! $html !!}` is now analysed as PHP, and each echo form only closes at its own terminator.
 - **An unterminated echo no longer breaks the rest of the template.** A `{{` or `{!!` without a closer only affects its own line.
 - **Inline `@php(…)` no longer hides the rest of the template.** It ends at its closing parenthesis and updates the template's variables.
 - **Blade comments are just text.** Quotes, `*/`, `@endphp`, and commented-out echoes inside `{{-- … --}}` no longer break the code after them, and an unterminated comment no longer swallows the file.
@@ -787,7 +788,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Go-to-implementation is more reliable.** Results no longer depend on which files you viewed earlier, interfaces from dependencies (such as Symfony's `HttpKernelInterface`) are answered from their packages, abstract classes with a method body and classes inheriting a method are included. Built-in interfaces like `Countable` still search only your project.
 - **Go-to-implementation works when an interface and class share a short name.** Contributed by @calebdw.
 - **Searches during indexing show what they are waiting for.** Find References, Rename, and Go to Implementation show "Waiting for workspace index" in their progress.
-- **Hover no longer depends on indexing timing.** Requests on a file that has not been parsed yet parse it immediately. Closes #343.
+- **Hover no longer depends on indexing timing.** Requests on a file that has not been parsed yet parse it immediately.
 - **Hover is quiet on every declaration.** Global functions, top-level `const`, and promoted constructor parameters no longer repeat their own signature.
 
 #### Completion, hover, and code actions
@@ -814,7 +815,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PHPStan is detected more accurately.** It runs for Laravel projects with Larastan (or a fork), for any project with a `phpstan.neon`, `phpstan.neon.dist`, or `phpstan.dist.neon`, and for projects that require `phpstan/phpstan` directly. A `vendor/bin/phpstan` from a transitive dependency is ignored, and plain PHPStan is not run on a Laravel application without Larastan, whether from `vendor/bin` or `$PATH`.
 - **PHPStan sees the file's real location.** Location-aware rules (such as Larastan's `env()` check) no longer fire while you edit.
 - **Project-wide scans no longer overwrite newer results.** PHPStan, PHPCS, and Mago scans no longer restore diagnostics to closed files or replace newer per-file results.
-- **phpcbf is used when the project has a PHPCS config.** A `phpcs.xml` (or variant) enables it even when PHP_CodeSniffer is a transitive dependency. Closes #374.
+- **phpcbf is used when the project has a PHPCS config.** A `phpcs.xml` (or variant) enables it even when PHP_CodeSniffer is a transitive dependency.
 - **Mago formatting wins when configured.** A `[formatter]` table in `mago.toml` keeps formatting with Mago even when a `phpcs.xml` exists.
 - **Mago checks run only when configured.** `mago lint` runs with a `[linter]` table and `mago analyze` with an `[analyzer]` table, only when `carthage-software/mago` is a direct dependency. On Laravel projects, `mago analyze` runs only with a Laravel extension configured. `[mago]` settings in `.phpantom.toml` override this.
 - **`.phpantom.toml` completion knows the Mago `lint` and `analyze` keys.**
@@ -837,7 +838,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Functions behind `__DIR__`-relative `require_once` chains are indexed.** Calls like `\Safe\base64_decode()` are found. (#318)
 - **Phar archives without a line break after the stub are read.**
 - **Crashes and hangs are fixed.** Very long fluent chains, long `??` chains and nested ternaries, deeply nested `array_map`/`array_filter` closures, Pest expectation chains through union types, `"\x8b"` byte escapes, and non-ASCII characters in edited files no longer crash, hang, or stop analysis.
-- **Variable resolution with `global` no longer hangs.** Closes #327.
+- **Variable resolution with `global` no longer hangs.**
 - **Deeply nested class hierarchies resolve completely.** Only real dependency cycles fall back to partial results, and they do so consistently.
 - **Lower memory use and faster analysis.** Assertion narrowing no longer leaks memory, stub indexes are shared instead of copied (roughly halving `analyze` time on large Laravel projects), and the deprecation check parses each file once.
 
@@ -877,7 +878,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Imported and same-namespace symbols rank first.** Symbols already imported or in the current namespace always appear above others. Contributed by @calebdw.
 - **Static methods complete after `->`.** PHP allows calling static methods through an instance, so they are now offered. Static properties remain `::` only. Contributed by @calebdw in https://github.com/PHPantom-dev/phpantom_lsp/pull/174.
 - **Magic methods complete when implemented.** `__invoke`, `__toString`, and other magic methods a class declares are offered (below regular methods) and support go-to-definition.
-- **Package badges in hover.** Hover shows where a symbol comes from: 🟢 direct Composer dependency, 🟠 transitive dependency, 🟣 PHP core or extension. Project symbols show no badge. Closes #228. Contributed by @calebdw.
+- **Package badges in hover.** Hover shows where a symbol comes from: 🟢 direct Composer dependency, 🟠 transitive dependency, 🟣 PHP core or extension. Project symbols show no badge. Contributed by @calebdw.
 - **Correct badges for external path-repository packages.** Symlinked path-repository packages outside the workspace show their package badge, while modules inside the workspace still show none. Contributed by @calebdw.
 - **`@phpstan-sealed` tag.** Classes named in the tag count as used imports, and docblock completion offers the tag. Contributed by @calebdw in https://github.com/PHPantom-dev/phpantom_lsp/pull/190.
 

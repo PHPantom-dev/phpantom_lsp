@@ -61,6 +61,8 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             if func_info.type_assertions.is_empty() {
                 return;
             }
+            let skip_negations =
+                negations_are_disjunctive(&func_info.type_assertions, function_returned_true);
             for assertion in &func_info.type_assertions {
                 let applies_positively = match assertion.kind {
                     AssertionKind::IfTrue => function_returned_true,
@@ -75,7 +77,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 // implication.  Laravel's `filled()` carries
                 // `@phpstan-assert-if-false !=numeric|bool`, and inverting
                 // that made every filled value look like `numeric|bool`.
-                if !applies_positively && assertion.is_equality {
+                if !applies_positively && (assertion.is_equality || skip_negations) {
                     continue;
                 }
                 let arg_vars = narrowing::find_assertion_arg_variables(
@@ -148,13 +150,15 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 None => return,
             };
             let declaring_namespace = namespace_of_fqn(&declaring_fqn);
+            let skip_negations =
+                negations_are_disjunctive(&method.type_assertions, function_returned_true);
             for assertion in &method.type_assertions {
                 let applies_positively = match assertion.kind {
                     AssertionKind::IfTrue => function_returned_true,
                     AssertionKind::IfFalse => !function_returned_true,
                     AssertionKind::Always => continue,
                 };
-                if !applies_positively && assertion.is_equality {
+                if !applies_positively && (assertion.is_equality || skip_negations) {
                     continue;
                 }
                 let arg_vars = narrowing::find_assertion_arg_variables(
@@ -249,13 +253,15 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     }
                     _ => HashMap::new(),
                 };
+                let skip_negations =
+                    negations_are_disjunctive(&method.type_assertions, function_returned_true);
                 for assertion in &method.type_assertions {
                     let applies_positively = match assertion.kind {
                         AssertionKind::IfTrue => function_returned_true,
                         AssertionKind::IfFalse => !function_returned_true,
                         AssertionKind::Always => continue,
                     };
-                    if !applies_positively && assertion.is_equality {
+                    if !applies_positively && (assertion.is_equality || skip_negations) {
                         continue;
                     }
                     let should_exclude = assertion.negated ^ !applies_positively;
@@ -321,6 +327,32 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
         }
         _ => {}
     }
+}
+
+/// Whether the tags that would be negated in this branch must instead be
+/// left alone, because negating them one by one proves too much.
+///
+/// The tags a call carries for one outcome hold together, so when the
+/// call has the other outcome only their conjunction is known to have
+/// failed.  `-if-true Foo $a` plus `-if-true Bar $b` returning false means
+/// `$a` is not a `Foo` *or* `$b` is not a `Bar`, which narrows neither on
+/// its own.  A single tag is the one case where the negation is exact.
+/// Equality tags are never negated, so they do not count.
+fn negations_are_disjunctive(
+    assertions: &[crate::types::TypeAssertion],
+    function_returned_true: bool,
+) -> bool {
+    use crate::types::AssertionKind;
+    let negated_kind = if function_returned_true {
+        AssertionKind::IfFalse
+    } else {
+        AssertionKind::IfTrue
+    };
+    assertions
+        .iter()
+        .filter(|a| a.kind == negated_kind && !a.is_equality)
+        .nth(1)
+        .is_some()
 }
 
 /// The class a resolved receiver entry stands for, for looking up the

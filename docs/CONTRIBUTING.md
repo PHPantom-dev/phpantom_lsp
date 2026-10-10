@@ -52,7 +52,7 @@ Keep entries short and easy to scan:
 - Leave out how the code worked before or why the bug happened. That belongs in the commit message.
 - Keep the details a user acts on: config keys, CLI flags, and a short code example when it makes the change concrete. One headline number is enough for a performance entry.
 - If a section groups its entries under `####` headings (Laravel, Blade templates, Type inference, Diagnostics, Performance and memory, and so on), put your entry under the matching one. Related fixes can share one entry.
-- End with `Contributed by @username` if you are not the maintainer, and `Closes #N` when the change fixes an issue.
+- End with `Contributed by @username` if you are not the maintainer. Don't reference the issue a change fixes.
 
 Example:
 

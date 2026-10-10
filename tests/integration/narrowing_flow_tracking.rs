@@ -1029,6 +1029,67 @@ function f(Reader $reader, ?Row $row): void
     );
 }
 
+const TWO_ASSERT_GUARD: &str = r#"<?php
+namespace Repro;
+
+class Row {}
+
+class Reader
+{
+    /**
+     * @phpstan-assert-if-true Row $start
+     * @phpstan-assert-if-true Row $end
+     */
+    public function bothLoaded(?Row $start, ?Row $end): bool
+    {
+        return $start instanceof Row && $end instanceof Row;
+    }
+}
+
+function takesRows(Row $start, Row $end): void {}
+"#;
+
+/// Every `-if-true` tag a method carries holds once it returns true, not
+/// just the last one.
+#[test]
+fn every_assert_if_true_tag_narrows_the_truthy_branch() {
+    assert_no_type_errors(&format!(
+        r#"{TWO_ASSERT_GUARD}
+function f(Reader $reader, ?Row $start, ?Row $end): void
+{{
+    if ($reader->bothLoaded($start, $end)) {{
+        takesRows($start, $end);
+    }}
+}}
+"#
+    ));
+}
+
+/// When a method with several `-if-true` tags returns false, only one of
+/// them has to have failed, so none of the values is known to be `null`.
+#[test]
+fn a_failed_call_with_several_assert_if_true_tags_narrows_no_single_value() {
+    let messages = type_diagnostics(&format!(
+        r#"{TWO_ASSERT_GUARD}
+function f(Reader $reader, ?Row $start, ?Row $end): void
+{{
+    if ($reader->bothLoaded($start, $end)) {{
+        return;
+    }}
+    takesRows($start, $end);
+}}
+"#
+    ));
+    assert_eq!(messages.len(), 2, "got: {messages:?}");
+    for message in &messages {
+        let got = message.rsplit("got ").next().unwrap_or_default();
+        assert!(
+            got.contains("Row"),
+            "the value may still be a Row, got: {message}"
+        );
+    }
+}
+
 /// Laravel's `filled()` and `blank()`, copied tag for tag from the
 /// framework.  Between them they cover both halves of the pair: the tag
 /// naming the branch under test narrows it, and the tag naming the other
