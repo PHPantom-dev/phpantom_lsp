@@ -1019,23 +1019,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b573-deferred-code-actions-are-sent-to-clients-that-cannot-resolve-them" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B573. Deferred code actions are sent to clients that cannot resolve them
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1697,23 +1680,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b573-deferred-code-actions-are-sent-to-clients-that-cannot-resolve-them" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B573. Deferred code actions are sent to clients that cannot resolve them
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1868,22 +1834,6 @@ not a search forward from every opener.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b573-deferred-code-actions-are-sent-to-clients-that-cannot-resolve-them">B573. Deferred code actions are sent to clients that cannot resolve them<a class="headerlink" href="#b573-deferred-code-actions-are-sent-to-clients-that-cannot-resolve-them" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<p><code>handle_code_action</code> (<code>src/code_actions/mod.rs</code>) returns the deferred
-actions (PHPStan quick fixes, extract function/method, extract variable,
-extract constant, inline variable, convert to instance variable, remove
-unused imports) with a <code>data</code> field and no <code>edit</code>, whatever the client
-advertised. The spec only allows this when the client lists <code>edit</code> in
-<code>textDocument.codeAction.resolveSupport.properties</code>; a client without it
-applies an action as it was received. Nothing reads that capability
-(nor <code>dataSupport</code>). Found with CodeLite before it supported
-<code>codeAction/resolve</code>: the actions were listed, and picking one did
-nothing.</p>
-<p><strong>Fix:</strong> Read <code>resolveSupport</code> and <code>dataSupport</code> at <code>initialize</code>, next
-to <code>supports_file_rename</code>. When either is missing, compute the edit in
-phase 1 through the same code <code>resolve_code_action</code> runs, and send it
-without <code>data</code>.</p>
 
 
 
