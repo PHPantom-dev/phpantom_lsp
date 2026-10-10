@@ -5047,3 +5047,82 @@ class Example {
         "Expected Tvalue bound to float|bool, got: {msgs:?}"
     );
 }
+
+// ─── Override narrowing the native return type of an ancestor ──────────────
+
+#[test]
+fn override_narrowing_native_return_keeps_its_own_class() {
+    let php = r#"<?php
+namespace Persistence {
+    /** @template T of object */
+    interface ClassMetadata {}
+
+    /** @template T of ClassMetadata */
+    interface ClassMetadataFactory {}
+
+    interface ObjectManager {
+        /** @phpstan-return ClassMetadataFactory<ClassMetadata<object>> */
+        public function getMetadataFactory(): ClassMetadataFactory;
+    }
+}
+
+namespace Orm {
+    use Persistence\ObjectManager;
+
+    /** @implements \Persistence\ClassMetadataFactory<\Persistence\ClassMetadata<object>> */
+    class ClassMetadataFactory implements \Persistence\ClassMetadataFactory {}
+
+    interface EntityManagerInterface extends ObjectManager {
+        public function getMetadataFactory(): ClassMetadataFactory;
+    }
+
+    final class Lister {
+        public function __construct(private EntityManagerInterface $entityManager) {}
+
+        private function getMetadataFactory(): ClassMetadataFactory {
+            return $this->entityManager->getMetadataFactory();
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "The override's native return type should win over the ancestor's wider docblock, got: {diags:?}"
+    );
+}
+
+#[test]
+fn override_narrowing_native_return_still_inherits_refinement_of_its_class() {
+    let php = r#"<?php
+/** @template T */
+class Box {}
+
+/**
+ * @template T
+ * @extends Box<T>
+ */
+class SpecialBox extends Box {}
+
+interface Maker {
+    /** @return SpecialBox<int> */
+    public function make(): Box;
+}
+
+interface SpecialMaker extends Maker {
+    public function make(): SpecialBox;
+}
+
+class User {
+    /** @return SpecialBox<string> */
+    public function wrong(SpecialMaker $maker): SpecialBox {
+        return $maker->make();
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "A docblock refining the override's own class should still be inherited, got: {diags:?}"
+    );
+}

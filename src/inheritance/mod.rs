@@ -384,9 +384,9 @@ pub(crate) fn resolve_class_with_inheritance(
                             apply_substitution_to_method(&mut m, &level_subs);
                             m
                         });
-                        enrich_method_arc_from_ancestor(existing, &ancestor_method);
+                        enrich_method_arc_from_ancestor(existing, &ancestor_method, class_loader);
                     } else {
-                        enrich_method_arc_from_ancestor(existing, method);
+                        enrich_method_arc_from_ancestor(existing, method, class_loader);
                     }
                 }
                 continue;
@@ -545,9 +545,9 @@ pub(crate) fn resolve_class_with_inheritance(
                         apply_substitution_to_method(&mut m, &iface_subs);
                         m
                     });
-                    enrich_method_arc_from_ancestor(existing, &ancestor_method);
+                    enrich_method_arc_from_ancestor(existing, &ancestor_method, class_loader);
                 } else {
-                    enrich_method_arc_from_ancestor(existing, method);
+                    enrich_method_arc_from_ancestor(existing, method, class_loader);
                 }
             }
         }

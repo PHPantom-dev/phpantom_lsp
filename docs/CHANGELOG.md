@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An override that narrows its return type keeps it.** When an interface method documents `@return Factory<Meta>` and an extending interface redeclares it as `: OrmFactory`, the override's result reads as `OrmFactory`, so returning it from a method declared `: OrmFactory` is no longer reported. This fixes Doctrine's `EntityManagerInterface::getMetadataFactory()`.
 - **A failed call with several `@phpstan-assert-if-true` tags narrows none of its arguments.** When `bothDefined($start, $end)` returns false, `$start` and `$end` are no longer both taken to be `null`, since only one of the promises has to have failed.
 - **A template next to other types in a parameter union binds only what they leave over.** Passing `string|float|bool|null` values to a `@param array<K, T|string|null>` now binds `T` to `float|bool`, so the call's return type no longer brings back the `null` the function filtered out.
 - **A passing strict `in_array()` against `object` elements keeps the needle's classes.** A `Foo|Bar|string` needle checked against a `list<object>` still reads as `Foo` or `Bar` inside the branch.

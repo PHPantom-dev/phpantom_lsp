@@ -77,7 +77,45 @@ No outstanding items.
 
 ## Symbol resolution
 
-No outstanding items.
+### B579. An override's parameter hint is compared to its ancestor's by short name
+
+**Impact: Low · Complexity: Medium**
+
+```php
+namespace P {
+    class Box {}
+    class Base {
+        /** @param Box&\Countable $b */
+        public function take(Box $b): void {}
+    }
+}
+namespace Q {
+    class Box { public function fromQ(): void {} }
+    class Child extends \P\Base {
+        public function take(Box $b): void {
+            $b->fromQ(); // reported: not found on P\Box, Countable
+        }
+    }
+}
+```
+
+`Q\Child::take()` declares its own `Q\Box`, but it inherits the parent's
+`@param P\Box&\Countable` as if it had restated the parent's hint.
+
+Methods keep their native hints (`native_type_hint`, `native_return_type`)
+as written in the source, never resolved to FQNs, while their docblock types
+are. `child_native_hint_overrides` (`inheritance/enrichment.rs`) compares the
+two methods' native hints, so `Box` in one namespace equals `Box` in another.
+The return-type side checks the class hierarchy through the resolved
+effective type instead, which is why it is not affected.
+
+Resolving method native hints in `resolve_parent_class_names`
+(`parser/ast_update.rs`), as is already done for functions' return hints,
+fixes the comparison but breaks consumers that re-resolve a native hint
+against the calling file's imports (a `use X\Foo` file then reads `B\X\Foo`).
+
+**Fix:** Resolve method native hints at parse time and move the consumers
+that re-resolve them over to the FQN form.
 
 ## Array types
 
