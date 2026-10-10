@@ -1104,17 +1104,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p79-writes-under-the-same-dynamic-key-in-separate-ifs-are-quadratic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P79. Writes under the same dynamic key in separate <code>if</code>s are quadratic
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1411,17 +1400,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p79-writes-under-the-same-dynamic-key-in-separate-ifs-are-quadratic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P79. Writes under the same dynamic key in separate <code>if</code>s are quadratic
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1602,28 +1580,6 @@ itself.</p>
 <p><strong>Where to look:</strong> <code>dedup_types</code> and <code>hash_for_dedup</code> in
 <code>php_type/normalize.rs</code>, <code>decode_php_string_literal</code> in <code>text_scan.rs</code>
 and its callers in <code>php_type/subtype.rs</code>.</p>
-<hr />
-<h2 id="p79-writes-under-the-same-dynamic-key-in-separate-ifs-are-quadratic">P79. Writes under the same dynamic key in separate <code>if</code>s are quadratic<a class="headerlink" href="#p79-writes-under-the-same-dynamic-key-in-separate-ifs-are-quadratic" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>N <code>if</code>s each writing a different shape to <code>$data[$id]</code> cost time in
-proportion to the square of N. <code>benches/scaling.py</code>'s
-<code>conditional_dynamic_writes</code> shape, on a release build, takes 1.6 s at
-2,000 writes and 6.6 s at 4,000. The array's value type is a union that
-gains one shape per <code>if</code>, and every join builds that union again from
-scratch: the samples are in <code>dedup_types</code>, <code>hash_for_dedup</code> and the shape
-index <code>join_runtime_value_types</code> builds to find which members could absorb
-which, each of them a pass over all the shapes so far. Joining one new
-member into a union that is already normalised would make each join cost
-only what it adds.</p>
-<p>That cuts the constant, but the union still grows with every write, so
-only bounding it removes the growth. PHPStan turns a union of more than
-256 constant-array values into one general <code>non-empty-array&lt;K, V&gt;</code>
-(<code>TypeCombinator::optimizeConstantArrays</code>). Doing the same would change
-what hover shows past that size, so it needs a decision first.</p>
-<p><strong>Where to look:</strong> <code>join_runtime_value_types</code> and <code>absorb_subsumed_shapes</code>
-in <code>php_type/normalize.rs</code>, reached from a join through
-<code>ResolvedType::collapse_redundant_runtime_literals</code> in
-<code>types/resolved_type.rs</code>.</p>
 <hr />
 <h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
 <h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>
