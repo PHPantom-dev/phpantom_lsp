@@ -1071,17 +1071,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p77-a-long-method-chain-costs-the-cube-of-its-length" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P77. A long method chain costs the cube of its length
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p21-offset-shifting-for-cached-diagnostics-on-partial-edits" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1389,17 +1378,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p77-a-long-method-chain-costs-the-cube-of-its-length" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P77. A long method chain costs the cube of its length
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p21-offset-shifting-for-cached-diagnostics-on-partial-edits" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1534,48 +1512,6 @@ against that bar.</p>
 </tr>
 </tbody>
 </table>
-<hr />
-<h2 id="p77-a-long-method-chain-costs-the-cube-of-its-length">P77. A long method chain costs the cube of its length<a class="headerlink" href="#p77-a-long-method-chain-costs-the-cube-of-its-length" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Generated query builders and API clients produce fluent chains hundreds
-of links long. <code>benches/scaling.py</code>'s <code>method_chain</code> shape (one chain of
-<code>-&gt;self()</code> links on a <code>@return static</code> method), on a release build:</p>
-<table>
-<thead>
-<tr>
-<th>Links</th>
-<th>analyse wall clock</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>200</td>
-<td>0.46 s</td>
-</tr>
-<tr>
-<td>300</td>
-<td>1.0 s</td>
-</tr>
-<tr>
-<td>400</td>
-<td>2.5 s</td>
-</tr>
-<tr>
-<td>600</td>
-<td>7.1 s</td>
-</tr>
-</tbody>
-</table>
-<p>Most of the samples are in building and splitting the text of each link's
-subject: <code>SubjectExpr::to_subject_text</code>, <code>split_last_arrow_raw</code>,
-<code>subject_scope_key</code> and hashing the result. Each link renders the text of
-the whole receiver chain before it and then rescans that text, so every
-link costs time in proportion to the chain's length, and the chain's
-links are resolved more than once over.</p>
-<p><strong>Where to look:</strong> <code>split_last_arrow_raw</code> and
-<code>SubjectExpr::to_subject_text</code> in <code>type_engine/subject_expr.rs</code>,
-<code>subject_scope_key</code> and <code>resolve_target_classes_expr</code> in
-<code>type_engine/resolver/mod.rs</code>.</p>
 <hr />
 <h2 id="p21-offset-shifting-for-cached-diagnostics-on-partial-edits">P21. Offset-shifting for cached diagnostics on partial edits<a class="headerlink" href="#p21-offset-shifting-for-cached-diagnostics-on-partial-edits" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Very High</strong></p>
