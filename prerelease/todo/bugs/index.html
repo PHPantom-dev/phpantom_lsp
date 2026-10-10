@@ -930,34 +930,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b565-a-plain-array-counts-as-a-subtype-of-an-unsealed-array-shape" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B565. A plain array counts as a subtype of an unsealed array shape
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b566-a-list-parameter-rejects-a-docblock-shape-keyed-by-class-constants" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B566. A <code>list</code> parameter rejects a docblock shape keyed by class constants
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1574,34 +1546,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b565-a-plain-array-counts-as-a-subtype-of-an-unsealed-array-shape" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B565. A plain array counts as a subtype of an unsealed array shape
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b566-a-list-parameter-rejects-a-docblock-shape-keyed-by-class-constants" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B566. A <code>list</code> parameter rejects a docblock shape keyed by class constants
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1722,58 +1666,7 @@ alone otherwise.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b565-a-plain-array-counts-as-a-subtype-of-an-unsealed-array-shape">B565. A plain array counts as a subtype of an unsealed array shape<a class="headerlink" href="#b565-a-plain-array-counts-as-a-subtype-of-an-unsealed-array-shape" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @param array{foo: int, ...} $shape */</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function takeOpen(array $shape): void {}</span>
-</code></pre></div>
-<p><code>array&lt;string, int&gt;</code> is a subtype of <code>array{foo: int, ...}</code> as far as
-<code>is_subtype_of_typed</code> is concerned, and <code>non-empty-array&lt;string, int&gt;</code> is
-one for <code>PhpType::is_subtype_of</code> too, though nothing says either array
-holds <code>foo</code>. The same goes for <code>list&lt;int&gt;</code> and <code>non-empty-list&lt;int&gt;</code>
-against <code>list{int, ...}</code>. The shape-to-shape rules read an unsealed shape
-through <code>shape_parts()</code>, but a subtype that is not itself a shape reaches
-an unsealed supertype as the <code>non-empty-array&lt;array-key, mixed&gt;</code> it widens
-to, which any array-like generic fits. The class-aware generic covariance
-rule in <code>is_subtype_of_typed</code> does not even check the <code>non-empty-</code> promise,
-which is why a bare <code>array&lt;string, int&gt;</code> passes there. A sealed supertype
-has no such problem: <code>non-empty-array&lt;string, int&gt;</code> is not a subtype of
-<code>array{foo: int}</code>. Parameter seeding reads the answer as a proven
-narrowing of the declared type.</p>
-<p><strong>Fix:</strong> Settle an array-like generic against an unsealed supertype as an
-unsealed shape with no entries of its own, <code>array{...&lt;K, V&gt;}</code> (or
-<code>list{...&lt;V&gt;}</code> for a list), through <code>shape_is_subshape</code>: an entry the
-supertype requires is then missing, and an optional one has to fit the
-tail. Do it in <code>PhpType::is_subtype_of</code> and, ahead of the generic-array
-rules, in <code>is_subtype_of_typed</code>. The argument diagnostic answers a typed
-array handed to an unsealed parameter through its own rules, not through
-these two functions; keep it that way, so that an array that merely might
-hold the entries stays unreported.</p>
-<h3 id="b566-a-list-parameter-rejects-a-docblock-shape-keyed-by-class-constants">B566. A <code>list</code> parameter rejects a docblock shape keyed by class constants<a class="headerlink" href="#b566-a-list-parameter-rejects-a-docblock-shape-keyed-by-class-constants" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Slots { const NAME = 0; const AGE = 1; }</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">/** @return array{Slots::NAME: string, Slots::AGE: int} */</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">function row(): array { return [&#39;Ann&#39;, 30]; }</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">/** @param list&lt;string|int&gt; $values */</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">function takeList(array $values): void {}</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">takeList(row()); // reported, though the keys are `0` and `1`</span>
-</code></pre></div>
-<p><code>shape_fits_array</code> (<code>src/diagnostics/type_errors/compatibility.rs</code>) holds
-the keys of a shape to the integers a list demands by their spelling, and
-a key spelled <code>Slots::NAME</code> is not one, so the shape is rejected whatever
-the constant evaluates to. An array literal does not have the problem,
-because its keys are evaluated: <code>[Slots::NAME =&gt; 'Ann']</code> is typed
-<code>array&lt;0, 'Ann'&gt;</code>. A docblock keeps the spelling, and <code>shape_key_type</code> can
-only call such a key an <code>array-key</code>.</p>
-<p><strong>Fix:</strong> Evaluate the constant. When the class is loadable and the constant
-holds an integer or string literal, read the key as that value in
-<code>shape_fits_array</code>, and in the structural list check
-(<code>shape_keys_are_sequential</code>), which reads the same spelling as a string
-key. A constant that cannot be evaluated stays an <code>array-key</code>, which does
-not contradict a list.</p>
+<p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
