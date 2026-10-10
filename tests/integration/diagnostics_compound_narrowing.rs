@@ -1648,3 +1648,29 @@ function f(): void {
     let messages = type_error_messages(&backend, uri, text);
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+/// A no-op emptiness check joins `''` and `non-empty-string` back into
+/// `string`, which a `non-empty-string` parameter accepts like the
+/// unchecked variable.
+#[test]
+fn emptiness_check_join_does_not_fail_non_empty_string_argument() {
+    let backend = create_test_backend();
+    let text = r#"<?php
+/** @param non-empty-string $s */
+function needsNonEmpty(string $s): void {}
+
+function f(string $h): void {
+    if ($h !== '') {
+        echo 1;
+    }
+    needsNonEmpty($h);
+}
+"#;
+    let diags = slow_diagnostic_messages(
+        &backend,
+        "file:///empty_join.php",
+        text,
+        "type_mismatch_argument",
+    );
+    assert!(diags.is_empty(), "got: {diags:?}");
+}

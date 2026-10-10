@@ -39,44 +39,6 @@ No outstanding items.
 
 No outstanding items.
 
-### B578. A no-op emptiness check makes a `string` fail a `non-empty-string` parameter
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-/** @param non-empty-string $s */
-function needsNonEmpty(string $s): void {}
-
-function f(string $h): void {
-    needsNonEmpty($h); // not reported
-    if ($h !== '') {
-        echo 1;
-    }
-    needsNonEmpty($h); // reported: got ''|non-empty-string
-}
-```
-
-After the `if`, `$h` reads `''|non-empty-string`: the branch narrowed it to
-`non-empty-string`, the path that skipped the branch narrowed it to `''`,
-and the join keeps both. The argument check accepts a plain `string` here
-but reads a union member by member, so `''` alone fails and the call is
-reported. `=== ''` does the same. An array checked with `!== []` joins
-back to its declared type and is not reported.
-
-`join_runtime_value_types` (`php_type/normalize.rs`) folds `true|false`
-into `bool` through `simplify_bool_union`, but it has no rule for a string
-refinement beside its complement, and neither member subsumes the other,
-so both survive the join.
-
-**Fix:** Fold `''` beside `non-empty-string` back into `string` in the
-join, the way `simplify_bool_union` folds the two booleans.
-
-## Arithmetic
-
-No outstanding items.
-
-## Symbol resolution
-
 ### B579. An override's parameter hint is compared to its ancestor's by short name
 
 **Impact: Low · Complexity: Medium**

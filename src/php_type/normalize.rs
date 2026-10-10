@@ -289,6 +289,7 @@ impl PhpType {
         flattened.retain(|member| !member.is_never());
         dedup_types(&mut flattened);
         simplify_bool_union(&mut flattened);
+        simplify_empty_string_union(&mut flattened);
 
         // Branch joins are normally tiny. Pairwise containment keeps the
         // semantics explicit and handles equivalent aliases deterministically
@@ -1071,6 +1072,21 @@ pub(crate) fn simplify_bool_union(types: &mut Vec<PhpType>) {
                 if matches!(s.to_ascii_lowercase().as_str(), "true" | "false"))
         });
         types.push(PhpType::bool());
+    }
+}
+
+/// If a union holds `''` beside `non-empty-string`, replace the pair with
+/// `string`, the way [`simplify_bool_union`] folds the two booleans.
+fn simplify_empty_string_union(types: &mut Vec<PhpType>) {
+    let is_empty_literal = |t: &PhpType| {
+        matches!(t.kind(), TypeKind::Literal(lit)
+            if lit.string_content().is_some_and(|c| c.is_empty()))
+    };
+    let is_non_empty = |t: &PhpType| matches!(t.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("non-empty-string"));
+
+    if types.iter().any(is_empty_literal) && types.iter().any(is_non_empty) {
+        types.retain(|t| !is_empty_literal(t) && !is_non_empty(t));
+        types.push(PhpType::parse("string"));
     }
 }
 
