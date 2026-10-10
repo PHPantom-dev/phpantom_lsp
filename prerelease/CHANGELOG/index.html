@@ -5112,6 +5112,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Imported type aliases resolve in the file that imports them.</strong> A method typed with an alias from <code>@phpstan-import-type</code> now returns the full shape when it is called from the same file, not only from other files.</li>
 <li><strong>An override that names a different class than its ancestor keeps its own.</strong> A <code>take(Box $b)</code> that names its own <code>Box</code> no longer inherits the ancestor's <code>@param Box&amp;Countable</code> for a <code>Box</code> in another namespace.</li>
 <li><strong>A no-op emptiness check no longer breaks a <code>non-empty-string</code> argument.</strong> After <code>if ($h !== '') { ... }</code>, passing <code>$h</code> to a <code>non-empty-string</code> parameter is no longer reported, since the variable is still a plain <code>string</code>.</li>
 <li><strong>A value both branches could hold no longer says which branch ran.</strong> When one branch leaves <code>$x</code> as <code>1|2</code> and the other as <code>2|3</code>, a later <code>if ($x === 2)</code> no longer narrows variables to what only one of the branches assigned.</li>
