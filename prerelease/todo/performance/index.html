@@ -1071,17 +1071,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p3-go-to-implementation-on-a-vendor-class-parses-the-whole-classmap" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P3. Go-to-implementation on a vendor class parses the whole classmap
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p72-a-switch-that-assigns-many-distinct-literals-costs-cubic-time" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1455,17 +1444,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p3-go-to-implementation-on-a-vendor-class-parses-the-whole-classmap" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P3. Go-to-implementation on a vendor class parses the whole classmap
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p72-a-switch-that-assigns-many-distinct-literals-costs-cubic-time" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1667,40 +1645,6 @@ against that bar.</p>
 </tbody>
 </table>
 <hr />
-<h2 id="p3-go-to-implementation-on-a-vendor-class-parses-the-whole-classmap">P3. Go-to-implementation on a vendor class parses the whole classmap<a class="headerlink" href="#p3-go-to-implementation-on-a-vendor-class-parses-the-whole-classmap" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Complexity: Medium-High</strong></p>
-<p>Go-to-implementation and type-hierarchy subtypes both go through
-<code>find_implementors</code> (<code>definition/implementation.rs</code>). When the target is
-declared under <code>vendor/</code>, or the workspace index has not been built yet
-(the <code>composer</code>, <code>self</code> and <code>none</code> strategies until something builds it),
-Phase 2 calls the class loader on every entry of <code>fqn_uri_index</code>. That
-index holds the whole classmap, vendor included, so the first such
-request parses every class file the session has not loaded yet, and
-keeps all of them.</p>
-<p>Measured on a release build against a large Laravel project (about 19,000
-vendor files): go-to-implementation on <code>ShouldQueue</code> takes 4.2 s the first
-time and raises RSS from 406 MB to 697 MB for the rest of the session.
-Repeats take 0.3 s, which is still a full pass over the index plus the
-later phases.</p>
-<p>Phase 3 already does what Phase 2 needs: it reads each unloaded file's
-bytes (<code>read_for_scan</code>, mmap-backed for large files) and only parses the
-ones that mention the target's short name. Phase 2's blanket load exists
-because a transitive implementor need not mention the target (<code>class B
-extends A</code> where <code>A implements Target</code>), but the same pre-filter covers
-that when it is applied level by level: find the files naming the
-target, then the files naming each class found, until no new class turns
-up. Phase 4 has a smaller cost of its own: <code>stub_index</code> maps each stub
-class to its whole stub file, so a file is searched once for every class
-it declares (1,512 entries).</p>
-<p><strong>Fix:</strong> replace Phase 2's blanket load with the byte pre-filter,
-iterated over each newly found class name for transitive results, and
-search each stub file once rather than once per class. Parallelising the
-pre-filter, which is what this item originally proposed, can come on top,
-but the parses avoided are the bulk of the win.</p>
-<p><strong>Where to look:</strong> <code>find_implementors</code> and <code>check_candidate_fqn</code> in
-<code>definition/implementation.rs</code>; <code>read_for_scan</code> in
-<code>classmap_scanner/mod.rs</code>.</p>
-<hr />
 <h2 id="p72-a-switch-that-assigns-many-distinct-literals-costs-cubic-time">P72. A <code>switch</code> that assigns many distinct literals costs cubic time<a class="headerlink" href="#p72-a-switch-that-assigns-many-distinct-literals-costs-cubic-time" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function countryName(string $code): string {</span>
@@ -1901,7 +1845,7 @@ history, and <code>memory-benchmark-pr</code> does the same for
 <li>Nothing checks how cost grows with the size of an input. Every
   performance problem users have hit so far was a growth problem on an
   input of an unusual shape (thousands of calls to undefined functions,
-  hundreds of Blade views without a DocBlock, and the open items P3, P70
+  hundreds of Blade views without a DocBlock, and the open items P70
   and P72), and a benchmark over fixed fixtures cannot see one until a
   project that has the shape reports it.</li>
 </ul>
@@ -1961,7 +1905,7 @@ project file loaded on demand is parsed three times where once would do.</p>
 <p>Installing a parse cache for the content around the three calls removes
 the extra two. On a release build that takes about 2% off an <code>analyze</code>
 of a mid-sized Laravel project; paths dominated by on-demand loading
-(startup population, the scan in P3) spend a larger share of their time
+(startup population, the go-to-implementation scan) spend a larger share of their time
 parsing. <code>parse_php_classes_by_block</code> already works out the use map and
 namespace internally, so the other two helpers could also read them from
 there.</p>

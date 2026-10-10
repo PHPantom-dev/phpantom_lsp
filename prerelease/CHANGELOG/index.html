@@ -5106,6 +5106,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <ul>
 <li><strong>Faster analysis of methods that check many properties.</strong> Narrowing a property or a call's result no longer walks the method again from its first line.</li>
 <li><strong>Faster analysis of loops.</strong> A loop body is no longer walked again once its types have settled.</li>
+<li><strong>Faster go-to-implementation on library classes.</strong> Finding the implementations of a class or interface from a Composer package now reads only the files that could hold one, instead of loading every class the project depends on.</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
