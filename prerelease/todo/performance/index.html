@@ -1082,17 +1082,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P78. A <code>switch</code> over thousands of distinct literals is still quadratic
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1367,17 +1356,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P78. A <code>switch</code> over thousands of distinct literals is still quadratic
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1504,42 +1482,6 @@ to be worked out first.</p>
 - Psalm: <code>FileDiffer</code> and <code>FileStatementsDiffer</code> in
   <code>Psalm\Internal\Diff</code>
 - Psalm: <code>Analyzer::shiftFileOffsets()</code> for the offset-shifting logic</p>
-<hr />
-<h2 id="p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic">P78. A <code>switch</code> over thousands of distinct literals is still quadratic<a class="headerlink" href="#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>A <code>switch</code> that assigns a different literal in each case is fast at the
-sizes real lookup tables reach, but each case's join still costs time in
-proportion to the cases before it. <code>benches/scaling.py</code>'s
-<code>switch_literals</code> shape, on a release build:</p>
-<table>
-<thead>
-<tr>
-<th>Cases</th>
-<th>analyse wall clock</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>2,000</td>
-<td>0.45 s</td>
-</tr>
-<tr>
-<td>4,000</td>
-<td>1.6 s</td>
-</tr>
-<tr>
-<td>8,000</td>
-<td>6.3 s</td>
-</tr>
-</tbody>
-</table>
-<p>About a fifth of the samples are in <code>decode_php_string_literal</code>, decoding
-the same literals again at each join, and most of the rest are in
-<code>dedup_types</code> and <code>is_subtype_of</code> comparing the growing union against
-itself.</p>
-<p><strong>Where to look:</strong> <code>dedup_types</code> and <code>hash_for_dedup</code> in
-<code>php_type/normalize.rs</code>, <code>decode_php_string_literal</code> in <code>text_scan.rs</code>
-and its callers in <code>php_type/subtype.rs</code>.</p>
 <hr />
 <h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
 <h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>
