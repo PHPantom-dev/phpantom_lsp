@@ -880,6 +880,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b578-a-no-op-emptiness-check-makes-a-string-fail-a-non-empty-string-parameter" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B578. A no-op emptiness check makes a <code>string</code> fail a <code>non-empty-string</code> parameter
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1479,6 +1496,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b578-a-no-op-emptiness-check-makes-a-string-fail-a-non-empty-string-parameter" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B578. A no-op emptiness check makes a <code>string</code> fail a <code>non-empty-string</code> parameter
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1608,6 +1642,31 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
+<h3 id="b578-a-no-op-emptiness-check-makes-a-string-fail-a-non-empty-string-parameter">B578. A no-op emptiness check makes a <code>string</code> fail a <code>non-empty-string</code> parameter<a class="headerlink" href="#b578-a-no-op-emptiness-check-makes-a-string-fail-a-non-empty-string-parameter" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param non-empty-string $s */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function needsNonEmpty(string $s): void {}</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">function f(string $h): void {</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    needsNonEmpty($h); // not reported</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    if ($h !== &#39;&#39;) {</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">        echo 1;</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    }</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    needsNonEmpty($h); // reported: got &#39;&#39;|non-empty-string</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">}</span>
+</code></pre></div>
+<p>After the <code>if</code>, <code>$h</code> reads <code>''|non-empty-string</code>: the branch narrowed it to
+<code>non-empty-string</code>, the path that skipped the branch narrowed it to <code>''</code>,
+and the join keeps both. The argument check accepts a plain <code>string</code> here
+but reads a union member by member, so <code>''</code> alone fails and the call is
+reported. <code>=== ''</code> does the same. An array checked with <code>!== []</code> joins
+back to its declared type and is not reported.</p>
+<p><code>join_runtime_value_types</code> (<code>php_type/normalize.rs</code>) folds <code>true|false</code>
+into <code>bool</code> through <code>simplify_bool_union</code>, but it has no rule for a string
+refinement beside its complement, and neither member subsumes the other,
+so both survive the join.</p>
+<p><strong>Fix:</strong> Fold <code>''</code> beside <code>non-empty-string</code> back into <code>string</code> in the
+join, the way <code>simplify_bool_union</code> folds the two booleans.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>

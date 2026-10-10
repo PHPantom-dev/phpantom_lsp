@@ -1922,7 +1922,7 @@ appended-to locals) first. Pay for it with resolver precision, the same
 way the supertype-where-subtype hatch was retired.</p>
 <hr />
 <h2 id="d19-invalid_member_access-cannot-tell-a-property-read-from-a-write">D19. <code>invalid_member_access</code> cannot tell a property read from a write<a class="headerlink" href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>PHP dispatches an unreachable property to a different magic method
 depending on what is being done to it: <code>__get</code> for a read, <code>__set</code> for a
 write, <code>__isset</code> for <code>isset()</code>, and <code>__unset</code> for <code>unset()</code>. The span the
@@ -1932,10 +1932,19 @@ presence of any of the four as reason enough to stand down.</p>
 <p>The result is a missed report rather than a wrong one. A class that
 declares <code>__set</code> but no <code>__get</code> silences a read it would in fact fatal
 on, and the same holds for every other mismatched pairing.</p>
+<p>PHP 8.4's asymmetric visibility needs the same distinction. A
+<code>public private(set)</code> or <code>public protected(set)</code> property, plain or
+promoted (and static, since PHP 8.5), can be read from anywhere but
+written only from inside its scope. <code>PropertyInfo</code> records a single
+visibility (<code>extract_visibility</code> in <code>parser/mod.rs</code> keeps the first
+modifier it finds), so a write from outside goes unreported, and
+completion offers the property in write positions too.</p>
 <p><strong>Fix:</strong> Carry the operation on the <code>MemberAccess</code> span — read, write,
 <code>isset</code>, <code>unset</code> — the way <code>readonly_writes.rs</code> recovers write targets
 from the AST, and require the handler that matches it. The same
-information would let the readonly check drop its own separate walk.</p>
+information would let the readonly check drop its own separate walk.
+Record a property's set-visibility as an optional <code>set_visibility</code> on
+<code>PropertyInfo</code> and check writes against it.</p>
 <hr />
 <h2 id="d20-foobar-and-foobar-are-the-same-span">D20. <code>Foo::$bar</code> and <code>Foo::bar</code> are the same span<a class="headerlink" href="#d20-foobar-and-foobar-are-the-same-span" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
@@ -2072,7 +2081,9 @@ stay quiet there if a comparison on a backed enum's <code>-&gt;value</code> narr
 enum itself, so <code>$s-&gt;value === 'H'</code> has to remove <code>Suit::Hearts</code> from <code>$s</code>
 on the fall-through path. Without that narrowing the check would be a new
 false positive. PHPStan and Psalm report the second function too, and the
-suite counts that against them.</p>
+suite counts that against them. Removing a case from an enum-typed
+variable needs a type for the single case, which is
+<a href="../type-inference/#t44-a-single-enum-case-has-no-type">T44</a>.</p>
 <p>Found running the php-typing-conformance suite
 (<code>regressions_backed_enum_value_narrowing.php</code>). A quick fix to add the
 missing arms is <a href="../phpstan-actions/#h16-matchunhandled--add-missing-match-arms">H16</a> (<code>match.unhandled</code>), which could
