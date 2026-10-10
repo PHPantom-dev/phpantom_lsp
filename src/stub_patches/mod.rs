@@ -81,8 +81,8 @@
 //!
 //! 8. **Argument-decided builtins** -- `pathinfo`, `print_r`, `hrtime`,
 //!    `microtime`, `getenv`, `mb_convert_encoding`, `abs`, `var_export`,
-//!    `mb_internal_encoding`, `version_compare`, `sscanf`/`fscanf`,
-//!    `array_reduce`, `pow` and `ini_get` each return one of several shapes
+//!    `mb_internal_encoding`, `version_compare`, the APCu key functions,
+//!    `sscanf`/`fscanf`, `array_reduce`, `pow` and `ini_get` each return one of several shapes
 //!    depending on an argument, but the stubs can only declare the union of
 //!    all of them. Each gets a conditional return type keyed on the deciding
 //!    parameter, so a call that provably takes one branch stops carrying the

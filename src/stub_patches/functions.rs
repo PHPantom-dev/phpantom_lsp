@@ -38,6 +38,9 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "var_export" => patch_var_export(func),
         "mb_internal_encoding" => patch_mb_internal_encoding(func),
         "version_compare" => patch_version_compare(func),
+        "apcu_store" | "apcu_add" => patch_apcu_key_family(func, "array<array-key, int>"),
+        "apcu_delete" => patch_apcu_key_family(func, "list<string>"),
+        "apcu_exists" => patch_apcu_key_family(func, "array<array-key, true>"),
         "sscanf" => patch_scanf_family(func, "int", "array|null"),
         "fscanf" => patch_scanf_family(func, "int|false", "array|false|null"),
         "array_reduce" => patch_array_reduce(func),
@@ -736,6 +739,28 @@ fn patch_version_compare(func: &mut FunctionInfo) {
         "$operator",
         PhpType::null(),
         PhpType::int(),
+        PhpType::bool(),
+    );
+}
+
+/// Patch an APCu key function to have a conditional return type keyed on its
+/// key argument.
+///
+/// `apcu_store`, `apcu_add`, `apcu_delete` and `apcu_exists` each take either
+/// one key or an array of them. A single key gets a `bool` back; an array gets
+/// a per-key report (`batch`): the keys that failed to store or delete, or the
+/// keys that exist. The stubs declare the union of both.
+///
+/// The parameter is keyed by position: `apcu_exists` calls it `$keys`.
+fn patch_apcu_key_family(func: &mut FunctionInfo, batch: &str) {
+    let Some(key) = func.parameters.first().map(|p| p.name) else {
+        return;
+    };
+    conditional_on(
+        func,
+        key.as_str(),
+        PhpType::array(),
+        PhpType::parse(batch),
         PhpType::bool(),
     );
 }

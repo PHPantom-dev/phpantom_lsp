@@ -366,6 +366,39 @@ function probe(string $a, string $b, ?string $op, ?string $enc): void {
     );
 }
 
+/// The APCu key functions answer a single key with a `bool` and an array of
+/// keys with a per-key report.
+#[test]
+fn apcu_key_functions_follow_their_key_argument() {
+    let content = r#"<?php
+function probe(string $key, array $keys, array $values, string|array $either, APCUIterator $it): void {
+    $stored = apcu_store($key, 1);
+    $storeFailures = apcu_store($values);
+    $eitherStore = apcu_store($either, 1);
+    $added = apcu_add($key, 1);
+    $deleted = apcu_delete($key);
+    $deletedByIterator = apcu_delete($it);
+    $deleteFailures = apcu_delete($keys);
+    $exists = apcu_exists($key);
+    $existing = apcu_exists($keys);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$stored", "bool"),
+            ("$storeFailures", "array<array-key, int>"),
+            ("$eitherStore", "array<array-key, int>|bool"),
+            ("$added", "bool"),
+            ("$deleted", "bool"),
+            ("$deletedByIterator", "bool"),
+            ("$deleteFailures", "list<string>"),
+            ("$exists", "bool"),
+            ("$existing", "array<array-key, true>"),
+        ],
+    );
+}
+
 /// The `scanf` family collects into an array or reports how many
 /// by-reference targets it filled, decided by whether any were passed. The
 /// deciding parameter is the variadic itself, so presence is the whole
