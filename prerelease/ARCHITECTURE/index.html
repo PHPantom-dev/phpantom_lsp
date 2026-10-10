@@ -3301,7 +3301,7 @@ sit next to.</p>
 <a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>├── type_engine/
 <a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>│   ├── subject_expr.rs, subject_extraction.rs, subject_resolution.rs
 <a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>│   │                       # Extracting and resolving the subject before -&gt;, ?-&gt;, ::
-<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>│   ├── resolver/           # Subject expression → ClassInfo (type engine entry point) + chain cache, property narrowing
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>│   ├── resolver/           # Subject expression → ClassInfo (type engine entry point) + chain cache
 <a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>│   ├── variable/           # Variable type resolution via assignment scanning
 <a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>│   │   ├── forward_walk/   #   the forward walker (shared by diagnostics, hover, go-to-def, sig help)
 <a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>│   │   ├── rhs_resolution/ #   right-hand-side expression resolution
@@ -4455,6 +4455,18 @@ native diagnostic set.</p>
 method bodies top-to-bottom, building a scope of variable types at
 each statement boundary. It is shared by diagnostics, completion,
 hover, go-to-definition, and signature help.</p>
+<p>Inside a statement, the walk follows PHP's evaluation order
+(<code>forward_walk/expr.rs</code>): each sub-expression runs on the scope the ones
+before it left, so a write or a check partway through an expression
+(<code>($a = g()) &amp;&amp; $a-&gt;bar()</code>, <code>$x instanceof Foo ? $x-&gt;foo() : null</code>) is in
+force for whatever is evaluated after it. A condition also hands back
+what each of its outcomes proves (<code>forward_walk/condition.rs</code>), and the
+right operand of <code>&amp;&amp;</code>/<code>||</code>, the arms of a ternary or <code>match</code>, the
+branches of an <code>if</code>/<code>elseif</code> chain, and loop bodies run on the outcome
+that lets them run. A walk to the cursor answers with the scope of the
+innermost expression holding it, and walks to the same position within
+one request are shared, so asking about several variables and member
+paths there costs one walk.</p>
 <p>The same walk answers which branches cannot run
 (<code>forward_walk/reachability.rs</code>): a guard whose value the source decides
 (a boolean literal, the logical operators over decidable operands, or a

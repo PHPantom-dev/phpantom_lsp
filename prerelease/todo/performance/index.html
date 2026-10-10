@@ -1437,17 +1437,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p50-cache-the-top-level-scope-for-global-keyword-resolution" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P50. Cache the top-level scope for <code>global</code> keyword resolution
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p51-ci-gated-scaling-and-memory-invariants" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1481,10 +1470,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p54-property-narrowing-re-walks-the-whole-body-once-per-subject" class="md-nav__link">
+  <a href="#p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P54. Property narrowing re-walks the whole body once per subject
+        P57. Narrowing deep-copies a class every time it crosses the <code>Arc</code> boundary
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p58-a-member-completion-cache-hit-copies-the-whole-item-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P58. A member-completion cache hit copies the whole item list
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P65. Every call site repeats the full function lookup, hit or miss
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P66. Stub version filtering rescans a stub file once per symbol it declares
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P70. Diagnostics on a long file find each access's context by scanning
       </span>
     </span>
   </a>
@@ -2082,17 +2115,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p50-cache-the-top-level-scope-for-global-keyword-resolution" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P50. Cache the top-level scope for <code>global</code> keyword resolution
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p51-ci-gated-scaling-and-memory-invariants" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2126,10 +2148,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p54-property-narrowing-re-walks-the-whole-body-once-per-subject" class="md-nav__link">
+  <a href="#p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P54. Property narrowing re-walks the whole body once per subject
+        P57. Narrowing deep-copies a class every time it crosses the <code>Arc</code> boundary
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p58-a-member-completion-cache-hit-copies-the-whole-item-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P58. A member-completion cache hit copies the whole item list
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P65. Every call site repeats the full function lookup, hit or miss
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P66. Stub version filtering rescans a stub file once per symbol it declares
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P70. Diagnostics on a long file find each access's context by scanning
       </span>
     </span>
   </a>
@@ -3080,23 +3146,6 @@ in <code>php_type/mod.rs</code>, and the shape-folding branch of <code>merge_bra
 does not reach the sizes where this shows; generated code and long
 procedural report builders do.</p>
 <hr />
-<h2 id="p50-cache-the-top-level-scope-for-global-keyword-resolution">P50. Cache the top-level scope for <code>global</code> keyword resolution<a class="headerlink" href="#p50-cache-the-top-level-scope-for-global-keyword-resolution" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<p>Every <code>resolve_variable_types</code> call on a file containing <code>global</code>
-rebuilds the top-level scope by forward-walking every top-level
-statement with <code>cursor_offset = u32::MAX</code>. This is done once per
-variable query, so hovering three variables in the same file walks the
-top-level three times.</p>
-<p>Re-entry guards (added to fix #327) prevent the walk from recursing
-unboundedly, but the repeated cost remains. The preferred shape is
-pre-compute-and-cache: build the top-level scope once per file version
-(keyed by content hash or pointer) and reuse it across queries within
-the same request cycle.</p>
-<p><strong>Where to look:</strong> <code>resolve_variable_in_statements</code> in
-<code>type_engine/variable/resolution.rs</code>, the <code>walk_top_level_for_globals</code>
-call. A per-request cache (similar to the chain resolution cache in
-<code>type_engine/resolver/context.rs</code>) would eliminate the redundant walks.</p>
-<hr />
 <h2 id="p51-ci-gated-scaling-and-memory-invariants">P51. CI-gated scaling and memory invariants<a class="headerlink" href="#p51-ci-gated-scaling-and-memory-invariants" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
 <p><code>.github/workflows/ci.yml</code>'s <code>benchmark</code>/<code>benchmark-pr</code> jobs only run
@@ -3183,39 +3232,6 @@ already have one, deref coercion covers the read sites, and the
 <p><strong>Where to look:</strong> <code>collect_deprecated_diagnostics</code> and
 <code>resolve_variable_subject</code> in <code>diagnostics/deprecated.rs</code>, plus the
 <code>var_type_cache</code> declaration at the top of the collector.</p>
-<h2 id="p54-property-narrowing-re-walks-the-whole-body-once-per-subject">P54. Property narrowing re-walks the whole body once per subject<a class="headerlink" href="#p54-property-narrowing-re-walks-the-whole-body-once-per-subject" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>Every <code>$this-&gt;prop</code> or <code>$h-&gt;getCall()</code> whose type the engine needs sends
-<code>apply_property_narrowing</code> back over the enclosing body from its first
-statement, looking for a check that refines that subject. Nothing
-remembers the answer, so a body holding n such subjects walks itself n
-times, and each walk resolves the expressions it passes, which resolves
-subjects of their own.</p>
-<p><code>NARROWING_IN_PROGRESS</code> stops that from compounding without bound — a
-walk no longer starts while another is running over the same source —
-but the remaining growth is still superlinear: on the reproducer from</p>
-<h1 id="385-a-release-build-measures-under-005-s-at-20-guardchain-pairs">385 a release build measures under 0.05 s at 20 guard/chain pairs,<a class="headerlink" href="#385-a-release-build-measures-under-005-s-at-20-guardchain-pairs" title="Permanent link">&para;</a></h1>
-<p>0.1 s at 30, and 0.4 s at 60, so roughly quadratic in the number of
-narrowed subjects. Real code stays well under those sizes, which is why
-this is Low rather than a bug, but a generated file or a long legacy
-method can reach them.</p>
-<p>Memoising the walk would collapse it, and blocking nested walks is what
-makes that straightforward: every walk that runs now runs with nothing
-above it on the same source, so its answer no longer depends on which
-other walks happened to be in flight. The result depends on the source,
-the subject key, the cursor offset, and the classes handed in, so a
-per-request map keyed by those four and cleared with the rest of the
-request caches would turn the n walks into n lookups. The awkward part is
-that the walk mutates <code>results</code> in place and reports intersections
-through a separate flag, so the cached value has to carry both.</p>
-<p>T45 removes the re-walk altogether by carrying property and call subject
-keys in the threaded scope. The memo is the fix to take if this becomes a
-problem before T45 lands.</p>
-<p><strong>Where to look:</strong> <code>apply_property_narrowing</code> in
-<code>type_engine/resolver/property_narrowing.rs</code>, and its three callers in
-<code>type_engine/resolver/mod.rs</code> (<code>SubjectExpr::CallExpr</code> and the property
-path) and <code>narrowed_by_rewalk</code> in
-<code>type_engine/variable/rhs_resolution/mod.rs</code>.</p>
 <hr />
 <h2 id="p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary">P57. Narrowing deep-copies a class every time it crosses the <code>Arc</code> boundary<a class="headerlink" href="#p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
@@ -3232,11 +3248,6 @@ dozen-plus allocations per copy.</p>
   narrowing left untouched has been deep-copied and re-allocated for
   nothing. Seventeen call sites reach it, covering every <code>instanceof</code>,
   <code>assert</code>, <code>in_array</code>, and identity guard the forward walk sees.</li>
-<li><code>apply_property_narrowing</code> unwraps the whole vector with
-  <code>Arc::unwrap_or_clone</code> and re-wraps it afterwards, with a comment
-  explaining that it does so because the walk functions take
-  <code>Vec&lt;ClassInfo&gt;</code>. The <code>Arc</code>s come out of the class index, so the
-  refcount is always above one and the clone branch always runs.</li>
 <li><code>resolved_type_with_lookup</code> clones a class out of the index only to
   hand it to <code>from_both</code>, which allocates a new <code>Arc</code> around the copy.
   Fifteen call sites, essentially every method-call return type.</li>
@@ -3249,13 +3260,11 @@ on these paths. The fix is to change the narrowing contract from
 <code>Vec&lt;ClassInfo&gt;</code> to <code>Vec&lt;Arc&lt;ClassInfo&gt;&gt;</code> — <code>apply_narrowing</code>'s closure,
 the <code>results</code> parameters in <code>narrowing::{instanceof,assertions,guards}</code>,
 <code>resolve_class_names_to_union</code>, and <code>ClassInfo::push_unique</code> — so a class
-is only allocated where one is genuinely constructed.
-<code>apply_property_narrowing</code>'s unwrap/rewrap then disappears.</p>
+is only allocated where one is genuinely constructed.</p>
 <p>This is the same defect as <a href="#p53-the-deprecated-collector-deep-copies-a-class-per-member-access">P53</a>
 on a different path, and it is worth measuring the two together.</p>
 <p><strong>Where to look:</strong> <code>apply_narrowing</code>, <code>from_class</code>, <code>from_arc</code>,
 <code>from_both</code>, and <code>from_both_arc</code> in <code>types/resolved_type.rs</code>;
-<code>apply_property_narrowing</code> in <code>type_engine/resolver/property_narrowing.rs</code>;
 <code>resolved_type_with_lookup</code> in
 <code>type_engine/variable/rhs_resolution/mod.rs</code>;
 <code>type_engine/types/narrowing/{resolve,instanceof,assertions}.rs</code>.</p>
