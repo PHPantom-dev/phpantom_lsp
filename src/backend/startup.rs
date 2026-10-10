@@ -72,6 +72,23 @@ impl Backend {
             Ordering::Release,
         );
 
+        // Deferred code actions carry `data` and no `edit`, which the spec
+        // only allows for a client that resolves `edit` lazily.
+        let code_action = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|td| td.code_action.as_ref());
+        let supports_resolve = code_action.is_some_and(|ca| {
+            ca.data_support == Some(true)
+                && ca
+                    .resolve_support
+                    .as_ref()
+                    .is_some_and(|rs| rs.properties.iter().any(|p| p == "edit"))
+        });
+        self.supports_code_action_resolve
+            .store(supports_resolve, Ordering::Release);
+
         // Detect whether the client supports server-initiated work-done
         // progress (window/workDoneProgress/create).  Per the LSP spec,
         // we must not send that request unless the client opts in.

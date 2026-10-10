@@ -127,6 +127,8 @@ mod update_docblock;
 mod docblock_edit;
 mod helpers;
 
+use std::sync::atomic::Ordering;
+
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -294,7 +296,35 @@ impl Backend {
             }
         }
 
+        if !self.supports_code_action_resolve.load(Ordering::Acquire) {
+            actions.retain_mut(|action| match action {
+                CodeActionOrCommand::CodeAction(action) => {
+                    self.inline_deferred_edit(action, content)
+                }
+                CodeActionOrCommand::Command(_) => true,
+            });
+        }
+
         actions
+    }
+
+    /// Fill in the edit of a deferred action for a client that cannot call
+    /// `codeAction/resolve`, and drop the `data` it would never use.
+    /// Returns `false` when the edit cannot be computed, since the action
+    /// would do nothing.
+    fn inline_deferred_edit(&self, action: &mut CodeAction, content: &str) -> bool {
+        if action.edit.is_some() {
+            return true;
+        }
+        let Some(data) = Self::code_action_data(action) else {
+            return true;
+        };
+        action.data = None;
+        let Some(edit) = self.compute_deferred_edit(action, &data, content) else {
+            return false;
+        };
+        action.edit = Some(edit);
+        true
     }
 
     /// Handle a `codeAction/resolve` request.
@@ -308,14 +338,8 @@ impl Backend {
     /// removed from the cache and updated diagnostics are returned via
     /// the `diagnostics_to_republish` output parameter.
     pub fn resolve_code_action(&self, mut action: CodeAction) -> (CodeAction, Option<String>) {
-        let data_value = match &action.data {
-            Some(v) => v.clone(),
-            None => return (action, None),
-        };
-
-        let data: CodeActionData = match serde_json::from_value(data_value) {
-            Ok(d) => d,
-            Err(_) => return (action, None),
+        let Some(data) = Self::code_action_data(&action) else {
+            return (action, None);
         };
 
         // A template's action was planned against its virtual PHP, so the
@@ -324,95 +348,10 @@ impl Backend {
             return (action, None);
         };
 
-        // Parse the file once and share it across the resolve handler below.
-        // Resolving an extract action, for example, walks the AST several
-        // times (scope map, return analysis, parameter order, return type);
-        // without this guard each walk would re-parse the same file.
-        let _parse_guard = crate::parser::with_parse_cache(&content);
-
-        // Resolving an action can need types (an extracted function's
-        // return type, a docblock's inferred `@return`).  This handler
-        // fetches its own file content, so it activates the type-engine
-        // resolvers itself rather than going through `with_file_content`.
-        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
-
-        let result = match data.action_kind.as_str() {
-            // ── PHPStan quickfixes ──────────────────────────────────
-            "phpstan.addThrows" => {
-                let edit = self.resolve_add_throws(&data, &content);
-
-                // Adding a @throws tag for an exception resolves the
-                // diagnostic for *every* throw of that exception in
-                // the same function/method body.  Expand the action's
-                // diagnostic list so they all get cleared at once.
-                if edit.is_some() {
-                    self.expand_sibling_checked_exception_diags(&data, &content, &mut action);
-                }
-
-                edit
-            }
-            "phpstan.removeThrows" => self.resolve_remove_throws(&data, &content),
-            "phpstan.addOverride" => self.resolve_add_override(&data, &content),
-            "phpstan.addIgnore" => self.resolve_add_ignore(&data, &content),
-            "phpstan.removeIgnore" => self.resolve_remove_ignore(&data, &content),
-            "phpstan.removeOverride" => self.resolve_remove_override(&data, &content),
-            "phpstan.addReturnTypeWillChange" => {
-                self.resolve_add_return_type_will_change(&data, &content)
-            }
-            "phpstan.fixPhpDocType.update" | "phpstan.fixPhpDocType.remove" => {
-                self.resolve_fix_phpdoc_type(&data, &content)
-            }
-            "phpstan.newStatic.addTag"
-            | "phpstan.newStatic.finalClass"
-            | "phpstan.newStatic.finalConstructor" => self.resolve_new_static(&data, &content),
-            // ── Fix prefixed class name ─────────────────────────────
-            "phpstan.fixPrefixedClass" => self.resolve_fix_prefixed_class(&data, &content),
-            // ── Remove always-true assert() ─────────────────────────
-            "phpstan.removeAssert" => self.resolve_remove_assert(&data, &content),
-            // ── Fix return type ─────────────────────────────────────
-            "phpstan.fixReturnType.stripExpr"
-            | "phpstan.fixReturnType.changeTypeToActual"
-            | "phpstan.fixReturnType.changeType"
-            | "phpstan.fixReturnType.addType"
-            | "phpstan.fixReturnType.updateReturnType" => {
-                self.resolve_fix_return_type(&data, &content)
-            }
-            // ── Remove unused return type ────────────────────────────
-            "phpstan.removeUnusedReturnType" => {
-                self.resolve_remove_unused_return_type(&data, &content)
-            }
-            // ── Add iterable return type ────────────────────────────
-            "phpstan.addIterableType" => self.resolve_add_iterable_type(&data, &content),
-            // ── Remove unreachable statement ────────────────────────
-            "phpstan.removeUnreachable" => self.resolve_remove_unreachable(&data, &content),
-            // ── Change visibility (parent-aware) ────────────────────
-            "refactor.changeVisibility" => self.resolve_change_visibility(&data, &content),
-            // ── Unused import quickfixes ─────────────────────────────
-            "quickfix.removeUnusedImport" | "quickfix.removeAllUnusedImports" => {
-                self.resolve_remove_unused_import(&data, &content, action.diagnostics.as_deref())
-            }
-            // ── Refactoring actions ─────────────────────────────────
-            "refactor.extractConstant" | "refactor.extractConstantAll" => {
-                self.resolve_extract_constant(&data, &content)
-            }
-            "refactor.extractVariable" | "refactor.extractVariableAll" => {
-                self.resolve_extract_variable(&data, &content)
-            }
-            // ── Import all missing classes ───────────────────────────────
-            "source.importAllClasses" => self.resolve_import_all_classes(&data, &content),
-            "refactor.extractFunction" => self.resolve_extract_function(&data, &content),
-            "refactor.extractInterface" => self.resolve_extract_interface(&data, &content),
-            "refactor.inlineVariable" => self.resolve_inline_variable(&data, &content),
-            "refactor.extractInstanceVariable" => {
-                self.resolve_convert_to_instance_variable(&data, &content)
-            }
-            _ => None,
+        let Some(edit) = self.compute_deferred_edit(&mut action, &data, &content) else {
+            return (action, None);
         };
-
-        if let Some(mut edit) = result {
-            self.translate_workspace_edit(&mut edit);
-            action.edit = Some(edit);
-        }
+        action.edit = Some(edit);
 
         // Only clear diagnostics and republish when the resolve
         // actually produced an edit.  If the file changed between
@@ -449,5 +388,108 @@ impl Backend {
         };
 
         (action, republish_uri)
+    }
+
+    fn code_action_data(action: &CodeAction) -> Option<CodeActionData> {
+        serde_json::from_value(action.data.clone()?).ok()
+    }
+
+    /// Compute the workspace edit of a deferred action, already translated
+    /// for templates.  Returns `None` when the file changed since the
+    /// action was offered or the kind is unknown.
+    fn compute_deferred_edit(
+        &self,
+        action: &mut CodeAction,
+        data: &CodeActionData,
+        content: &str,
+    ) -> Option<WorkspaceEdit> {
+        // Parse the file once and share it across the resolve handler below.
+        // Resolving an extract action, for example, walks the AST several
+        // times (scope map, return analysis, parameter order, return type);
+        // without this guard each walk would re-parse the same file.
+        let _parse_guard = crate::parser::with_parse_cache(content);
+
+        // Resolving an action can need types (an extracted function's
+        // return type, a docblock's inferred `@return`).  This handler
+        // fetches its own file content, so it activates the type-engine
+        // resolvers itself rather than going through `with_file_content`.
+        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
+
+        let result = match data.action_kind.as_str() {
+            // ── PHPStan quickfixes ──────────────────────────────────
+            "phpstan.addThrows" => {
+                let edit = self.resolve_add_throws(data, content);
+
+                // Adding a @throws tag for an exception resolves the
+                // diagnostic for *every* throw of that exception in
+                // the same function/method body.  Expand the action's
+                // diagnostic list so they all get cleared at once.
+                if edit.is_some() {
+                    self.expand_sibling_checked_exception_diags(data, content, action);
+                }
+
+                edit
+            }
+            "phpstan.removeThrows" => self.resolve_remove_throws(data, content),
+            "phpstan.addOverride" => self.resolve_add_override(data, content),
+            "phpstan.addIgnore" => self.resolve_add_ignore(data, content),
+            "phpstan.removeIgnore" => self.resolve_remove_ignore(data, content),
+            "phpstan.removeOverride" => self.resolve_remove_override(data, content),
+            "phpstan.addReturnTypeWillChange" => {
+                self.resolve_add_return_type_will_change(data, content)
+            }
+            "phpstan.fixPhpDocType.update" | "phpstan.fixPhpDocType.remove" => {
+                self.resolve_fix_phpdoc_type(data, content)
+            }
+            "phpstan.newStatic.addTag"
+            | "phpstan.newStatic.finalClass"
+            | "phpstan.newStatic.finalConstructor" => self.resolve_new_static(data, content),
+            // ── Fix prefixed class name ─────────────────────────────
+            "phpstan.fixPrefixedClass" => self.resolve_fix_prefixed_class(data, content),
+            // ── Remove always-true assert() ─────────────────────────
+            "phpstan.removeAssert" => self.resolve_remove_assert(data, content),
+            // ── Fix return type ─────────────────────────────────────
+            "phpstan.fixReturnType.stripExpr"
+            | "phpstan.fixReturnType.changeTypeToActual"
+            | "phpstan.fixReturnType.changeType"
+            | "phpstan.fixReturnType.addType"
+            | "phpstan.fixReturnType.updateReturnType" => {
+                self.resolve_fix_return_type(data, content)
+            }
+            // ── Remove unused return type ────────────────────────────
+            "phpstan.removeUnusedReturnType" => {
+                self.resolve_remove_unused_return_type(data, content)
+            }
+            // ── Add iterable return type ────────────────────────────
+            "phpstan.addIterableType" => self.resolve_add_iterable_type(data, content),
+            // ── Remove unreachable statement ────────────────────────
+            "phpstan.removeUnreachable" => self.resolve_remove_unreachable(data, content),
+            // ── Change visibility (parent-aware) ────────────────────
+            "refactor.changeVisibility" => self.resolve_change_visibility(data, content),
+            // ── Unused import quickfixes ─────────────────────────────
+            "quickfix.removeUnusedImport" | "quickfix.removeAllUnusedImports" => {
+                self.resolve_remove_unused_import(data, content, action.diagnostics.as_deref())
+            }
+            // ── Refactoring actions ─────────────────────────────────
+            "refactor.extractConstant" | "refactor.extractConstantAll" => {
+                self.resolve_extract_constant(data, content)
+            }
+            "refactor.extractVariable" | "refactor.extractVariableAll" => {
+                self.resolve_extract_variable(data, content)
+            }
+            // ── Import all missing classes ───────────────────────────────
+            "source.importAllClasses" => self.resolve_import_all_classes(data, content),
+            "refactor.extractFunction" => self.resolve_extract_function(data, content),
+            "refactor.extractInterface" => self.resolve_extract_interface(data, content),
+            "refactor.inlineVariable" => self.resolve_inline_variable(data, content),
+            "refactor.extractInstanceVariable" => {
+                self.resolve_convert_to_instance_variable(data, content)
+            }
+            _ => None,
+        };
+
+        let mut edit = result?;
+        self.translate_workspace_edit(&mut edit);
+        Some(edit)
     }
 }

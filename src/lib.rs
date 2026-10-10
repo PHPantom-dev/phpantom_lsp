@@ -940,6 +940,10 @@ pub struct Backend {
     /// The code actions that create a file (extract interface, create a
     /// missing view) are only offered when it does.
     pub(crate) supports_file_create: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client can resolve deferred code actions: it lists `data`
+    /// support and `edit` in `codeAction.resolveSupport.properties`.  When it
+    /// cannot, `handle_code_action` sends every edit up front.
+    pub(crate) supports_code_action_resolve: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports server-initiated work-done progress.
     ///
     /// Set during `initialize` based on the client's
@@ -1313,6 +1317,7 @@ impl Backend {
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_create: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_code_action_resolve: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
@@ -1360,6 +1365,7 @@ impl Backend {
             // Tests drive the backend without an `initialize` round-trip; a
             // real client advertises this capability there.
             supports_file_create: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            supports_code_action_resolve: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             // A test asserts right after the edit that triggered the parse,
             // so the parse has to have committed by the time the edit
             // returns.
@@ -1594,6 +1600,13 @@ impl Backend {
     /// to simulate Composer autoload file discovery).
     pub fn autoload_file_paths(&self) -> &Arc<RwLock<Vec<PathBuf>>> {
         &self.symbols.autoload_file_paths
+    }
+
+    /// Pretend the client cannot call `codeAction/resolve` (used by
+    /// integration tests, which skip the `initialize` round-trip).
+    pub fn disable_code_action_resolve(&self) {
+        self.supports_code_action_resolve
+            .store(false, std::sync::atomic::Ordering::Release);
     }
 
     /// Borrow the open files map (used by integration tests to inject
@@ -2119,6 +2132,7 @@ impl Backend {
             supports_pull_diagnostics: Arc::clone(&self.supports_pull_diagnostics),
             supports_file_rename: Arc::clone(&self.supports_file_rename),
             supports_file_create: Arc::clone(&self.supports_file_create),
+            supports_code_action_resolve: Arc::clone(&self.supports_code_action_resolve),
             supports_work_done_progress: Arc::clone(&self.supports_work_done_progress),
             supports_type_hierarchy_dynamic_registration: Arc::clone(
                 &self.supports_type_hierarchy_dynamic_registration,

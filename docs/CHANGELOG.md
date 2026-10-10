@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Writing to a `global` variable is no longer reported as unused.** The same goes for a write through a reference, such as `$first = &$items[0]; $first = 5;`.
 - **phpcbf fixes against the `[phpcs]` standard.** With `standard` set in `.phpantom.toml`, formatting now applies the rules PHPCS reports instead of PHP_CodeSniffer's default standard.
 - **A `[phpcs]` standard now selects phpcbf too.** A project that sets `standard` without a ruleset file or `require-dev` entry gets its fixes from phpcbf instead of the built-in formatter.
+- **Code actions work in editors that cannot resolve them lazily.** Quick fixes and refactorings such as extract function now apply in clients that do not support `codeAction/resolve`.
 - **A class with `__toString()` is accepted as `Stringable`.** Passing one where `Stringable` or `string|Stringable` is expected no longer reports a false type mismatch, whether the method is declared on the class, a parent, or a trait.
 - **`->value` and `->name` on an enum read as its cases' values and names.** A `value-of<Enum>` parameter or return, or a declared literal union, no longer reports a false type mismatch when fed an enum's `->value`.
 - **A new import inside a braced `namespace { }` block is indented to match the block.** Imports added by completion, code actions and class moves no longer land flush left.

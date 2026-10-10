@@ -123,6 +123,28 @@ function foo() {
 }
 
 #[test]
+fn edit_is_sent_up_front_when_client_cannot_resolve() {
+    let backend = create_test_backend();
+    backend.disable_code_action_resolve();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = 1;
+    $y = 2;
+    echo $x + $y;
+}
+";
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 3, 11);
+    let action = find_extract_action(&actions).expect("extract action offered");
+    assert!(action.edit.is_some(), "edit should be computed in phase 1");
+    assert!(
+        action.data.is_none(),
+        "no data for a client that cannot resolve"
+    );
+}
+
+#[test]
 fn not_offered_for_empty_selection() {
     let backend = create_test_backend();
     let uri = "file:///test.php";

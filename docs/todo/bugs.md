@@ -176,22 +176,3 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B573. Deferred code actions are sent to clients that cannot resolve them
-
-**Impact: Low · Complexity: Low-Medium**
-
-`handle_code_action` (`src/code_actions/mod.rs`) returns the deferred
-actions (PHPStan quick fixes, extract function/method, extract variable,
-extract constant, inline variable, convert to instance variable, remove
-unused imports) with a `data` field and no `edit`, whatever the client
-advertised. The spec only allows this when the client lists `edit` in
-`textDocument.codeAction.resolveSupport.properties`; a client without it
-applies an action as it was received. Nothing reads that capability
-(nor `dataSupport`). Found with CodeLite before it supported
-`codeAction/resolve`: the actions were listed, and picking one did
-nothing.
-
-**Fix:** Read `resolveSupport` and `dataSupport` at `initialize`, next
-to `supports_file_rename`. When either is missing, compute the edit in
-phase 1 through the same code `resolve_code_action` runs, and send it
-without `data`.
