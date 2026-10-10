@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Renaming one implementation of an interface method no longer breaks the interface.** Renaming `greet()` on a class that implements `Greeting` renamed only that class and its calls, leaving the interface and the other implementations behind. The rename is now refused with a message naming `Greeting::greet()`, where renaming it updates every implementation and call; the same goes for a method an abstract parent or trait requires. Contributed by @Deadsquirrel93. Closes #492.
 - **An assignment is seen by the rest of the expression it sits in.** In `if (($user = find($id)) && $user->isActive())`, the right-hand side now knows what `$user` holds, and `[$i++, $i]` holds the old `$i` in its first item and the incremented one in its second.
 - **Variables inside a closure keep their types when another method is chained onto the call.** In `$obj->with(function (string $s) { … })->run()`, hover and completion inside the closure again know the types of its parameters and locals.
 - **Writing to a `global` variable is no longer reported as unused.** The same goes for a write through a reference, such as `$first = &$items[0]; $first = 5;`.

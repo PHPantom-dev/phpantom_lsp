@@ -11,7 +11,9 @@ use super::*;
 use std::collections::HashMap;
 
 use crate::class_lookup::find_class_at_offset;
-use crate::types::ClassInfo;
+use crate::inheritance::ancestry::find_declaring_ancestor;
+use crate::symbol_map::SymbolKind;
+use crate::types::{ClassInfo, ClassLikeKind};
 
 /// The class a member declared at `offset` belongs to.
 ///
@@ -188,6 +190,100 @@ impl Backend {
             .clone()
             .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&[fqn]));
         Some((hierarchy, declaration_scope))
+    }
+
+    /// A class that renaming the method under the cursor would leave
+    /// without a method something outside the rename requires of it, with
+    /// that requirement as `Type::method()`.
+    ///
+    /// A method rename reaches the declaring class and what inherits from
+    /// it, but not the interfaces and abstract methods it fulfils, so that
+    /// renaming one implementation leaves its siblings alone.  The edit is
+    /// only valid PHP when every class it reaches still has the method
+    /// under its old name wherever a contract outside the rename demands
+    /// it, which a concrete parent or trait outside the rename can provide.
+    pub(crate) fn method_rename_contract_conflict(
+        &self,
+        uri: &str,
+        content: &str,
+        kind: &SymbolKind,
+        span_start: u32,
+    ) -> Option<(String, String)> {
+        let (name, scope) = match kind {
+            SymbolKind::MemberDeclaration { name, is_static } => {
+                let is_method = self
+                    .symbols
+                    .uri_classes_index
+                    .read()
+                    .get(uri)?
+                    .iter()
+                    .flat_map(|c| c.methods.iter())
+                    .any(|m| m.name_offset != 0 && m.name_offset == span_start);
+                if !is_method {
+                    return None;
+                }
+                let (_, scope) = self.resolve_member_declaration_scopes(
+                    uri,
+                    span_start,
+                    name,
+                    *is_static,
+                    ReferenceSearchMode::Rename,
+                )?;
+                (name, scope?)
+            }
+            SymbolKind::MemberAccess {
+                subject_text,
+                member_name,
+                is_static,
+                is_method_call: true,
+                ..
+            } => {
+                let source = self.symbol_map_source(uri, content)?;
+                let (_, scope) = self.resolve_member_access_scopes(
+                    uri,
+                    subject_text.as_str(source),
+                    *is_static,
+                    span_start,
+                    member_name,
+                    ReferenceSearchMode::Rename,
+                );
+                (member_name, scope?)
+            }
+            _ => return None,
+        };
+
+        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let declared_outside = |c: &ClassInfo| {
+            !scope.indexed().contains(c.fqn().as_str())
+                && c.methods.iter().any(|m| m.name.eq_ignore_ascii_case(name))
+        };
+        let provided_outside = |c: &ClassInfo| {
+            c.kind != ClassLikeKind::Interface
+                && declared_outside(c)
+                && c.methods
+                    .iter()
+                    .any(|m| m.name.eq_ignore_ascii_case(name) && !m.is_abstract)
+        };
+
+        // Sorted so that the class a refusal names does not depend on
+        // hash order.
+        let mut renamed: Vec<&String> = scope.indexed().iter().collect();
+        renamed.sort();
+        renamed.into_iter().find_map(|fqn| {
+            let class = class_loader(fqn)?;
+            if find_declaring_ancestor(&class, &class_loader, &provided_outside).is_some() {
+                return None;
+            }
+            let (_, contract) = find_declaring_ancestor(&class, &class_loader, &declared_outside)?;
+            let method = contract
+                .methods
+                .iter()
+                .find(|m| m.name.eq_ignore_ascii_case(name))?;
+            Some((
+                class.fqn().to_string(),
+                format!("{}::{}()", contract.fqn(), method.name),
+            ))
+        })
     }
 
     /// Resolve a member-access subject to the FQN(s) of its type(s), using
