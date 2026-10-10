@@ -57,10 +57,11 @@ fn catches_everything(try_stmt: &Try<'_>) -> bool {
 /// Walk a `try` body into `scope` and return the scope a `catch` clause
 /// starts from.
 ///
-/// Any statement in the body can throw, so a `catch` sees the join of the
-/// state before each of them: the assignments the body made before the
-/// throw, but not the one the throwing statement was about to make
-/// (`$x = mayThrow();` leaves `$x` as it was).
+/// A `catch` sees the join of the state before each statement that can
+/// throw: the assignments the body made before the throw, but not the one
+/// the throwing statement was about to make (`$x = mayThrow();` leaves `$x`
+/// as it was).  A body where nothing can throw leaves the catch with the
+/// state before the `try`.
 ///
 /// When `throws` is given, what each statement can throw is added to it.
 fn walk_try_body<'b>(
@@ -69,21 +70,27 @@ fn walk_try_body<'b>(
     ctx: &ForwardWalkCtx<'_>,
     mut throws: Option<&mut ThrowPoints>,
 ) -> ScopeState {
-    let mut catch_entry = scope.clone();
-    for (i, stmt) in try_stmt.block.statements.iter().enumerate() {
-        if i > 0 {
-            catch_entry.merge_branch(scope);
+    let pre_try = scope.clone();
+    let mut catch_entry: Option<ScopeState> = None;
+    for stmt in try_stmt.block.statements.iter() {
+        let flat = matches!(
+            stmt,
+            Statement::Expression(_) | Statement::Return(_) | Statement::Echo(_)
+        );
+        let mut stmt_throws = ThrowPoints::default();
+        stmt_throws.collect(stmt, flat.then_some(&*scope), ctx);
+        if stmt_throws.may_throw() {
+            match catch_entry.as_mut() {
+                Some(entry) => entry.merge_branch(scope),
+                None => catch_entry = Some(scope.clone()),
+            }
         }
         if let Some(throws) = throws.as_deref_mut() {
-            let flat = matches!(
-                stmt,
-                Statement::Expression(_) | Statement::Return(_) | Statement::Echo(_)
-            );
-            throws.collect(stmt, flat.then_some(&*scope), ctx);
+            throws.absorb(stmt_throws);
         }
         walk_body_forward(std::iter::once(stmt), scope, ctx);
     }
-    catch_entry
+    catch_entry.unwrap_or(pre_try)
 }
 
 /// Process a `try-catch-finally` statement.

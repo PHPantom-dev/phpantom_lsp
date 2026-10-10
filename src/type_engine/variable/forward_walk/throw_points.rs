@@ -77,6 +77,22 @@ impl ThrowPoints {
         })
     }
 
+    /// Whether anything was found that can throw.
+    pub(crate) fn may_throw(&self) -> bool {
+        self.implicit || !self.explicit.is_empty()
+    }
+
+    /// Add everything `other` can throw.
+    pub(crate) fn absorb(&mut self, other: ThrowPoints) {
+        if self.implicit {
+            return;
+        }
+        self.implicit = other.implicit;
+        for name in other.explicit {
+            self.add_class(name);
+        }
+    }
+
     fn add_class(&mut self, name: String) {
         if !self.explicit.contains(&name) {
             self.explicit.push(name);
@@ -229,6 +245,29 @@ impl<'ast, 'arena, 'c, 'w> Walker<'ast, 'arena, Collect<'c, 'w>> for ThrowPointW
     }
 
     fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, c: &mut Collect<'c, 'w>) {
+        let mut callee = call.function;
+        while let Expression::Parenthesized(p) = callee {
+            callee = p.expression;
+        }
+        // An immediately invoked closure throws what its body throws.  The
+        // body has its own variables, so none of the outer scope applies.
+        match callee {
+            Expression::Closure(closure) => {
+                let outer = c.scope.take();
+                for stmt in closure.body.statements.iter() {
+                    self.walk_statement(stmt, c);
+                }
+                c.scope = outer;
+                return;
+            }
+            Expression::ArrowFunction(arrow) => {
+                let outer = c.scope.take();
+                self.walk_expression(arrow.expression, c);
+                c.scope = outer;
+                return;
+            }
+            _ => {}
+        }
         let (Expression::Identifier(ident), Some(fl)) =
             (call.function, c.ctx.loaders.function_loader)
         else {

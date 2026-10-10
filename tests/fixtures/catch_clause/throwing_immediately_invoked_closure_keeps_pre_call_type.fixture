@@ -1,0 +1,22 @@
+// test: an immediately invoked closure that can throw leaves the catch with the type from before the call
+// feature: hover
+// expect: null|'a'
+---
+<?php
+
+function maybeThrows(): void {}
+
+function test(): void {
+    $path = null;
+
+    try {
+        (function () use (&$path): void {
+            maybeThrows();
+            $path = 'a';
+        })();
+
+        throw new \RuntimeException('boom');
+    } catch (\Throwable $e) {
+        echo $<>path;
+    }
+}

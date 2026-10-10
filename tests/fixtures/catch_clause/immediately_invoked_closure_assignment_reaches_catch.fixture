@@ -1,0 +1,19 @@
+// test: a by-reference assignment in an immediately invoked closure that cannot throw reaches the catch
+// feature: hover
+// expect: 'a'
+---
+<?php
+
+function test(): void {
+    $path = null;
+
+    try {
+        (function () use (&$path): void {
+            $path = 'a';
+        })();
+
+        throw new \RuntimeException('boom');
+    } catch (\Throwable $e) {
+        echo $<>path;
+    }
+}
