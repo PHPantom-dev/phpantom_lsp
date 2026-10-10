@@ -14,6 +14,8 @@
 //! - The `$this` variable is never offered for conversion.
 //! - Only works inside a method body of a class-like declaration.
 
+use std::sync::Arc;
+
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::method::MethodBody;
@@ -24,11 +26,14 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::find_class_at_offset;
 use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::code_actions::{CodeActionData, detect_indent_from_members, make_code_action_data};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::collect_function_scope;
 use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::types::{ClassInfo, Visibility};
+use crate::virtual_members::resolve_class_fully_cached;
 
 // ─── AST helpers ────────────────────────────────────────────────────────────
 
@@ -315,6 +320,30 @@ fn find_assignment_in_if_body(if_stmt: &If<'_>, cursor: u32) -> Option<(String,)
 // ─── Backend impl ───────────────────────────────────────────────────────────
 
 impl Backend {
+    /// Whether the enclosing class already inherits a non-private property
+    /// with this name from a parent or trait. Declaring it again would
+    /// shadow it, and a narrower visibility is a fatal error.
+    fn inherits_property(&self, uri: &str, cursor_offset: u32, var_name: &str) -> bool {
+        let bare_name = var_name.strip_prefix('$').unwrap_or(var_name);
+        let local_classes: Vec<Arc<ClassInfo>> = self
+            .symbols
+            .uri_classes_index
+            .read()
+            .get(uri)
+            .cloned()
+            .unwrap_or_default();
+        let Some(enclosing) = find_class_at_offset(&local_classes, cursor_offset) else {
+            return false;
+        };
+        let (use_map, namespace) = self.use_map_and_namespace_at(uri, cursor_offset);
+        let class_loader = self.class_loader_with(&local_classes, &use_map, &namespace);
+        let resolved =
+            resolve_class_fully_cached(enclosing, &class_loader, &self.resolved_class_cache);
+        resolved
+            .get_property(bare_name)
+            .is_some_and(|p| p.visibility != Visibility::Private)
+    }
+
     /// Collect "Convert to Instance Variable" code actions (Phase 1).
     ///
     /// This is a lightweight check that verifies the cursor is on a local
@@ -333,6 +362,10 @@ impl Backend {
             Some(i) => i,
             None => return,
         };
+
+        if self.inherits_property(uri, cursor_offset, &info.var_name) {
+            return;
+        }
 
         let title = if info.is_static {
             format!("Convert {} to static property", info.var_name)
@@ -368,6 +401,11 @@ impl Backend {
         content: &str,
     ) -> Option<WorkspaceEdit> {
         let cursor_offset = position_to_byte_offset(content, data.range.start) as u32;
+
+        let info = collect_info(content, cursor_offset)?;
+        if self.inherits_property(&data.uri, cursor_offset, &info.var_name) {
+            return None;
+        }
 
         let result = with_parsed_program(
             content,

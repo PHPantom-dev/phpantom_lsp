@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A `catch` block sees what the `try` body assigned before anything could throw.** A variable set by an immediately invoked closure, or by any statement that cannot throw, now keeps that value in the `catch` instead of reverting to what it held before the `try`.
+- **Convert to instance variable no longer redeclares an inherited property.** The action is not offered when a parent class or trait already declares the property.
 - **Imported type aliases resolve in the file that imports them.** A method typed with an alias from `@phpstan-import-type` now returns the full shape when it is called from the same file, not only from other files.
 - **An override that names a different class than its ancestor keeps its own.** A `take(Box $b)` that names its own `Box` no longer inherits the ancestor's `@param Box&Countable` for a `Box` in another namespace.
 - **A no-op emptiness check no longer breaks a `non-empty-string` argument.** After `if ($h !== '') { ... }`, passing `$h` to a `non-empty-string` parameter is no longer reported, since the variable is still a plain `string`.

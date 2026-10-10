@@ -99,6 +99,21 @@ fn rejects_when_property_exists() {
 }
 
 #[test]
+fn rejects_when_property_is_inherited() {
+    let php = "<?php\nclass Base { protected $x; }\nclass Foo extends Base {\n    public function bar() {\n        /*|*/$x = 1;\n    }\n}";
+    assert!(
+        run_convert(php).is_none(),
+        "should not offer action when a parent declares the property"
+    );
+}
+
+#[test]
+fn offers_when_parent_property_is_private() {
+    let php = "<?php\nclass Base { private $x; }\nclass Foo extends Base {\n    public function bar() {\n        /*|*/$x = 1;\n    }\n}";
+    assert!(run_convert(php).is_some());
+}
+
+#[test]
 fn rejects_when_promoted_property_exists() {
     let php = "<?php\nclass Foo {\n    public function __construct(private $result) {}\n    public function bar() {\n        /*|*/$result = 42;\n    }\n}";
     assert!(

@@ -93,29 +93,3 @@ and converting the closure body's occurrences, and convert arrow-function
 bodies directly (both bind `$this`). Decline the action when the variable
 appears in a `catch`, `static`, or `global` declaration, or by name in
 `compact()` / `extract()` / `$$`.
-
-### B581. Convert to instance variable redeclares an inherited property
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-class Base { protected $x; }
-class Foo extends Base {
-    public function bar() {
-        $x = 1; // cursor here
-    }
-}
-```
-
-The action adds `private $x;` to `Foo`, which is a fatal error ("Access level
-to Foo::$x must be protected (as in class Base) or weaker"). Even with a
-compatible visibility it would shadow the inherited property instead of
-reusing it.
-
-`property_exists` in `convert_to_instance_variable.rs` only scans the class's
-own members and promoted constructor parameters.
-
-**Fix:** Check the fully resolved class (parents, traits) for an existing
-property. When an inherited, accessible one exists, either decline the action
-or convert to `$this->x` without declaring a new property.
-
