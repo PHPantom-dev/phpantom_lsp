@@ -9,7 +9,7 @@ use super::*;
 use tower_lsp::lsp_types::{Location, Position};
 
 use crate::references::push_location;
-use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
+use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolSpan};
 use crate::text_position::offset_to_position;
 use crate::util::build_fqn;
 use crate::virtual_members::laravel;
@@ -91,14 +91,8 @@ impl Backend {
                 sym.kind,
                 sym.start
             );
-            let mut locations = self.dispatch_symbol_references(
-                &sym.kind,
-                uri,
-                content,
-                sym.start,
-                include_declaration,
-                mode,
-            );
+            let mut locations =
+                self.dispatch_symbol_references(sym, uri, content, include_declaration, mode);
             // A YAML/XML occurrence is a reference the user can be shown,
             // but not one an edit can be planned against: its text may be
             // the escaped `App\\Handler` form the document's own quoting
@@ -173,14 +167,14 @@ impl Backend {
     /// Dispatch a symbol-map hit to the appropriate reference finder.
     fn dispatch_symbol_references(
         &self,
-        kind: &SymbolKind,
+        span: &SymbolSpan,
         uri: &str,
         content: &str,
-        span_start: u32,
         include_declaration: bool,
         mode: ReferenceSearchMode,
     ) -> Vec<Location> {
-        match kind {
+        let span_start = span.start;
+        match &span.kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                 // Property declarations use Variable spans (so GTD can
                 // jump to the type hint), but Find References should
@@ -216,6 +210,7 @@ impl Backend {
                     return self.find_member_references(
                         name,
                         is_static,
+                        Some(false),
                         include_declaration,
                         hierarchy.as_ref(),
                         declaration_scope.flatten().as_ref(),
@@ -283,6 +278,7 @@ impl Backend {
                 let mut locations = self.find_member_references(
                     member_name,
                     *is_static,
+                    reads_constant(span),
                     include_declaration,
                     hierarchy.as_ref(),
                     declaration_scope.as_ref(),
@@ -359,9 +355,13 @@ impl Backend {
                 let (hierarchy, declaration_scope) = self
                     .resolve_member_declaration_scopes(uri, span_start, name, *is_static, mode)
                     .unzip();
+                let is_constant = self
+                    .shared_classes_for_uri(uri)
+                    .map(|classes| declares_constant_at(&classes, span_start));
                 let mut locations = self.find_member_references(
                     name,
                     *is_static,
+                    is_constant,
                     include_declaration,
                     hierarchy.as_ref(),
                     declaration_scope.flatten().as_ref(),

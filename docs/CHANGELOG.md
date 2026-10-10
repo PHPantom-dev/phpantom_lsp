@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A class constant is no longer renamed or counted together with a same-named method or property.** Renaming `const name` also renamed a `name()` method or a `$name` property of the class, and the other way round, and the reference lens above the constant counted their uses too. The same went for an enum case and a static method, or a constant and a static property, sharing a name. Contributed by @Deadsquirrel93. Closes #494.
 - **An assignment is seen by the rest of the expression it sits in.** In `if (($user = find($id)) && $user->isActive())`, the right-hand side now knows what `$user` holds, and `[$i++, $i]` holds the old `$i` in its first item and the incremented one in its second.
 - **Variables inside a closure keep their types when another method is chained onto the call.** In `$obj->with(function (string $s) { … })->run()`, hover and completion inside the closure again know the types of its parameters and locals.
 - **Writing to a `global` variable is no longer reported as unused.** The same goes for a write through a reference, such as `$first = &$items[0]; $first = 5;`.
