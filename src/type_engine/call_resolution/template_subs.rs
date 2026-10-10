@@ -1648,20 +1648,20 @@ pub(super) fn unify_template(
     match param_hint.kind() {
         TypeKind::Named(name) if &**name == tpl_name => Some(arg_type.clone()),
         TypeKind::Union(members) => {
-            let mut bare: Option<PhpType> = None;
+            let mut has_bare = false;
             for member in members {
                 if member.is_null() {
                     continue;
                 }
                 if member.is_named(tpl_name) {
-                    bare = Some(arg_type.clone());
+                    has_bare = true;
                     continue;
                 }
                 if let Some(unified) = unify_template(member, arg_type, tpl_name) {
                     return Some(unified);
                 }
             }
-            bare
+            has_bare.then(|| bare_template_remainder(members, arg_type, tpl_name))
         }
         TypeKind::Generic(hint) => {
             if let TypeKind::Generic(arg) = arg_type.kind()
@@ -1711,6 +1711,38 @@ pub(super) fn unify_template(
         },
         TypeKind::Nullable(inner) => unify_template(inner, arg_type.unwrap_nullable(), tpl_name),
         _ => None,
+    }
+}
+
+/// What a bare `T` alternative of a union hint binds to: the part of the
+/// argument the hint's other alternatives don't already account for.
+///
+/// For `@param Tvalue|string|null` and a `string|float|bool|null` argument
+/// that is `float|bool`, so the return type's `Tvalue` does not bring the
+/// `null` back.  When the other alternatives cover the whole argument, the
+/// argument itself is the binding.
+fn bare_template_remainder(
+    hint_members: &[PhpType],
+    arg_type: &PhpType,
+    tpl_name: &str,
+) -> PhpType {
+    let others: Vec<&PhpType> = hint_members
+        .iter()
+        .filter(|m| !crate::type_engine::variable::rhs_resolution::type_contains_name(m, tpl_name))
+        .collect();
+    if others.is_empty() {
+        return arg_type.clone();
+    }
+    let arg_members = arg_type.union_members();
+    let remainder: Vec<PhpType> = arg_members
+        .iter()
+        .filter(|a| !others.iter().any(|o| a.is_subtype_of(o)))
+        .map(|a| (*a).clone())
+        .collect();
+    if remainder.is_empty() || remainder.len() == arg_members.len() {
+        arg_type.clone()
+    } else {
+        PhpType::union(remainder)
     }
 }
 

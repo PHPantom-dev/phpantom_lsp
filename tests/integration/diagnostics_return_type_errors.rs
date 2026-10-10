@@ -4999,3 +4999,51 @@ namespace Second {
         "Short names should resolve against the commented namespace block, got: {diags:?}"
     );
 }
+
+// ─── Bare template alternative in a union parameter hint ───────────────────
+
+#[test]
+fn bare_template_in_union_hint_binds_only_the_uncovered_part() {
+    // `Tvalue|string|null` against `string|float|bool|null` leaves `Tvalue`
+    // as `float|bool`; the `null` the hint already names must not come back
+    // through the return type.
+    let php = r#"<?php
+class Example {
+    /**
+     * @param array<non-empty-string, string|float|bool|null> $value
+     * @return array<non-empty-string, non-empty-string|float|bool>
+     */
+    public function filter(array $value): array {
+        return $this->filterOutNull($value);
+    }
+
+    /**
+     * @param array<non-empty-string, string|float|bool|null> $value
+     * @return array<non-empty-string, float>
+     */
+    public function tooNarrow(array $value): array {
+        return $this->filterOutNull($value);
+    }
+
+    /**
+     * @template Tvalue of object|scalar
+     * @param array<non-empty-string, Tvalue|string|null> $data
+     * @return array<non-empty-string, Tvalue|non-empty-string>
+     */
+    private function filterOutNull(array $data): array {
+        return array_filter($data, static fn (mixed $v): bool => null !== $v && '' !== $v);
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Expected only the too-narrow return to be flagged, got: {msgs:?}"
+    );
+    assert!(
+        msgs[0].contains("array<non-empty-string, float|bool|non-empty-string>"),
+        "Expected Tvalue bound to float|bool, got: {msgs:?}"
+    );
+}

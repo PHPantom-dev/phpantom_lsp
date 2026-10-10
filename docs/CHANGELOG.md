@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A template next to other types in a parameter union binds only what they leave over.** Passing `string|float|bool|null` values to a `@param array<K, T|string|null>` now binds `T` to `float|bool`, so the call's return type no longer brings back the `null` the function filtered out. Closes #435.
 - **A passing strict `in_array()` against `object` elements keeps the needle's classes.** A `Foo|Bar|string` needle checked against a `list<object>` still reads as `Foo` or `Bar` inside the branch.
 - **A typed array no longer proves it holds the keys an open array shape requires.** A parameter declared `array<string, int>` or `list<int>` is no longer taken to match an `array{foo: int, ...}` or `list{int, ...}` it says nothing about.
 - **Shape keys spelled as class constants are read as the keys they hold.** A docblock shape like `array{Slots::NAME: string, Slots::AGE: int}` whose constants are `0` and `1` is now accepted where a `list` is expected.
