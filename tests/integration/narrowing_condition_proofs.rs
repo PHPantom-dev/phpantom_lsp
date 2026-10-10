@@ -4006,6 +4006,49 @@ function f(A $id): void {
     assert_eq!(text, "```php\n<?php\n$a = null|A\n```");
 }
 
+/// Two paths whose values are unions sharing a member are not told apart
+/// by that member: `$x === 2` holds whichever path ran.
+fn overlapping_unions_fixture(test: &str) -> String {
+    format!(
+        r#"<?php
+/**
+ * @param 1|2 $a
+ * @param 2|3 $b
+ */
+function f($a, $b, bool $c): void {{
+    if ($c) {{
+        $x = $a;
+        $flag = 'A';
+    }} else {{
+        $x = $b;
+        $flag = 'B';
+    }}
+    if ({test}) {{
+        $flag; // <-- here
+    }}
+}}
+"#
+    )
+}
+
+#[test]
+fn a_member_both_paths_hold_recovers_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///overlapping_unions_identical.php";
+    let content = overlapping_unions_fixture("$x === 2");
+    let text = hover_marked(&backend, uri, &content);
+    assert_eq!(text, "```php\n<?php\n$flag = 'A'|'B'\n```");
+}
+
+#[test]
+fn ruling_out_a_member_only_one_path_holds_recovers_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///overlapping_unions_not_identical.php";
+    let content = overlapping_unions_fixture("$x !== 1");
+    let text = hover_marked(&backend, uri, &content);
+    assert_eq!(text, "```php\n<?php\n$flag = 'A'|'B'\n```");
+}
+
 /// Writing to the subject between the two tests drops the proof: the
 /// second check is about a different value than the first one was.
 #[test]

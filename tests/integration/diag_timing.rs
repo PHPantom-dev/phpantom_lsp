@@ -2547,3 +2547,59 @@ class Report {
          inside one another again.",
     );
 }
+
+/// A `switch` lookup table that assigns a different literal in every case.
+///
+/// Each case's exit joins into the scope after the `switch`, and the
+/// variable gains one literal per case.  Comparing every pair of literals
+/// at each join made the whole `switch` cubic in the case count: 1000
+/// cases took minutes in a debug build.
+#[test]
+fn switch_assigning_many_distinct_literals() {
+    const CASES: usize = 1000;
+    let mut php = String::from(
+        "<?php\nfunction takesInt(int $x): void {}\n\
+         function countryName(string $code): void {\n    switch ($code) {\n",
+    );
+    for i in 0..CASES {
+        php.push_str(&format!(
+            "        case 'C{i}': $name = 'Country {i}'; break;\n"
+        ));
+    }
+    php.push_str("        default: $name = 'Unknown';\n    }\n    takesInt($name);\n}\n");
+
+    let uri = "file:///test/switch_literals.php";
+    let backend = create_test_backend();
+    backend.update_ast(uri, &php);
+
+    let start = Instant::now();
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, &php, &mut out);
+    let elapsed = start.elapsed();
+
+    eprintln!();
+    eprintln!("=== Switch assigning distinct literals ===");
+    eprintln!("  {CASES} cases: {elapsed:>10.3?}");
+    eprintln!();
+
+    // The mismatch spells out the joined type, which has to carry every
+    // case's value as well as the default's.
+    assert_eq!(out.len(), 1, "expected one argument type mismatch");
+    let message = &out[0].message;
+    assert!(
+        message.contains("'Country 0'|")
+            && message.contains(&format!("'Country {}'|", CASES - 1))
+            && message.contains("'Unknown'"),
+        "the joined type lost a case: {message}"
+    );
+
+    // Budget: 10 s in debug, 2 s in release.  With the literals joined
+    // linearly this takes about a second in debug.
+    let budget_secs = if cfg!(debug_assertions) { 10.0 } else { 2.0 };
+    assert!(
+        elapsed.as_secs_f64() < budget_secs,
+        "Diagnosing a {CASES}-case switch took {elapsed:.3?} which exceeds \
+         the {budget_secs:.0} s budget.  Joining the literals may be \
+         comparing them pairwise again.",
+    );
+}

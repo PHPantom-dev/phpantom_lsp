@@ -1056,7 +1056,10 @@ impl PhpType {
         if members.len() == 1 {
             return members.into_iter().next().unwrap();
         }
-        if normalize::has_duplicate_members(&members) {
+        // The pairwise check spares the small unions nearly every caller
+        // builds a hash map, but it is quadratic, so a long union (one
+        // literal per `switch` case) goes straight to the hashing dedup.
+        if members.len() > 16 || normalize::has_duplicate_members(&members) {
             normalize::dedup_types(&mut members);
             if members.len() == 1 {
                 return members.into_iter().next().unwrap();

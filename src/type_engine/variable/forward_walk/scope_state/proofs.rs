@@ -5,6 +5,7 @@ use std::ops::ControlFlow;
 
 use super::merge::same_types;
 use super::*;
+use crate::php_type::TypeKind;
 use crate::type_engine::variable::forward_walk::is_synthetic_key;
 
 /// Whether no single value could be described by both type lists.
@@ -17,18 +18,28 @@ use crate::type_engine::variable::forward_walk::is_synthetic_key;
 /// re-apply a proof from a branch that never ran — `bool` and `true` are
 /// the shape that matters, since a branch a plain boolean guards leaves
 /// the flag `bool` on the path that skipped it.
+///
+/// A union is compared member by member: `1|2` and `2|3` are neither a
+/// subtype of the other, yet both hold `2`.
 pub(crate) fn types_are_disjoint(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
+    fn disjoint(x: &PhpType, y: &PhpType) -> bool {
+        match (x.kind(), y.kind()) {
+            (TypeKind::Union(members), _) => members.iter().all(|m| disjoint(m, y)),
+            (TypeKind::Nullable(inner), _) => disjoint(inner, y) && disjoint(&PhpType::null(), y),
+            (_, TypeKind::Union(_) | TypeKind::Nullable(_)) => disjoint(y, x),
+            _ => {
+                !x.is_subtype_of(y)
+                    && !y.is_subtype_of(x)
+                    && !(x.is_object_like() && y.is_object_like())
+            }
+        }
+    }
+
     if a.is_empty() || b.is_empty() {
         return false;
     }
-    a.iter().all(|x| {
-        b.iter().all(|y| {
-            let (x, y) = (&x.type_string, &y.type_string);
-            !x.is_subtype_of(y)
-                && !y.is_subtype_of(x)
-                && !(x.is_object_like() && y.is_object_like())
-        })
-    })
+    a.iter()
+        .all(|x| b.iter().all(|y| disjoint(&x.type_string, &y.type_string)))
 }
 
 /// Whether `side` has shown that `key` cannot be holding any of `types`.

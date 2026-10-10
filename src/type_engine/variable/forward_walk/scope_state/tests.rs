@@ -205,3 +205,37 @@ fn a_proof_recorded_after_a_fork_is_still_found_by_its_variable() {
     assert!(b.non_null_implications.contains_key(&atom("$h")));
     assert!(!a.non_null_implications.contains_key(&atom("$h")));
 }
+
+#[test]
+fn literals_from_every_path_join_into_one_entry() {
+    let mut a = ScopeState::new();
+    a.set("$x", typed(PhpType::literal_string_value("a")));
+    for value in ["b", "c", "a"] {
+        let mut b = ScopeState::new();
+        b.set("$x", typed(PhpType::literal_string_value(value)));
+        a.merge_branch(&b);
+    }
+
+    assert_eq!(type_strings(&a, "$x"), vec!["'a'|'b'|'c'"]);
+}
+
+#[test]
+fn unions_that_share_a_member_are_not_disjoint() {
+    use super::proofs::types_are_disjoint;
+
+    let union = |values: &[&str]| {
+        typed(PhpType::union(
+            values.iter().map(|v| PhpType::literal_int(*v)).collect(),
+        ))
+    };
+
+    assert!(!types_are_disjoint(
+        &union(&["1", "2"]),
+        &union(&["2", "3"])
+    ));
+    assert!(!types_are_disjoint(
+        &typed(PhpType::parse("?int")),
+        &typed(PhpType::parse("?string")),
+    ));
+    assert!(types_are_disjoint(&union(&["1", "2"]), &union(&["3", "4"])));
+}

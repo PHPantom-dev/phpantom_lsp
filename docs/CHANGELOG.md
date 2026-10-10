@@ -15,12 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Faster analysis of methods that check many properties.** Narrowing a property or a call's result no longer walks the method again from its first line.
 - **Faster analysis of loops.** A loop body is no longer walked again once its types have settled.
+- **Faster analysis of `switch` lookup tables.** A `switch` that assigns a different literal in each of hundreds of cases, such as a table of country or currency names, now takes well under a second instead of up to half a minute.
 - **Faster go-to-implementation on library classes.** Finding the implementations of a class or interface from a Composer package now reads only the files that could hold one, instead of loading every class the project depends on.
 
 ### Fixed
 
 - **An override that names a different class than its ancestor keeps its own.** A `take(Box $b)` that names its own `Box` no longer inherits the ancestor's `@param Box&Countable` for a `Box` in another namespace.
 - **A no-op emptiness check no longer breaks a `non-empty-string` argument.** After `if ($h !== '') { ... }`, passing `$h` to a `non-empty-string` parameter is no longer reported, since the variable is still a plain `string`.
+- **A value both branches could hold no longer says which branch ran.** When one branch leaves `$x` as `1|2` and the other as `2|3`, a later `if ($x === 2)` no longer narrows variables to what only one of the branches assigned.
 - **An override that narrows its return type keeps it.** When an interface method documents `@return Factory<Meta>` and an extending interface redeclares it as `: OrmFactory`, the override's result reads as `OrmFactory`, so returning it from a method declared `: OrmFactory` is no longer reported. This fixes Doctrine's `EntityManagerInterface::getMetadataFactory()`.
 - **A failed call with several `@phpstan-assert-if-true` tags narrows none of its arguments.** When `bothDefined($start, $end)` returns false, `$start` and `$end` are no longer both taken to be `null`, since only one of the promises has to have failed.
 - **A template next to other types in a parameter union binds only what they leave over.** Passing `string|float|bool|null` values to a `@param array<K, T|string|null>` now binds `T` to `float|bool`, so the call's return type no longer brings back the `null` the function filtered out.

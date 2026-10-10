@@ -20,65 +20,6 @@ against that bar.
 
 ---
 
-## P72. A `switch` that assigns many distinct literals costs cubic time
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-function countryName(string $code): string {
-    switch ($code) {
-        case 'AF': $name = 'Afghanistan'; break;
-        case 'AL': $name = 'Albania'; break;
-        // … one case per value …
-        default: $name = 'Unknown';
-    }
-    return strtoupper($name);
-}
-```
-
-Each case's exit joins into the scope after the `switch`, and the
-variable's type grows by one literal per case. The join normalises the
-union by comparing its members pairwise (`join_runtime_value_types` in
-`php_type/normalize.rs`, `drop_subsumed_entries` in
-`types/resolved_type.rs`), and `literals_equal` (`php_type/subtype.rs`)
-decodes both strings whenever their spellings differ, which for distinct
-literals is every time. One join is therefore quadratic in the literals
-collected so far, and the `switch` as a whole is cubic.
-
-Release build, one function with N cases that each assign a distinct
-string:
-
-| N cases | analyse wall clock |
-| ------- | ------------------ |
-| 250     | 0.6 s              |
-| 500     | 3.5 s              |
-| 1000    | 26 s               |
-
-The same 500 cases over 5 distinct values take under a second even in a
-debug build, so the cost follows the number of distinct literals, not
-the number of cases. A `match` with the same arms builds its union once
-and takes 1.1 s at 1000. The join belongs to the shared forward walker,
-so hover and completion below such a `switch` pay for it too. Lookup
-tables written this way (country, currency, MIME type or status code
-names) are common in older code.
-
-**Fix:** a literal only ever subsumes an equal literal or its base
-scalar, so the join can deduplicate literals by value through a hash set
-and keep the pairwise comparison for the non-literal members, which
-makes a join linear in its literal count. `literals_equal` can also skip
-decoding when neither spelling contains an escape, since two different
-spellings are then two different values. A cap that collapses an
-oversized union to its base scalar (Psalm uses 500 literals) bounds the
-type itself, but would not help below the cap.
-
-**Where to look:** `join_runtime_value_types` and
-`is_runtime_value_subtype` in `php_type/normalize.rs`, `literals_equal`
-in `php_type/subtype.rs`, `drop_subsumed_entries` and
-`collapse_redundant_runtime_literals` in `types/resolved_type.rs`, and
-`merge_local` in `type_engine/variable/forward_walk/scope_state/merge.rs`.
-
----
-
 ## P70. Diagnostics on a long file find each access's context by scanning
 
 **Impact: Medium · Complexity: Medium**
@@ -226,9 +167,10 @@ history, and `memory-benchmark-pr` does the same for
 - Nothing checks how cost grows with the size of an input. Every
   performance problem users have hit so far was a growth problem on an
   input of an unusual shape (thousands of calls to undefined functions,
-  hundreds of Blade views without a DocBlock, and the open items P70
-  and P72), and a benchmark over fixed fixtures cannot see one until a
-  project that has the shape reports it.
+  hundreds of Blade views without a DocBlock, a `switch` assigning
+  hundreds of distinct literals, and the open item P70), and a
+  benchmark over fixed fixtures cannot see one until a project that has
+  the shape reports it.
 
 Add a scaling check: generate each known pathological shape (a long
 top-level script, a `switch` over N distinct literals, N conditional

@@ -294,22 +294,30 @@ impl PhpType {
         // Branch joins are normally tiny. Pairwise containment keeps the
         // semantics explicit and handles equivalent aliases deterministically
         // without putting subtype policy into the global dedup key.
-        let mut keep = vec![true; flattened.len()];
-        for index in 0..flattened.len() {
-            for candidate in 0..flattened.len() {
-                if index == candidate
-                    || !is_runtime_value_subtype(&flattened[index], &flattened[candidate])
-                {
-                    continue;
+        //
+        // A literal is only contained in an equal literal or in a wider
+        // non-literal type, and `dedup_types` has already merged equal
+        // literals, so two literals never need comparing. A `switch` that
+        // assigns a different literal in every case joins hundreds of them,
+        // and comparing every pair made each of those joins quadratic.
+        let non_literals: Vec<usize> = (0..flattened.len())
+            .filter(|&index| flattened[index].as_literal().is_none())
+            .collect();
+        let keep: Vec<bool> = (0..flattened.len())
+            .map(|index| {
+                let subsumed_by = |candidate: usize| {
+                    index != candidate
+                        && is_runtime_value_subtype(&flattened[index], &flattened[candidate])
+                        && (candidate < index
+                            || !is_runtime_value_subtype(&flattened[candidate], &flattened[index]))
+                };
+                if flattened[index].as_literal().is_some() {
+                    !non_literals.iter().any(|&candidate| subsumed_by(candidate))
+                } else {
+                    !(0..flattened.len()).any(subsumed_by)
                 }
-
-                let equivalent = is_runtime_value_subtype(&flattened[candidate], &flattened[index]);
-                if !equivalent || candidate < index {
-                    keep[index] = false;
-                    break;
-                }
-            }
-        }
+            })
+            .collect();
 
         crate::util::retain_by_mask(&mut flattened, &keep);
 

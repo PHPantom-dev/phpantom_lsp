@@ -584,9 +584,13 @@ impl ResolvedType {
         // type had it, since one the code did spell out makes the whole
         // union worth enforcing.
         let all_lenient = non_class_types.iter().all(PhpType::is_benevolent);
-        let original = match non_class_types.len() {
-            1 => non_class_types[0].clone(),
-            _ => PhpType::union(non_class_types.clone()),
+        // Several entries are folded into one even when the join drops
+        // nothing: left apart, a variable assigned a different literal in
+        // every `switch` case carries one entry per case, and every later
+        // join compares those entries pairwise.
+        let original = match non_class_types.as_slice() {
+            [only] => Some(only.clone()),
+            _ => None,
         };
         let mut normalized = PhpType::join_runtime_value_types(non_class_types);
         if all_lenient {
@@ -594,7 +598,7 @@ impl ResolvedType {
         }
         // Without the marker carried across, this comparison would see two
         // types differing by nothing else and rebuild the entry anyway.
-        if normalized == original {
+        if original.is_some_and(|original| normalized == original) {
             return results;
         }
 
