@@ -4999,3 +4999,79 @@ namespace Second {
         "Short names should resolve against the commented namespace block, got: {diags:?}"
     );
 }
+
+// ─── Compound bitwise assignments ─────────────────────────────────────────
+
+/// `&=`, `|=` and `^=` on two strings work byte by byte, like the binary
+/// operators, so the target stays a string — in a statement and when the
+/// assignment is itself the value.
+#[test]
+fn a_compound_bitwise_assignment_on_strings_leaves_a_string() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class Frames
+{
+    public function unmask(string $payload, string $mask): string
+    {
+        $payload ^= $mask;
+        return $payload;
+    }
+
+    public function both(string $a, string $b): string
+    {
+        $a |= $b;
+        $a &= $b;
+        return $a;
+    }
+
+    public function asValue(string $a, string $b): string
+    {
+        return $a ^= $b;
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Anything but two strings makes those operators produce an int, and a
+/// shift always does — in a statement or as a value — so neither
+/// satisfies a `string` return.
+#[test]
+fn a_compound_bitwise_assignment_on_ints_or_a_shift_leaves_an_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class Masks
+{
+    public function flags(int $flags): string
+    {
+        $flags |= 4;
+        return $flags;
+    }
+
+    public function shifted(string $s): string
+    {
+        $s <<= 1;
+        return $s;
+    }
+
+    public function mixedSides(string $s, int $n): string
+    {
+        return $s ^= $n;
+    }
+
+    public function shiftedValue(string $s): string
+    {
+        return $s <<= 1;
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert_eq!(messages.len(), 4, "got {messages:?}");
+    assert!(
+        messages.iter().all(|m| m.contains("Return type int")),
+        "{messages:?}"
+    );
+}

@@ -10,7 +10,7 @@ use crate::types::{ClassInfo, ResolvedType};
 
 use super::super::rhs_resolution::{
     ArithmeticOpKind, infer_addition_result_type, infer_arithmetic_result_type,
-    infer_modulo_result_type,
+    infer_bitwise_assignment_result_type, infer_modulo_result_type,
 };
 
 // ─── Statement processing ───────────────────────────────────────────────────
@@ -1037,11 +1037,15 @@ fn compound_assignment_result(
     match operator {
         AssignmentOperator::Concat(_) => Some(PhpType::string()),
         AssignmentOperator::Modulo(_) => Some(infer_modulo_result_type(&lhs_types(), &rhs_types())),
-        AssignmentOperator::LeftShift(_)
-        | AssignmentOperator::RightShift(_)
-        | AssignmentOperator::BitwiseAnd(_)
+        AssignmentOperator::LeftShift(_) | AssignmentOperator::RightShift(_) => {
+            Some(PhpType::int())
+        }
+        AssignmentOperator::BitwiseAnd(_)
         | AssignmentOperator::BitwiseOr(_)
-        | AssignmentOperator::BitwiseXor(_) => Some(PhpType::int()),
+        | AssignmentOperator::BitwiseXor(_) => Some(infer_bitwise_assignment_result_type(
+            &lhs_types(),
+            &rhs_types(),
+        )),
         AssignmentOperator::Addition(_) => {
             Some(infer_addition_result_type(&lhs_types(), &rhs_types()))
         }
