@@ -794,6 +794,8 @@ impl Backend {
         uri: &str,
         php_version: Option<PhpVersion>,
     ) -> Option<Vec<Arc<ClassInfo>>> {
+        // The three helpers below each parse `content`; share one AST.
+        let _parse_guard = crate::parser::with_parse_cache(content);
         let file_use_map = self.parse_use_statements(content);
         let file_namespace = self.parse_namespace(content);
 

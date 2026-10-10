@@ -64,30 +64,6 @@ to be worked out first.
 
 ---
 
-## P73. A lazily loaded file is parsed three times
-
-**Impact: Low-Medium · Complexity: Low**
-
-`parse_and_cache_content_versioned` (`resolution.rs`) builds a loaded
-file's classes from three helpers, `parse_use_statements`,
-`parse_namespace` and `parse_php_classes_by_block`, and each runs its own
-mago parse of the same content (and copies it), because no parse cache
-is installed for the file. Every embedded stub and every vendor or
-project file loaded on demand is parsed three times where once would do.
-
-Installing a parse cache for the content around the three calls removes
-the extra two. On a release build that takes about 2% off an `analyze`
-of a mid-sized Laravel project; paths dominated by on-demand loading
-(startup population, the go-to-implementation scan) spend a larger share of their time
-parsing. `parse_php_classes_by_block` already works out the use map and
-namespace internally, so the other two helpers could also read them from
-there.
-
-**Where to look:** `parse_and_cache_content_versioned` in
-`resolution.rs`; `with_parse_cache` in `parser/mod.rs`.
-
----
-
 ## P78. A `switch` over thousands of distinct literals is still quadratic
 
 **Impact: Low-Medium · Complexity: Medium**
