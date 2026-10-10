@@ -880,23 +880,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b579-an-overrides-parameter-hint-is-compared-to-its-ancestors-by-short-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B579. An override's parameter hint is compared to its ancestor's by short name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1474,23 +1457,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b579-an-overrides-parameter-hint-is-compared-to-its-ancestors-by-short-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B579. An override's parameter hint is compared to its ancestor's by short name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1598,38 +1564,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
-<h3 id="b579-an-overrides-parameter-hint-is-compared-to-its-ancestors-by-short-name">B579. An override's parameter hint is compared to its ancestor's by short name<a class="headerlink" href="#b579-an-overrides-parameter-hint-is-compared-to-its-ancestors-by-short-name" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace P {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    class Box {}</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    class Base {</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        /** @param Box&amp;\Countable $b */</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">        public function take(Box $b): void {}</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    }</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">}</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">namespace Q {</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    class Box { public function fromQ(): void {} }</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    class Child extends \P\Base {</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">        public function take(Box $b): void {</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">            $b-&gt;fromQ(); // reported: not found on P\Box, Countable</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">        }</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">    }</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>Q\Child::take()</code> declares its own <code>Q\Box</code>, but it inherits the parent's
-<code>@param P\Box&amp;\Countable</code> as if it had restated the parent's hint.</p>
-<p>Methods keep their native hints (<code>native_type_hint</code>, <code>native_return_type</code>)
-as written in the source, never resolved to FQNs, while their docblock types
-are. <code>child_native_hint_overrides</code> (<code>inheritance/enrichment.rs</code>) compares the
-two methods' native hints, so <code>Box</code> in one namespace equals <code>Box</code> in another.
-The return-type side checks the class hierarchy through the resolved
-effective type instead, which is why it is not affected.</p>
-<p>Resolving method native hints in <code>resolve_parent_class_names</code>
-(<code>parser/ast_update.rs</code>), as is already done for functions' return hints,
-fixes the comparison but breaks consumers that re-resolve a native hint
-against the calling file's imports (a <code>use X\Foo</code> file then reads <code>B\X\Foo</code>).</p>
-<p><strong>Fix:</strong> Resolve method native hints at parse time and move the consumers
-that re-resolve them over to the FQN form.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
