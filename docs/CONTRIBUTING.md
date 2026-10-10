@@ -32,6 +32,15 @@ Note that clippy runs twice, once for library code and once including test code.
 
 ## Testing
 
+CI runs the test suite with coverage across six parallel Nextest shards.
+The `Test` check passes only after every shard succeeds and their coverage
+reports are uploaded together to Codecov. To reproduce one shard locally
+(replace `1` with the shard number):
+
+```bash
+cargo llvm-cov nextest --partition hash:1/6 --lcov --output-path lcov.info
+```
+
 - Integration tests go in `tests/integration/`, one file per feature area (`completion_*.rs`, `definition_*.rs`, `code_action_*.rs`, ...)
 - Use `create_test_backend()` from `tests/integration/common/mod.rs` for same-file tests
 - Use `create_psr4_workspace()` for cross-file / PSR-4 tests
