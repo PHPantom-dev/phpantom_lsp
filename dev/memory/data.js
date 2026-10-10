@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791655884593,
+  "lastUpdate": 1791657442420,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -37059,6 +37059,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 83.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "0ae8f311ae1ad6d292883e80615eb14d6eb596de",
+          "message": "Convert to instance variable handles closures and arrow functions",
+          "timestamp": "2026-10-10T20:23:32+02:00",
+          "tree_id": "8b4db94b70cfd1d6bf9c132e39f15a80711f8c72",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/0ae8f311ae1ad6d292883e80615eb14d6eb596de"
+        },
+        "date": 1791657430836,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.1,
             "unit": "MiB"
           }
         ]
