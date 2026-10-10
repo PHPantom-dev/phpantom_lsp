@@ -5108,6 +5108,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A passing strict <code>in_array()</code> against <code>object</code> elements keeps the needle's classes.</strong> A <code>Foo|Bar|string</code> needle checked against a <code>list&lt;object&gt;</code> still reads as <code>Foo</code> or <code>Bar</code> inside the branch.</li>
 <li><strong>A typed array no longer proves it holds the keys an open array shape requires.</strong> A parameter declared <code>array&lt;string, int&gt;</code> or <code>list&lt;int&gt;</code> is no longer taken to match an <code>array{foo: int, ...}</code> or <code>list{int, ...}</code> it says nothing about.</li>
 <li><strong>Shape keys spelled as class constants are read as the keys they hold.</strong> A docblock shape like <code>array{Slots::NAME: string, Slots::AGE: int}</code> whose constants are <code>0</code> and <code>1</code> is now accepted where a <code>list</code> is expected.</li>
 <li><strong>Blade <code>{{!!$flag}}</code>.</strong> A double negation written without a space is an escaped echo again, instead of a raw echo that broke the rest of the template.</li>

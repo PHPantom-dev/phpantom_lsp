@@ -880,23 +880,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b568-a-passing-strict-in_array-against-object-elements-drops-the-needles-classes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B568. A passing strict <code>in_array()</code> against <code>object</code> elements drops the needle's classes
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1496,23 +1479,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b568-a-passing-strict-in_array-against-object-elements-drops-the-needles-classes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B568. A passing strict <code>in_array()</code> against <code>object</code> elements drops the needle's classes
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1641,26 +1607,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b568-a-passing-strict-in_array-against-object-elements-drops-the-needles-classes">B568. A passing strict <code>in_array()</code> against <code>object</code> elements drops the needle's classes<a class="headerlink" href="#b568-a-passing-strict-in_array-against-object-elements-drops-the-needles-classes" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param list&lt;object&gt; $handlers */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function f(Foo|Bar|string $x, array $handlers): void {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    if (in_array($x, $handlers, true)) {</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        $x-&gt;run(); // `$x` reads `string`, though the object it equals can be a `Foo` or a `Bar`</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    }</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>In the branch where the check held, <code>apply_in_array_narrowing</code>
-(<code>cond_narrowing/in_array.rs</code>) narrows the needle's class layer through
-<code>apply_instanceof_inclusion</code>, which keeps only the classes the element type
-resolves to. An element that names no class it can load, such as <code>object</code>
-or a class that is not found, resolves to none, so every class goes and
-only the needle's scalar alternatives are left. The branch already skips an
-element that could be anything (<code>mixed</code>), but <code>object</code> can be any object as
-well, and a class that cannot be loaded may be an ancestor of the needle's.</p>
-<p><strong>Fix:</strong> Narrow the class layer only when every element alternative that
-can hold an object names a class that loads, and leave the needle's classes
-alone otherwise.</p>
+<p>No outstanding items.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
