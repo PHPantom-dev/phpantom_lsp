@@ -112,6 +112,13 @@ pub fn atom(s: &str) -> Atom {
     ustr::ustr(s)
 }
 
+/// The [`Atom`] for `s` if it has already been interned, without
+/// interning it otherwise.
+#[inline]
+pub fn existing_atom(s: &str) -> Option<Atom> {
+    ustr::existing_ustr(s)
+}
+
 /// Intern a string after lowercasing ASCII characters.
 ///
 /// PHP class and function names are case-insensitive (but not constant

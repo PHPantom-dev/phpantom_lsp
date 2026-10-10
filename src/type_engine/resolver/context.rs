@@ -23,21 +23,80 @@ use crate::types::*;
 // the first method call 5 times, etc. — O(depth²) total work.
 //
 // The chain cache stores `resolve_target_classes` results keyed by the
-// raw subject text string.  It is activated per-request for all LSP
+// subject text (see [`ChainKey`]).  It is activated per-request for all LSP
 // handlers (completion, hover, definition, diagnostics, etc.) via
 // [`with_chain_resolution_cache`] and consulted by
 // `resolve_target_classes` before doing any work.
 
 thread_local! {
     /// When `Some`, `resolve_target_classes` will consult and populate
-    /// this map.  Set by [`with_chain_resolution_cache`], cleared on
+    /// this cache.  Set by [`with_chain_resolution_cache`], cleared on
     /// guard drop.
-    pub(super) static CHAIN_CACHE: RefCell<Option<HashMap<String, Vec<ResolvedType>>>> =
-        const { RefCell::new(None) };
+    pub(super) static CHAIN_CACHE: RefCell<Option<ChainCache>> = const { RefCell::new(None) };
+}
+
+/// The chain cache: resolved results, and the table that names each chain
+/// text by a number.
+#[derive(Default)]
+pub(crate) struct ChainCache {
+    /// Interned chain texts.  A chain is named by the number of the chain
+    /// one link shorter plus the text its last link adds, so naming every
+    /// link of a chain costs the chain's length once rather than once per
+    /// link.
+    chains: HashMap<String, u32>,
+    pub(super) entries: HashMap<ChainKey, Vec<ResolvedType>>,
+}
+
+impl ChainCache {
+    /// The number naming the chain that extends `parent` (or starts a
+    /// chain, when `None`) with `link`.  Two chains get the same number
+    /// only when their texts are equal.
+    pub(super) fn intern(&mut self, parent: Option<u32>, link: &str, scratch: &mut String) -> u32 {
+        use std::fmt::Write;
+        scratch.clear();
+        match parent {
+            Some(parent) => {
+                let _ = write!(scratch, "{parent:x}:");
+            }
+            None => scratch.push(':'),
+        }
+        scratch.push_str(link);
+        if let Some(&id) = self.chains.get(scratch.as_str()) {
+            return id;
+        }
+        let id = self.chains.len() as u32;
+        self.chains.insert(scratch.clone(), id);
+        id
+    }
+}
+
+/// What a chain cache entry is keyed by.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(super) struct ChainKey {
+    /// Tells files apart: the same text can name different classes in two
+    /// files (see `SpineKeys::new`).
+    pub(super) file_id: usize,
+    /// The subject text, as numbered by [`ChainCache::intern`].
+    pub(super) chain: u32,
+    pub(super) site: ChainSite,
+}
+
+/// Which occurrences of a chain text share a cache entry.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(super) enum ChainSite {
+    /// Every occurrence in the file.
+    Anywhere,
+    /// Occurrences whose local variables hold these types.
+    Typed(std::rc::Rc<str>),
+    /// Only the occurrence at this offset.
+    At(u32),
+    /// The occurrences that read the diagnostic scope snapshot recorded at
+    /// this offset.
+    Scope(u32),
 }
 
 /// RAII guard that clears the thread-local chain cache on drop.
-pub(crate) type ChainCacheGuard = crate::type_engine::MemoGuard<HashMap<String, Vec<ResolvedType>>>;
+pub(crate) type ChainCacheGuard = crate::type_engine::MemoGuard<ChainCache>;
 
 /// Activate the thread-local chain resolution cache.
 ///
@@ -51,7 +110,7 @@ pub(crate) fn with_chain_resolution_cache() -> ChainCacheGuard {
 }
 
 /// Puts back the chain cache [`with_isolated_chain_cache`] set aside.
-pub(crate) struct IsolatedChainCacheGuard(Option<HashMap<String, Vec<ResolvedType>>>);
+pub(crate) struct IsolatedChainCacheGuard(Option<ChainCache>);
 
 impl Drop for IsolatedChainCacheGuard {
     fn drop(&mut self) {
@@ -70,7 +129,9 @@ impl Drop for IsolatedChainCacheGuard {
 /// does, so the entries either side of that walk describe a different
 /// scope than the one being resolved and neither may be shared with it.
 pub(crate) fn with_isolated_chain_cache() -> IsolatedChainCacheGuard {
-    IsolatedChainCacheGuard(CHAIN_CACHE.with(|cell| cell.borrow_mut().replace(HashMap::new())))
+    IsolatedChainCacheGuard(
+        CHAIN_CACHE.with(|cell| cell.borrow_mut().replace(ChainCache::default())),
+    )
 }
 
 /// Type alias for the optional function-loader closure passed through

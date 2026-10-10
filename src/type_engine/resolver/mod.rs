@@ -48,7 +48,7 @@ use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 use crate::virtual_members::resolve_class_fully_maybe_cached;
 
-use context::{CHAIN_CACHE, resolved_to_arcs};
+use context::{CHAIN_CACHE, ChainKey, ChainSite, resolved_to_arcs};
 
 /// Resolve a completion subject to all candidate types, preserving
 /// both class info and type strings.
@@ -102,29 +102,22 @@ pub(crate) fn resolve_target_classes_expr(
         }
     }
 
-    // Cache key per link, reused for the probe below and the store in
-    // `resolve_chain_link`.  `None` marks a link that must not be cached.
-    //
-    // Keys are built as the probe reaches each link, never up front: a key
-    // serializes its whole sub-expression, so building one per link costs
-    // O(depth²) for the spine.  The probe usually answers at the outermost
-    // link (a repeated chain prefix is already cached), which would leave
-    // every key below it built and thrown away — the dominant cost on a
-    // long fluent chain.
-    let mut cache_keys: Vec<Option<String>> = Vec::with_capacity(spine.len());
+    let keys = SpineKeys::new(&spine, ctx);
 
     // Probe the outermost link inward for an answer that does not depend on
-    // the receiver, mirroring the checks the recursive form made on its way
-    // down.  The first hit is a finished result for that link, so nothing
-    // below it needs resolving at all.
+    // the receiver: a cached result, or a type the forward walker narrowed
+    // the link's path to.  The first hit is a finished result for that
+    // link, so nothing below it needs resolving at all.
     let mut receiver: Option<Vec<ResolvedType>> = None;
     let mut unresolved = spine.len();
-    for (index, &(node, _)) in spine.iter().enumerate() {
-        cache_keys.push(chain_cache_key(node, ctx));
-        let hit = cache_keys[index]
-            .as_deref()
+    for index in 0..spine.len() {
+        let hit = keys
+            .cache_key(index)
             .and_then(lookup_chain_cache)
-            .or_else(|| narrowed_property_path(node, ctx));
+            .or_else(|| {
+                keys.scope_key(index)
+                    .and_then(|key| lookup_scope_for_subject(key, ctx))
+            });
         let Some(hit) = hit else { continue };
         if index == 0 {
             return hit;
@@ -139,7 +132,7 @@ pub(crate) fn resolve_target_classes_expr(
         receiver = Some(resolve_chain_link(
             node,
             node_access,
-            cache_keys[index].as_deref(),
+            keys.cache_key(index),
             receiver.take(),
             ctx,
         ));
@@ -152,7 +145,7 @@ pub(crate) fn resolve_target_classes_expr(
 fn resolve_chain_link(
     expr: &SubjectExpr,
     access_kind: AccessKind,
-    cache_key: Option<&str>,
+    cache_key: Option<&ChainKey>,
     receiver: Option<Vec<ResolvedType>>,
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
@@ -164,27 +157,11 @@ fn resolve_chain_link(
     }
     let result = resolve_target_classes_expr_inner(expr, access_kind, receiver, ctx);
     CHAIN_CACHE.with(|cell| {
-        let mut borrow = cell.borrow_mut();
-        if let Some(ref mut map) = *borrow {
-            map.insert(cache_key.to_string(), result.clone());
+        if let Some(ref mut cache) = *cell.borrow_mut() {
+            cache.entries.insert(cache_key.clone(), result.clone());
         }
     });
     result
-}
-
-/// The forward walker's narrowed type for a property path, when `expr` is one
-/// and the walker has already narrowed it.
-///
-/// This answers without touching the property's receiver, so the spine walk
-/// can stop here rather than resolving everything below it.
-fn narrowed_property_path(
-    expr: &SubjectExpr,
-    ctx: &ResolutionCtx<'_>,
-) -> Option<Vec<ResolvedType>> {
-    if !matches!(expr, SubjectExpr::PropertyChain { .. }) {
-        return None;
-    }
-    lookup_scope_for_subject(&subject_scope_key(expr), ctx)
 }
 
 /// Whether `var_name` is a plain `$variable` name rather than a complex
@@ -204,105 +181,312 @@ fn is_bare_variable(var_name: &str) -> bool {
         && !var_name.contains("||")
 }
 
-fn lookup_chain_cache(cache_key: &str) -> Option<Vec<ResolvedType>> {
+fn lookup_chain_cache(cache_key: &ChainKey) -> Option<Vec<ResolvedType>> {
     CHAIN_CACHE.with(|cell| {
         let borrow = cell.borrow();
-        borrow.as_ref().and_then(|map| map.get(cache_key).cloned())
+        borrow
+            .as_ref()
+            .and_then(|cache| cache.entries.get(cache_key).cloned())
     })
 }
 
-/// The chain cache key for a subject expression, or `None` when the
-/// expression must not be cached.
-fn chain_cache_key(expr: &SubjectExpr, ctx: &ResolutionCtx<'_>) -> Option<String> {
-    // ── Chain cache lookup ───────────────────────────────────────
-    // During diagnostic passes the chain cache is active and stores
-    // results by subject text.  This eliminates O(depth²) re-resolution
-    // of shared chain prefixes (e.g. `$model->where(...)` resolved once
-    // and reused by `$model->where(...)->whereNotNull(...)` etc.).
-    //
-    // The cache is NOT used for variable-only subjects (no `->` or `::`
-    // in the expression): those are answered straight from the scope.
-    //
-    // A chain rooted in a variable (`$this->pet`, `$obj->prop`,
-    // `$args[0]->value`, `$this->a->b`), and an argument-less instance
-    // call on one (`$job->data()`), resolves differently wherever the
-    // variable or a path through it was narrowed or written: `$this->pet`
-    // may be a `Dog` inside `if ($this->pet instanceof Dog)` and a `Cat`
-    // after `if (!$this->pet instanceof Cat) { return; }`.  So its text
-    // alone does not identify the answer, but its text where it is written
-    // does, whenever the scope at that position is fixed: outside a walk
-    // in progress, which can see one position on several scopes (each
-    // re-walk of a loop body).
-    //
-    // Static accesses and calls that carry arguments are safe to share
-    // across positions: their return types are deterministic (method
-    // signatures don't change based on narrowing context).
-    let shared = match expr {
-        SubjectExpr::CallExpr { .. } => narrowable_call_key(expr).is_none(),
-        SubjectExpr::MethodCall { .. }
-        | SubjectExpr::StaticMethodCall { .. }
-        | SubjectExpr::StaticAccess { .. } => true,
-        // PropertyChain is only shared when its base does NOT root in a
-        // variable — e.g. `$this->method()->prop` (rooted in a call).
-        SubjectExpr::PropertyChain { base, .. } => !base_roots_in_variable(base),
-        _ => false,
-    };
-    let positional = !shared
-        && matches!(
-            expr,
-            SubjectExpr::CallExpr { .. } | SubjectExpr::PropertyChain { .. }
-        )
-        && ctx.scope_var_resolver.is_none()
-        && !crate::type_engine::variable::forward_walk::is_building_scopes();
-    if !shared && !positional {
-        return None;
+/// The keys each link of a receiver spine is looked up under: its chain
+/// cache key and, when the forward walker can narrow it, its scope key.
+///
+/// Every link's subject text is a prefix of the outermost link's, and so,
+/// mostly, is its scope key, so both are rendered once for the whole spine
+/// and sliced per link.  What a link's key depends on below it is likewise
+/// carried up from the base one link at a time.  Working any of it out per
+/// link instead would cost the length of the chain at every link, and a
+/// generated fluent chain runs to hundreds of links.
+struct SpineKeys {
+    /// The outermost link's subject text; link `i`'s is `text[..ends[i]]`.
+    text: String,
+    ends: Vec<usize>,
+    /// The base's scope key followed by the text the links add to it, when
+    /// the base is spelled differently as a key than as text (`$rows["0"]`
+    /// against `$rows[0]`).  The scope key of a link whose key runs down
+    /// to the base is a prefix of this rather than of `text`.
+    rebased: Option<String>,
+    /// Per link: whether its scope key runs through every link below it
+    /// down to the base, rather than stopping at a call with arguments.
+    reaches_base: Vec<bool>,
+    /// Per link: whether the forward walker can hold a narrowed type for it.
+    narrowable: Vec<bool>,
+    cache_keys: Vec<Option<ChainKey>>,
+}
+
+impl SpineKeys {
+    fn new(spine: &[(&SubjectExpr, AccessKind)], ctx: &ResolutionCtx<'_>) -> Self {
+        let base_index = spine.len() - 1;
+        let base = spine[base_index].0;
+
+        // What the links' keys depend on below them, carried up from the
+        // base.  A link's scope key descends into the link below it when
+        // it is a property or an argument-less call (see
+        // `SubjectExpr::scope_key_base`); a call with arguments is keyed
+        // under its own text.
+        let mut reaches_base = vec![true; spine.len()];
+        let mut narrowable = vec![false; spine.len()];
+        // Whether a link roots in a variable through the links its scope
+        // key descends (`scope_key_roots_in_variable`), and through
+        // property and array-access links alone (`base_roots_in_variable`).
+        let mut key_rooted = base.scope_key_roots_in_variable();
+        let mut path_rooted = vec![base_roots_in_variable(base); spine.len()];
+        narrowable[base_index] = is_narrowable_call(base);
+        for index in (0..base_index).rev() {
+            let (descends, is_property) = match spine[index].0 {
+                SubjectExpr::CallExpr { args_text, .. } => (args_text.trim().is_empty(), false),
+                _ => (true, true),
+            };
+            reaches_base[index] = descends && reaches_base[index + 1];
+            narrowable[index] = is_property || (descends && key_rooted);
+            key_rooted = descends && key_rooted;
+            path_rooted[index] = is_property && path_rooted[index + 1];
+        }
+
+        // Which links the chain cache takes, and on what terms (see
+        // `cache_keys`), while the cache is active.
+        let caching = CHAIN_CACHE.with(|cell| cell.borrow().is_some());
+        let positional_allowed = ctx.scope_var_resolver.is_none()
+            && !crate::type_engine::variable::forward_walk::is_building_scopes();
+        let cacheable: Vec<Option<bool>> = (0..spine.len())
+            .map(|index| {
+                if !caching {
+                    return None;
+                }
+                let node = spine[index].0;
+                let shared = match node {
+                    SubjectExpr::CallExpr { .. } => !narrowable[index],
+                    SubjectExpr::MethodCall { .. }
+                    | SubjectExpr::StaticMethodCall { .. }
+                    | SubjectExpr::StaticAccess { .. } => true,
+                    // PropertyChain is only shared when its base does NOT
+                    // root in a variable — e.g. `$this->method()->prop`
+                    // (rooted in a call).
+                    SubjectExpr::PropertyChain { .. } => !path_rooted[index + 1],
+                    _ => false,
+                };
+                let positional = !shared
+                    && positional_allowed
+                    && matches!(
+                        node,
+                        SubjectExpr::CallExpr { .. } | SubjectExpr::PropertyChain { .. }
+                    );
+                (shared || positional).then_some(shared)
+            })
+            .collect();
+
+        let mut keys = SpineKeys {
+            text: String::new(),
+            ends: vec![0; spine.len()],
+            rebased: None,
+            reaches_base,
+            narrowable,
+            cache_keys: vec![None; spine.len()],
+        };
+        if !keys.narrowable.iter().any(|&n| n) && cacheable.iter().all(Option::is_none) {
+            return keys;
+        }
+
+        let text = &mut keys.text;
+        text.push_str(&base.to_subject_text());
+        keys.ends[base_index] = text.len();
+        for index in (0..base_index).rev() {
+            match spine[index].0 {
+                SubjectExpr::CallExpr { callee, args_text } => {
+                    let SubjectExpr::MethodCall { method, .. } = callee.as_ref() else {
+                        unreachable!("the spine only descends into method calls")
+                    };
+                    text.push_str("->");
+                    text.push_str(method);
+                    text.push('(');
+                    // Blank arguments are spelled `()`, as the scope key
+                    // spells them.
+                    if !args_text.trim().is_empty() {
+                        text.push_str(args_text);
+                    }
+                    text.push(')');
+                }
+                SubjectExpr::PropertyChain { property, .. } => {
+                    text.push_str("->");
+                    text.push_str(property);
+                }
+                _ => unreachable!("the spine only descends through calls and properties"),
+            }
+            keys.ends[index] = text.len();
+        }
+
+        if keys.narrowable.iter().any(|&n| n) {
+            let base_key = subject_scope_key(base);
+            let base_text = &keys.text[..keys.ends[base_index]];
+            if base_key != base_text {
+                let mut rebased = base_key;
+                rebased.push_str(&keys.text[keys.ends[base_index]..]);
+                keys.rebased = Some(rebased);
+            }
+        }
+
+        if caching {
+            keys.cache_keys = Self::cache_keys(spine, &keys.text, &keys.ends, &cacheable, ctx);
+        }
+        keys
     }
 
-    // The same subject text can mean different classes in different files
-    // (`use A\Pen;` in one, `use B\Pen;` in another, both spelling
-    // `Pen::make()`), and some activations of the chain cache — the
-    // reference-count pending-item loop, find-references/rename — span
-    // every file the request walks, not just one.  `ctx.content` is
-    // borrowed once per file for as long as any chain from that file is
-    // being resolved, so its pointer is a cheap per-file discriminator:
-    // the same technique `resolve_variable_types`'s re-entry guards use
-    // for the same reason (see `variable/resolution.rs`).  Two ResolutionCtx
-    // built from the same file share `content` and thus the pointer, so
-    // within-file sharing (the cache's actual purpose) is unaffected.
-    let file_id = ctx.content.as_ptr() as usize;
+    /// The chain cache key of every link, `None` for a link that must not
+    /// be cached.  `cacheable` says which links the cache takes, and
+    /// whether each is shared across positions (`Some(true)`) or keyed to
+    /// the one it is written at (`Some(false)`).
+    ///
+    /// The cache is NOT used for variable-only subjects (no `->` or `::`
+    /// in the expression): those are answered straight from the scope.
+    ///
+    /// A chain rooted in a variable (`$this->pet`, `$obj->prop`,
+    /// `$args[0]->value`, `$this->a->b`), and an argument-less instance
+    /// call on one (`$job->data()`), resolves differently wherever the
+    /// variable or a path through it was narrowed or written: `$this->pet`
+    /// may be a `Dog` inside `if ($this->pet instanceof Dog)` and a `Cat`
+    /// after `if (!$this->pet instanceof Cat) { return; }`.  So its text
+    /// alone does not identify the answer, but its text where it is
+    /// written does, whenever the scope at that position is fixed: outside
+    /// a walk in progress, which can see one position on several scopes
+    /// (each re-walk of a loop body).
+    ///
+    /// During a diagnostic pass the scope at a position is the snapshot the
+    /// position reads, so the occurrences reading the same snapshot share
+    /// an entry: every member access in one statement asks about the
+    /// prefixes of the same chain, and would otherwise resolve each of them
+    /// again.
+    ///
+    /// Static accesses and calls that carry arguments are safe to share
+    /// across positions: their return types are deterministic (method
+    /// signatures don't change based on narrowing context).
+    fn cache_keys(
+        spine: &[(&SubjectExpr, AccessKind)],
+        text: &str,
+        ends: &[usize],
+        cacheable: &[Option<bool>],
+        ctx: &ResolutionCtx<'_>,
+    ) -> Vec<Option<ChainKey>> {
+        let base_index = spine.len() - 1;
+        let mut keys = vec![None; spine.len()];
 
-    // A chain that references a local variable (as receiver or as a call
-    // argument) can resolve to different types at call sites where the
-    // variable holds a different type — e.g. `$this->parse($stmt)` where
-    // `$stmt` is a different subtype in two methods, or a `@template T`
-    // method binding `@return T` from a variable argument.  Keying by the
-    // subject text alone would leak the result across sites, so mix in a
-    // discriminator built from those variables' resolved types: sites
-    // where the variables share a type still share the cache entry (so
-    // the common case stays fast), while differently-typed sites get
-    // distinct entries.  When the variables can't be resolved cheaply
-    // (no active scope), fall back to a per-site key so nothing leaks.
-    // Chains with no local variables keep the shared text-only key.
-    if positional {
-        return Some(format!(
-            "{file_id:x}:{}@{}",
-            expr.to_subject_text(),
-            ctx.cursor_offset
-        ));
+        // Each link is numbered from the link below it, so the whole spine
+        // is numbered even where some links go uncached.
+        let mut chains = vec![0u32; spine.len()];
+        CHAIN_CACHE.with(|cell| {
+            let mut borrow = cell.borrow_mut();
+            let Some(cache) = borrow.as_mut() else {
+                return;
+            };
+            let mut scratch = String::new();
+            let mut parent = None;
+            let mut start = 0;
+            for index in (0..spine.len()).rev() {
+                let id = cache.intern(parent, &text[start..ends[index]], &mut scratch);
+                chains[index] = id;
+                parent = Some(id);
+                start = ends[index];
+            }
+        });
+
+        // The same subject text can mean different classes in different
+        // files (`use A\Pen;` in one, `use B\Pen;` in another, both
+        // spelling `Pen::make()`), and some activations of the chain cache
+        // — the reference-count pending-item loop, find-references/rename
+        // — span every file the request walks, not just one.
+        // `ctx.content` is borrowed once per file for as long as any chain
+        // from that file is being resolved, so its pointer is a cheap
+        // per-file discriminator: the same technique
+        // `resolve_variable_types`'s re-entry guards use for the same
+        // reason (see `variable/resolution.rs`).  Two ResolutionCtx built
+        // from the same file share `content` and thus the pointer, so
+        // within-file sharing (the cache's actual purpose) is unaffected.
+        let file_id = ctx.content.as_ptr() as usize;
+
+        // A chain that references a local variable (as receiver or as a
+        // call argument) can resolve to different types at call sites
+        // where the variable holds a different type — e.g.
+        // `$this->parse($stmt)` where `$stmt` is a different subtype in two
+        // methods, or a `@template T` method binding `@return T` from a
+        // variable argument.  Keying by the subject text alone would leak
+        // the result across sites, so mix in a discriminator built from
+        // those variables' resolved types: sites where the variables share
+        // a type still share the cache entry (so the common case stays
+        // fast), while differently-typed sites get distinct entries.  When
+        // the variables can't be resolved cheaply (no active scope), fall
+        // back to a per-site key so nothing leaks.  Chains with no local
+        // variables keep the shared text-only key.
+        //
+        // A link's variables are those of the link below it plus the ones
+        // its own arguments name, so they are gathered on the way up, and
+        // the discriminator is only rebuilt when a link adds one.
+        let mut vars = Vec::new();
+        spine[base_index].0.collect_local_variables(&mut vars);
+        let mut discriminator: Option<(usize, Option<std::rc::Rc<str>>)> = None;
+
+        for index in (0..spine.len()).rev() {
+            if index < base_index
+                && let SubjectExpr::CallExpr { args_text, .. } = spine[index].0
+            {
+                crate::type_engine::subject_expr::collect_text_local_variables(
+                    args_text, &mut vars,
+                );
+            }
+            let Some(shared) = cacheable[index] else {
+                continue;
+            };
+            let site = if !shared {
+                match crate::type_engine::variable::forward_walk::diagnostic_scope_floor(
+                    ctx.cursor_offset,
+                ) {
+                    Some(floor) => ChainSite::Scope(floor),
+                    None => ChainSite::At(ctx.cursor_offset),
+                }
+            } else if vars.is_empty() {
+                ChainSite::Anywhere
+            } else {
+                let disc = match &discriminator {
+                    Some((len, disc)) if *len == vars.len() => disc.clone(),
+                    _ => {
+                        let disc = scope_type_discriminator(&vars, ctx).map(std::rc::Rc::from);
+                        discriminator = Some((vars.len(), disc.clone()));
+                        disc
+                    }
+                };
+                match disc {
+                    Some(disc) => ChainSite::Typed(disc),
+                    None => ChainSite::At(ctx.cursor_offset),
+                }
+            };
+            keys[index] = Some(ChainKey {
+                file_id,
+                chain: chains[index],
+                site,
+            });
+        }
+        keys
     }
-    let mut vars = Vec::new();
-    expr.collect_local_variables(&mut vars);
-    Some(if vars.is_empty() {
-        format!("{file_id:x}:{}", expr.to_subject_text())
-    } else if let Some(disc) = scope_type_discriminator(&vars, ctx) {
-        format!("{file_id:x}:{}{}", expr.to_subject_text(), disc)
-    } else {
-        format!(
-            "{file_id:x}:{}@{}",
-            expr.to_subject_text(),
-            ctx.cursor_offset
-        )
-    })
+
+    fn cache_key(&self, index: usize) -> Option<&ChainKey> {
+        self.cache_keys[index].as_ref()
+    }
+
+    /// The forward-walker scope key of link `index`, or `None` when the
+    /// walker never narrows that link.
+    fn scope_key(&self, index: usize) -> Option<&str> {
+        if !self.narrowable[index] {
+            return None;
+        }
+        let base_end = self.ends[self.ends.len() - 1];
+        match &self.rebased {
+            Some(rebased) if self.reaches_base[index] => {
+                let base_key_len = rebased.len() - (self.text.len() - base_end);
+                Some(&rebased[..base_key_len + self.ends[index] - base_end])
+            }
+            _ => Some(&self.text[..self.ends[index]]),
+        }
+    }
 }
 
 /// Inner implementation of [`resolve_target_classes_expr`] without
@@ -544,20 +728,10 @@ fn resolve_target_classes_expr_inner(
 
         // ── Call expression ─────────────────────────────────────
         SubjectExpr::CallExpr { callee, args_text } => {
-            // ── Narrowing on the call itself ────────────────────
-            // `if ($h->get() instanceof Foo) { $h->get()->m(); }`
-            // narrows the call the same way it narrows a property
-            // path: the check is keyed under the call's text, so a
-            // later occurrence of that text reads the narrowed type
-            // instead of the declared return type.  Only argument-less
-            // instance calls carry such a key.
-            let narrowing_key = narrowable_call_key(expr);
-            if let Some(ref key) = narrowing_key
-                && let Some(narrowed) = lookup_scope_for_subject(key, ctx)
-            {
-                return narrowed;
-            }
-
+            // Narrowing on the call itself (`if ($h->get() instanceof
+            // Foo) { $h->get()->m(); }`) has already been consulted by the
+            // spine walk in `resolve_target_classes_expr`, which reads it
+            // before resolving anything below the call.
             let mut hint: Option<PhpType> = None;
             let classes = Backend::resolve_call_return_types_on_receiver(
                 callee,
@@ -605,19 +779,10 @@ fn resolve_target_classes_expr_inner(
 
         // ── Property chain ──────────────────────────────────────
         SubjectExpr::PropertyChain { base, property } => {
-            // ── Forward-walker scope narrowing ──────────────────
-            // The forward walker computes narrowing for compound
-            // conditions that the property-narrowing re-walk below
-            // cannot express: inline `&&` where a later conjunct uses
-            // an earlier one's narrowing, `||` guard clauses whose
-            // De Morgan expansion narrows several distinct subjects,
-            // and array-indexed subjects.  When it has already
-            // narrowed this exact property path, trust it.
-            let full_path = subject_scope_key(expr);
-            if let Some(narrowed) = lookup_scope_for_subject(&full_path, ctx) {
-                return narrowed;
-            }
-
+            // A type the forward walker narrowed this exact property path
+            // to has already been consulted by the spine walk in
+            // `resolve_target_classes_expr`, which reads it before
+            // resolving anything below the property.
             let base_arcs = resolved_to_arcs(
                 receiver.unwrap_or_else(|| resolve_target_classes_expr(base, access_kind, ctx)),
             );
@@ -1783,30 +1948,18 @@ fn base_roots_in_variable(expr: &SubjectExpr) -> bool {
     }
 }
 
-/// The scope key for a call that narrowing can key on, when `expr` is
-/// one: an argument-less instance method call whose receiver roots in a
-/// variable (`$job->data()`, `$this->getKernel()`).  Everything else,
+/// Whether `expr` is a call that narrowing can key on: an argument-less
+/// instance method call whose receiver roots in a variable (`$job->data()`,
+/// `$this->getKernel()`, `$e->getExpr()->getExpr()`).  Everything else,
 /// calls with arguments, function calls, static calls, resolves purely
-/// from its signature and is never a narrowing subject.
-pub(crate) fn narrowable_call_key(expr: &SubjectExpr) -> Option<String> {
+/// from its signature and is never a narrowing subject.  The key itself is
+/// [`subject_scope_key`], spelled exactly as the AST side spells it.
+pub(crate) fn is_narrowable_call(expr: &SubjectExpr) -> bool {
     let SubjectExpr::CallExpr { callee, args_text } = expr else {
-        return None;
+        return false;
     };
-    if !args_text.trim().is_empty() {
-        return None;
-    }
-    match callee.as_ref() {
-        // Rendered through [`subject_scope_key`] rather than
-        // `to_subject_text`, so the key is spelled exactly as the AST side
-        // spells it: whatever whitespace stands between the parentheses,
-        // and `["0"]` rather than `[0]` for an element access on the way
-        // down. The receiver may itself be a call (`$e->getExpr()->getExpr()`),
-        // which the AST side keys the same way.
-        SubjectExpr::MethodCall { base, .. } if base.scope_key_roots_in_variable() => {
-            Some(subject_scope_key(expr))
-        }
-        _ => None,
-    }
+    args_text.trim().is_empty()
+        && matches!(callee.as_ref(), SubjectExpr::MethodCall { base, .. } if base.scope_key_roots_in_variable())
 }
 
 /// Build the canonical forward-walker scope key for a subject

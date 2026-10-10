@@ -67,19 +67,6 @@ pub(crate) fn resolve_class_names_to_union(
     union
 }
 
-/// The subject key a property read keys under: the receiver's own key
-/// followed by `->` and the property name.
-fn property_subject_key(
-    object: &Expression<'_>,
-    property: &ClassLikeMemberSelector<'_>,
-) -> Option<String> {
-    let object_key = expr_to_subject_key(object)?;
-    let ClassLikeMemberSelector::Identifier(ident) = property else {
-        return None;
-    };
-    Some(format!("{}->{}", object_key, bytes_to_str(ident.value)))
-}
-
 /// Convert an AST expression to a subject key string for narrowing comparison.
 ///
 /// Handles:
@@ -92,18 +79,74 @@ fn property_subject_key(
 /// - `Carbon::parse($s)` → `"Carbon::parse($s)"`
 ///
 /// Returns `None` for expressions that are not supported as narrowing subjects.
+///
+/// A chain of property reads and method calls nests one node per link, so
+/// it is rendered from its base outward into a single buffer: recursing
+/// into each receiver and formatting its key again would cost the length
+/// of the chain at every link of it.
 pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Option<String> {
+    // The links above the chain's base, outermost first.  `->` and `?->`
+    // read the same storage, so both key under `->`.
+    let mut links: Vec<(&[u8], Option<&ArgumentList<'_>>)> = Vec::new();
+    let mut base = expr;
+    loop {
+        let (object, member, arguments) = match base {
+            Expression::Access(
+                Access::Property(PropertyAccess {
+                    object, property, ..
+                })
+                | Access::NullSafeProperty(NullSafePropertyAccess {
+                    object, property, ..
+                }),
+            ) => (*object, property, None),
+            // A call keyed under its own written form: checking one call
+            // and using another is the idiom the check is written for
+            // (`if ($h->get() instanceof Foo) { $h->get()->m(); }`), so
+            // the two occurrences share a key.
+            Expression::Call(
+                Call::Method(MethodCall {
+                    object,
+                    method,
+                    argument_list,
+                    ..
+                })
+                | Call::NullSafeMethod(NullSafeMethodCall {
+                    object,
+                    method,
+                    argument_list,
+                    ..
+                }),
+            ) => (*object, method, Some(argument_list)),
+            _ => break,
+        };
+        let ClassLikeMemberSelector::Identifier(ident) = member else {
+            return None;
+        };
+        links.push((ident.value, arguments));
+        base = object;
+    }
+    if links.is_empty() {
+        return non_chain_subject_key(expr);
+    }
+
+    let mut key = non_chain_subject_key(base)?;
+    for (name, arguments) in links.into_iter().rev() {
+        key.push_str("->");
+        key.push_str(bytes_to_str(name));
+        if let Some(arguments) = arguments {
+            key.push('(');
+            key.push_str(&argument_list_key(arguments)?);
+            key.push(')');
+        }
+    }
+    Some(key)
+}
+
+/// [`expr_to_subject_key`] for an expression that is not a property read
+/// or a method call.
+fn non_chain_subject_key(expr: &Expression<'_>) -> Option<String> {
     match expr {
         Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name).to_string()),
-        // `->` and `?->` read the same storage, so both key under `->`.
-        Expression::Access(
-            Access::Property(PropertyAccess {
-                object, property, ..
-            })
-            | Access::NullSafeProperty(NullSafePropertyAccess {
-                object, property, ..
-            }),
-        ) => property_subject_key(object, property),
         // `self::$repo`, `static::$repo`, `Foo::$repo` — keyed under the
         // class as the source names it.  Two spellings of the same
         // storage (`self::$x` in `Foo` and `Foo::$x`) get different keys,
@@ -116,29 +159,12 @@ pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Opti
             Some(format!("{}::{}", class, bytes_to_str(dv.name)))
         }
         Expression::ArrayAccess(aa) => array_access_subject_key(aa),
-        // A call keyed under its own written form: checking one call and
-        // using another is the idiom the check is written for
-        // (`if ($h->get() instanceof Foo) { $h->get()->m(); }`,
-        // `if (mb_strpos($s, $m) !== false) { mb_substr($s, 0,
-        // mb_strpos($s, $m)); }`), so the two occurrences share a key.
-        // The arguments are part of the key, and each of them has to be a
-        // subject in its own right — a call whose argument is itself a
-        // statement (an assignment, an increment) is not the same call
-        // twice.
-        Expression::Call(
-            Call::Method(MethodCall {
-                object,
-                method,
-                argument_list,
-                ..
-            })
-            | Call::NullSafeMethod(NullSafeMethodCall {
-                object,
-                method,
-                argument_list,
-                ..
-            }),
-        ) => method_call_key(object, method, argument_list),
+        // A call keyed under its own written form, like a method call
+        // (`if (mb_strpos($s, $m) !== false) { mb_substr($s, 0,
+        // mb_strpos($s, $m)); }`).  The arguments are part of the key, and
+        // each of them has to be a subject in its own right — a call whose
+        // argument is itself a statement (an assignment, an increment) is
+        // not the same call twice.
         Expression::Call(Call::StaticMethod(sc)) => {
             let class = static_class_key(sc.class)?;
             let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
@@ -333,9 +359,9 @@ fn is_name_char(c: char) -> bool {
 /// cover. The index is left unquoted so it cannot collide with a literal
 /// key that happens to spell a variable name.
 ///
-/// Kept out of [`expr_to_subject_key`] so its frame stays small: a long
-/// method chain recurses once per link and pays for every local the match
-/// arms declare.
+/// Kept out of [`expr_to_subject_key`] so its frame stays small: a subject
+/// nested through array accesses recurses once per access and pays for
+/// every local the match arms declare.
 #[inline(never)]
 fn array_access_subject_key(aa: &mago_syntax::cst::ArrayAccess<'_>) -> Option<String> {
     let base = expr_to_subject_key(aa.array)?;
@@ -405,21 +431,6 @@ fn arithmetic_operator_text(operator: &BinaryOperator<'_>) -> Option<&'static st
         BinaryOperator::Exponentiation(_) => Some("**"),
         _ => None,
     }
-}
-
-/// Build the subject key for a method call, matching the
-/// `$obj->method(args)` text form the resolver's subject keys use.
-fn method_call_key(
-    object: &Expression<'_>,
-    method: &ClassLikeMemberSelector<'_>,
-    argument_list: &ArgumentList<'_>,
-) -> Option<String> {
-    let obj = expr_to_subject_key(object)?;
-    let ClassLikeMemberSelector::Identifier(ident) = method else {
-        return None;
-    };
-    let args = argument_list_key(argument_list)?;
-    Some(format!("{}->{}({})", obj, bytes_to_str(ident.value), args))
 }
 
 /// The key for the class side of a static call: a written class name, one

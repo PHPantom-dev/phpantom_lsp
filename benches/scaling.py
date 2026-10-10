@@ -177,7 +177,7 @@ SHAPES: dict[str, Shape] = {
     "switch_literals": Shape(switch_literals, 2000, known_slow=True),
     "conditional_array_writes": Shape(conditional_array_writes, 200, known_slow=True),
     "conditional_dynamic_writes": Shape(conditional_dynamic_writes, 2000, known_slow=True),
-    "method_chain": Shape(method_chain, 200, known_slow=True),
+    "method_chain": Shape(method_chain, 600, known_slow=True),
 }
 
 BASELINE_PHP = "<?php\necho 'hello';\n"

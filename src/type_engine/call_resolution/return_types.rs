@@ -790,7 +790,7 @@ fn restore_dropped_call_arms(
     let SubjectExpr::CallExpr { callee, args_text } = expr else {
         return walked;
     };
-    if crate::type_engine::resolver::narrowable_call_key(expr).is_some() {
+    if crate::type_engine::resolver::is_narrowable_call(expr) {
         return walked;
     }
 

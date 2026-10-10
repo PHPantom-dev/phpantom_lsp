@@ -131,15 +131,14 @@ impl Backend {
         rctx: &ResolutionCtx<'_>,
         args_text: Option<&str>,
     ) -> Option<ResolvedCallableTarget> {
-        let subject_text = base.to_subject_text();
         let resolved_types: Vec<ResolvedType> = if base.is_self_like() {
             rctx.current_class
                 .map(|c| ResolvedType::from_class(c.clone()))
                 .into_iter()
                 .collect()
         } else {
-            crate::type_engine::resolver::resolve_target_classes(
-                &subject_text,
+            crate::type_engine::resolver::resolve_target_classes_expr(
+                base,
                 crate::AccessKind::Arrow,
                 rctx,
             )

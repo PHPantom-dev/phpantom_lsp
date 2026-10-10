@@ -118,6 +118,44 @@ fn parse_nullsafe_var_property() {
     );
 }
 
+#[test]
+fn parse_chain_splits_at_last_arrow_outside_arguments() {
+    // The arrows inside the arguments are not where the chain splits.
+    assert_eq!(
+        SubjectExpr::parse("$a->b($x->y)->c($z->w)"),
+        SubjectExpr::CallExpr {
+            callee: Box::new(SubjectExpr::MethodCall {
+                base: Box::new(SubjectExpr::CallExpr {
+                    callee: Box::new(SubjectExpr::MethodCall {
+                        base: Box::new(SubjectExpr::Variable("$a".to_string())),
+                        method: "b".to_string(),
+                    }),
+                    args_text: "$x->y".to_string(),
+                }),
+                method: "c".to_string(),
+            }),
+            args_text: "$z->w".to_string(),
+        }
+    );
+}
+
+#[test]
+fn parse_nullsafe_link_after_call() {
+    assert_eq!(
+        SubjectExpr::parse("$a->b()?->c"),
+        SubjectExpr::PropertyChain {
+            base: Box::new(SubjectExpr::CallExpr {
+                callee: Box::new(SubjectExpr::MethodCall {
+                    base: Box::new(SubjectExpr::Variable("$a".to_string())),
+                    method: "b".to_string(),
+                }),
+                args_text: String::new(),
+            }),
+            property: "c".to_string(),
+        }
+    );
+}
+
 // ── Static access (enum case / constant) ────────────────────────────
 
 #[test]

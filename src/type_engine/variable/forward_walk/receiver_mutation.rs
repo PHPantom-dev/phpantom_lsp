@@ -521,7 +521,12 @@ fn call_node_invalidations<'b>(
                     let ClassLikeMemberSelector::Identifier(ident) = method else {
                         return;
                     };
-                    let receiver = narrowing::expr_to_subject_key(object);
+                    // Rendering the receiver's key costs the length of its
+                    // chain, which a fluent chain pays at every link, so it
+                    // is skipped when nothing could read through it.
+                    let receiver = scope_tracks_paths(scope)
+                        .then(|| narrowing::expr_to_subject_key(object))
+                        .flatten();
                     let receiver_has_state = receiver
                         .as_deref()
                         .is_some_and(|r| scope_reads_through(scope, r));
@@ -884,10 +889,18 @@ fn push_unique(out: &mut Vec<Invalidation>, invalidation: Invalidation) {
 
 /// Whether any argument has something recorded through it.
 fn any_argument_has_state(args: &ArgumentList<'_>, scope: &ScopeState) -> bool {
-    args.arguments.iter().any(|arg| {
-        narrowing::expr_to_subject_key(arg.value())
-            .is_some_and(|key| scope_reads_through(scope, &key))
-    })
+    scope_tracks_paths(scope)
+        && args.arguments.iter().any(|arg| {
+            narrowing::expr_to_subject_key(arg.value())
+                .is_some_and(|key| scope_reads_through(scope, &key))
+        })
+}
+
+/// Whether the scope holds anything [`scope_reads_through`] could find,
+/// for any subject.
+fn scope_tracks_paths(scope: &ScopeState) -> bool {
+    scope.locals.compound_keys().next().is_some()
+        || scope.assertions.values().any(|checks| !checks.is_empty())
 }
 
 /// Whether the scope holds any synthetic key read through `subject`.

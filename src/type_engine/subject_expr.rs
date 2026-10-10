@@ -635,7 +635,7 @@ fn detach_child(node: &mut SubjectExpr, pending: &mut Vec<SubjectExpr>) {
 /// found in a raw argument/element text to `out`, each with its leading
 /// `$`.  Used to gather the variables an expression's resolution depends
 /// on so a cache key can be made scope-aware.
-fn collect_text_local_variables(text: &str, out: &mut Vec<String>) {
+pub(crate) fn collect_text_local_variables(text: &str, out: &mut Vec<String>) {
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -753,30 +753,32 @@ fn parse_callee(call_body: &str) -> SubjectExpr {
 ///
 /// Returns `(base, property)` or `None` if no arrow is found.
 /// Arrows inside balanced parentheses are ignored.
+///
+/// Scans from the end, so the cost is the length of the last link rather
+/// than of the whole subject: parsing a chain splits it once per link, and
+/// a scan from the front would make that quadratic in the chain's length.
 fn split_last_arrow_raw(subject: &str) -> Option<(&str, &str)> {
     let bytes = subject.as_bytes();
     let mut depth = 0i32;
     let mut last_arrow: Option<(usize, usize)> = None;
 
-    let mut i = 0;
-    while i < bytes.len() {
+    let mut i = bytes.len();
+    while i > 1 {
+        i -= 1;
         match bytes[i] {
-            b'(' => depth += 1,
-            b')' => depth -= 1,
-            b'-' if depth == 0 && i + 1 < bytes.len() && bytes[i + 1] == b'>' => {
-                let arrow_start = if i > 0 && bytes[i - 1] == b'?' {
-                    i - 1
+            b')' => depth += 1,
+            b'(' => depth -= 1,
+            b'>' if depth == 0 && bytes[i - 1] == b'-' => {
+                let arrow_start = if i > 1 && bytes[i - 2] == b'?' {
+                    i - 2
                 } else {
-                    i
+                    i - 1
                 };
-                let prop_start = i + 2;
-                last_arrow = Some((arrow_start, prop_start));
-                i += 2;
-                continue;
+                last_arrow = Some((arrow_start, i + 1));
+                break;
             }
             _ => {}
         }
-        i += 1;
     }
 
     let (arrow_start, prop_start) = last_arrow?;

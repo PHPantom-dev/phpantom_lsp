@@ -401,7 +401,7 @@ impl Backend {
         // candidate file, one after another.  Each file's content is a
         // fresh `Arc<String>` freed once its resolution finishes, and the
         // allocator can hand the next file's content the same address —
-        // `chain_cache_key` discriminates files by that address, so a
+        // the chain cache key tells files apart by that address, so a
         // shared map would then serve this file's queries the previous
         // file's cached answer. An isolated map is only ever populated and
         // read within this one file's resolution below.

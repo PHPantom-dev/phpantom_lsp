@@ -1,7 +1,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-use crate::atom::atom;
+use crate::atom::existing_atom;
 use crate::types::ResolvedType;
 
 // ─── Diagnostic scope cache ─────────────────────────────────────────────────
@@ -180,8 +180,35 @@ pub(crate) fn lookup_diagnostic_scope(var_name: &str, offset: u32) -> Option<Vec
         // determined the variable has no known type here.  Return
         // empty rather than `None` so the caller treats the variable
         // as unresolved at this position.
-        let result = snap.get(&atom(var_name)).cloned().unwrap_or_default();
+        //
+        // A name that was never interned cannot be a key of any snapshot,
+        // and interning it just to find that out would keep every subject
+        // ever asked about (a long chain asks about each of its prefixes)
+        // in the process-wide table for good.
+        let result = existing_atom(var_name)
+            .and_then(|name| snap.get(&name).cloned())
+            .unwrap_or_default();
         Some(result)
+    })
+}
+
+/// The offset of the snapshot a lookup at `offset` reads, when the active
+/// snapshots answer for `offset` at all.
+///
+/// Two offsets that read the same snapshot see the same scope: a snapshot
+/// is recorded wherever the scope changes (each statement, each closure
+/// body and the code after it, each expression node whose scope differs
+/// from the one before it).  So a result that depends on the position
+/// only through the scope can be shared by every offset reading the same
+/// snapshot.
+pub(crate) fn diagnostic_scope_floor(offset: u32) -> Option<u32> {
+    if is_building_scopes() || !scope_snapshots_cover(offset) {
+        return None;
+    }
+    DIAGNOSTIC_SCOPE.with(|cell| {
+        let borrow = cell.borrow();
+        let (&floor, _) = borrow.as_ref()?.range(..=offset).next_back()?;
+        Some(floor)
     })
 }
 

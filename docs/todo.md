@@ -170,7 +170,6 @@ unlikely to move the needle for most users.
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Medium      |
 |     | **[Performance](todo/performance.md)**                                                                                       |             |             |
-| P77 | [A long method chain costs the cube of its length](todo/performance.md#p77-a-long-method-chain-costs-the-cube-of-its-length)                                                | Medium      | Medium      |
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Very High   |
 | P73 | [A lazily loaded file is parsed three times](todo/performance.md#p73-a-lazily-loaded-file-is-parsed-three-times)                                                          | Low-Medium  | Low         |
 | P78 | [A `switch` over thousands of distinct literals is still quadratic](todo/performance.md#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic)                | Low-Medium  | Medium      |

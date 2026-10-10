@@ -20,35 +20,6 @@ against that bar.
 
 ---
 
-## P77. A long method chain costs the cube of its length
-
-**Impact: Medium · Complexity: Medium**
-
-Generated query builders and API clients produce fluent chains hundreds
-of links long. `benches/scaling.py`'s `method_chain` shape (one chain of
-`->self()` links on a `@return static` method), on a release build:
-
-| Links | analyse wall clock |
-| ----- | ------------------ |
-| 200   | 0.46 s             |
-| 300   | 1.0 s              |
-| 400   | 2.5 s              |
-| 600   | 7.1 s              |
-
-Most of the samples are in building and splitting the text of each link's
-subject: `SubjectExpr::to_subject_text`, `split_last_arrow_raw`,
-`subject_scope_key` and hashing the result. Each link renders the text of
-the whole receiver chain before it and then rescans that text, so every
-link costs time in proportion to the chain's length, and the chain's
-links are resolved more than once over.
-
-**Where to look:** `split_last_arrow_raw` and
-`SubjectExpr::to_subject_text` in `type_engine/subject_expr.rs`,
-`subject_scope_key` and `resolve_target_classes_expr` in
-`type_engine/resolver/mod.rs`.
-
----
-
 ## P21. Offset-shifting for cached diagnostics on partial edits
 
 **Impact: Medium · Complexity: Very High**
