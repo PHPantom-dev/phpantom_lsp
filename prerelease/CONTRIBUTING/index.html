@@ -1513,7 +1513,7 @@
 <li>Leave out how the code worked before or why the bug happened. That belongs in the commit message.</li>
 <li>Keep the details a user acts on: config keys, CLI flags, and a short code example when it makes the change concrete. One headline number is enough for a performance entry.</li>
 <li>If a section groups its entries under <code>####</code> headings (Laravel, Blade templates, Type inference, Diagnostics, Performance and memory, and so on), put your entry under the matching one. Related fixes can share one entry.</li>
-<li>End with <code>Contributed by @username</code> if you are not the maintainer, and <code>Closes #N</code> when the change fixes an issue.</li>
+<li>End with <code>Contributed by @username</code> if you are not the maintainer. Don't reference the issue a change fixes.</li>
 </ul>
 <p>Example:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">-</span><span class="w"> </span><span class="gs">**`analyze` takes more than one path.**</span> <span class="sb">`phpantom_lsp analyze app/ lib/Helper.php tests/`</span> checks everything named, so a pre-commit hook or CI step can pass only the changed files.
