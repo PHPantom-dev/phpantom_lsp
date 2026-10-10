@@ -357,6 +357,54 @@ function f(bool $flag): void {
     }
 }
 
+/// The same goes for a write under a key that is not known until runtime,
+/// which adds each branch's value to the array's element type.
+#[test]
+fn a_dynamic_key_write_breaks_a_proof_about_the_whole_array() {
+    let backend = create_test_backend();
+    let uri = "file:///dynamic_write_correlation.php";
+    let content = r#"<?php
+function f(bool $flag, int $id): void {
+    $data = [];
+    if ($flag) { $data[$id] = ['a' => 1]; }
+    if ($flag) { $data[$id] = ['b' => 2]; }
+    if ($flag) { $data[$id] = ['c' => 3]; }
+    $data; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("array{a: 1}")
+            && text.contains("array{b: 2}")
+            && text.contains("array{c: 3}"),
+        "every branch's write is still in the array, got: {text}"
+    );
+}
+
+/// And for `array_push()`, which writes through its argument. Every `if`
+/// tests the same flag, so either all three pushes ran or none did.
+#[test]
+fn an_array_push_breaks_a_proof_about_the_whole_array() {
+    let backend = create_test_backend();
+    let uri = "file:///array_push_correlation.php";
+    let content = r#"<?php
+function f(bool $flag): void {
+    $data = [];
+    if ($flag) { array_push($data, 'a'); }
+    if ($flag) { array_push($data, 1); }
+    if ($flag) { array_push($data, true); }
+    $data; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("array{'a', 1, true}"),
+        "every branch's push is still in the array, got: {text}"
+    );
+}
+
 // ─── A type guard on a value of unknown type establishes it ────────────────
 
 /// `$row->version` on a bare `stdClass` resolves to nothing, and the

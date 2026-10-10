@@ -23,11 +23,48 @@ use crate::type_engine::variable::forward_walk::is_synthetic_key;
 /// A union is compared member by member: `1|2` and `2|3` are neither a
 /// subtype of the other, yet both hold `2`.
 pub(crate) fn types_are_disjoint(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
+    /// An array type, as opposed to `iterable`, which objects satisfy too.
+    fn is_array_value(ty: &PhpType) -> bool {
+        let name = match ty.kind() {
+            TypeKind::Named(name) => name,
+            TypeKind::Generic(generic) => &generic.name,
+            _ => return ty.is_array_like(),
+        };
+        ty.is_array_like() && !name.eq_ignore_ascii_case("iterable")
+    }
+
+    /// Subtyping alone would call `non-empty-array<int, 1|2>` and
+    /// `non-empty-array<int, 2|3>` disjoint, though both hold `[2]`, and
+    /// would compare every pair of members of two element unions to say
+    /// so. Two arrays that can both be empty share `[]`. Otherwise a value
+    /// they share holds an entry, and that entry's value is one both
+    /// element types describe, so they are disjoint when those are.
+    /// Shapes keep the subtyping rule, which is what tells two tagged
+    /// shapes (`array{kind: 'a'}`, `array{kind: 'b'}`) apart.
+    fn arrays_disjoint(x: &PhpType, y: &PhpType) -> bool {
+        if !x.is_provably_non_empty() && !y.is_provably_non_empty() {
+            return false;
+        }
+        if x.is_empty_array_shape() || y.is_empty_array_shape() {
+            return true;
+        }
+        let is_shape =
+            |ty: &PhpType| matches!(ty.kind(), TypeKind::ArrayShape(_) | TypeKind::ListShape(_));
+        if is_shape(x) && is_shape(y) {
+            return !x.is_subtype_of(y) && !y.is_subtype_of(x);
+        }
+        match (x.iterable_element_type(), y.iterable_element_type()) {
+            (Some(x_values), Some(y_values)) => disjoint(&x_values, &y_values),
+            _ => false,
+        }
+    }
+
     fn disjoint(x: &PhpType, y: &PhpType) -> bool {
         match (x.kind(), y.kind()) {
             (TypeKind::Union(members), _) => members.iter().all(|m| disjoint(m, y)),
             (TypeKind::Nullable(inner), _) => disjoint(inner, y) && disjoint(&PhpType::null(), y),
             (_, TypeKind::Union(_) | TypeKind::Nullable(_)) => disjoint(y, x),
+            _ if is_array_value(x) && is_array_value(y) => arrays_disjoint(x, y),
             _ => {
                 !x.is_subtype_of(y)
                     && !y.is_subtype_of(x)

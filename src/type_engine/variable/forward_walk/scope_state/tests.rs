@@ -239,3 +239,23 @@ fn unions_that_share_a_member_are_not_disjoint() {
     ));
     assert!(types_are_disjoint(&union(&["1", "2"]), &union(&["3", "4"])));
 }
+
+#[test]
+fn arrays_are_disjoint_only_when_no_value_fits_both() {
+    use super::proofs::types_are_disjoint;
+
+    let disjoint =
+        |a: &str, b: &str| types_are_disjoint(&typed(PhpType::parse(a)), &typed(PhpType::parse(b)));
+
+    assert!(!disjoint(
+        "non-empty-array<int, 1|2>",
+        "non-empty-array<int, 2|3>"
+    ));
+    assert!(!disjoint("array<int, 1>", "array<int, 2>"));
+    assert!(disjoint("array{}", "non-empty-array<int, int>"));
+    assert!(disjoint(
+        "non-empty-array<int, int>",
+        "non-empty-array<int, string>"
+    ));
+    assert!(disjoint("array{kind: 'a'}", "array{kind: 'b'}"));
+}

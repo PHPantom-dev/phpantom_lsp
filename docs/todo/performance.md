@@ -158,6 +158,12 @@ which, each of them a pass over all the shapes so far. Joining one new
 member into a union that is already normalised would make each join cost
 only what it adds.
 
+That cuts the constant, but the union still grows with every write, so
+only bounding it removes the growth. PHPStan turns a union of more than
+256 constant-array values into one general `non-empty-array<K, V>`
+(`TypeCombinator::optimizeConstantArrays`). Doing the same would change
+what hover shows past that size, so it needs a decision first.
+
 **Where to look:** `join_runtime_value_types` and `absorb_subsumed_shapes`
 in `php_type/normalize.rs`, reached from a join through
 `ResolvedType::collapse_redundant_runtime_literals` in

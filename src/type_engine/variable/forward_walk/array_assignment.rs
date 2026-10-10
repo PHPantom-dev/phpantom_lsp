@@ -320,6 +320,9 @@ pub(crate) fn process_array_push_call<'b>(
         apply_array_push(&base_type, &values, ctx.in_loop)
     };
     scope.set(base_name, vec![ResolvedType::from_type_string(result)]);
+    // The entries already there keep their values; the array as a whole
+    // does not.
+    scope.invalidate_whole_value_proofs(base_name);
     scope.note_element_write(base_name, false);
     true
 }
@@ -378,6 +381,7 @@ pub(crate) fn process_array_cursor_call<'b>(
         .flatten()
         .unwrap_or_else(|| super::super::array_shape_writes::after_unknown_removal(&base_type));
     scope.set(base_name, vec![ResolvedType::from_type_string(result)]);
+    scope.invalidate_proofs(base_name);
     true
 }
 
@@ -444,6 +448,7 @@ pub(crate) fn process_array_sort_call(expr: &Expression<'_>, scope: &mut ScopeSt
         list
     };
     scope.set(base_name, vec![ResolvedType::from_type_string(result)]);
+    scope.invalidate_proofs(base_name);
     true
 }
 
@@ -532,6 +537,7 @@ fn apply_array_write<'b>(
             base_name,
             vec![ResolvedType::from_type_string(PhpType::string())],
         );
+        scope.invalidate_proofs(base_name);
         return;
     }
 
