@@ -52,7 +52,7 @@ fn blade_echo_delimiter_at(content: &str, offset: usize) -> Option<EchoDelimiter
             let rest = content.get(start..)?;
             // `{{--` opens a comment, not an echo, and in `{{!!` the raw
             // echo opens at the second `{`, so the first is a literal brace.
-            if rest.starts_with("{{--") || rest.starts_with("{{!!") {
+            if rest.starts_with("{{--") || (rest.starts_with("{{!!") && rest[4..].contains("!!}")) {
                 return None;
             }
             let (text, raw, _) = DELIMITERS.iter().find(|(text, _, mode)| {

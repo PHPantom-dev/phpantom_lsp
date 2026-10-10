@@ -2301,3 +2301,15 @@ fn test_preprocess_bound_attribute_on_plain_html_tag_is_not_php() {
         "a bound attribute on a plain tag is not PHP: {php}"
     );
 }
+
+/// A `{{!!` with no `!!}` after it is an escaped echo of a double negation.
+#[test]
+fn test_preprocess_double_negation_without_raw_close_is_escaped_echo() {
+    let (php, _) = preprocess("<p>{{!!$flag}}</p>");
+    assert!(
+        php.contains("echo e(!!$flag)"),
+        "{{!!$flag}} should compile to an escaped echo: {}",
+        php
+    );
+    assert!(!php.contains("}}"), "no literal braces left: {}", php);
+}

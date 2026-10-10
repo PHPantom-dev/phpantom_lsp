@@ -289,13 +289,19 @@ pub(crate) enum InertOpener {
     PhpStatement,
 }
 
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
 /// Whether an echo (`{{ … }}`, `{{{ … }}}`, or `{!! … !!}`) opens at `at`.
 ///
 /// Blade matches its echo tags longest-opening-first, so in `{{!! … !!}}` the
-/// raw echo opens at the second `{` and the first is a literal brace.
+/// raw echo opens at the second `{` and the first is a literal brace. That
+/// needs a `!!}` after it: `{{!!$a}}` is an escaped echo of `!!$a`.
 pub(crate) fn is_echo_start(bytes: &[u8], at: usize) -> bool {
     let rest = &bytes[at..];
-    (rest.starts_with(b"{{") && !rest.starts_with(b"{{!!")) || rest.starts_with(b"{!!")
+    let raw_at_second_brace = rest.starts_with(b"{{!!") && contains_bytes(&rest[4..], b"!!}");
+    (rest.starts_with(b"{{") && !raw_at_second_brace) || rest.starts_with(b"{!!")
 }
 
 /// The opening and closing delimiters of the echo [`is_echo_start`] found at
@@ -710,6 +716,8 @@ mod tests {
         // A space keeps `!!` out of the opener, so this is a double negation
         // inside an escaped echo.
         assert!(is_echo_start(b"{{ !!$a }}", 0));
+        // With no `!!}` after it, `{{!!` is an escaped echo of `!!$a`.
+        assert!(is_echo_start(b"{{!!$a}}", 0));
     }
 
     #[test]

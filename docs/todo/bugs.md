@@ -143,32 +143,7 @@ No outstanding items.
 
 ## Blade
 
-### B571. A `{{!!` with no `!!}` after it is read as a raw echo
-
-**Impact: Low · Complexity: Low-Medium**
-
-```blade
-<p>{{!!$flag}}</p>
-```
-
-A double negation written without a space. Blade compiles a raw echo only
-when a `!!}` follows the `{!!`, and with none the escaped echo compiles to
-`e(!!$flag)`. `echo::open` (`src/blade/preprocessor/echo.rs`) reads every
-`{{!!` as a literal `{` and a raw echo, so the template lowers to
-`echo $flag}};` and reports a cascade of syntax errors. `{{ !!$flag }}` is
-fine.
-
-`open_escaped` (the `@{{!!` form), `mode_at`
-(`src/blade/directive_completion.rs`), `blade_echo_delimiter_at`
-(`src/blade/echo_delimiter.rs`) and `is_echo_start`
-(`src/blade/signature.rs`) apply the same rule, so hover, directive
-completion, the formatter and semantic tokens read the echo as a raw one
-too.
-
-**Fix:** Read a `{{!!` as a literal brace only when a `!!}` follows it.
-`EchoCloses` already answers that for the preprocessor. The scanners ask per
-`{`, so they need the position of the last `!!}` worked out once per scan,
-not a search forward from every opener.
+No outstanding items.
 
 ## Templates
 

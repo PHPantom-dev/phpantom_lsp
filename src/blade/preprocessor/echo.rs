@@ -12,6 +12,12 @@ pub(super) struct EchoCloses {
     pub(super) raw: Option<usize>,
 }
 
+/// Whether a `!!}` follows the `{{!!` that `opener` starts with, which is
+/// what makes its second `{` open a raw echo.
+fn raw_follows(opener: &[char], line_idx: usize, closes: &EchoCloses) -> bool {
+    contains_seq(&opener[4..], &['!', '!', '}']) || closes.raw.is_some_and(|last| last > line_idx)
+}
+
 /// An echo, a raw echo, or a Blade comment opening at the cursor.
 pub(super) fn open(
     remaining: &[char],
@@ -23,7 +29,10 @@ pub(super) fn open(
     let replacement;
     let next_mode;
 
-    if remaining.starts_with(&['{', '{']) && !remaining[1..].starts_with(&['{', '!', '!']) {
+    if remaining.starts_with(&['{', '{'])
+        && !(remaining[1..].starts_with(&['{', '!', '!'])
+            && raw_follows(remaining, line_idx, closes))
+    {
         let is_comment = remaining.starts_with(&['{', '{', '-', '-']);
         replacement = if is_comment {
             " /* ".to_string()
@@ -45,6 +54,8 @@ pub(super) fn open(
         // the raw echo starts at the second `{` and the outer
         // braces are literal text — the guard above keeps the
         // first `{` from being read as an escaped echo instead.
+        // Without a `!!}` after it there is no raw echo, and `{{!!$a}}`
+        // is an escaped echo of `!!$a`.
         replacement = " echo ".to_string();
         match_len = 3;
         next_mode = Mode::Php(true);
@@ -75,7 +86,9 @@ pub(super) fn open_escaped(
     // The `@` escapes only the echo it comes directly before. With `{{!!`
     // the raw echo opens at the second `{` (see `open`), so there is no
     // escaped echo here, only the `@` and a literal brace in front of it.
-    if remaining.starts_with(&['@', '{', '{', '!', '!']) {
+    if remaining.starts_with(&['@', '{', '{', '!', '!'])
+        && raw_follows(&remaining[1..], line_idx, closes)
+    {
         return None;
     }
 

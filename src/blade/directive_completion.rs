@@ -34,6 +34,12 @@ pub(crate) fn is_html_position(content: &str, offset: usize) -> bool {
     mode_at(content, offset) == Mode::Html
 }
 
+/// Whether `rest` starts with a `{{!!` that a `!!}` follows, so the raw echo
+/// opens at the second `{`. Without the `!!}` it is an escaped echo of `!!…`.
+fn raw_echo_opens_at_second_brace(rest: &str) -> bool {
+    rest.starts_with("{{!!") && rest[4..].contains("!!}")
+}
+
 /// The [`Mode`] the scanner is in once it reaches `offset`, i.e. what the
 /// compiler makes of everything up to (not including) `offset`.
 ///
@@ -60,10 +66,10 @@ pub(crate) fn mode_at(content: &str, offset: usize) -> Mode {
                 } else if rest.starts_with("{!!") {
                     mode = Mode::UntilMarkerInCode("!!}");
                     i += 3;
-                } else if rest.starts_with("{{") && !rest.starts_with("{{!!") {
-                    // Not `{{!!`: there the raw echo opens at the second `{`
-                    // and the first is a literal brace, as the preprocessor
-                    // lowers it.
+                } else if rest.starts_with("{{") && !raw_echo_opens_at_second_brace(rest) {
+                    // Not `{{!!…!!}`: there the raw echo opens at the second
+                    // `{` and the first is a literal brace, as the
+                    // preprocessor lowers it.
                     mode = Mode::UntilMarkerInCode("}}");
                     i += 2;
                 } else if rest.starts_with("<?xml") {
@@ -86,8 +92,10 @@ pub(crate) fn mode_at(content: &str, offset: usize) -> Mode {
                         // engine, so none of it is PHP.
                         mode = Mode::UntilMarkerRaw("!!}");
                         i += 1 + 3;
-                    } else if after_at.starts_with("{{") && !after_at.starts_with("{{!!") {
-                        // Not `{{!!`: the `@` escapes only the echo it comes
+                    } else if after_at.starts_with("{{")
+                        && !raw_echo_opens_at_second_brace(after_at)
+                    {
+                        // Not `{{!!…!!}`: the `@` escapes only the echo it comes
                         // directly before, and there the raw echo opens at
                         // the second `{`.
                         mode = Mode::UntilMarkerRaw("}}");
