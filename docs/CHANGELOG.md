@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Variables inside a closure keep their types when another method is chained onto the call.** In `$obj->with(function (string $s) { … })->run()`, hover and completion inside the closure again know the types of its parameters and locals.
 - **Writing to a `global` variable is no longer reported as unused.** The same goes for a write through a reference, such as `$first = &$items[0]; $first = 5;`.
 - **phpcbf fixes against the `[phpcs]` standard.** With `standard` set in `.phpantom.toml`, formatting now applies the rules PHPCS reports instead of PHP_CodeSniffer's default standard.
 - **A class with `__toString()` is accepted as `Stringable`.** Passing one where `Stringable` or `string|Stringable` is expected no longer reports a false type mismatch, whether the method is declared on the class, a parent, or a trait.

@@ -521,6 +521,18 @@ pub(crate) fn try_enter_closure_expr<'b>(
                     return true;
                 }
             }
+            // A closure passed to an earlier call in a chain
+            // (`$a->with(function () { … })->run()`) sits in the receiver.
+            match call {
+                Call::Method(mc) => return try_enter_closure_expr(mc.object, scope, ctx, None),
+                Call::NullSafeMethod(mc) => {
+                    return try_enter_closure_expr(mc.object, scope, ctx, None);
+                }
+                Call::StaticMethod(sc) => {
+                    return try_enter_closure_expr(sc.class, scope, ctx, None);
+                }
+                Call::Function(_) => {}
+            }
         }
         Expression::Access(access) => match access {
             Access::Property(pa) => {

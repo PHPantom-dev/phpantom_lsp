@@ -222,6 +222,35 @@ class Service {
     );
 }
 
+/// A closure passed as an argument keeps its parameter and local types
+/// when another method is chained onto the call that receives it.
+#[test]
+fn hover_variable_inside_closure_argument_of_chained_call() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class ClosureTest
+{
+    public function useClosure(\Closure $closure): static { return $this; }
+    public function return(): string { return 'test'; }
+}
+
+$closure = new ClosureTest();
+$closure->useClosure(function (string $s) {
+    echo $s;
+    $test = 'a';
+})->return();
+"#;
+
+    let hover = hover_at(&backend, uri, content, 9, 10).expect("expected hover on $s");
+    let text = hover_text(&hover);
+    assert!(text.contains("string"), "$s should be string: {text}");
+
+    let hover = hover_at(&backend, uri, content, 10, 5).expect("expected hover on $test");
+    let text = hover_text(&hover);
+    assert!(text.contains("'a'"), "$test should be 'a': {text}");
+}
+
 /// A readonly property holds what the constructor assigned it in every
 /// other method, when that is narrower than the declared type.  An
 /// assignment the constructor only makes on one path, or a property that
