@@ -1013,11 +1013,11 @@ pub fn apply_workspace_edit(content: &str, edit: &WorkspaceEdit) -> String {
 /// Convert an LSP `Position` (line, character) to a byte offset in `content`.
 pub fn lsp_pos_to_offset(content: &str, pos: Position) -> usize {
     let mut offset = 0;
-    for (i, line) in content.lines().enumerate() {
+    for (i, line) in content.split_inclusive('\n').enumerate() {
         if i == pos.line as usize {
             return offset + pos.character as usize;
         }
-        offset += line.len() + 1;
+        offset += line.len();
     }
     content.len()
 }

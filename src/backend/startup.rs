@@ -245,7 +245,8 @@ impl Backend {
                             CodeActionKind::QUICKFIX,
                             CodeActionKind::REFACTOR_EXTRACT,
                             CodeActionKind::REFACTOR_INLINE,
-                            CodeActionKind::new("source.organizeImports"),
+                            CodeActionKind::SOURCE_ORGANIZE_IMPORTS,
+                            CodeActionKind::new("source.addMissingImports"),
                         ]),
                         work_done_progress_options: WorkDoneProgressOptions {
                             work_done_progress: None,

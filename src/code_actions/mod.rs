@@ -116,7 +116,7 @@ pub(crate) mod phpstan;
 mod promote_constructor_param;
 mod remove_unused_import;
 pub(crate) use remove_unused_import::{
-    build_line_deletion_edit, build_use_directive_deletion_edit, cursor_on_use_import_line,
+    build_line_deletion_edit, build_use_directive_deletion_edit, range_touches_use_import,
 };
 mod replace_deprecated;
 mod replace_fqcn;
@@ -479,6 +479,8 @@ impl Backend {
             }
             // ── Import all missing classes ───────────────────────────────
             "source.importAllClasses" => self.resolve_import_all_classes(data, content),
+            // ── Sort use statements ──────────────────────────────────────
+            "source.sortUseStatements" => self.resolve_sort_use_statements(data, content),
             "refactor.extractFunction" => self.resolve_extract_function(data, content),
             "refactor.extractInterface" => self.resolve_extract_interface(data, content),
             "refactor.inlineVariable" => self.resolve_inline_variable(data, content),

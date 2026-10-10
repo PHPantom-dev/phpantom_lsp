@@ -6,7 +6,7 @@
 
 use crate::common::{
     apply_edits, create_test_backend, extract_edits, find_action, get_code_actions_at,
-    resolve_action,
+    get_code_actions_in_range, resolve_action,
 };
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
@@ -92,6 +92,20 @@ fn bulk_remove_not_offered_when_cursor_outside_import_block() {
     assert!(
         find_action(&actions, SINGLE).is_none(),
         "should NOT offer single remove when cursor is not on the unused import"
+    );
+}
+
+#[test]
+fn bulk_remove_offered_for_a_whole_document_request() {
+    let backend = create_test_backend();
+    let content = "<?php\nuse Foo\\Bar;\n\nclass Test {}\n";
+    backend.update_ast(URI, content);
+    // `editor.codeActionsOnSave` sends the whole document as the range.
+    let range = Range::new(Position::new(0, 0), Position::new(4, 0));
+    let actions = get_code_actions_in_range(&backend, URI, content, range);
+    assert!(
+        find_action(&actions, BULK).is_some(),
+        "should offer bulk remove for a range spanning the imports"
     );
 }
 

@@ -4,8 +4,8 @@
 //! once; the wrappers here present its result in the shapes the callers ask
 //! for: the diagnostics suppress a class-name report on an import line,
 //! `completion::use_edit::analyze_use_block` places a *new* import, and
-//! `code_actions::cursor_on_use_import_line` tells whether the cursor rests
-//! on one.
+//! `code_actions::range_touches_use_import` tells whether a code action
+//! request touches one.
 
 use super::helpers::ByteRange;
 

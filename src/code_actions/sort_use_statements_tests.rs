@@ -149,3 +149,13 @@ fn multiline_group_use_sorts_as_one_entry() {
         "<?php\nuse Aardvark\\{\n    Bar,\n    Baz,\n};\nuse Zebra\\Foo;\n\nclass Test {}\n"
     );
 }
+
+#[test]
+fn keeps_crlf_line_endings() {
+    let content = "<?php\r\nuse Zebra\\Foo;\r\nuse Aardvark\\Bar;\r\n\r\nclass Test {}\r\n";
+    let result = crate::text_position::apply_text_edits(content, &edits_of(content));
+    assert_eq!(
+        result,
+        "<?php\r\nuse Aardvark\\Bar;\r\nuse Zebra\\Foo;\r\n\r\nclass Test {}\r\n"
+    );
+}

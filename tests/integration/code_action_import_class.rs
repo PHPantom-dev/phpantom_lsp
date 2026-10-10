@@ -401,6 +401,12 @@ fn import_all_places_each_import_in_its_own_namespace_block() {
     let actions = get_code_actions_in_range(&backend, uri, content, range(2, 15, 22));
     let action = find_action(&actions, "Import all missing classes")
         .expect("expected the bulk import action");
+    // Picking a candidate can be ambiguous, so an automatic organize pass
+    // must not run it.
+    assert_eq!(
+        action.kind,
+        Some(CodeActionKind::new("source.addMissingImports"))
+    );
     let resolved = crate::common::resolve_action(&backend, uri, content, action);
     let result = crate::common::apply_edits(content, &extract_edits(&resolved));
 

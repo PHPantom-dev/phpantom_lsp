@@ -452,8 +452,9 @@ impl Backend {
     ///
     /// Scans the entire file for unresolved class names (the same
     /// condition that triggers the single-class import action) and
-    /// offers a single `source.organizeImports` action that imports
-    /// them all at once.  The action uses the deferred resolve model
+    /// offers a single `source.addMissingImports` action that imports
+    /// them all at once.  It is kept out of `source.organizeImports` so an
+    /// automatic organize pass never picks between candidates.  The action uses the deferred resolve model
     /// so the actual edits are computed in
     /// [`resolve_import_all_classes`](Self::resolve_import_all_classes).
     pub(crate) fn collect_import_all_classes_action(
@@ -518,7 +519,7 @@ impl Backend {
 
         out.push(CodeActionOrCommand::CodeAction(CodeAction {
             title: "Import all missing classes".to_string(),
-            kind: Some(CodeActionKind::new("source.organizeImports")),
+            kind: Some(CodeActionKind::new("source.addMissingImports")),
             diagnostics: if all_unknown_diags.is_empty() {
                 None
             } else {

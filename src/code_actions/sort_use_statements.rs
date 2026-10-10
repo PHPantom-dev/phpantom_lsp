@@ -20,19 +20,25 @@
 //!   never across it.
 //! - A comment attached to one `use` line (leading or trailing) moves
 //!   with it.
+//!
+//! The edits are computed at resolve time against the current content,
+//! so a client that applies this after "Remove all unused imports" (as
+//! organize-on-save does) sorts the text the removal left behind.
 
 use tower_lsp::lsp_types::*;
 
-use super::cursor_on_use_import_line;
+use super::{CodeActionData, make_code_action_data, range_touches_use_import};
 use crate::Backend;
 use crate::completion::use_edit::{UseBlockInfo, analyze_use_block};
 
 impl Backend {
     /// Collect the "Sort use statements" code action.
     ///
-    /// Only offered when the cursor is on a top-level `use` import line
+    /// Only offered when the request touches a top-level `use` import
     /// (mirroring the bulk "Remove all unused imports" action) and when
     /// the block isn't already sorted.
+    ///
+    /// Phase 1 only — edits are deferred to [`resolve_sort_use_statements`].
     pub(crate) fn collect_sort_use_statements_action(
         &self,
         uri: &str,
@@ -40,29 +46,42 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        if !cursor_on_use_import_line(content, params.range.start.line) {
+        if !range_touches_use_import(content, &params.range)
+            || compute_sort_use_edits(content).is_empty()
+        {
             return;
         }
-
-        let edits = compute_sort_use_edits(content);
-        if edits.is_empty() {
-            return;
-        }
-
-        let Ok(doc_uri) = uri.parse::<Url>() else {
-            return;
-        };
 
         out.push(CodeActionOrCommand::CodeAction(CodeAction {
             title: "Sort use statements".to_string(),
-            kind: Some(CodeActionKind::new("source.organizeImports")),
+            kind: Some(CodeActionKind::SOURCE_ORGANIZE_IMPORTS),
             diagnostics: None,
-            edit: Some(crate::code_actions::single_file_edit(doc_uri, edits)),
+            edit: None,
             command: None,
             is_preferred: None,
             disabled: None,
-            data: None,
+            data: Some(make_code_action_data(
+                "source.sortUseStatements",
+                uri,
+                &params.range,
+                serde_json::json!({}),
+            )),
         }));
+    }
+
+    /// Resolve a deferred "Sort use statements" action against the
+    /// current content.
+    pub(crate) fn resolve_sort_use_statements(
+        &self,
+        data: &CodeActionData,
+        content: &str,
+    ) -> Option<WorkspaceEdit> {
+        let doc_uri: Url = data.uri.parse().ok()?;
+        let edits = compute_sort_use_edits(content);
+        if edits.is_empty() {
+            return None;
+        }
+        Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
 }
 
@@ -94,6 +113,12 @@ fn compute_sort_use_edits(content: &str) -> Vec<TextEdit> {
     }
 
     let lines: Vec<&str> = content.lines().collect();
+    // `lines()` strips the terminator; write back the one the file uses.
+    let eol = if content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
 
     let mut entries: Vec<Entry> = Vec::with_capacity(use_block.existing.len());
     let mut floor = 0usize;
@@ -147,7 +172,7 @@ fn compute_sort_use_edits(content: &str) -> Vec<TextEdit> {
         for &idx in &sorted {
             for line in &lines[entries[idx].leading..=entries[idx].end] {
                 new_text.push_str(line);
-                new_text.push('\n');
+                new_text.push_str(eol);
             }
         }
 

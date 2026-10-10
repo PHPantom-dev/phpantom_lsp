@@ -91,12 +91,10 @@ impl Backend {
         }
 
         // ── Bulk action: remove unused imports ──────────────────────────
-        // Only offer when the cursor is on any namespace-level `use`
-        // import line (used or unused), so it doesn't pop up on
-        // unrelated lines elsewhere in the file.
-        if !all_unused_diags.is_empty()
-            && cursor_on_use_import_line(content, params.range.start.line)
-        {
+        // Only offer when the request touches a namespace-level `use`
+        // import (used or unused), so it doesn't pop up on unrelated
+        // lines elsewhere in the file.
+        if range_touches_use_import(content, &params.range) {
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Remove all unused imports".to_string(),
                 kind: Some(CodeActionKind::new("source.organizeImports")),
@@ -186,24 +184,32 @@ impl Backend {
     }
 }
 
-/// Check whether the cursor line belongs to a namespace-level `use` import.
+/// Check whether `range` touches a namespace-level `use` import.
 ///
-/// Returns `true` for any line of the statement, including the wrapped
-/// members of a group import, and `false` for a trait `use` inside a
-/// class/trait body.
-pub(crate) fn cursor_on_use_import_line(content: &str, line: u32) -> bool {
-    // The byte offset the line starts at; a line past the end of the file
-    // rests on nothing.
+/// Any line of the statement counts, including the wrapped members of a
+/// group import, and a range that spans the import block counts too, so
+/// a whole-document request (as `editor.codeActionsOnSave` sends) is
+/// offered the import actions while a cursor elsewhere in the file is
+/// not.  A trait `use` inside a class/trait body never counts.
+pub(crate) fn range_touches_use_import(content: &str, range: &Range) -> bool {
+    // A range starting past the end of the file rests on nothing.
+    let Some(start) = line_start_offset(content, range.start.line) else {
+        return false;
+    };
+    let end = position_to_byte_offset(content, range.end).max(start);
+    scan_use_statements(content).iter().any(|statement| {
+        statement.top_level && statement.line_start <= end && start <= statement.end
+    })
+}
+
+/// The byte offset line `line` starts at, or `None` past the end of the
+/// file.
+fn line_start_offset(content: &str, line: u32) -> Option<usize> {
     let mut offset = 0usize;
     for _ in 0..line {
-        match content[offset..].find('\n') {
-            Some(newline) => offset += newline + 1,
-            None => return false,
-        }
+        offset += content[offset..].find('\n')? + 1;
     }
-    scan_use_statements(content).iter().any(|statement| {
-        statement.top_level && statement.line_start <= offset && offset <= statement.end
-    })
+    Some(offset)
 }
 
 /// Build a `TextEdit` that deletes the full line(s) covered by `range`,
@@ -845,34 +851,48 @@ mod tests {
         assert_eq!(result, "<?php\nclass Foo {}\n");
     }
 
-    // ── cursor_on_use_import_line ────────────────────────────────────
+    // ── range_touches_use_import ────────────────────────────────────
+
+    fn at_line(line: u32) -> Range {
+        Range::new(Position::new(line, 0), Position::new(line, 0))
+    }
 
     #[test]
-    fn cursor_on_use_line_returns_true() {
+    fn cursor_on_use_line_touches_an_import() {
         let content = "<?php\nuse Foo\\Bar;\nclass Test {}\n";
-        assert!(cursor_on_use_import_line(content, 1));
+        assert!(range_touches_use_import(content, &at_line(1)));
     }
 
     #[test]
-    fn cursor_on_non_use_line_returns_false() {
+    fn cursor_on_non_use_line_does_not_touch_an_import() {
         let content = "<?php\nuse Foo\\Bar;\nclass Test {\n    public function foo() {}\n}\n";
-        assert!(!cursor_on_use_import_line(content, 2)); // class line
-        assert!(!cursor_on_use_import_line(content, 3)); // method line
+        assert!(!range_touches_use_import(content, &at_line(2))); // class line
+        assert!(!range_touches_use_import(content, &at_line(3))); // method line
     }
 
     #[test]
-    fn cursor_on_trait_use_returns_false() {
+    fn cursor_on_trait_use_does_not_touch_an_import() {
         let content = "<?php\nclass Foo {\n    use SomeTrait;\n}\n";
-        assert!(!cursor_on_use_import_line(content, 2));
+        assert!(!range_touches_use_import(content, &at_line(2)));
     }
 
     #[test]
-    fn cursor_on_use_in_braced_namespace_returns_true() {
+    fn cursor_on_use_in_braced_namespace_touches_an_import() {
         let content = "<?php\nnamespace App {\n    use Foo\\Bar;\n}\n";
-        // Brace depth at line 2 is 1 (opened by namespace), but
-        // namespace braces are tracked separately so depth 1 inside a
-        // braced namespace is still "top level" for import purposes.
-        assert!(cursor_on_use_import_line(content, 2));
+        assert!(range_touches_use_import(content, &at_line(2)));
+    }
+
+    #[test]
+    fn whole_document_range_touches_an_import() {
+        let content = "<?php\nuse Foo\\Bar;\n\nclass Test {}\n";
+        let range = Range::new(Position::new(0, 0), Position::new(4, 0));
+        assert!(range_touches_use_import(content, &range));
+    }
+
+    #[test]
+    fn range_past_the_end_touches_nothing() {
+        let content = "<?php\nuse Foo\\Bar;";
+        assert!(!range_touches_use_import(content, &at_line(5)));
     }
 
     // ── A template's `@use` directives ──────────────────────────────
