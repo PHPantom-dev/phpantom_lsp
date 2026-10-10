@@ -20,47 +20,6 @@ against that bar.
 
 ---
 
-## P53. Diagnostics and type-hint resolution deep-copy classes they only read
-
-**Impact: Medium · Complexity: Low**
-
-`collect_deprecated_diagnostics` resolves each member access to a class
-and then clones the whole `ClassInfo` out of the `Arc` it just got:
-
-```rust
-.and_then(|name| self.find_or_load_class(&name))
-.map(|arc| ClassInfo::clone(&arc));
-```
-
-`resolve_variable_subject` does the same on its own path, and the
-per-variable cache stores `Option<ClassInfo>` rather than
-`Option<Arc<ClassInfo>>`, so its hits clone too. The class is only ever
-read afterwards (`get_method`, `get_property`, and a `&ClassInfo`
-argument to `resolve_class_fully_cached`), so every one of those copies
-is wasted, and the cost scales with the class's member count: a file
-whose accesses land on a large resolved class (an Eloquent `Builder`, a
-facade's concrete binding) pays for a full copy of its methods,
-properties, and constants once per access.
-
-`resolve_named_type` (`type_engine/types/resolution.rs`) has the same
-habit on every type-hint lookup. It takes the class out of its `Arc` with
-`Arc::unwrap_or_clone`, which deep-copies whenever the class is shared
-(a cached class always is), and wraps the copy in a fresh `Arc` even when
-nothing changed it. Only the Eloquent collection swap and the generic
-path modify the class.
-
-Hold `Arc<ClassInfo>` through the collector instead; both producers
-already have one, and deref coercion covers the read sites. In
-`resolve_named_type`, keep the `Arc` and copy only on the paths that
-modify the class.
-
-**Where to look:** `collect_deprecated_diagnostics` and
-`resolve_variable_subject` in `diagnostics/deprecated.rs`, plus the
-`var_type_cache` declaration at the top of the collector;
-`resolve_named_type` in `type_engine/types/resolution.rs`.
-
----
-
 ## P51. CI checks for how cost grows with input size
 
 **Impact: Medium · Complexity: Low-Medium**

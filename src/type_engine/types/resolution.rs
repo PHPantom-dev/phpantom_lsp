@@ -492,8 +492,6 @@ fn resolve_named_type(
 
     match lookup_class_declaration(name, owning_class_name, all_classes, class_loader) {
         Some(cls) => {
-            let cls = Arc::unwrap_or_clone(cls);
-
             // ── Eloquent custom collection swapping ────────────────
             // Only for a returned type hint — see
             // `type_hint_to_classes_typed_returned`.
@@ -564,7 +562,7 @@ fn resolve_named_type(
                     &generic_arg_strings,
                     generic_args,
                 );
-                let mut result = std::sync::Arc::unwrap_or_clone(resolved);
+                let mut result = Arc::unwrap_or_clone(resolved);
 
                 // ── Template-param mixin resolution ────────────────
                 // When a class declares `@mixin TParam` where `TParam`
@@ -615,7 +613,7 @@ fn resolve_named_type(
 
                 vec![Arc::new(result)]
             } else {
-                vec![Arc::new(cls)]
+                vec![cls]
             }
         }
         None => {

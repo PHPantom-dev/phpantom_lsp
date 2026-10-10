@@ -373,12 +373,12 @@ pub(super) fn self_ref_subs(ty: PhpType) -> HashMap<String, PhpType> {
 /// Returns `cls` unchanged when it is not the Eloquent Collection, has no
 /// generic args, or the model does not declare a custom collection.
 pub(crate) fn try_swap_custom_collection(
-    cls: ClassInfo,
+    cls: Arc<ClassInfo>,
     base_fqn: &str,
     generic_args: &[PhpType],
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> ClassInfo {
+) -> Arc<ClassInfo> {
     if base_fqn != crate::types::ELOQUENT_COLLECTION_FQN || generic_args.is_empty() {
         return cls;
     }
@@ -389,16 +389,16 @@ pub(crate) fn try_swap_custom_collection(
         None => return cls,
     };
     let model_class = crate::class_lookup::find_class_by_name(all_classes, &model_name)
-        .map(|c| Arc::unwrap_or_clone(Arc::clone(c)))
-        .or_else(|| class_loader(&model_name).map(Arc::unwrap_or_clone));
+        .map(Arc::clone)
+        .or_else(|| class_loader(&model_name));
 
     if let Some(ref mc) = model_class
         && let Some(coll_type) = mc.laravel().and_then(|l| l.custom_collection.as_ref())
     {
         let coll_name = coll_type.to_string();
         crate::class_lookup::find_class_by_name(all_classes, &coll_name)
-            .map(|c| Arc::unwrap_or_clone(Arc::clone(c)))
-            .or_else(|| class_loader(&coll_name).map(Arc::unwrap_or_clone))
+            .map(Arc::clone)
+            .or_else(|| class_loader(&coll_name))
             .unwrap_or(cls)
     } else {
         cls

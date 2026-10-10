@@ -80,7 +80,7 @@ impl Backend {
         // see the same type share a single resolution pass.  This turns
         // O(n * parse) into O(k * parse) where k is the number of
         // distinct subjects, not the number of member accesses.
-        let mut var_type_cache: HashMap<SubjectCacheKey, Option<ClassInfo>> = HashMap::new();
+        let mut var_type_cache: HashMap<SubjectCacheKey, Option<Arc<ClassInfo>>> = HashMap::new();
 
         let symbol_map = &ctx.symbol_map;
         let file_resolved_names = &ctx.file.resolved_names;
@@ -189,8 +189,7 @@ impl Backend {
                         span.start,
                         &subject_ctx,
                     )
-                    .and_then(|name| self.find_or_load_class(&name))
-                    .map(|arc| ClassInfo::clone(&arc));
+                    .and_then(|name| self.find_or_load_class(&name));
 
                     // Fall back to variable type resolution for $var->member() calls.
                     // Use the per-variable cache to avoid re-parsing the
@@ -235,7 +234,7 @@ impl Backend {
                             });
 
                             match cached {
-                                Some(c) => c.clone(),
+                                Some(c) => Arc::clone(c),
                                 None => continue,
                             }
                         }
@@ -552,11 +551,9 @@ fn resolve_variable_subject(
     subject_text: &str,
     access_kind: AccessKind,
     rctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Arc<ClassInfo>> {
     match resolve_subject_outcome(subject_text.trim(), access_kind, rctx) {
-        SubjectOutcome::Resolved(classes) => {
-            classes.into_iter().next().map(|arc| ClassInfo::clone(&arc))
-        }
+        SubjectOutcome::Resolved(classes) => classes.into_iter().next(),
         _ => None,
     }
 }
