@@ -1034,6 +1034,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#b574-a-phpcs-standard-turns-on-phpcs-but-not-phpcbf" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B574. A <code>[phpcs]</code> standard turns on PHPCS but not phpcbf
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b549-throws-and-namespaced-function-completions-plan-their-import-against-the-whole-file" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1723,6 +1734,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#b574-a-phpcs-standard-turns-on-phpcs-but-not-phpcbf" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B574. A <code>[phpcs]</code> standard turns on PHPCS but not phpcbf
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b549-throws-and-namespaced-function-completions-plan-their-import-against-the-whole-file" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1906,6 +1928,16 @@ nothing.</p>
 to <code>supports_file_rename</code>. When either is missing, compute the edit in
 phase 1 through the same code <code>resolve_code_action</code> runs, and send it
 without <code>data</code>.</p>
+<h3 id="b574-a-phpcs-standard-turns-on-phpcs-but-not-phpcbf">B574. A <code>[phpcs]</code> standard turns on PHPCS but not phpcbf<a class="headerlink" href="#b574-a-phpcs-standard-turns-on-phpcs-but-not-phpcbf" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p><code>resolve_phpcs</code> (<code>src/phpcs.rs</code>) runs PHPCS whenever <code>[phpcs] standard</code>
+is set, even with no ruleset file or <code>require-dev</code> entry, but
+<code>Tool::detected</code> for phpcbf (<code>src/formatting/mod.rs</code>) only checks
+<code>project_uses_phpcs</code>. A project configured that way with
+<code>vendor/bin/phpcbf</code> installed gets PHPCS diagnostics and the built-in
+formatter, though the comment there promises the linter and its fixer
+never disagree. Treat a set standard as evidence in <code>detected</code> too,
+still yielding to a <code>mago.toml</code> <code>[formatter]</code> table.</p>
 <h3 id="b549-throws-and-namespaced-function-completions-plan-their-import-against-the-whole-file">B549. <code>@throws</code> and namespaced-function completions plan their import against the whole file<a class="headerlink" href="#b549-throws-and-namespaced-function-completions-plan-their-import-against-the-whole-file" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
 <p>The <code>@throws</code> smart items (<code>src/completion/phpdoc/mod.rs</code>), the <code>@throws</code>
