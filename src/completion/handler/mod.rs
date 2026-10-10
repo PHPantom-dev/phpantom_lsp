@@ -247,6 +247,7 @@ impl Backend {
                             &class_loader,
                             Some(self),
                             Some(&function_loader),
+                            &uri,
                         )
                     {
                         return Ok(Some(response));
@@ -260,7 +261,7 @@ impl Backend {
                     crate::completion::phpdoc::extract_phpdoc_prefix(&content, position)
                 {
                     return Ok(Some(
-                        self.complete_phpdoc_tag(&content, &prefix, position, &ctx),
+                        self.complete_phpdoc_tag(&content, &prefix, position, &ctx, &uri),
                     ));
                 }
 

@@ -488,6 +488,11 @@ pub struct SmartContext<'a> {
     /// used for cross-file `@throws` propagation from standalone
     /// function calls.
     pub function_loader: Option<FunctionLoaderFn<'a>>,
+
+    /// The backend and file URI that plan `use` edits for `@throws`
+    /// imports against the `namespace` block the cursor is in.  Without
+    /// it the whole file is analysed.
+    pub import_target: Option<(&'a crate::Backend, &'a str)>,
 }
 
 impl SmartContext<'_> {
@@ -496,6 +501,7 @@ impl SmartContext<'_> {
         inferred_inline_var_type: None,
         class_loader: None,
         function_loader: None,
+        import_target: None,
     };
 }
 
@@ -595,7 +601,10 @@ pub fn build_phpdoc_completions(
                     .collect();
 
                 if !missing.is_empty() {
-                    let use_block = analyze_use_block(content);
+                    let use_block = match smart.import_target {
+                        Some((backend, uri)) => backend.use_block_at(uri, content, position),
+                        None => analyze_use_block(content),
+                    };
 
                     for (idx, exc_type) in missing.iter().enumerate() {
                         let display_name = crate::util::short_name(exc_type);

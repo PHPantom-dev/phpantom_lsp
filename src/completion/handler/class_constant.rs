@@ -436,6 +436,7 @@ impl Backend {
                 Some(content),
                 &ctx.namespace,
                 current_uri,
+                position,
             );
             let function_items = filter_current_file_functions(function_items, current_uri, self);
             let items = append_semicolon_to_insert_text(function_items);
@@ -593,6 +594,7 @@ impl Backend {
             Some(content),
             &ctx.namespace,
             current_uri,
+            position,
         );
 
         if class_items.is_empty()

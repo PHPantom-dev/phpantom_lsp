@@ -75,6 +75,7 @@ pub fn try_generate_docblock(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
+    uri: &str,
 ) -> Option<CompletionResponse> {
     let (trigger_range, indent) = trigger::detect_docblock_trigger(content, position)?;
 
@@ -116,15 +117,19 @@ pub fn try_generate_docblock(
     }
 
     // Collect additional text edits (e.g. use imports for @throws).
-    let additional_edits = build_throws_import_edits(
-        content,
-        position,
-        use_map,
-        file_namespace,
-        &context,
-        class_loader,
-        function_loader,
-    );
+    let additional_edits = if matches!(context, DocblockContext::FunctionOrMethod) {
+        build_throws_import_edits(
+            content,
+            position,
+            use_map,
+            file_namespace,
+            class_loader,
+            function_loader,
+            backend.map(|backend| (backend, uri)),
+        )
+    } else {
+        Vec::new()
+    };
 
     let item = CompletionItem {
         label: "/** PHPDoc Block */".to_string(),
@@ -171,6 +176,7 @@ pub fn try_generate_docblock_on_enter(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
+    uri: &str,
 ) -> Option<Vec<TextEdit>> {
     let (block_range, _block_indent, after_block) =
         trigger::detect_empty_docblock(content, position)?;
@@ -222,15 +228,17 @@ pub fn try_generate_docblock_on_enter(
     }];
 
     // Auto-import edits for @throws.
-    edits.extend(build_throws_import_edits(
-        content,
-        position,
-        use_map,
-        file_namespace,
-        &context,
-        class_loader,
-        function_loader,
-    ));
+    if matches!(context, DocblockContext::FunctionOrMethod) {
+        edits.extend(build_throws_import_edits(
+            content,
+            position,
+            use_map,
+            file_namespace,
+            class_loader,
+            function_loader,
+            backend.map(|backend| (backend, uri)),
+        ));
+    }
 
     Some(edits)
 }
@@ -244,14 +252,10 @@ fn build_throws_import_edits(
     position: Position,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
-    context: &DocblockContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: FunctionLoader<'_>,
+    import_target: Option<(&crate::Backend, &str)>,
 ) -> Vec<TextEdit> {
-    if !matches!(context, DocblockContext::FunctionOrMethod) {
-        return Vec::new();
-    }
-
     let throws_ctx = ThrowsContext {
         class_loader,
         function_loader,
@@ -267,7 +271,10 @@ fn build_throws_import_edits(
         return Vec::new();
     }
 
-    let use_block = analyze_use_block(content);
+    let use_block = match import_target {
+        Some((backend, uri)) => backend.use_block_at(uri, content, position),
+        None => analyze_use_block(content),
+    };
     let mut edits = Vec::new();
 
     for exc in &uncaught {

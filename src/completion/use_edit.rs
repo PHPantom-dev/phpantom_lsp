@@ -420,6 +420,18 @@ fn namespace_declaration_end(content: &str, keyword: usize) -> Option<usize> {
 }
 
 impl Backend {
+    /// [`use_block_for`](Self::use_block_for) for the `namespace` block the
+    /// cursor at `position` is in.
+    pub(crate) fn use_block_at(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> UseBlockInfo {
+        let offset = crate::text_position::position_to_byte_offset(content, position);
+        self.use_block_for(uri, content, self.import_block_range_at(uri, offset))
+    }
+
     /// The use block a new import for `uri` joins: the file's own `use`
     /// statements, or a template's `@use` directives.
     ///

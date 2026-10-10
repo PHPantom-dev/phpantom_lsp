@@ -1103,6 +1103,7 @@ impl LanguageServer for Backend {
                 &class_loader,
                 Some(&backend),
                 Some(&function_loader),
+                &u,
             )
         })
         .await

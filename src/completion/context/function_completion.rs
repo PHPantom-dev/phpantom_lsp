@@ -9,9 +9,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::util::{short_name, strip_fqn_prefix};
 
-use crate::completion::builder::{
-    analyze_use_block, build_callable_label, build_callable_snippet, deprecation_tag,
-};
+use crate::completion::builder::{build_callable_label, build_callable_snippet, deprecation_tag};
 use crate::completion::context::symbol_ranking::{flat_symbol_sort_text, origin_sort_tier};
 use crate::completion::resolve::CompletionItemData;
 use crate::completion::use_edit::build_use_function_edit;
@@ -175,13 +173,14 @@ impl Backend {
         content: Option<&str>,
         file_namespace: &Option<String>,
         uri: &str,
+        position: Position,
     ) -> (Vec<CompletionItem>, bool) {
         let prefix_lower = strip_fqn_prefix(prefix).to_lowercase();
         let mut seen: HashSet<String> = HashSet::new();
         let mut items: Vec<CompletionItem> = Vec::new();
 
         // Pre-compute use-block info for auto-import insertion.
-        let use_block = content.map(analyze_use_block);
+        let use_block = content.map(|content| self.use_block_at(uri, content, position));
 
         // ── 1. User-defined functions (from parsed files) ───────────
         {

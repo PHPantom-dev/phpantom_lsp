@@ -1060,3 +1060,43 @@ function caller() {\n\
         labels(&items)
     );
 }
+
+/// With several `namespace` blocks, the auto-import goes into the block the
+/// cursor is in, not the first one.
+#[tokio::test]
+async fn test_auto_import_lands_in_the_cursor_namespace_block() {
+    let backend = create_test_backend();
+
+    register_namespaced_function(
+        &backend,
+        "Illuminate\\Support\\enum_value",
+        "enum_value",
+        "Illuminate\\Support",
+        "file:///helpers.php",
+    );
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A {\n",
+        "    use Foo\\Bar;\n",
+        "}\n",
+        "namespace B {\n",
+        "    enum_val\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 5, 12).await;
+
+    let edits = items
+        .iter()
+        .find(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("enum_value"))
+        .and_then(|i| i.additional_text_edits.as_ref())
+        .expect("Should have auto-import");
+
+    assert!(
+        edits[0].range.start.line >= 4,
+        "Import must land in the second block, got line {}",
+        edits[0].range.start.line
+    );
+}

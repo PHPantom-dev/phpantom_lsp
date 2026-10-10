@@ -29,6 +29,7 @@ impl Backend {
         prefix: &str,
         position: Position,
         ctx: &FileContext,
+        uri: &str,
     ) -> CompletionResponse {
         let context = crate::completion::phpdoc::detect_context(content, position);
         let class_loader = self.class_loader(ctx);
@@ -59,6 +60,7 @@ impl Backend {
             inferred_inline_var_type: inferred_var_type,
             class_loader: Some(&class_loader),
             function_loader: Some(&function_loader),
+            import_target: Some((self, uri)),
         };
         let items = crate::completion::phpdoc::build_phpdoc_completions(
             content,

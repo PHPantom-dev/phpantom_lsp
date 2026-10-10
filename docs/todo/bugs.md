@@ -209,18 +209,3 @@ formatter, though the comment there promises the linter and its fixer
 never disagree. Treat a set standard as evidence in `detected` too,
 still yielding to a `mago.toml` `[formatter]` table.
 
-### B549. `@throws` and namespaced-function completions plan their import against the whole file
-
-**Impact: Low · Complexity: Low-Medium**
-
-The `@throws` smart items (`src/completion/phpdoc/mod.rs`), the `@throws`
-imports of docblock generation (`build_throws_import_edits` in
-`src/completion/phpdoc/generation/mod.rs`) and `build_function_completions`
-(`src/completion/context/function_completion.rs`) build their `use` edit
-from `analyze_use_block(content)`, the whole file. In a file with several
-`namespace` blocks the import can land in another block, which every other
-import edit stopped doing this cycle; in a Blade template it lands in the
-virtual prologue, so the completion carrying it is dropped. Plan them
-through `Backend::use_block_for` with the block the cursor is in, as class
-completion does.
-

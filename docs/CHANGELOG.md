@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A call nested in an expression writes through its reference parameters.** `$found = [preg_match('/(\d+)/', $s, $m), …]` now leaves `$m` typed the same as a `preg_match()` call on its own line.
 - **`@phpstan-self-out` applies wherever the call sits.** A call whose result is assigned or tested, such as `$ok = $box->replace('x')`, now updates the type of `$box` too, not only a call made on its own line.
 - **Variables inside a closure keep their types when another method is chained onto the call.** In `$obj->with(function (string $s) { … })->run()`, hover and completion inside the closure again know the types of its parameters and locals.
+- **`@throws` and function imports land in the namespace block you are in.** In a file with several `namespace` blocks, the `use` line added by these completions no longer goes into another block, and in Blade templates it is no longer dropped.
 - **Writing to a `global` variable is no longer reported as unused.** The same goes for a write through a reference, such as `$first = &$items[0]; $first = 5;`.
 - **phpcbf fixes against the `[phpcs]` standard.** With `standard` set in `.phpantom.toml`, formatting now applies the rules PHPCS reports instead of PHP_CodeSniffer's default standard.
 - **A class with `__toString()` is accepted as `Stringable`.** Passing one where `Stringable` or `string|Stringable` is expected no longer reports a false type mismatch, whether the method is declared on the class, a parent, or a trait.
