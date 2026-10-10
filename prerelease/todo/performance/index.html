@@ -1115,17 +1115,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p74-every-class-lookup-by-name-re-parses-and-lowercases-the-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P74. Every class lookup by name re-parses and lowercases the name
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1455,17 +1444,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p74-every-class-lookup-by-name-re-parses-and-lowercases-the-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P74. Every class lookup by name re-parses and lowercases the name
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1715,31 +1693,6 @@ namespace internally, so the other two helpers could also read them from
 there.</p>
 <p><strong>Where to look:</strong> <code>parse_and_cache_content_versioned</code> in
 <code>resolution.rs</code>; <code>with_parse_cache</code> in <code>parser/mod.rs</code>.</p>
-<hr />
-<h2 id="p74-every-class-lookup-by-name-re-parses-and-lowercases-the-name">P74. Every class lookup by name re-parses and lowercases the name<a class="headerlink" href="#p74-every-class-lookup-by-name-re-parses-and-lowercases-the-name" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p><code>find_or_load_class(&amp;str)</code> (<code>resolution.rs</code>) runs <code>PhpType::parse</code> on the
-name before looking it up, so that callers may pass <code>?Foo</code> or
-<code>Collection&lt;int, User&gt;</code>. Most callers pass a bare class name, and
-<code>try_parse</code> has no fast path for one: each lookup runs the full PHPDoc
-type parser, hyphenated-keyword rewriting included, before
-<code>class_loader_memo</code> is consulted. 119 call sites use the <code>&amp;str</code> form.
-Separately, <code>is_scalar_name</code> and <code>is_keyword_type</code>
-(<code>php_type/keywords.rs</code>) allocate a lowercase copy of the name on every
-call, and <code>find_indexed_class</code> reaches them on every lookup, memo hits
-included.</p>
-<p>On a release <code>analyze</code> of a mid-sized Laravel project the PHPDoc type
-parser is about 4% of CPU samples (part of it is this re-parse), and the
-two keyword checks about 2%.</p>
-<p><strong>Fix:</strong> give <code>PhpType::try_parse</code> a fast path for input made only of
-identifier characters and backslashes that is not a keyword, returning
-the named type directly, and compare against the keyword lists with
-<code>eq_ignore_ascii_case</code> (or a stack buffer) instead of allocating. An
-earlier attempt at allocation-free <code>CiMap</code> lookups regressed slightly
-under mimalloc, so confirm this one with an order-swapped A/B run.</p>
-<p><strong>Where to look:</strong> <code>find_or_load_class</code> in <code>resolution.rs</code>,
-<code>PhpType::try_parse</code> in <code>php_type/parse.rs</code>, <code>is_scalar_name</code> and
-<code>is_keyword_type</code> in <code>php_type/keywords.rs</code>.</p>
 <hr />
 <h2 id="p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic">P78. A <code>switch</code> over thousands of distinct literals is still quadratic<a class="headerlink" href="#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
