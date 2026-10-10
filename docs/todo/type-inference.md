@@ -340,42 +340,6 @@ raw strings.
 
 ---
 
-## T48. A sub-expression's type is resolved again by every consumer
-**Impact: Low-Medium · Complexity: High**
-
-The forward walker threads the scope through each expression in
-evaluation order (`forward_walk/expr.rs`) and records the scope each node
-ran on, but not the node's type. The expression's own type is resolved
-once, by the caller, against the scope after the whole expression
-(`resolve_rhs_with_scope`). The sub-expressions that read an earlier scope
-(evaluated before a later write, or the old value `$d++` yields) are typed
-where they ran and handed back by span in `ExprTypes`, which only
-`resolve_rhs_expression` and array-item inference consult. Diagnostics,
-hover and completion resolve the nodes they look at again, each against
-the scope recorded there, and `CHAIN_CACHE` exists to keep re-resolving a
-chain affordable.
-
-PHPStan 2.3 keeps each processed node's `ExpressionResult`, whose type is
-computed lazily, and `Scope::getType()` on a node already processed reads
-it back. It recomputes only for synthetic nodes, or under a scope that
-disagrees on a variable the node reads.
-
-**Design.** Give each node `ExprWalk` evaluates a lazily computed type
-against the scope it ran on, stored by span next to the node scopes the
-diagnostic walk records. `ExprTypes` and its pending/flush bookkeeping
-then go away, `resolve_rhs_with_scope` reads the stored type, and a
-diagnostic reads the type of the node it checks instead of resolving it
-again. Measure first: the win is the resolutions it saves, and a stored
-type per node costs memory on every file the diagnostic pass walks.
-
-**Where to look:** PHPStan 2.3's `src/Analyser/ExpressionResult.php` and
-`MutatingScope::resolveTypeOfNewWorldHandlerNode`. Ours:
-`forward_walk/expr.rs` (`ExprTypes`, `ExprWalk`),
-`forward_walk/diagnostic_cache.rs` (`record_node_scope`),
-`rhs_resolution/mod.rs`, and `CHAIN_CACHE` in `resolver/context.rs`.
-
----
-
 ## T26. Class constants named as docblock types (`Foo::BAR`, `Foo::BAR_*`)
 
 **Impact: Low-Medium · Complexity: Medium**

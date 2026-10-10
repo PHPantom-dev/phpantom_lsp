@@ -91,7 +91,6 @@ unlikely to move the needle for most users.
 | T31 | [Closure literal-return shape inference](todo/type-inference.md#t31-closure-literal-return-shape-inference)                                                                 | Low-Medium  | Medium-High |
 | T44 | [A single enum case has no type](todo/type-inference.md#t44-a-single-enum-case-has-no-type) | Low-Medium | High |
 | T4  | [Non-empty-\* type narrowing and propagation](todo/type-inference.md#t4-non-empty--type-narrowing-and-propagation)                                                          | Low-Medium  | High        |
-| T48 | [A sub-expression's type is resolved again by every consumer](todo/type-inference.md#t48-a-sub-expressions-type-is-resolved-again-by-every-consumer) | Low-Medium  | High        |
 | T5  | Fiber type resolution                                                                                                                                                       | Low         | Medium      |
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |

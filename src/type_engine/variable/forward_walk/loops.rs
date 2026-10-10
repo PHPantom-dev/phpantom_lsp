@@ -22,6 +22,10 @@ pub(crate) enum LoopSeedPoint {
 
 /// Walk a loop body until its loop-carried types stop changing.
 ///
+/// The walks stop early once one would start from the same scope as the
+/// walk before it, which can discover nothing new, and never exceed
+/// `assignment_depth`.
+///
 /// The caller has already seeded `scope` for the first iteration (bound
 /// the `foreach` target, narrowed by the `while` condition, run the `for`
 /// initialisers).  `seed` advances the loop for every later walk: at
@@ -60,6 +64,7 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
 
     // ── Initial walk (always performed) ─────────────────────────
     let initial_ctx = if re_walks > 0 { discovery_ctx } else { ctx };
+    let mut previous_entry = (re_walks > 0).then(|| scope.clone());
     clear_exit_frame();
     walk_body_forward(body_stmts.iter().copied(), scope, initial_ctx);
     if fold_exit_edges {
@@ -77,7 +82,22 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
             break;
         }
 
-        *scope = merged_loop_entry_scope(pre_loop_scope, scope, &mut seed);
+        // A walk from the entry the previous one started from comes out
+        // the same, so the loop has reached its fixed point.  The walked
+        // scope is left as it ended rather than advanced by `AfterBody`,
+        // exactly as the check above leaves it.
+        let mut walked = scope.clone();
+        let entry = merged_loop_entry_scope(pre_loop_scope, &mut walked, &mut seed);
+        if previous_entry
+            .as_ref()
+            .is_some_and(|previous| entry.walks_the_same_as(previous))
+        {
+            break;
+        }
+        *scope = entry;
+        if iteration + 1 < re_walks {
+            previous_entry = Some(scope.clone());
+        }
 
         // Use the real context on the final iteration so diagnostic
         // snapshots and cursor handling are correct.

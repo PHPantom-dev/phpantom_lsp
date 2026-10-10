@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Faster analysis of methods that check many properties.** Narrowing a property or a call's result no longer walks the method again from its first line.
+- **Faster analysis of loops.** A loop body is no longer walked again once its types have settled.
 
 ### Fixed
 

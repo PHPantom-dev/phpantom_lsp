@@ -14,6 +14,16 @@ impl ScopeState {
     /// the check that matters are clones of one another, so a shared
     /// `class_info` compares by pointer and never walks a class.
     fn describes_same_state_as(&self, other: &ScopeState) -> bool {
+        self.agrees_with(other, same_types)
+    }
+
+    /// [`Self::describes_same_state_as`], with `same` deciding whether two
+    /// entries of [`Self::locals`] agree.
+    fn agrees_with(
+        &self,
+        other: &ScopeState,
+        same: fn(&[ResolvedType], &[ResolvedType]) -> bool,
+    ) -> bool {
         if self.locals.len() != other.locals.len()
             || self.unresolved != other.unresolved
             || self.assertions != other.assertions
@@ -27,10 +37,24 @@ impl ScopeState {
         }
         self.locals
             .diff(&other.locals, |_, mine, theirs| match (mine, theirs) {
-                (Some(mine), Some(theirs)) if same_types(mine, theirs) => ControlFlow::Continue(()),
+                (Some(mine), Some(theirs)) if same(mine, theirs) => ControlFlow::Continue(()),
                 _ => ControlFlow::Break(()),
             })
             .is_continue()
+    }
+
+    /// Whether a walk starting from `self` would come out exactly as one
+    /// starting from `other` did.
+    ///
+    /// Unlike [`Self::describes_same_state_as`], everything a walk reads
+    /// counts, the exclusions and reachability included.  A class rebuilt
+    /// with the same members counts as the same class: a walk resolves the
+    /// classes it assigns afresh, so comparing by pointer alone would
+    /// rarely find two walks' entries equal.
+    pub(crate) fn walks_the_same_as(&self, other: &ScopeState) -> bool {
+        self.unreachable == other.unreachable
+            && self.ruled_out == other.ruled_out
+            && self.agrees_with(other, same_resolved_types)
     }
 
     /// The keys whose entries the two scopes do not share: written on
@@ -356,6 +380,21 @@ pub(super) fn same_types(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
             x.type_string == y.type_string
                 && match (&x.class_info, &y.class_info) {
                     (Some(p), Some(q)) => Arc::ptr_eq(p, q),
+                    (None, None) => true,
+                    _ => false,
+                }
+        })
+}
+
+/// Whether two type lists say the same thing, comparing two separately
+/// built `class_info`s by what they declare.
+fn same_resolved_types(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| {
+            x.type_string == y.type_string
+                && x.factory_count == y.factory_count
+                && match (&x.class_info, &y.class_info) {
+                    (Some(p), Some(q)) => Arc::ptr_eq(p, q) || p.signature_eq(q),
                     (None, None) => true,
                     _ => false,
                 }
