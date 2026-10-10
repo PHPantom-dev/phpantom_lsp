@@ -1082,17 +1082,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p73-a-lazily-loaded-file-is-parsed-three-times" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P73. A lazily loaded file is parsed three times
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1378,17 +1367,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p73-a-lazily-loaded-file-is-parsed-three-times" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P73. A lazily loaded file is parsed three times
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1526,24 +1504,6 @@ to be worked out first.</p>
 - Psalm: <code>FileDiffer</code> and <code>FileStatementsDiffer</code> in
   <code>Psalm\Internal\Diff</code>
 - Psalm: <code>Analyzer::shiftFileOffsets()</code> for the offset-shifting logic</p>
-<hr />
-<h2 id="p73-a-lazily-loaded-file-is-parsed-three-times">P73. A lazily loaded file is parsed three times<a class="headerlink" href="#p73-a-lazily-loaded-file-is-parsed-three-times" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p><code>parse_and_cache_content_versioned</code> (<code>resolution.rs</code>) builds a loaded
-file's classes from three helpers, <code>parse_use_statements</code>,
-<code>parse_namespace</code> and <code>parse_php_classes_by_block</code>, and each runs its own
-mago parse of the same content (and copies it), because no parse cache
-is installed for the file. Every embedded stub and every vendor or
-project file loaded on demand is parsed three times where once would do.</p>
-<p>Installing a parse cache for the content around the three calls removes
-the extra two. On a release build that takes about 2% off an <code>analyze</code>
-of a mid-sized Laravel project; paths dominated by on-demand loading
-(startup population, the go-to-implementation scan) spend a larger share of their time
-parsing. <code>parse_php_classes_by_block</code> already works out the use map and
-namespace internally, so the other two helpers could also read them from
-there.</p>
-<p><strong>Where to look:</strong> <code>parse_and_cache_content_versioned</code> in
-<code>resolution.rs</code>; <code>with_parse_cache</code> in <code>parser/mod.rs</code>.</p>
 <hr />
 <h2 id="p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic">P78. A <code>switch</code> over thousands of distinct literals is still quadratic<a class="headerlink" href="#p78-a-switch-over-thousands-of-distinct-literals-is-still-quadratic" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
