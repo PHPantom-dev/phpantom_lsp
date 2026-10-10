@@ -170,7 +170,6 @@ unlikely to move the needle for most users.
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Medium      |
 |     | **[Performance](todo/performance.md)**                                                                                       |             |             |
-| P3  | [Go-to-implementation on a vendor class parses the whole classmap](todo/performance.md#p3-go-to-implementation-on-a-vendor-class-parses-the-whole-classmap)               | High        | Medium-High |
 | P72 | [A `switch` that assigns many distinct literals costs cubic time](todo/performance.md#p72-a-switch-that-assigns-many-distinct-literals-costs-cubic-time)                    | Medium      | Medium      |
 | P70 | [Diagnostics on a long file find each access's context by scanning](todo/performance.md#p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning)             | Medium      | Medium      |
 | P52 | [The diagnostic benchmarks measure a path no consumer takes](todo/performance.md#p52-the-diagnostic-benchmarks-measure-a-path-no-consumer-takes)                            | Medium      | Low         |

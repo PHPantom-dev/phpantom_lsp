@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Faster analysis of methods that check many properties.** Narrowing a property or a call's result no longer walks the method again from its first line.
 - **Faster analysis of loops.** A loop body is no longer walked again once its types have settled.
+- **Faster go-to-implementation on library classes.** Finding the implementations of a class or interface from a Composer package now reads only the files that could hold one, instead of loading every class the project depends on.
 
 ### Fixed
 

@@ -28,7 +28,7 @@
 /// 5. **Reverse jump** — for `MemberDeclaration` symbols on a concrete class,
 ///    walk the class's interfaces and parent abstract classes to find the
 ///    prototype method declaration and return its location.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -510,14 +510,12 @@ impl Backend {
     /// Find all classes that implement or extend the target.
     ///
     /// Scans:
-    /// 1. All classes already in `uri_classes_index` (open files + autoload-discovered)
-    /// 2. All classes loadable via `fqn_uri_index`
-    /// 3. Class index files not yet loaded — string pre-filter then parse
-    /// 4. Embedded PHP stubs — string pre-filter then lazy parse
-    /// 5. User PSR-4 directories — walk for `.php` files not covered by
-    ///    the class index, string pre-filter then parse.  Vendor PSR-4
-    ///    roots are skipped because vendor classes are assumed complete
-    ///    in the class index (Phase 3).
+    /// 1. Already-parsed classes, through the reverse inheritance index
+    /// 2. Collects the unparsed sources: class index files, user PSR-4
+    ///    files the class index does not cover yet (vendor PSR-4 roots are
+    ///    assumed complete in the class index), and embedded PHP stubs
+    /// 3. Parses only the sources that name the target or a subtype found
+    ///    so far, repeating until a round finds no new subtype
     ///
     /// When `include_abstract` is `false` (the default for interface and
     /// abstract-class targets), abstract subclasses are excluded from the
@@ -533,11 +531,9 @@ impl Backend {
     /// the client walks the tree one level at a time.
     ///
     /// When `project_only` is `true`, vendor classes are skipped before
-    /// they are loaded: the index scans (Phases 1-3) drop any candidate
-    /// whose source lives under a `/vendor/` directory, and the embedded
-    /// stub scan (Phase 4) is skipped entirely.  Only the project's own
-    /// classes (already parsed, so their lookups hit the cache) are
-    /// examined.  This keeps callers that need only project implementors
+    /// they are loaded: every phase drops any candidate whose source lives
+    /// under a `/vendor/` directory, and the embedded stubs are not
+    /// searched at all.  This keeps callers that need only project implementors
     /// (e.g. the Laravel auth-model floor) from paying the cost of loading
     /// and parsing every class in a large vendor tree.
     ///
@@ -682,41 +678,14 @@ impl Backend {
             p.set_scope(80, 100, "Scanning for implementations");
         }
 
-        // ── Phase 2: scan fqn_uri_index for classes not yet in uri_classes_index ────
-        let index_entries: Vec<(String, String)> = {
-            let idx = self.symbols.fqn_uri_index.read();
-            idx.iter()
-                .map(|(fqn, uri)| (fqn.to_owned(), uri.clone()))
-                .collect()
-        };
-
-        if let Some(p) = progress {
-            p.add_total(index_entries.len() as u64);
-        }
-        for (fqn, uri) in &index_entries {
-            if let Some(p) = progress {
-                p.add_done(1);
-            }
-            if project_only && uri.contains("/vendor/") {
-                continue;
-            }
-            self.check_candidate_fqn(
-                fqn,
-                target_short,
-                target_fqn,
-                class_loader,
-                include_abstract,
-                direct_only,
-                &mut seen_fqns,
-                &mut result,
-            );
-        }
-
-        // ── Phase 3: scan class index files with string pre-filter ────────
-        // Collect unique file paths from the class index (one file may define
-        // multiple classes, so we de-duplicate by path and scan each file
-        // at most once).  Files already present in uri_classes_index were covered by
-        // Phase 1 and can be skipped.
+        // ── Phase 2: collect the sources nothing has parsed yet ─────────
+        // Class index files (one file may define several classes, so they
+        // are de-duplicated by path), files under the user's PSR-4 roots
+        // that the class index does not know about yet, and the embedded
+        // stubs.  Vendor PSR-4 roots are not walked: vendor classes are
+        // assumed complete in the class index.  Already-parsed files are
+        // left out, because Phase 1 covered their classes.
+        let loaded_uris: HashSet<String> = self.parsed_uris.read().iter().cloned().collect();
         let index_paths: HashSet<PathBuf> = self
             .symbols
             .fqn_uri_index
@@ -725,84 +694,12 @@ impl Backend {
             .filter(|uri| !(project_only && uri.contains("/vendor/")))
             .filter_map(|uri| Url::parse(uri).ok().and_then(|u| u.to_file_path().ok()))
             .collect();
+        let mut pending_files: Vec<PathBuf> = index_paths
+            .iter()
+            .filter(|path| !loaded_uris.contains(&crate::util::path_to_uri(path)))
+            .cloned()
+            .collect();
 
-        let loaded_uris: HashSet<String> = self.parsed_uris.read().iter().cloned().collect();
-
-        if let Some(p) = progress {
-            p.add_total(index_paths.len() as u64);
-        }
-        for path in &index_paths {
-            if let Some(p) = progress {
-                p.add_done(1);
-            }
-            let uri = crate::util::path_to_uri(path);
-            if loaded_uris.contains(&uri) {
-                continue;
-            }
-
-            // Cheap pre-filter: read the raw file and skip it if the
-            // source doesn't mention the target name at all.
-            let raw = match crate::classmap_scanner::read_for_scan(path) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-            if memchr::memmem::find(&raw, target_short.as_bytes()).is_none() {
-                continue;
-            }
-
-            // Parse the file, cache it, and check every class it defines.
-            if let Some(classes) = self.parse_and_cache_file(path) {
-                self.check_candidates_in_file(
-                    &classes,
-                    target_short,
-                    target_fqn,
-                    class_loader,
-                    include_abstract,
-                    direct_only,
-                    &mut seen_fqns,
-                    &mut result,
-                );
-            }
-        }
-
-        // ── Phase 4: scan embedded stubs with string pre-filter ─────────
-        // Stubs are static strings baked into the binary.  A cheap text
-        // search for the target name narrows candidates before we parse.
-        // Parsing is lazy and cached in uri_classes_index, so subsequent lookups
-        // hit Phase 1.  Stubs are vendor/built-in definitions, so they are
-        // skipped entirely when only project implementors are wanted.
-        if !project_only {
-            let stub_idx = self.stub_index.read();
-            if let Some(p) = progress {
-                p.add_total(stub_idx.len() as u64);
-            }
-            for (stub_name, &stub_source) in stub_idx.iter() {
-                if let Some(p) = progress {
-                    p.add_done(1);
-                }
-                // Cheap pre-filter: skip stubs whose source doesn't mention
-                // the target name at all.
-                if !stub_source.contains(target_short) {
-                    continue;
-                }
-                self.check_candidate_fqn(
-                    stub_name,
-                    target_short,
-                    target_fqn,
-                    class_loader,
-                    include_abstract,
-                    direct_only,
-                    &mut seen_fqns,
-                    &mut result,
-                );
-            }
-        }
-
-        // ── Phase 5: scan user PSR-4 directories for files not in class index ──
-        // The user may have created classes that are not yet in the
-        // class index.  Walk user PSR-4 roots only — vendor classes are
-        // assumed complete in the class index (Phase 3) and should not
-        // require a filesystem walk.
         let workspace_root = self.workspace.workspace_root.read().clone();
         if let Some(workspace_root) = workspace_root {
             // The vendor dir paths are needed by collect_php_files even
@@ -811,7 +708,6 @@ impl Backend {
             // walk must still skip vendor directories (and hidden
             // directories like .git).
             let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
-
             let psr4_dirs: Vec<PathBuf> = {
                 let mappings = self.workspace.psr4_mappings.read();
                 mappings
@@ -820,168 +716,187 @@ impl Backend {
                     .filter(|p| p.is_dir())
                     .collect()
             };
-
-            let loaded_uris_p5: HashSet<String> = self.parsed_uris.read().iter().cloned().collect();
-
             let filters = self.index_filters();
+            let mut walked: HashSet<PathBuf> = HashSet::new();
             for dir in &psr4_dirs {
-                let php_files = collect_php_files(dir, &vendor_dir_paths, &filters);
+                for php_file in collect_php_files(dir, &vendor_dir_paths, &filters) {
+                    if index_paths.contains(&php_file)
+                        || loaded_uris.contains(&crate::util::path_to_uri(&php_file))
+                        || !walked.insert(php_file.clone())
+                    {
+                        continue;
+                    }
+                    pending_files.push(php_file);
+                }
+            }
+        }
+
+        // `stub_index` maps every stub class to the whole stub file that
+        // declares it, so group the names by file to search each file once.
+        // Stubs are vendor/built-in definitions, so they are skipped
+        // entirely when only project implementors are wanted.
+        let mut pending_stubs: Vec<(&'static str, Vec<String>)> = Vec::new();
+        if !project_only {
+            let stub_idx = self.stub_index.read();
+            let mut by_source: HashMap<*const u8, usize> = HashMap::new();
+            for (stub_name, &stub_source) in stub_idx.iter() {
+                let slot = *by_source.entry(stub_source.as_ptr()).or_insert_with(|| {
+                    pending_stubs.push((stub_source, Vec::new()));
+                    pending_stubs.len() - 1
+                });
+                pending_stubs[slot].1.push(stub_name.to_string());
+            }
+        }
+
+        // ── Phase 3: parse the sources that name a known subtype ───────
+        // A direct subtype's source names its parent, so a cheap byte
+        // search for the target's short name narrows the candidates before
+        // anything is parsed.  A transitive one need not name the target
+        // (`class B extends A` where `A implements Target`), so the search
+        // repeats with the short names of the subtypes each round found,
+        // until a round finds none.  Every class in a parsed file is
+        // classified against the full ancestor chain, so a file is parsed
+        // at most once.  The Phase 1 descendants seed the first round too,
+        // since an unparsed file can extend one of them without naming the
+        // target.  The other way round, an already-parsed class whose
+        // parent was unparsed is reached through the reverse index once
+        // that parent turns up.
+        let mut descendants: HashSet<String> = gti_candidates.iter().cloned().collect();
+        let mut searched: HashSet<String> = HashSet::new();
+        let mut needles: Vec<String> = Vec::new();
+        for name in std::iter::once(target_short)
+            .chain(gti_candidates.iter().map(|fqn| short_name(fqn)))
+            .take(if direct_only { 1 } else { usize::MAX })
+        {
+            if searched.insert(name.to_string()) {
+                needles.push(name.to_string());
+            }
+        }
+
+        while !needles.is_empty() {
+            let finders: Vec<memchr::memmem::Finder<'_>> = needles
+                .iter()
+                .map(|n| memchr::memmem::Finder::new(n.as_bytes()))
+                .collect();
+            let mentions_needle = |bytes: &[u8]| finders.iter().any(|f| f.find(bytes).is_some());
+            let mut candidates: Vec<Arc<ClassInfo>> = Vec::new();
+
+            if let Some(p) = progress {
+                p.add_total((pending_stubs.len() + pending_files.len()) as u64);
+            }
+            pending_stubs.retain(|(stub_source, stub_names)| {
                 if let Some(p) = progress {
-                    p.add_total(php_files.len() as u64);
+                    p.add_done(1);
                 }
-                for php_file in php_files {
-                    if let Some(p) = progress {
-                        p.add_done(1);
-                    }
-                    // Skip files already covered by the class index (Phase 3).
-                    if index_paths.contains(&php_file) {
-                        continue;
-                    }
-
-                    let uri = crate::util::path_to_uri(&php_file);
-                    if loaded_uris_p5.contains(&uri) {
-                        continue;
-                    }
-
-                    let raw = match std::fs::read_to_string(&php_file) {
-                        Ok(r) => r,
-                        Err(_) => continue,
-                    };
-                    if !raw.contains(target_short) {
-                        continue;
-                    }
-
-                    if let Some(classes) = self.parse_and_cache_file(&php_file) {
-                        self.check_candidates_in_file(
-                            &classes,
-                            target_short,
-                            target_fqn,
-                            class_loader,
-                            include_abstract,
-                            direct_only,
-                            &mut seen_fqns,
-                            &mut result,
-                        );
-                    }
+                if !mentions_needle(stub_source.as_bytes()) {
+                    return true;
                 }
+                candidates.extend(stub_names.iter().filter_map(|name| class_loader(name)));
+                false
+            });
+            pending_files.retain(|path| {
+                if let Some(p) = progress {
+                    p.add_done(1);
+                }
+                // A class lookup during an earlier round may have parsed
+                // this file since the list was built.  Use those classes
+                // rather than parsing it again.
+                let uri = crate::util::path_to_uri(path);
+                let classes = match self.shared_classes_for_uri(&uri) {
+                    Some(classes) => classes,
+                    None => {
+                        let Ok(raw) = crate::classmap_scanner::read_for_scan(path) else {
+                            return false;
+                        };
+                        if !mentions_needle(&raw) {
+                            return true;
+                        }
+                        drop(raw);
+                        match self.parse_and_cache_file(path) {
+                            Some(classes) => classes,
+                            None => return false,
+                        }
+                    }
+                };
+                candidates.extend(classes);
+                false
+            });
+            drop(finders);
+
+            needles = Vec::new();
+            while let Some(cls) = candidates.pop() {
+                if !self.class_descends_from(
+                    &cls,
+                    target_short,
+                    target_fqn,
+                    class_loader,
+                    direct_only,
+                ) {
+                    continue;
+                }
+                let cls_fqn = cls.fqn().to_string();
+                if !descendants.insert(cls_fqn.clone()) {
+                    continue;
+                }
+                if Self::is_listed_kind(&cls, include_abstract, direct_only)
+                    && is_project_fqn(&cls_fqn)
+                    && seen_fqns.insert(cls_fqn.clone())
+                {
+                    result.push(Arc::clone(&cls));
+                }
+                if direct_only {
+                    continue;
+                }
+                let short = short_name(&cls_fqn);
+                if searched.insert(short.to_string()) {
+                    needles.push(short.to_string());
+                }
+                // Subtypes of this class that are already parsed are in
+                // the reverse index, but Phase 1 could not reach them
+                // while this class was unparsed.
+                let children = self.symbols.gti_index.read().get(&cls_fqn).cloned();
+                candidates.extend(
+                    children
+                        .iter()
+                        .flatten()
+                        .filter(|child| !descendants.contains(*child))
+                        .filter_map(|child| class_loader(child)),
+                );
             }
         }
 
         result
     }
 
-    /// Check a single already-known candidate FQN against the target and,
-    /// if it matches, record it in `result`/`seen_fqns`.  Shared by the
-    /// phases that already have a resolved name to check (the class index
-    /// scan and the embedded stub scan) rather than a freshly parsed
-    /// file's classes.
-    #[allow(clippy::too_many_arguments)]
-    fn check_candidate_fqn(
-        &self,
-        fqn: &str,
-        target_short: &str,
-        target_fqn: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        include_abstract: bool,
-        direct_only: bool,
-        seen_fqns: &mut HashSet<String>,
-        result: &mut Vec<Arc<ClassInfo>>,
-    ) {
-        if seen_fqns.contains(fqn) {
-            return;
-        }
-        if let Some(cls) = class_loader(fqn)
-            && self.class_implements_or_extends(
-                &cls,
-                target_short,
-                target_fqn,
-                class_loader,
-                include_abstract,
-                direct_only,
-            )
-        {
-            let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
-            if seen_fqns.insert(cls_fqn) {
-                result.push(cls);
-            }
-        }
-    }
-
-    /// Check every class defined in a freshly parsed file's `classes`
-    /// against the target and record matches.  Shared by the phases that
-    /// pre-filter a file's content by different means (an mmap-backed
-    /// byte search for indexed/vendor files, a `read_to_string` scan for a
-    /// PSR-4 directory walk) before parsing it.
-    #[allow(clippy::too_many_arguments)]
-    fn check_candidates_in_file(
-        &self,
-        classes: &[Arc<ClassInfo>],
-        target_short: &str,
-        target_fqn: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        include_abstract: bool,
-        direct_only: bool,
-        seen_fqns: &mut HashSet<String>,
-        result: &mut Vec<Arc<ClassInfo>>,
-    ) {
-        for cls in classes {
-            let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
-            if seen_fqns.contains(&cls_fqn) {
-                continue;
-            }
-            if self.class_implements_or_extends(
-                cls,
-                target_short,
-                target_fqn,
-                class_loader,
-                include_abstract,
-                direct_only,
-            ) {
-                seen_fqns.insert(cls_fqn);
-                result.push(Arc::clone(cls));
-            }
-        }
+    /// Whether a subtype of `cls`'s kind belongs in the results.  Type
+    /// hierarchy (`direct_only`) lists every kind of subtype, while
+    /// go-to-implementation never lists interfaces and lists abstract
+    /// classes only when `include_abstract` is set.
+    fn is_listed_kind(cls: &ClassInfo, include_abstract: bool, direct_only: bool) -> bool {
+        direct_only
+            || (cls.kind != ClassLikeKind::Interface && (include_abstract || !cls.is_abstract))
     }
 
     /// Check whether `cls` implements the target interface or extends the
-    /// target class (directly or transitively through its parent chain).
+    /// target class (directly or transitively through its parent chain),
+    /// whatever kind of class-like `cls` is.  In `direct_only` mode only
+    /// its own `extends`/`implements` clauses count.
     ///
     /// Comparisons use fully-qualified names to avoid false positives when
     /// two interfaces in different namespaces share the same short name.
-    ///
-    /// When `include_abstract` is `false`, abstract classes and interfaces
-    /// are skipped (only concrete implementations are returned).  When
-    /// `true`, abstract subclasses are included in the results.
-    fn class_implements_or_extends(
+    fn class_descends_from(
         &self,
         cls: &ClassInfo,
         target_short: &str,
         target_fqn: &str,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        include_abstract: bool,
         direct_only: bool,
     ) -> bool {
-        // Build the FQN of the candidate class for comparison.
-        let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
-
         // Skip the target class itself — compare by FQN so that
         // classes in different namespaces that share the same short
         // name are not incorrectly excluded.
-        if cls_fqn == target_fqn {
+        if cls.fqn() == target_fqn {
             return false;
-        }
-
-        // In direct_only mode (type hierarchy), interfaces that extend
-        // the target are valid subtypes, and traits that use the target
-        // are too.  In normal mode (go-to-implementation), interfaces
-        // are never implementations.
-        if !direct_only {
-            if cls.kind == ClassLikeKind::Interface {
-                return false;
-            }
-            if cls.is_abstract && !include_abstract {
-                return false;
-            }
         }
 
         // Whether the target has a known FQN (contains a namespace
@@ -1665,6 +1580,74 @@ mod tests {
         assert!(
             files.contains(&PROJECT_KERNEL.to_string()),
             "App\\Kernel implements it through the vendor base kernel: {files:?}"
+        );
+    }
+
+    /// The vendor scan parses only files that name the target or a subtype
+    /// found so far.  A class whose file never names the target is still
+    /// found through the intermediate class it extends, including an
+    /// already-open one whose parent nothing had parsed yet.
+    #[test]
+    fn vendor_scan_follows_subtypes_without_parsing_unrelated_files() {
+        const TARGET: &str = "vendor/acme/queue/src/ShouldQueue.php";
+        const BASE: &str = "vendor/acme/queue/src/QueuedJob.php";
+        const LEAF: &str = "vendor/acme/queue/src/RetryingJob.php";
+        const UNRELATED: &str = "vendor/acme/queue/src/Clock.php";
+        const PROJECT_JOB: &str = "src/SendMail.php";
+        let (backend, dir) = scenario_workspace(
+            &[
+                (
+                    TARGET,
+                    "<?php\nnamespace Acme\\Queue;\ninterface ShouldQueue\n{\n}\n",
+                ),
+                (
+                    BASE,
+                    "<?php\nnamespace Acme\\Queue;\nabstract class QueuedJob implements ShouldQueue\n{\n}\n",
+                ),
+                (
+                    LEAF,
+                    "<?php\nnamespace Acme\\Queue;\nclass RetryingJob extends QueuedJob\n{\n}\n",
+                ),
+                (
+                    UNRELATED,
+                    "<?php\nnamespace Acme\\Queue;\nclass Clock\n{\n}\n",
+                ),
+                (
+                    PROJECT_JOB,
+                    "<?php\nnamespace App;\nuse Acme\\Queue\\RetryingJob;\nclass SendMail extends RetryingJob\n{\n}\n",
+                ),
+            ],
+            &[
+                ("Acme\\Queue\\ShouldQueue", TARGET),
+                ("Acme\\Queue\\QueuedJob", BASE),
+                ("Acme\\Queue\\RetryingJob", LEAF),
+                ("Acme\\Queue\\Clock", UNRELATED),
+                ("App\\SendMail", PROJECT_JOB),
+            ],
+        );
+        let (target_uri, target_text) = open_file(&backend, dir.path(), TARGET);
+        open_file(&backend, dir.path(), PROJECT_JOB);
+
+        // Cursor on `ShouldQueue` in the interface declaration.
+        let locations = backend
+            .resolve_implementation(
+                target_uri.as_str(),
+                &target_text,
+                Position {
+                    line: 2,
+                    character: 12,
+                },
+            )
+            .expect("implementors of ShouldQueue should be found");
+
+        let mut files = located_files(&locations, dir.path());
+        files.sort();
+        assert_eq!(files, vec![PROJECT_JOB.to_string(), LEAF.to_string()]);
+
+        let unrelated_uri = crate::util::path_to_uri(&dir.path().join(UNRELATED));
+        assert!(
+            !backend.parsed_uris.read().contains(&unrelated_uri),
+            "a vendor file that names no subtype should not be parsed"
         );
     }
 

@@ -20,48 +20,6 @@ against that bar.
 
 ---
 
-## P3. Go-to-implementation on a vendor class parses the whole classmap
-
-**Impact: High · Complexity: Medium-High**
-
-Go-to-implementation and type-hierarchy subtypes both go through
-`find_implementors` (`definition/implementation.rs`). When the target is
-declared under `vendor/`, or the workspace index has not been built yet
-(the `composer`, `self` and `none` strategies until something builds it),
-Phase 2 calls the class loader on every entry of `fqn_uri_index`. That
-index holds the whole classmap, vendor included, so the first such
-request parses every class file the session has not loaded yet, and
-keeps all of them.
-
-Measured on a release build against a large Laravel project (about 19,000
-vendor files): go-to-implementation on `ShouldQueue` takes 4.2 s the first
-time and raises RSS from 406 MB to 697 MB for the rest of the session.
-Repeats take 0.3 s, which is still a full pass over the index plus the
-later phases.
-
-Phase 3 already does what Phase 2 needs: it reads each unloaded file's
-bytes (`read_for_scan`, mmap-backed for large files) and only parses the
-ones that mention the target's short name. Phase 2's blanket load exists
-because a transitive implementor need not mention the target (`class B
-extends A` where `A implements Target`), but the same pre-filter covers
-that when it is applied level by level: find the files naming the
-target, then the files naming each class found, until no new class turns
-up. Phase 4 has a smaller cost of its own: `stub_index` maps each stub
-class to its whole stub file, so a file is searched once for every class
-it declares (1,512 entries).
-
-**Fix:** replace Phase 2's blanket load with the byte pre-filter,
-iterated over each newly found class name for transitive results, and
-search each stub file once rather than once per class. Parallelising the
-pre-filter, which is what this item originally proposed, can come on top,
-but the parses avoided are the bulk of the win.
-
-**Where to look:** `find_implementors` and `check_candidate_fqn` in
-`definition/implementation.rs`; `read_for_scan` in
-`classmap_scanner/mod.rs`.
-
----
-
 ## P72. A `switch` that assigns many distinct literals costs cubic time
 
 **Impact: Medium · Complexity: Medium**
@@ -268,7 +226,7 @@ history, and `memory-benchmark-pr` does the same for
 - Nothing checks how cost grows with the size of an input. Every
   performance problem users have hit so far was a growth problem on an
   input of an unusual shape (thousands of calls to undefined functions,
-  hundreds of Blade views without a DocBlock, and the open items P3, P70
+  hundreds of Blade views without a DocBlock, and the open items P70
   and P72), and a benchmark over fixed fixtures cannot see one until a
   project that has the shape reports it.
 
@@ -342,7 +300,7 @@ project file loaded on demand is parsed three times where once would do.
 Installing a parse cache for the content around the three calls removes
 the extra two. On a release build that takes about 2% off an `analyze`
 of a mid-sized Laravel project; paths dominated by on-demand loading
-(startup population, the scan in P3) spend a larger share of their time
+(startup population, the go-to-implementation scan) spend a larger share of their time
 parsing. `parse_php_classes_by_block` already works out the use map and
 namespace internally, so the other two helpers could also read them from
 there.
