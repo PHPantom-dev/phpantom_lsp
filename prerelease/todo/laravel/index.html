@@ -1146,10 +1146,54 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l54-audit-custom-builder-and-relation-closure-inference-against-the-phpstan-extensions" class="md-nav__link">
+  <a href="#l60-preserve-custom-builders-through-model-instance-query-factories" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L54. Audit custom-builder and relation-closure inference against the PHPStan extensions
+        L60. Preserve custom builders through model instance query factories
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l61-preserve-custom-builders-in-relation-callbacks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L61. Preserve custom builders in relation callbacks
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l62-bind-named-relation-callback-arguments-before-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L62. Bind named relation callback arguments before inference
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l63-infer-morph-constraint-callbacks-from-candidate-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L63. Infer morph constraint callbacks from candidate models
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l64-infer-both-callback-receivers-for-withwherehas" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L64. Infer both callback receivers for withWhereHas
       </span>
     </span>
   </a>
@@ -1828,10 +1872,54 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l54-audit-custom-builder-and-relation-closure-inference-against-the-phpstan-extensions" class="md-nav__link">
+  <a href="#l60-preserve-custom-builders-through-model-instance-query-factories" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L54. Audit custom-builder and relation-closure inference against the PHPStan extensions
+        L60. Preserve custom builders through model instance query factories
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l61-preserve-custom-builders-in-relation-callbacks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L61. Preserve custom builders in relation callbacks
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l62-bind-named-relation-callback-arguments-before-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L62. Bind named relation callback arguments before inference
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l63-infer-morph-constraint-callbacks-from-candidate-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L63. Infer morph constraint callbacks from candidate models
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l64-infer-both-callback-receivers-for-withwherehas" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L64. Infer both callback receivers for withWhereHas
       </span>
     </span>
   </a>
@@ -2466,26 +2554,102 @@ only the innermost collection.</p>
 the collection return-type patches for the argument forms. The property
 lookup already exists for <code>model-property&lt;Model&gt;</code>; the work is threading
 a resolved key type through the generic substitution.</p>
-<h4 id="l54-audit-custom-builder-and-relation-closure-inference-against-the-phpstan-extensions">L54. Audit custom-builder and relation-closure inference against the PHPStan extensions<a class="headerlink" href="#l54-audit-custom-builder-and-relation-closure-inference-against-the-phpstan-extensions" title="Permanent link">&para;</a></h4>
+<h4 id="l60-preserve-custom-builders-through-model-instance-query-factories">L60. Preserve custom builders through model instance query factories<a class="headerlink" href="#l60-preserve-custom-builders-through-model-instance-query-factories" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>Team::query()</code> and <code>Team::where(…)-&gt;orderBy(…)</code> preserve a custom
+<code>TeamBuilder</code>, but <code>$team-&gt;newQuery()-&gt;orderBy(…)</code> returns <code>Builder&lt;Team&gt;</code>
+instead. This loses custom methods even though Laravel constructs the
+same builder in both cases. Both generic and non-generic custom builders
+are affected.</p>
+<p><strong>Reproducer:</strong> The <code>builders()</code> assertions marked <code>SKIP</code> in
+<code>tests/phpstan_nsrt/laravel-builder-relations.php</code>. Compare
+<a href="https://github.com/larastan/larastan/blob/c328727e6103c1147d1c64cc96b3aedfda26bc20/tests/Type/data/custom-eloquent-builder.php">Larastan's custom builder assertions</a>.</p>
+<p><strong>Where to change:</strong> Reuse the model's custom-builder selection for the
+instance query-factory return in the shared type engine. Check
+<code>newQueryWithoutScopes()</code> and <code>newModelQuery()</code> alongside <code>newQuery()</code>.
+Keep the inferred model argument for a builder without its own templates;
+removing that context would break terminal methods such as <code>firstOrFail()</code>.</p>
+<h4 id="l61-preserve-custom-builders-in-relation-callbacks">L61. Preserve custom builders in relation callbacks<a class="headerlink" href="#l61-preserve-custom-builders-in-relation-callbacks" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<p>A custom builder already survives the chain (<code>Team::query()-&gt;where()</code>
-and <code>Team::where()</code> both stay on <code>TeamBuilder&lt;Team&gt;</code>), and the
-<code>whereHas</code> family types its closure for dotted relation paths and in
-non-leading argument positions. Two relation-constraint closure cases
-still fall short of the PHPStan Laravel extensions
-(<code>type_engine/variable/closure_resolution.rs</code>,
-<code>forward_walk/callable_inference.rs</code>):</p>
+<p>Two sides of the relation override discard custom-builder context:</p>
 <ul>
-<li><strong><code>*Morph</code> variants.</strong> <code>whereHasMorph('commentable', [Post::class],
-  fn ($q) =&gt; …)</code> types <code>$q</code> as <code>Builder&lt;Model&gt;</code> instead of the union of
-  the candidate models' builders, and the closure's <code>$type</code> parameter
-  is not typed from the candidates either.</li>
-<li><strong><code>withWhereHas</code>.</strong> The closure receives only the builder, not the
-  <code>Builder|Relation</code> union the framework passes.</li>
+<li><code>Team::query()-&gt;whereHas('stocks.warehouse', …)</code> fails to identify the
+  receiver's model when <code>Team</code> uses <code>TeamBuilder</code>. The callback in the
+  assertion fixture falls back to <code>Builder&lt;Model&gt;</code> instead of
+  <code>Builder&lt;Warehouse&gt;</code>.</li>
+<li><code>Stock::whereHas('team', …)</code> resolves the related model but always builds
+  <code>Builder&lt;Team&gt;</code>, losing <code>TeamBuilder</code> and its custom methods. An explicit
+  bare <code>Builder</code> parameter has the same problem.</li>
 </ul>
-<p><strong>Where to change:</strong> add assertion cases next to the existing ones in
-<code>tests/integration/completion_laravel.rs</code> and fix them in the closure
-parameter inference.</p>
+<p><strong>Reproducer:</strong> The custom-builder callback assertions in <code>relations()</code>
+in <code>tests/phpstan_nsrt/laravel-builder-relations.php</code>. Expected types follow
+<a href="https://github.com/larastan/larastan/blob/c328727e6103c1147d1c64cc96b3aedfda26bc20/tests/Type/data/relationship-query-callbacks.php">Larastan's relation callback assertions</a>.</p>
+<p><strong>Where to change:</strong> <code>find_model_from_receivers</code> and
+<code>try_relation_query_override</code> in
+<code>type_engine/variable/closure_resolution.rs</code>, using the receiver's resolved
+generic context and the existing custom-builder metadata/selection. Keep
+this in the shared callable inference path so completion, hover, and
+diagnostics agree. Refining a bare <code>Builder</code> hint to its custom subclass
+must preserve the inferred generic arguments too.</p>
+<h4 id="l62-bind-named-relation-callback-arguments-before-inference">L62. Bind named relation callback arguments before inference<a class="headerlink" href="#l62-bind-named-relation-callback-arguments-before-inference" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>Team::has(relation: 'stocks.warehouse', callback: …)</code> types the callback
+correctly, but putting <code>callback:</code> first loses the relation and falls back
+to <code>Builder&lt;Model&gt;</code> in the assertion fixture. Positional callbacks in the
+fifth argument already work; the missing step is binding named arguments,
+not assuming the first supplied expression names the relation.</p>
+<p><strong>Reproducer:</strong> The reordered <code>has(callback: …, relation: …)</code> assertion
+in <code>relations()</code> in <code>tests/phpstan_nsrt/laravel-builder-relations.php</code>.</p>
+<p><strong>Where to change:</strong> Relation overrides in
+<code>type_engine/variable/forward_walk/callable_inference.rs</code> currently receive
+the first literal argument from <code>extract_first_arg_string_fw</code>. Use the
+shared argument binder to locate both the relation and the actual callback
+parameter, consistently in the cursor and diagnostics walks. Cover static
+and instance calls, arrow functions, omitted defaults, and closures in an
+unrelated argument so the override does not attach to the wrong closure.</p>
+<h4 id="l63-infer-morph-constraint-callbacks-from-candidate-models">L63. Infer morph constraint callbacks from candidate models<a class="headerlink" href="#l63-infer-morph-constraint-callbacks-from-candidate-models" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>The <code>whereHasMorph</code> family does not participate in relation-query
+inference. A literal model class or an array of candidates falls back to
+<code>Builder&lt;Model&gt;</code> in the assertion fixture, losing both the related
+models and their custom builders. The second <code>$type</code> callback parameter
+already resolves to <code>string</code> from Laravel's declaration and must stay
+typed when the first parameter is refined.</p>
+<p><strong>Reproducer:</strong> The <code>morphs()</code> assertions in
+<code>tests/phpstan_nsrt/laravel-builder-relations.php</code> cover all six
+callback-taking existence methods, single and multiple candidates,
+reordered named arguments, wildcard and empty-list fallbacks, and a
+declared <code>MorphTo&lt;Team&gt;</code> target. The desired builder types remain in the
+<code>SKIP</code> assertions; the <code>$type</code> assertions and the <code>MorphTo&lt;Model&gt;</code>
+wildcard and empty-list cases, whose <code>Builder&lt;Model&gt;</code> fallback is already
+correct, run normally.</p>
+<p><strong>Where to change:</strong> Extend shared callable inference using bound
+<code>relation</code>, <code>types</code>, and <code>callback</code> arguments. Build a union of candidate
+builders, preserving custom builders. For unresolved/wildcard candidates,
+use the relation's declared target, falling back to <code>Model</code> when that is
+all the declaration knows. Also cover class-string variables and mixed
+known/unknown candidate arrays, as
+<a href="https://github.com/larastan/larastan/blob/c328727e6103c1147d1c64cc96b3aedfda26bc20/src/ClosureTypes/RelationshipQueryCallbackExtension.php">Larastan's callback extension</a>
+does. Do not boot the application or query the database for wildcard
+discovery. Check the <code>whereMorphRelation</code> shortcuts when sharing the
+callback logic.</p>
+<h4 id="l64-infer-both-callback-receivers-for-withwherehas">L64. Infer both callback receivers for withWhereHas<a class="headerlink" href="#l64-infer-both-callback-receivers-for-withwherehas" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p><code>withWhereHas('stocks', …)</code> calls the constraint with <code>Builder&lt;Stock&gt;</code> for
+the existence query and <code>HasMany&lt;Stock, Team&gt;</code> for eager loading. We infer
+only the builder. Dotted paths likewise lose the final relation type, and
+the <code>stocks:id</code> column-selection form fails relation lookup entirely,
+falling back to unbound <code>Builder&lt;mixed&gt;|Relation&lt;mixed, mixed, mixed&gt;</code>.</p>
+<p><strong>Reproducer:</strong> The <code>eagerRelations()</code> assertions in
+<code>tests/phpstan_nsrt/laravel-builder-relations.php</code>. The Laravel runtime
+assertions also verify both invocations without executing eager-load SQL.</p>
+<p><strong>Where to change:</strong> Extend the shared relation-chain resolver to retain
+the terminal instantiated relation and its declaring model, then use the
+builder/relation union for this callback. Strip the column suffix where
+Laravel accepts it, preserve custom builders, and bind named arguments.
+The callback's ordinary fluent methods must preserve that union. Cover
+explicit <code>Builder|Relation</code> hints and the <code>withWhereRelation</code> counterpart;
+ordinary <code>whereHas</code> must continue to receive just the related builder.</p>
 <h4 id="l45-_count-properties-are-offered-on-every-relationship">L45. <code>*_count</code> properties are offered on every relationship<a class="headerlink" href="#l45-_count-properties-are-offered-on-every-relationship" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p>For each relationship method we synthesize a <code>{snake_name}_count</code>
