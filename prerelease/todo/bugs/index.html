@@ -1283,10 +1283,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b613-this-in-a-pest-test-closure-is-not-the-configured-test-case" class="md-nav__link">
+  <a href="#b614-pest-bindings-outside-testspestphps-in-are-ignored" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B613. <code>$this</code> in a Pest test closure is not the configured test case
+        B614. Pest bindings outside <code>tests/Pest.php</code>'s <code>-&gt;in()</code> are ignored
       </span>
     </span>
   </a>
@@ -2221,10 +2221,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b613-this-in-a-pest-test-closure-is-not-the-configured-test-case" class="md-nav__link">
+  <a href="#b614-pest-bindings-outside-testspestphps-in-are-ignored" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B613. <code>$this</code> in a Pest test closure is not the configured test case
+        B614. Pest bindings outside <code>tests/Pest.php</code>'s <code>-&gt;in()</code> are ignored
       </span>
     </span>
   </a>
@@ -2745,23 +2745,25 @@ of the same short name. The real-world shape is
 docblock signatures follow the same convention (PHPStan treats them so).
 Generated facade tags use it widely, e.g. Laravel Excel's
 <code>toCollection(..., string $disk = null, ...)</code>.</p>
-<h3 id="b613-this-in-a-pest-test-closure-is-not-the-configured-test-case">B613. <code>$this</code> in a Pest test closure is not the configured test case<a class="headerlink" href="#b613-this-in-a-pest-test-closure-is-not-the-configured-test-case" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="x">// tests/Pest.php</span>
-<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="x">pest()-&gt;extends(BrowserTestCase::class)-&gt;in(&#39;Webshop/Browser&#39;);</span>
+<h3 id="b614-pest-bindings-outside-testspestphps-in-are-ignored">B614. Pest bindings outside <code>tests/Pest.php</code>'s <code>-&gt;in()</code> are ignored<a class="headerlink" href="#b614-pest-bindings-outside-testspestphps-in-are-ignored" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="x">// tests/Feature/GiftTest.php</span>
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="x">uses(FeatureTestCase::class, CreatesProducts::class);</span>
 <a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a>
-<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="x">// tests/Webshop/Browser/GiftTest.php</span>
-<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="x">it(&#39;gives a gift&#39;, function (): void {</span>
-<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a><span class="x">    $products = $this-&gt;createProductCollection(5); // Pest\PendingCalls\TestCall</span>
-<a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a><span class="x">    addToBasket($page, $products-&gt;firstOrFail());   // expects Product, got TestCall</span>
-<a id="__codelineno-32-8" name="__codelineno-32-8" href="#__codelineno-32-8"></a><span class="x">});</span>
+<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="x">it(&#39;gives a gift&#39;, function (): void {</span>
+<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="x">    $this-&gt;createProductCollection(5); // not found on PHPUnit\Framework\TestCase</span>
+<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a><span class="x">});</span>
 </code></pre></div>
-<p>Pest's own <code>it()</code>/<code>test()</code> declare <code>@param-closure-this TestCall</code>, and
-<code>TestCall::__call()</code> returns <code>self</code>, so every helper on the real test case
-becomes <code>TestCall</code>. <code>pest-plugin-phpstan</code> resolves <code>$this</code> to the class
-<code>pest()-&gt;extends()</code>/<code>uses()</code> binds for the test file's directory (falling
-back to <code>PHPUnit\Framework\TestCase</code>). Reading those bindings from
-<code>tests/Pest.php</code> would do the same.</p>
+<p><code>$this</code> in a Pest test closure is read from the <code>pest()-&gt;extends()</code> and
+<code>uses()</code> chains <code>tests/Pest.php</code> binds with <code>-&gt;in()</code>. Three cases are not:</p>
+<ul>
+<li>A <code>uses()</code> or <code>pest()-&gt;extends()</code> written in the test file itself, with no
+  <code>-&gt;in()</code>, which binds that file.</li>
+<li>Traits in the binding. Pest builds the test class from the bound test case
+  plus every bound trait, but only the class is used for <code>$this</code>, so a
+  helper that lives on a trait is not found.</li>
+<li>A test directory other than <code>tests/</code> (Pest's <code>--test-directory</code>).</li>
+</ul>
 
 
 
