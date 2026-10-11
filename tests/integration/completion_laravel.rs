@@ -16312,3 +16312,82 @@ final class DivisionFactory
         "hover on the closure parameter should name UserBuilder, got: {text}"
     );
 }
+
+/// `@use HasBuilder<TeamBuilder>` declares every query factory as
+/// `TBuilder`, which must still bind the model so terminal methods such as
+/// `firstOrFail()` return it.
+#[tokio::test]
+async fn test_has_builder_query_factories_keep_builder_and_model() {
+    let trait_src = r#"<?php namespace Illuminate\Database\Eloquent;
+/** @template TBuilder of \Illuminate\Database\Eloquent\Builder */
+trait HasBuilder {
+    /** @return TBuilder */
+    public static function query() { return parent::query(); }
+    /** @return TBuilder */
+    public function newQuery() { return parent::newQuery(); }
+    /** @return TBuilder */
+    public function newModelQuery() { return parent::newModelQuery(); }
+    /** @return TBuilder */
+    public function newQueryWithoutScopes() { return parent::newQueryWithoutScopes(); }
+}"#;
+    let builder = r#"<?php namespace App\Models;
+use Illuminate\Database\Eloquent\Builder;
+class TeamBuilder extends Builder {
+    /** @return $this */
+    public function active() { return $this; }
+}"#;
+    let model = r#"<?php namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\HasBuilder;
+class Team extends Model {
+    /** @use HasBuilder<TeamBuilder> */
+    use HasBuilder;
+    public function teamName(): string { return ''; }
+}"#;
+    let (backend, dir) = make_workspace(&[
+        ("vendor/illuminate/Eloquent/HasBuilder.php", trait_src),
+        ("src/Models/TeamBuilder.php", builder),
+        ("src/Models/Team.php", model),
+    ]);
+    for chain in [
+        "Team::query()",
+        "Team::query()->where('a', 1)",
+        "(new Team())->newQuery()",
+        "(new Team())->newQuery()->where('a', 1)",
+        "(new Team())->newModelQuery()",
+        "(new Team())->newQueryWithoutScopes()",
+    ] {
+        let content = format!("<?php namespace App\\Models;\n$query = {chain};\n$query->");
+        let position = crate::common::position_after(&content, "\n$query->");
+        let items = complete_at(
+            &backend,
+            &dir,
+            "audit.php",
+            &content,
+            position.line,
+            position.character,
+        )
+        .await;
+        let m = method_names(&items);
+        let content =
+            format!("<?php namespace App\\Models;\n$model = {chain}->firstOrFail();\n$model->");
+        let position = crate::common::position_after(&content, "$model->");
+        let items = complete_at(
+            &backend,
+            &dir,
+            "audit.php",
+            &content,
+            position.line,
+            position.character,
+        )
+        .await;
+        assert!(
+            m.contains(&"active"),
+            "{chain} lost the custom builder: {m:?}"
+        );
+        assert!(
+            method_names(&items).contains(&"teamName"),
+            "{chain}->firstOrFail() lost its model"
+        );
+    }
+}

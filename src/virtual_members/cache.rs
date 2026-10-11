@@ -794,6 +794,9 @@ pub(crate) mod transform_flags {
     /// Builder-typed return rewritten to the `ForwardsCalls` decorator
     /// that the method was injected onto (an Eloquent relation).
     pub const FORWARDS_CALLS_SELF: u8 = 32;
+    /// Model query factory (`newQuery()` and friends) whose return type
+    /// is replaced with the model's own builder.
+    pub const QUERY_FACTORY: u8 = 64;
 }
 
 /// Return a transformed copy of `origin`, shared through the active

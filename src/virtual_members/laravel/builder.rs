@@ -186,8 +186,8 @@ pub(super) fn build_builder_forwarded_methods(
 
     let query_fp = crate::virtual_members::TransformFingerprint::new(
         Some(&subs),
-        Some("model-query-factory"),
-        0,
+        None,
+        crate::virtual_members::cache::transform_flags::QUERY_FACTORY,
     );
     for name in [
         "query",
@@ -196,11 +196,15 @@ pub(super) fn build_builder_forwarded_methods(
         "newQueryWithoutScopes",
     ] {
         if let Some(original) = class.get_method_arc(name) {
-            // A user override returning a different builder owns its type.
-            // Refine only the framework's base-builder declaration, keeping
-            // its parameters, visibility and instance/static distinction.
+            // A user override returning a different builder or model owns
+            // its type. Refine only a declaration of the base builder or
+            // of the model's own builder (`HasBuilder`'s `TBuilder`
+            // resolves to the latter), keeping its parameters, visibility
+            // and instance/static distinction.
             if let Some(ret) = original.return_type.as_ref()
-                && (ret.base_name() != Some(ELOQUENT_BUILDER_FQN)
+                && (!ret
+                    .base_name()
+                    .is_some_and(|base| base == ELOQUENT_BUILDER_FQN || base == builder_fqn)
                     || matches!(ret.kind(), TypeKind::Generic(g) if g.args.first().is_some_and(|model| !model.is_self_ref())))
             {
                 continue;
