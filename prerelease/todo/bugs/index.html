@@ -952,23 +952,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b583-a-fake-formatter-in-the-formatting-tests-can-fail-to-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B583. A fake formatter in the formatting tests can fail to start
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1563,23 +1546,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b583-a-fake-formatter-in-the-formatting-tests-can-fail-to-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B583. A fake formatter in the formatting tests can fail to start
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1658,17 +1624,7 @@ higher-order proxy form builds its result separately and is unaffected.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b583-a-fake-formatter-in-the-formatting-tests-can-fail-to-start">B583. A fake formatter in the formatting tests can fail to start<a class="headerlink" href="#b583-a-fake-formatter-in-the-formatting-tests-can-fail-to-start" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p><code>formatting::tests::phpcbf_fixes_against_the_phpcs_standard</code> failed once
-in a full <code>cargo test</code> run with "Failed to spawn phpcbf: Text file busy
-(os error 26)" and passed on every rerun. <code>write_fake_tool</code> writes an
-executable script that the test runs straight away. When another test
-thread forks to start its own tool while the script is still open for
-writing, the child holds the write handle until it execs, and starting
-the script in that window fails with <code>ETXTBSY</code>.</p>
-<p><strong>Fix:</strong> Retry starting the tool on <code>ETXTBSY</code>, or write every fake tool
-before any test can start a process.</p>
+<p>No outstanding items.</p>
 
 
 
