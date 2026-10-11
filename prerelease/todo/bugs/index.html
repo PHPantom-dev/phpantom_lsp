@@ -1084,32 +1084,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b608-a-class-component-outside-appviewcomponents-is-not-linked-to-its-template" class="md-nav__link">
+  <a href="#b611-component-is-treated-as-handing-the-child-the-parents-scope" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B608. A class component outside <code>App\View\Components</code> is not linked to its template
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b609-a-class-components-render-view-is-reported-as-missing-attributes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B609. A class component's <code>render()</code> view is reported as missing <code>$attributes</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b610-a-blade-include-does-not-count-as-reading-the-parents-variables" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B610. A Blade <code>@include</code> does not count as reading the parent's variables
+        B611. <code>@component</code> is treated as handing the child the parent's scope
       </span>
     </span>
   </a>
@@ -1867,32 +1845,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b608-a-class-component-outside-appviewcomponents-is-not-linked-to-its-template" class="md-nav__link">
+  <a href="#b611-component-is-treated-as-handing-the-child-the-parents-scope" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B608. A class component outside <code>App\View\Components</code> is not linked to its template
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b609-a-class-components-render-view-is-reported-as-missing-attributes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B609. A class component's <code>render()</code> view is reported as missing <code>$attributes</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b610-a-blade-include-does-not-count-as-reading-the-parents-variables" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B610. A Blade <code>@include</code> does not count as reading the parent's variables
+        B611. <code>@component</code> is treated as handing the child the parent's scope
       </span>
     </span>
   </a>
@@ -2148,63 +2104,20 @@ or <code>View::prependNamespace()</code>). One large Laravel project registers a
 three of its view namespaces this way, which leaves every
 <code>view('webshop::…')</code> and <code>@include('backoffice::…')</code> unknown.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
-<h3 id="b608-a-class-component-outside-appviewcomponents-is-not-linked-to-its-template">B608. A class component outside <code>App\View\Components</code> is not linked to its template<a class="headerlink" href="#b608-a-class-component-outside-appviewcomponents-is-not-linked-to-its-template" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">namespace App\Contexts\Webshop\View\Components\Products;</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">final class Slider extends Component {</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">    public readonly string $declared;</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">    public function __construct(public readonly int $promoted, public bool $flag = false) {</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">        $this-&gt;declared = &#39;x&#39;;</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">    }</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">    public function modifier(): string { return &#39;&#39;; }</span>
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x">    public function render(): View { return view(&#39;components.products.slider&#39;); }</span>
-<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="x">}</span>
-</code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>{{-- resources/webshop/views/components/products/slider.blade.php --}}
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>&lt;div class=&quot;{{ $declared }} {{ $promoted }} {{ $flag }} {{ $modifier() }}&quot;&gt;&lt;/div&gt;
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>{{-- Undefined variable for all four --}}
-</code></pre></div>
-<p>The same class under <code>App\View\Components\Slider</code> with the template at
-<code>resources/views/components/slider.blade.php</code> is clean, so the template is
-only linked to its class by Laravel's default naming convention, not by
-the view the class's <code>render()</code> returns or by <code>Blade::componentNamespace()</code>.
-When the component is used as a tag, call-site attribute inference covers
-the variables passed as attributes, so only defaults, computed properties
-and public methods show up as undefined. One large Laravel project has 55
-of these across its webshop components. A Livewire component's view
-(<code>$this-&gt;method()</code> inside <code>components.customers.add-test-order</code>) shows the
-same symptom and is likely the same gap.</p>
-<h3 id="b609-a-class-components-render-view-is-reported-as-missing-attributes">B609. A class component's <code>render()</code> view is reported as missing <code>$attributes</code><a class="headerlink" href="#b609-a-class-components-render-view-is-reported-as-missing-attributes" title="Permanent link">&para;</a></h3>
+<h3 id="b611-component-is-treated-as-handing-the-child-the-parents-scope">B611. <code>@component</code> is treated as handing the child the parent's scope<a class="headerlink" href="#b611-component-is-treated-as-handing-the-child-the-parents-scope" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">public function render(): View {</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x">    return view(&#39;components.products.ean-code&#39;, [&#39;value&#39; =&gt; $this-&gt;raw]);</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>@php /** @bladestan-signature @var string $title */ @endphp
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>@component(&#39;alert&#39;) @endcomponent {{-- alert declares $title: not reported --}}
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>@php /** @var \Illuminate\View\ComponentAttributeBag $attributes */ @endphp
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>{{-- View &#39;components.products.ean-code&#39; expects $attributes … which is not passed --}}
-</code></pre></div>
-<p>Laravel adds <code>attributes</code>, <code>slot</code> and <code>componentName</code> (plus the public
-properties and methods) to the data of a view a class component renders,
-so the template can always rely on them.</p>
-<h3 id="b610-a-blade-include-does-not-count-as-reading-the-parents-variables">B610. A Blade <code>@include</code> does not count as reading the parent's variables<a class="headerlink" href="#b610-a-blade-include-does-not-count-as-reading-the-parents-variables" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>@if ($flag)
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>    @php $spanClass = &#39;a&#39;; @endphp
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>@else
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>    @php $spanClass = &#39;&#39;; @endphp
-<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>@endif
-<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>
-<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>@include(&#39;child&#39;) {{-- child.blade.php reads $spanClass --}}
-<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>{{-- Unused variable &#39;$spanClass&#39; --}}
-</code></pre></div>
-<p>Laravel compiles <code>@include</code> (and <code>@includeIf</code>, <code>@includeWhen</code>,
-<code>@includeUnless</code>, <code>@includeFirst</code>, and <code>@extends</code>) to pass
-<code>get_defined_vars()</code> to the child, so every variable in scope is read. A
-plain PHP <code>include</code> already exempts its frame in <code>unused_variables.rs</code>
-(<code>frame_owns_import</code>); the Blade directives produce neither an <code>include</code>
-nor a <code>get_defined_vars()</code> call, so the variable counts as unused. Only the
-first write is reported, which is why one branch looks fine.</p>
+<p>Laravel compiles <code>@component</code> to <code>$__env-&gt;startComponent(...)</code>, which
+renders the view from the array it is passed (plus shared data) alone,
+unlike the <code>@include</code> family. <code>contract.rs</code> still lists <code>component</code> and
+<code>componentFirst</code> in <code>RENDER_DIRECTIVES</code>, and <code>ViewCallWalker</code> records the
+site with <code>forwards_scope: true</code>, so a name the parent holds counts as
+supplied to the component's view and a name only the component's view
+reads counts as accepted from the parent's callers. The unused-variable
+check already tells them apart (the preprocessor lowers <code>@component</code> to
+<code>blade_component_directive</code>).</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
