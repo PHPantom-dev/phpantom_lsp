@@ -1071,17 +1071,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P81. Call sites are 160-byte records with up to six side allocations
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p82-trivial-memory-fixes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1367,17 +1356,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P81. Call sites are 160-byte records with up to six side allocations
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p82-trivial-memory-fixes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1490,23 +1468,6 @@ against that bar.</p>
 </tr>
 </tbody>
 </table>
-<hr />
-<h2 id="p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations">P81. Call sites are 160-byte records with up to six side allocations<a class="headerlink" href="#p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Every workspace file keeps its symbol map for the whole session
-(references, CodeLens and the Laravel string-key scanners read them), so
-<code>SymbolMap::call_sites</code> never goes away. On the large Laravel app it holds
-192k <code>CallSite</code>s at 160 B each (31 MB) plus 8 MB of heap in 380k separate
-allocations: <code>call_expression</code> is an owned <code>String</code>, and
-<code>comma_offsets</code>, <code>arg_offsets</code>, <code>named_arg_indices</code>, <code>named_arg_names</code>
-and <code>spread_arg_indices</code> are each their own <code>Vec</code>. With allocator overhead
-that is about 57 MB, 7% of the LSP's RSS.</p>
-<p><strong>Fix:</strong> move the per-site strings and offset lists into one arena per
-map (a <code>String</code> and a <code>Vec&lt;u32&gt;</code>) that each record indexes with
-offset/length pairs. That brings the record to roughly 40 B and the
-allocations to two per file. Interning <code>call_expression</code> as an <code>Atom</code>
-would be shorter to write but wrong here: <code>ustr</code> never frees, and call
-expression text changes with every edit.</p>
 <hr />
 <h2 id="p82-trivial-memory-fixes">P82. Trivial memory fixes<a class="headerlink" href="#p82-trivial-memory-fixes" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
