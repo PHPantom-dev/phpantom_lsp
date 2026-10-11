@@ -23,7 +23,9 @@ use super::helpers::{camel_to_snake, snake_to_camel};
 ///
 /// When one of these methods is detected, the closure parameter
 /// inference overrides `TModel` with the related model resolved from
-/// the relation name string.
+/// the relation name string. The `*Morph*` methods take the candidate
+/// models from their `$types` argument instead, falling back to the
+/// relation's declared target.
 pub(crate) const RELATION_QUERY_METHODS: &[&str] = &[
     "has",
     "orHas",

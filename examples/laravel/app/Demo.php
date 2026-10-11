@@ -581,7 +581,7 @@ class Demo
         // Morph candidates choose the callback builder and keep the type string.
         Review::whereHasMorph('reviewable', Loaf::class, function (Builder $q, string $type) {
             $q->stale();                     // → LoafBuilder<Loaf>
-            echo $type;                     // → string
+            echo $type;                      // → string
         });
     }
 
