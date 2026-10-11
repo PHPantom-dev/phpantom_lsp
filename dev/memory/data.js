@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791756551824,
+  "lastUpdate": 1791756638038,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -38521,6 +38521,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "77f3e25ee38793e6ba1ae26eb6de42113f28f0be",
+          "message": "test(laravel): audit custom builders and relation callbacks",
+          "timestamp": "2026-10-11T23:56:29+02:00",
+          "tree_id": "4ab0fc189eed786f12535375b3ccc47b2c8d1c4b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/77f3e25ee38793e6ba1ae26eb6de42113f28f0be"
+        },
+        "date": 1791756626791,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.3,
             "unit": "MiB"
           }
         ]
