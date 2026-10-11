@@ -20,10 +20,24 @@ within the same impact tier.
 
 PHPantom embeds JetBrains phpstorm-stubs at compile time via
 `build.rs`. The stubs are baked into the binary as static string
-arrays and indexed by class, function, and constant name. At runtime,
-`find_or_load_class` checks the `stub_index` as a final fallback
-(Phase 3) after `uri_classes_index`, `fqn_uri_index`, and PSR-4. Stub files are parsed
-lazily on first access and cached under `phpantom-stub://` URIs.
+arrays and indexed by class, function, and constant name. Stub files
+are parsed lazily on first access and cached under `phpantom-stub://`
+URIs, and `src/stub_patches/` corrects or enriches individual
+declarations after parsing (templates on the SPL iterators and
+`WeakMap`, precise return types for many functions).
+
+Built-in names always resolve to the embedded stubs. In
+`find_or_load_class`, Phase 0.5 sends any global-namespace class the
+embedded stubs know straight to the stub, ahead of the classmap and
+PSR-4, so a conditional polyfill in vendor cannot shadow it. Likewise,
+an unguarded redeclaration of a built-in function in a project or
+vendor file is skipped at parse time, because per-function signature
+packages (`phpstan/php-8-stubs` and similar) are less precise than the
+embedded stubs plus patches. Those guards are about incidental
+redeclarations in ordinary project and vendor code (polyfills,
+signature packages pulled in as dependencies). A deliberate stub source
+(E2, E3) is different: it is how a user overrides internals, so it
+wins over the embedded stubs.
 
 This works well for the PHP standard library but has limitations:
 
@@ -44,10 +58,6 @@ This works well for the PHP standard library but has limitations:
   returns nothing for `array_map`, `Iterator`, `PDO`, etc. If the
   user has phpstorm-stubs (or another stub package) installed locally,
   GTD could navigate to those real files.
-- **No generic annotations on SPL.** The embedded phpstorm-stubs lack
-  `@template` annotations on SPL iterator classes. PHPStan maintains
-  its own stub overlays for these. Detecting project-level stubs
-  would let PHPantom pick up richer type information automatically.
 
 ---
 
@@ -241,7 +251,9 @@ file, parse it, find the symbol by name/offset).
 
 Low. The map-parsing logic already exists in `build.rs` and can be
 extracted into a shared helper. The GTD fallback is a small addition
-to `resolve_class_definition` / `resolve_function_definition`.
+to `class_declaration_location` / `resolve_function_definition` in
+`src/definition/resolve.rs` (the latter currently returns `None` for
+`phpantom-stub-fn://` URIs).
 
 ---
 
@@ -251,6 +263,18 @@ to `resolve_class_definition` / `resolve_function_definition`.
 embedded stubs for type resolution, completion, and hover. This is
 where external stubs become a real type-intelligence feature rather
 than just a navigation aid.
+
+**External stubs win over the embedded ones**, built-ins included, so
+a user can override internals; the reverse would leave no way to fix a
+wrong built-in signature. This means the external stub index has to be
+consulted ahead of Phase 0.5 (built-in names → embedded stubs) and ahead
+of the parse-time skip of redeclared built-in functions. Those two
+guards stay in place for ordinary project and vendor code, which is
+where polyfills and incidental signature packages live; only symbols
+from a recognised stub source bypass them. Non-builtin symbols from
+stub packages that declare a Composer autoload already resolve through
+the normal vendor index; the gap is autoload-less packages (functions
+and constants especially) and built-in overrides.
 
 ### Priority model
 
@@ -322,21 +346,25 @@ embedded stubs:
 
 **`find_or_load_class`:**
 
-1. Phase 0: `fqn_class_index` (user code, already-parsed files)
-2. Phase 1: fqn_uri_index
-3. Phase 2: PSR-4
-4. **Phase 2.5 (new): External stub class index.** Checks the
-   unified external stub index (populated from `.phpantom.toml`,
-   Composer stubs, and IDE-provided stubs in priority order). Read
-   the file, parse and cache in `uri_classes_index` under a
-   `phpantom-ext-stub://` URI.
-5. Phase 3: Embedded stubs
+1. Phase 0: `find_class_in_uri_classes_index` (already-parsed files)
+2. **New: External stub class index**, checked before Phase 0.5 so
+   an external stub can override a built-in
+3. Phase 0.5: built-in global names → embedded stubs
+4. Phase 1: `fqn_uri_index` (classmap and scanned files)
+5. Phase 2: PSR-4
+6. Embedded stubs for anything Phase 0.5 did not cover
+
+The external stub index is the unified index populated from
+`.phpantom.toml`, Composer stubs, and IDE-provided stubs in priority
+order. A hit reads the file, parses it, and caches it in
+`uri_classes_index` under a `phpantom-ext-stub://` URI.
 
 **`find_or_load_function`:**
 
 1. `global_functions` (user code + cached results)
 2. `autoload_function_index` (already populated by the byte-level
-   scanner described in indexing.md's Current State)
+   scanner described in indexing.md's Current State), then the lazy
+   autoload-file parse
 3. **External stub function index (new).** Same unified index.
    Read the file, parse, cache in `global_functions`.
 4. `stub_function_index` (embedded stubs)
@@ -349,7 +377,7 @@ embedded stub constants.
 Since external stubs point at real on-disk files, go-to-definition
 works naturally. The `phpantom-ext-stub://` URI scheme carries the
 real file path, so GTD resolves to a navigable `Location`. This
-supersedes the Phase 1 GTD-only approach for any symbol that has
+supersedes E1's GTD-only approach for any symbol that has
 an external stub (from any source).
 
 ### Interaction with embedded phpstorm-stubs
@@ -367,6 +395,10 @@ When a non-phpstorm-stubs package defines a symbol that also exists
 in the embedded stubs (e.g. `wordpress-stubs` redefining `wpdb`),
 the external package wins. This is the correct behaviour: the
 project-specific definition is more accurate than the generic one.
+
+`src/stub_patches/` should not apply to a class or function loaded
+from an external stub: the patches exist to fix the embedded copy, and
+a user who supplies their own stub has said what the declaration is.
 
 ### Complexity
 
@@ -386,16 +418,17 @@ still requires real familiarity with how those chains are structured.
 ## E3. IDE-provided and `.phpantom.toml` stub paths
 
 **Goal:** Support stub directories provided by IDE extensions (via
-`initializationOptions`) and by users (via `.phpantom.toml`). Phase 2
-handles Composer-discovered stubs. This phase adds the remaining two
+`initializationOptions`) and by users (via `.phpantom.toml`). E2
+handles Composer-discovered stubs. This item adds the remaining two
 external sources.
 
 ### IDE-provided path via `initializationOptions`
 
 IDE extensions that bundle PHPantom can pass a stubs directory in the
 LSP `initialize` request. PHPantom reads the path from
-`initializationOptions.stubs.path` and scans it at init. The user
-never sees or configures this.
+`initializationOptions.stubs.path` (alongside the `indexing` options
+already read from there, `ClientIndexingOptions` in `src/config.rs`)
+and scans it at init. The user never sees or configures this.
 
 This enables a distribution model where the IDE extension:
 
@@ -435,7 +468,7 @@ skip-if-present, so higher-priority sources win:
 
 1. **`.phpantom.toml` paths.** Scanned first. Explicit user choices
    for this project override everything else.
-2. **Composer project-level stubs** (Phase 2). The project's vendor
+2. **Composer project-level stubs** (E2). The project's vendor
    directory.
 3. **IDE-provided stubs** (`initializationOptions`). The IDE
    extension's bundled stubs.
@@ -459,59 +492,10 @@ skip-if-present, so higher-priority sources win:
 
 ### Complexity
 
-Low (once Phase 2 is done). The scanning is identical. The new work
+Low (once E2 is done). The scanning is identical. The new work
 is reading `initializationOptions` during `initialize`, reading
 `.phpantom.toml` `[stubs]` paths, resolving them, and feeding them
 into the existing scanner.
-
----
-
-## E4. Embedded stub override with external stubs
-
-**Goal:** When a project-level or global stub defines a symbol with
-richer type annotations than the embedded stub (e.g. `@template` on
-SPL iterators), use the richer version for type resolution.
-
-### The SPL iterator problem
-
-The embedded phpstorm-stubs lack `@template` annotations on SPL
-iterator classes (`ArrayIterator`, `FilterIterator`,
-`RecursiveIteratorIterator`, etc.). PHPStan maintains its own stub
-overlays that add these annotations. Without them, `foreach` over
-an SPL iterator resolves element types as `mixed`.
-
-Phase 2 already solves this if the user installs a stub package that
-includes the annotations. Phase 4 addresses the question: should
-PHPantom ship its own SPL overlay stubs, or rely on users to bring
-their own?
-
-### Decision: ship minimal overlays, prefer external
-
-1. **Ship a small set of built-in overlay stubs** for the most
-   impactful SPL classes (10-15 classes). These are embedded in the
-   binary alongside the phpstorm-stubs, but with `@template`
-   annotations added. They take priority over the base phpstorm-stubs
-   for the classes they cover.
-
-2. **External stubs always win.** If any external source
-   (`.phpantom.toml`, Composer, or IDE-provided) defines the same
-   class, the external version takes priority over both the overlay
-   and the base embedded stub. This means users who install PHPStan's
-   stubs or write their own overlays are never fighting with the
-   built-in ones.
-
-### Implementation
-
-The overlay stubs can be embedded via `build.rs` the same way the
-base stubs are. They go into a separate `STUB_OVERLAY_CLASS_MAP`
-array. At resolution time, when `find_or_load_class` reaches Phase 3
-(embedded stubs), it checks the overlay map first, then the base map.
-
-### Complexity
-
-Low. The overlay stubs are small hand-written PHP files. The build
-and resolution changes are minor additions to the existing
-infrastructure.
 
 ---
 
@@ -522,8 +506,8 @@ infrastructure.
 **Option A: Eager scan, lazy parse (recommended).** At init, run the
 byte-level scanner over all external stub directories to build the
 name-to-path indices. Parse individual files on demand when a symbol
-is first accessed. This is consistent with the approach in Phase 2.5
-of indexing.md (lazy autoload file indexing) and keeps init fast.
+is first accessed. This is consistent with how autoload files are
+indexed (see indexing.md) and keeps init fast.
 
 **Option B: Fully lazy.** Don't scan at init. When a symbol is not
 found in user code or embedded stubs, search through external stub
@@ -538,8 +522,8 @@ completion.
 ### How does this interact with the classmap?
 
 External stub packages installed via Composer may appear in the
-classmap (`autoload_classmap.php`). This is fine: Phase 1.5 of
-`find_or_load_class` already handles classmap lookups, and any class
+classmap (`autoload_classmap.php`). This is fine: the classmap feeds
+`fqn_uri_index`, which Phase 1 of `find_or_load_class` consults, and any class
 found there is parsed and cached normally. The external stub index
 serves as a parallel discovery path for stub packages that are
 `require-dev` dependencies (which may not be in the classmap if the
@@ -561,12 +545,10 @@ parameters:
         - stubs/MyCustomStub.php
 ```
 
-Reading PHPStan config is out of scope for now. PHPantom is not
-PHPStan and should not parse its configuration. If users want
-PHPantom to see these stubs, they can add the path to
-`[stubs] paths` in `.phpantom.toml`. A future iteration could
-optionally read `phpstan.neon` `stubFiles` entries as a convenience,
-but it is not a priority.
+Reading PHPStan config is out of scope. PHPantom is not PHPStan and
+does not derive its settings from other tools' configuration. If users
+want PHPantom to see these stubs, they can add the path to
+`[stubs] paths` in `.phpantom.toml`.
 
 ### Building without embedded stubs
 
@@ -579,9 +561,9 @@ PHP standard library symbols.
 For this to work, stubs must come from another source. The most
 reliable combinations:
 
-- IDE extension provides stubs via `initializationOptions` (Phase 3).
+- IDE extension provides stubs via `initializationOptions` (E3).
 - The user's project has `jetbrains/phpstorm-stubs` in Composer
-  (Phase 2).
+  (E2).
 - The user points at stubs via `.phpantom.toml`.
 
 Any of these is sufficient. Without any external stubs and without
@@ -596,12 +578,11 @@ embedded stubs, built-in symbols would be invisible.
 | E1  | GTD for built-in symbols via project-level phpstorm-stubs | Low         | None                                               |
 | E2  | Project-level stubs as a type resolution source           | High        | None (byte-level scanner already shipped)          |
 | E3  | IDE-provided and `.phpantom.toml` stub paths              | Low         | E2                                                 |
-| E4  | Ship SPL overlay stubs, let external stubs override       | Low         | E2                                                 |
 | E7  | Stub-based framework patches (replace Rust patch system)  | Medium-High | E2 or E3                                           |
 
 E1 can be done immediately and independently. It provides
 immediate value (GTD on `array_map`, `PDO`, `Iterator`, etc.) with
-minimal code. E2-E4 build on the byte-level scanning infrastructure
+minimal code. E2 and E3 build on the byte-level scanning infrastructure
 already shipped for the project's own symbol discovery (see
 indexing.md's Current State) and on each other.
 
@@ -615,62 +596,6 @@ overrides, non-Composer projects, and edge cases.
 source: its `PhpStormStubsMap.php` is parsed for fast indexed lookup
 instead of directory scanning, then other stub packages are scanned
 on top.
-
----
-
-## E5. Extension stub selection (`[stubs] extensions`)
-
-**Impact: Low-Medium · Complexity: Low**
-
-Override which PHP extension stubs are loaded. By default PHPantom
-loads core + all commonly bundled extensions, plus any declared in
-the project's `composer.json` via `ext-*` keys.
-
-```toml
-[stubs]
-extensions = [
-  "Core", "standard", "json", "mbstring", "curl",
-  "redis", "imagick", "mongodb",
-]
-```
-
-### Auto-detection from `composer.json`
-
-When `extensions` is unset, PHPantom reads the `require` and
-`require-dev` sections of `composer.json` and collects every `ext-*`
-key. These are added on top of the default set. Only `composer.json`
-is read, not `composer.lock`. Transitive `ext-*` requirements from
-dependencies are intentionally ignored.
-
-### Manual override
-
-When `extensions` is set, only the listed extensions are loaded and
-auto-detection is skipped. Extension names match the directory names
-in phpstorm-stubs (e.g. `"redis"`, `"imagick"`, `"swoole"`). An
-unrecognised name is silently ignored with a log message.
-
-### Implementation
-
-The build script already embeds all stub files. Filtering happens at
-runtime: when building the stub class/function indices, skip entries
-whose source file path does not start with one of the enabled
-extension directories. This is a simple string prefix check on the
-relative path from `STUB_CLASS_MAP`.
-
----
-
-## E6. Stub install prompt for non-Composer projects
-
-**Impact: Low · Complexity: Medium**
-
-For non-Composer projects, offer to install phpstorm-stubs into the
-project so that go-to-definition works for built-in symbols. The
-answer (`true` or `false`) is written to `[stubs] install` in
-`.phpantom.toml` so the prompt does not reappear.
-
-This is not implemented yet. The config writing infrastructure
-(using `toml_edit` to preserve comments and formatting) is a
-prerequisite.
 
 ---
 
@@ -771,13 +696,25 @@ stubs. This makes the system fully extensible without code changes.
 ### Migration path
 
 1. Implement E2 or E3 (external stub loading with priority).
-2. Write override stubs for the patches currently in
-   `patches.rs` (Builder `__call`, Conditionable `when`/`unless`).
-3. Add a bundled-overrides loading phase to the stub pipeline,
+2. Add a partial-class merge: an override stub declares only some
+   members, so loading it has to replace those members on the real
+   class and keep the rest. Nothing does this today.
+3. Write override stubs for the patches in `patches.rs` that a plain
+   declaration can express (return-type and generic fixes such as
+   Builder `__call`, Conditionable `when`/`unless`, the paginate
+   element type, the Cache facade generics).
+4. Add a bundled-overrides loading phase to the stub pipeline,
    between vendor stubs and user stubs.
-4. Remove the Rust patch functions from `patches.rs`.
-5. Document how to contribute framework override stubs (just PHP,
+5. Remove the Rust patch functions those stubs replace. Several
+   patches are not expressible as a stub and stay in Rust: metadata
+   such as higher-order-proxy property tagging, mock return types that
+   dispatch on a signature scan, and Conditionable applied to any class
+   that uses it.
+6. Document how to contribute framework override stubs (just PHP,
    no Rust needed).
+
+The phpstorm-stubs patch system (`src/stub_patches/`) is an equally
+good candidate for the same treatment once the mechanism exists.
 
 ### Scope of the Rust patch system until then
 

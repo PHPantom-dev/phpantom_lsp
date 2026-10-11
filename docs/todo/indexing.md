@@ -96,8 +96,9 @@ completeness heuristic needed.
 
 ### `"self"`
 
-Always build the classmap ourselves. Ignores `autoload_classmap.php`
-entirely. Equivalent to the merged approach with an empty skip set.
+Always build the classmap ourselves: scan every PHP file under the
+workspace root, ignoring `autoload_classmap.php` and the PSR-4
+mappings. Vendor packages are still scanned via `installed.json`.
 For users who prefer PHPantom's own scanner or who are actively
 editing `composer.json` dependencies.
 
@@ -121,19 +122,14 @@ complete.
 
 ### Current state (partial)
 
-`ensure_workspace_indexed` (used by find references) now parses files
-in parallel via two helpers in `references/mod.rs`:
-
-- **`parse_files_parallel`** — takes `(uri, Option<content>)` pairs,
-  loads content via `get_file_content` when not provided, splits work
-  into chunks, and parses each chunk in a separate OS thread.
-- **`parse_paths_parallel`** — takes `(uri, PathBuf)` pairs, reads
-  files from disk and parses them in parallel.
-
-Both use `std::thread::scope` for structured concurrency (all threads
-join before the function returns). The thread count is capped at
-`std::thread::available_parallelism()` (typically the number of CPU
-cores). Batches of 2 or fewer files skip threading overhead.
+`ensure_workspace_indexed` (`src/indexing/preload.rs`, used by find
+references) parses files in parallel via
+`parse_files_parallel_with_progress` (`(uri, Option<content>)` pairs)
+and `parse_paths_parallel_with_progress` (`(uri, PathBuf)` pairs, read
+from disk). Both run on the shared pull-index pool in `src/parallel.rs`
+(`map_indexed`): workers claim the next file as they finish the last,
+the pool is capped at `available_parallelism()`, and never spawns more
+workers than there are files.
 
 Transient entry eviction after GTI and find references has been
 removed. Parsed files stay cached in `uri_classes_index`, `symbol_maps`,
@@ -182,11 +178,13 @@ The following are deferred to a later sprint:
   time) only still runs for `"composer"`/`"self"`/`"none"` strategies,
   for a request that arrives before the background index finishes, or
   for a target that lives under `/vendor/` (where the index-ready fast
-  path would filter out the package's own implementations).
-  Parallelizing it requires care because it interleaves reads and
-  writes through `class_loader` callbacks.
+  path would filter out the package's own implementations). The
+  candidate files are then parsed one at a time (`parse_and_cache_file`
+  in a loop in `src/definition/implementation.rs`). Parallelizing it
+  requires care because it interleaves reads and writes through
+  `class_loader` callbacks.
 - **Parallel autoload file scanning.** The `scan_autoload_files` work
-  queue is inherently sequential due to `require_once` chain
+  queue (`src/indexing/scan.rs`) is inherently sequential due to `require_once` chain
   following, but the initial batch of files could be processed in
   parallel before following chains.
 
@@ -208,66 +206,6 @@ completion is a minor subset of what users actually trigger. This
 means classmap generation can run at normal priority without blocking
 the user. They can start writing code immediately while the classmap
 builds in the background.
-
----
-
-## X6. Disk cache (evaluate later)
-
-**Goal:** Persist the full index to disk so that restarts don't
-require a full rescan.
-
-### When to consider
-
-Only if full background indexing is slow enough on cold start that
-users complain. Given that:
-
-- Mago can lint 45K files in 2 seconds.
-- A regex classmap scan over 21K files should be sub-second.
-- Full AST parsing of a few thousand user files should take single
-  digit seconds.
-
-...disk caching may never justify its complexity. The primary use
-case would be memory savings (load from disk on demand instead of
-holding everything in RAM), not startup speed.
-
-### Format options
-
-- `bincode` / `postcard`: simple, small dependency footprint, tolerant
-  of struct changes (deserialization fails gracefully instead of
-  reading garbage memory). The right default choice.
-- SQLite: robust, queryable, but heavier than needed for a flat
-  key-value store.
-
-Zero-copy formats like `rkyv` are ruled out. They map serialized bytes
-directly into memory as if they were the original structs, which means
-any struct layout change between versions reads corrupt data. PHPantom's
-internal types change frequently and will continue to do so. A cache
-format that silently produces garbage after an update is worse than no
-cache at all.
-
-### Invalidation
-
-Store file mtime + content hash per entry. On startup, walk the
-directory, compare mtimes, re-parse only changed files. This is
-Libretto's `IncrementalCache` approach and it works well.
-
-The content hash must be the authority; mtime is only a pre-filter
-to skip hashing files that look unchanged. A peer PHP LSP project
-shipped this exact bug: its cache was keyed on `mtime + size`, so a
-size-preserving edit within the same mtime second served a stale
-index entry. It later switched to `blake3(uri || content)`.
-
-### Decision criteria
-
-Implement disk caching only if:
-
-1. Full-mode cold start exceeds 10 seconds on a representative large
-   codebase, AND
-2. The memory overhead of holding the full index exceeds the 512 MB
-   target, or users on constrained systems report issues.
-
-If neither condition is met, skip this phase entirely. Simpler is
-better.
 
 ---
 
@@ -443,9 +381,10 @@ registered and drop the ones contained in another, the same containment
 test `LinkClaims::claim` already does.
 
 **Switch every walker together.** `collect_php_files_gitignore`,
-`util::collect_php_files`, and `analyse::collect_php_files` each take a
-single root, so only `walk_roots` is multi-root today. Leaving the serial
-three behind would index classes from an include folder while
+`collect_workspace_index_files_gitignore` (the one find-references
+walks), `util::collect_php_files`, and `analyse::collect_php_files` each
+take a single root, so only `walk_roots` is multi-root today. Leaving
+the serial ones behind would index classes from an include folder while
 find-references, rename, and go-to-implementation never see them, which
 is the half-wired state the symlink change avoided by moving all four
 walkers at once.
@@ -480,8 +419,9 @@ from an include root is served by its own folder's client.
 
 **Impact: Low-Medium · Complexity: Medium**
 
-`collect_php_files_gitignore` feeds find-references and namespace
-rename, so an excluded tree is invisible to both: a rename can leave
+Find-references walks via `collect_workspace_index_files_gitignore` and
+namespace rename via `collect_php_files_gitignore`; both apply the
+index filters, so an excluded tree is invisible to both: a rename can leave
 excluded code calling a name that no longer exists, with no warning.
 That is consistent with what an exclude means, but sharper than
 "background discovery" suggests. Options: (a) keep the behaviour and

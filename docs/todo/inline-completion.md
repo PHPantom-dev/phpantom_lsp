@@ -99,7 +99,16 @@ artifact, not bundled in the main LSP binary.
 ## N1. Template Engine
 
 **Complexity:** Medium (per pattern group)
-**Dependencies:** None beyond existing type resolution
+**Dependencies:** None beyond existing type resolution, but
+`textDocument/inlineCompletion` is an LSP 3.18 request. Check whether
+our `lsp-types` (0.94.1, pinned by `tower-lsp` 0.20) carries it; if
+not, this needs F20 or a custom method.
+
+Some templates overlap shipped features: getter/setter and
+constructor-assignment bodies duplicate the `generate_getter_setter`
+and `generate_constructor` code actions, and the `try/catch` template
+overlaps the existing try/catch completion. Reuse those generators
+rather than writing second copies.
 
 The template engine is pattern matching on the current AST node and
 cursor position, combined with type information from the existing
@@ -121,9 +130,10 @@ completion resolver. No model, no data files, no latency.
 
 The template engine reuses existing infrastructure:
 
-- **Variable types:** `type_engine/variable/resolution.rs` already
-  resolves every variable in scope to a type. The template engine
-  calls the same pipeline.
+- **Variable types:** the forward walker
+  (`type_engine/variable/forward_walk/`, via `resolve_expression_type`)
+  already resolves every variable in scope to a type. The template
+  engine calls the same pipeline.
 - **Containing function:** The AST map already stores `MethodInfo`
   and `FunctionInfo` with return types, parameter lists, and
   docblocks.
@@ -427,7 +437,8 @@ wrong.
 ## N2. N-gram Engine
 
 **Complexity:** Very High (novel statistical model and training pipeline, no existing pattern to follow)
-**Dependencies:** Training corpus, PHP tokenizer
+**Dependencies:** N1 (the `InlineContext` builder), training corpus,
+PHP tokenizer
 
 The n-gram engine handles the cases where the template engine has no
 pattern match but there's still enough local context to make a useful
@@ -529,7 +540,7 @@ and `$id`.
 ## N3. Fine-Tuned GGUF Model
 
 **Complexity:** Very High (model selection, fine-tuning, and a new sidecar architecture, well outside the existing codebase's patterns)
-**Dependencies:** Phase 1 and 2 complete, training infrastructure
+**Dependencies:** N1 and N2 complete, training infrastructure
 
 This is the "eventually" phase. A small language model fine-tuned
 exclusively on PHP code with fill-in-the-middle capability. It runs
@@ -755,25 +766,25 @@ for a small model (target: under 512 tokens).
 
 ```toml
 # .phpantom.toml or editor settings
-[inlineCompletion]
+[inline_completion]
 # Enable/disable the entire feature
 enabled = true
 
 # Minimum confidence to show a suggestion (0.0 - 1.0)
-minConfidence = 0.4
+min_confidence = 0.4
 
 # Which engines to use (in priority order)
 engines = ["template", "ngram", "model"]
 
 # Debounce delay in milliseconds
-debounceMs = 50
+debounce_ms = 50
 
-[inlineCompletion.model]
+[inline_completion.model]
 # Path to a custom GGUF model (overrides default)
 # path = "~/.phpantom/models/phpantom-completion-v1.gguf"
 
 # Maximum tokens to generate per request
-maxTokens = 64
+max_tokens = 64
 
 # Temperature (lower = more conservative)
 temperature = 0.2
@@ -781,9 +792,9 @@ temperature = 0.2
 
 ---
 
-## Phasing and Sprint Placement
+## Phasing
 
-### N1. Template Engine (Sprint 7 timeframe)
+### Template engine first (N1)
 
 Implement the `InlineContext` builder and 3-4 high-value template
 patterns:
@@ -795,7 +806,7 @@ patterns:
 This is enough to demo the "how did it know" effect. No external
 dependencies, no model files, ships in the main binary.
 
-### N2. N-gram Engine (post-Sprint 7)
+### Then the n-gram engine (N2)
 
 - Build the PHP tokenizer
 - Scrape and process the Packagist corpus
@@ -804,7 +815,7 @@ dependencies, no model files, ships in the main binary.
 - Ship the model file as a separate downloadable asset or embed it
   if it stays under 5MB
 
-### N3. GGUF Sidecar (when competing with PHPStorm)
+### GGUF sidecar last (N3, when competing with PHPStorm)
 
 - Select and fine-tune the base model
 - Build the sidecar binary (Rust + llama.cpp bindings, or a small

@@ -81,7 +81,29 @@ No outstanding items.
 
 ## Laravel
 
-No outstanding items.
+### B582. `keyBy`/`groupBy` on an Eloquent collection lose the element type
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+Member::all()->keyBy('id');           // Eloquent\Collection<array-key, mixed>
+Member::all()->groupBy('id');         // Eloquent\Collection<array-key, Eloquent\Collection<int, mixed>>
+Member::all()->toBase()->keyBy('id'); // Support\Collection<array-key, Member>  (correct)
+Member::all()->keyBy->id;             // Eloquent\Collection<array-key, Member>   (correct)
+```
+
+`Support\Collection::keyBy` carries only `{@inheritDoc}`; the signature
+comes from `Enumerable::keyBy`, which returns
+`static<(…conditional key…), TValue>`. `Eloquent\Collection` declares its
+own templates (`TKey`, `TModel`) and maps them through
+`@extends Support\Collection<TKey, TModel>`. Called on the Eloquent
+subclass, the `TValue` inside `static<…>` is not carried through that
+mapping to `TModel`, so it ends up unbound and becomes `mixed`. On
+`Support\Collection` itself the names line up and it resolves. The
+higher-order proxy form builds its result separately and is unaffected.
+
+Any other `static<…, TValue>` return inherited from `Enumerable` through
+`{@inheritDoc}` is likely affected the same way.
 
 ## Blade
 

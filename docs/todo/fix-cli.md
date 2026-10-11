@@ -59,6 +59,14 @@ function or method has a native `array` return type (or no return
 type at all) and the body contains enough information to infer a
 specific element type, e.g. `@return list<Butterfly>`.
 
+This also covers PHPStan's `missingType.iterableValue` on return types
+without running PHPStan: a native `array` return with no element type
+is exactly the case above. The "Add `@return` type" quickfix for that
+identifier (`src/code_actions/phpstan/add_iterable_type.rs`) carries its
+own element-type inference from `return` statements; fold it into
+`enrichment_return_type` rather than keeping two inference paths, and
+let the quickfix and this rule share the result.
+
 This lets teams that want to reach PHPStan level 6 (require return
 type declarations) run a single command and get specific, useful
 return types across the entire codebase for free, instead of adding
@@ -85,32 +93,6 @@ rule is exclusively CLI wiring: invoking the quickfix's resolve
 function headlessly from `fix.rs` against diagnostics collected via
 `--with-phpstan`.
 
-### FX4. `phpstan.missingType.iterableValue` — Add `@return` with iterable type
-
-**Backlog ID:** H17
-
-The underlying logic already ships as the "Add `@return` type" LSP
-quickfix (`src/code_actions/phpstan/add_iterable_type.rs`, matching
-PHPStan identifier `missingType.iterableValue`): it infers the element
-type from `return` statements (array literals, variable types, `new
-ClassName()` expressions) and falls back to `<mixed>` only when
-inference cannot determine a concrete type. What remains for this rule
-is exclusively CLI wiring, same as FX3.
-
-### FX5. `phpstan.property.unused` / `phpstan.method.unused` — Remove unused member
-
-**Backlog ID:** H19
-
-When PHPStan reports an unused property, method, or class constant,
-remove the entire declaration including its docblock.
-
-### FX6. `phpstan.generics.callSiteVarianceRedundant` — Remove redundant variance
-
-**Backlog ID:** H20
-
-Strip `covariant` or `contravariant` keywords from generic type
-arguments in docblocks when PHPStan reports them as redundant.
-
 ---
 
 ## Infrastructure
@@ -121,9 +103,8 @@ Rules are identified by their diagnostic code string:
 - Native rules: bare identifiers (e.g. `unused_import`)
 - PHPStan rules: prefixed with `phpstan.` (e.g. `phpstan.return.unusedType`)
 
-When no `--rule` flags are provided, all "preferred" native rules run.
-A rule is "preferred" if its corresponding code action has
-`is_preferred: true` in the LSP protocol.
+When no `--rule` flags are provided, every native rule in
+`NATIVE_RULES` (`src/fix.rs`) runs.
 
 PHPStan rules only run when `--with-phpstan` is passed. This is an
 explicit opt-in because PHPStan adds significant runtime (it must

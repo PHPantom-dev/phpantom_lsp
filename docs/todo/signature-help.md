@@ -33,30 +33,26 @@ $format('Alice', 30);  // ← signature help here
 
 #### Current state
 
-`extract_callable_target_from_variable` handles first-class callables
-(`$fn = makePen(...)`) by scanning for the `(...)` suffix.  Closures
-and arrow functions assigned to variables are not detected because they
-don't end with `(...)`.
+`extract_callable_target_from_variable` (`signature_help.rs`) handles
+first-class callables (`$fn = makePen(...)`) by looking the variable up
+in the first-class-callable assignments collected from the AST
+(`parser::with_fcc_assignments`). Closures and arrow functions assigned
+to variables are not collected there, so they get no signature help.
 
 #### Implementation
 
-1. **Detect closure/arrow assignments** — in
-   `extract_callable_target_from_variable`, if the RHS does not end with
-   `(...)`, check whether it starts with `function(` or `fn(`.  If so,
-   return a synthetic identifier (e.g. `"__closure_at_L{line}"`) that
-   the resolver can look up.
+1. **Resolve the variable's type** — ask the shared resolver for the
+   variable's type at the call site. A closure or arrow function
+   assignment resolves to a `Closure(...)` type carrying the parameter
+   and return types, so no separate parse of the closure is needed and
+   any closure the type engine understands (including ones passed
+   through other variables) gets signature help.
 
-2. **Parse closure parameters** — alternatively, skip the
-   `resolve_callable_target` pathway entirely.  When the variable is
-   assigned a closure/arrow function, parse the parameters and return
-   type directly from the AST of the assignment RHS.  Build the
-   `ResolvedCallableTarget` inline without going through class
-   resolution.
-
-   This is the cleaner approach: closures don't have classes, so the
-   existing class-based resolution is the wrong abstraction.  The
-   `SymbolMap` already records `VarDefSite` for the assignment, and the
-   AST is available.
+2. **Build the signature** — turn the callable type into a
+   `ResolvedCallableTarget` inline, without going through class
+   resolution (closures don't have classes). Parameter names come from
+   the callable type when it carries them, otherwise from the closure's
+   AST.
 
 3. **Label prefix** — use `$format` (the variable name) or the closure's
    inferred signature as the label prefix.

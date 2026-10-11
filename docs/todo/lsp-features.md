@@ -10,96 +10,22 @@ within the same impact tier.
 
 ---
 
-## F2. Partial result streaming via `$/progress`
-
-**Impact: Medium · Complexity: Medium-High**
-
-The LSP spec (3.17) allows requests that return arrays — such as
-`textDocument/implementation`, `textDocument/references`,
-`workspace/symbol`, and even `textDocument/completion` — to stream
-incremental batches of results via `$/progress` notifications when both
-sides negotiate a `partialResultToken`. The final RPC response then
-carries `null` (all items were already sent through progress).
-
-This would let PHPantom deliver the _first_ useful results almost
-instantly instead of blocking until every source has been scanned.
-
-### Streaming between existing phases
-
-`find_implementors` already runs five sequential phases (see
-`docs/ARCHITECTURE.md` § Go-to-Implementation):
-
-1. **Phase 1 — uri_classes_index** (already-parsed classes in memory) — essentially
-   free. Flush results immediately.
-2. **Phase 2 — fqn_uri_index** (FQN → URI entries not yet in uri_classes_index) —
-   loads individual files. Flush after each batch.
-3. **Phase 3 — classmap files** (Composer classmap, user + vendor mixed)
-   — iterates unique file paths, applies string pre-filter, parses
-   matches. This is the widest phase and the best candidate for
-   within-phase streaming (see below).
-4. **Phase 4 — embedded stubs** (string pre-filter → lazy parse) — flush
-   after stubs are checked.
-5. **Phase 5 — PSR-4 directory walk** (user code only, catches files not
-   in the classmap) — disk I/O + parse per file, good candidate for
-   per-file streaming.
-
-Each phase boundary is a natural point to flush a `$/progress` batch,
-so the editor starts populating the results list while heavier phases
-are still running.
-
-### Prioritising user code within Phase 3
-
-Phase 3 iterates the Composer classmap, which contains both user and
-vendor entries. Currently they are processed in arbitrary order. A
-simple optimisation: partition classmap file paths into user paths
-(under PSR-4 roots from `composer.json` `autoload` / `autoload-dev`)
-and vendor paths (everything else, typically under `vendor/`), then
-process user paths first. This way the results most relevant to the
-developer arrive before vendor matches, even within a single phase.
-
-### Granularity options
-
-- **Per-phase batches** (simplest) — one `$/progress` notification at
-  each of the five phase boundaries listed above.
-- **Per-file streaming** — within Phases 3 and 5, emit results as each
-  file is parsed from disk instead of waiting for the entire phase to
-  finish. Phase 3 can iterate hundreds of classmap files and Phase 5
-  recursively walks PSR-4 directories, so per-file flushing would
-  significantly improve perceived latency for large projects.
-- **Adaptive batching** — collect results for a short window (e.g. 50 ms)
-  then flush, balancing notification overhead against latency.
-
-### Applicable requests
-
-| Request                       | Benefit                                                                         |
-| ----------------------------- | ------------------------------------------------------------------------------- |
-| `textDocument/implementation` | Already scans five phases; each phase's matches can be streamed                 |
-| `textDocument/references`     | Will need full-project scanning; streaming is essential                         |
-| `workspace/symbol`            | Searches every known class/function; early batches feel instant                 |
-| `textDocument/completion`     | Less critical (usually fast), but long chains through vendor code could benefit |
-
-### Implementation sketch
-
-1. Check whether the client sent a `partialResultToken` in the request
-   params.
-2. If yes, create a `$/progress` sender. After each scan phase (or
-   per-file, depending on granularity), send a
-   `ProgressParams { token, value: [items...] }` notification.
-3. Return `null` as the final response.
-4. If no token was provided, fall back to the current behaviour: collect
-   everything, return once.
-
----
-
 ## F7. Evaluatable expression support (DAP integration)
 
 **Impact: Low-Medium · Complexity: Low**
 
-Implement `textDocument/evaluatableExpression` so debuggers (Xdebug
-via DAP) can evaluate expressions under the cursor during a debug
-session. Given a cursor position, the handler returns the expression
-text and range that the debugger should evaluate in the running PHP
-process.
+Tell debuggers (Xdebug via DAP) which expression sits under the cursor
+during a debug session. Given a cursor position, the handler returns
+the expression text and range that the debugger should evaluate in the
+running PHP process.
+
+LSP has no standard request for this. Phpactor uses a custom
+`textDocument/xevaluatableExpression` (advertised as
+`experimental.xevaluatableExpressionProvider`), which only its own
+client calls. The choice is between a custom method that our VS Code
+extension consumes, or the standard 3.17 `textDocument/inlineValue`
+request (check whether our `lsp-types` version carries it). Decide that
+before implementing.
 
 ### Supported expression kinds
 
@@ -130,65 +56,18 @@ debugger.
 
 ---
 
-## F11. VS Code extension
+## F11. Windows code signing
 
 | Field      | Value                    |
 | ---------- | ------------------------ |
-| **Impact** | High                     |
-| **Complexity** | Medium-High          |
+| **Impact** | Medium                   |
+| **Complexity** | Medium               |
 
-Create a VS Code extension that bundles PHPantom and publishes it to
-the VS Code Marketplace.
-
-### Approach
-
-Fork the [vscode-intelephense](https://github.com/bmewburn/vscode-intelephense)
-client extension (MIT-licensed). Intelephense is the #1 PHP extension
-in the VS Code Marketplace, so its `package.json` represents what
-PHP developers expect from an extension: the settings schema,
-activation events, file associations, categories, and contribution
-points are battle-tested. Starting from this base means we do not
-accidentally omit something users take for granted.
-
-Strip the proprietary Intelephense server dependency (`intelephense`
-npm package) and replace it with PHPantom binary management. The
-extension is a thin TypeScript wrapper around `vscode-languageclient`
-that spawns `phpantom_lsp` over stdio.
-
-**Cleanup process:** After forking, compare the result against a
-fresh VS Code extension scaffold (`yo code` generator) to identify
-and remove Intelephense-specific legacy that does not apply to
-PHPantom (licence key commands, telemetry integration, Node.js
-runtime configuration, premium feature gating). The goal is a clean
-extension that inherits the right UX expectations without carrying
-over implementation baggage.
-
-### Scope
-
-1. **Binary distribution.** Bundle or auto-download the correct
-   pre-built binary for each platform (linux-x64, linux-arm64,
-   darwin-x64, darwin-arm64, win-x64). Use GitHub Releases as the
-   download source.
-2. **Settings surface.** Expose PHPantom's `.phpantom.toml` settings
-   as VS Code settings (PHP version, diagnostics toggles, indexing
-   strategy).
-3. **Status bar.** Show indexing progress and server status.
-4. **Marketplace listing.** Icon, description, screenshots,
-   categories, keywords.
-5. **CI.** GitHub Actions workflow to build, test, and publish the
-   extension on release.
-
-### Code signing
-
-macOS and Windows builds must be signed so the OS
-stops flagging PHPantom as malware. This is a prerequisite for the
-VS Code extension (users will not trust an extension that triggers
-Gatekeeper or SmartScreen warnings).
-
-- **macOS:** Apple Developer ID certificate, `codesign`, and
-  `notarytool` in the release CI workflow.
-- **Windows:** Authenticode certificate (or Azure Trusted Signing)
-  and `signtool` in the release CI workflow.
+macOS release binaries are signed and notarized
+(`.github/workflows/release.yml`), but the Windows packaging step signs
+nothing, so SmartScreen flags the binary the VS Code extension
+downloads. Add an Authenticode certificate (or Azure Trusted Signing)
+and `signtool` to the release workflow.
 
 ---
 
@@ -243,49 +122,12 @@ IDEs, not just PHPStorm.
 
 ---
 
-## F13. Homebrew formula
-
-| Field      | Value                    |
-| ---------- | ------------------------ |
-| **Impact** | Medium                   |
-| **Complexity** | Low                  |
-
-Create a Homebrew formula for PHPantom so users on macOS and Linux
-can install it with `brew install phpantom_lsp`.
-
-### Approach
-
-Submit a PR to [homebrew-core](https://github.com/Homebrew/homebrew-core)
-with a formula that downloads the pre-built binary from GitHub
-Releases for the current platform. Alternatively, the formula can
-build from source using `cargo install` if the Homebrew reviewers
-prefer source builds (common for Rust projects).
-
-### Formula contents
-
-- **Homepage:** `https://github.com/PHPantom-dev/phpantom_lsp`
-- **Source:** GitHub Releases tarball or `cargo install` from crates.io.
-- **Binary:** `phpantom_lsp`
-- **Test block:** `system bin/"phpantom_lsp", "--version"`
-
-### Why this matters
-
-A Homebrew formula is a prerequisite for upstream PRs to editors like
-Helix, which prefer that language servers be installable via a
-package manager. It also simplifies the VS Code extension's binary
-management on macOS (detect Homebrew-installed binary before
-downloading).
-
----
-
 ## F14. Helix upstream PR
 
 | Field      | Value                    |
 | ---------- | ------------------------ |
 | **Impact** | Low-Medium               |
 | **Complexity** | Low                  |
-
-**Depends on:** F13 (Homebrew formula).
 
 Submit a PR to the [Helix editor](https://github.com/helix-editor/helix)
 adding `phpantom_lsp` as a language server option in the default
@@ -305,10 +147,12 @@ command = "phpantom_lsp"
 
 ### Prerequisites
 
-- F13 (Homebrew formula) should be merged so Helix maintainers can
-  point users at `brew install phpantom_lsp`.
+- Helix maintainers can point users at `brew install phpantom-lsp`
+  (the formula is in homebrew-core).
 - Helix maintainers may want a brief README section documenting the
   server and its feature set.
+
+---
 
 ## F15. Go-to-declaration
 
@@ -339,8 +183,10 @@ declaration handler can reuse this: for `MemberAccess` and
 first. For class-level symbols, declaration and definition are the
 same.
 
-Register `declaration_provider` in `server.rs` and wire it to a thin
-handler that delegates to the existing infrastructure.
+Register `declaration_provider` in `src/backend/startup.rs` and wire it
+to a thin handler that delegates to the existing infrastructure.
+
+---
 
 ## F16. On-type `}` brace de-indent
 
@@ -366,6 +212,8 @@ This is a pure text-based operation — no AST needed. Register `}` as
 an additional `on_type_formatting_trigger_character` alongside the
 existing `\n`.
 
+---
+
 ## F17. Wire class move to `workspace/willRenameFiles`
 
 **Impact: Medium · Complexity: Medium**
@@ -376,7 +224,7 @@ declaration accepts the full FQCN so it can move between namespaces in
 one step, and renaming a namespace segment rewrites every affected
 `namespace` declaration, `use` statement, and FQN reference while
 moving the PSR-4 directories to match (see `build_class_move_edit` in
-`src/rename/class.rs` and `build_namespace_rename_edit` in
+`src/rename/class/` and `build_namespace_rename_edit` in
 `src/rename/namespace/`). What's still missing is the editor-triggered
 path: when the user renames or moves a PHP file in the editor's file
 tree (rather than through the LSP rename command), nothing updates the
@@ -394,36 +242,6 @@ machinery to produce the `WorkspaceEdit`. The companion
 - Phpactor: `MoveClass` refactoring in the class-mover package.
 
 ---
-
-## F19. Connect to a remote/TCP language server (VS Code extension)
-
-**Impact: Low · Complexity: Medium**
-
-This task is for the VS Code extension package, not the `phpantom_lsp`
-server itself. The server can already speak LSP over a TCP socket; the
-gap is purely on the client side, where the editor extensions only ever
-spawn a local binary over stdio. Expose an option in the extension
-(mirroring Phpactor's `remote.enabled` / `remote.host` / `remote.port`)
-to connect to an already-running server instead of spawning one. This
-covers running the server inside a container or on a remote host while
-editing locally.
-
-### Scope
-
-This is a client-side change in the editor extensions, not the server.
-In the VS Code extension, add `phpantom.remote.enabled`, `.host`, and
-`.port` settings; when enabled, build the language client from a socket
-transport rather than a spawned process. Remote mode is a single shared
-endpoint, so it bypasses the per-folder server model and uses one
-client that matches all PHP documents (the same exception Phpactor's
-extension makes).
-
-### Caveats
-
-A remote server has its own filesystem view, so `rootUri` / workspace
-paths must line up with the paths the server sees (or be remapped).
-Auto-download, version checks, and the per-folder rooting do not apply
-in remote mode.
 
 ## F20. Migrate to the maintained `tower-lsp` fork
 
@@ -458,11 +276,11 @@ upstream progress before assuming this migration alone resolves them.
 
 **The real complexity driver:** `ls-types`'s `Uri` is a newtype over
 `fluent_uri::Uri<String>`, not `url::Url`. Our code uses `Url`
-(re-exported from `lsp_types`) directly in roughly 90 files across
-nearly every module — path manipulation, `to_file_path`/
+(re-exported from `lsp_types`) directly across nearly every module — path manipulation, `to_file_path`/
 `from_file_path`, `.path()`, `.join()`, and more — and `fluent_uri`'s
 API does not mirror `url::Url`'s. This is a project-wide port of the
-document-URI type, not a mechanical import rename. Scope it file by
+document-URI type, not a mechanical import rename (about 110 non-test
+files use `Url` today). Scope it file by
 file before committing to a single PR; it may need a preparatory
 abstraction (e.g. isolate URI construction/parsing behind a narrow
 internal helper) to keep the blast radius reviewable, and likely
@@ -475,9 +293,7 @@ signatures) to scope the mechanical rename across every file that does
 `use tower_lsp::...` (grep `tower_lsp::` for the full list:
 `src/lsp_dispatch.rs`, `src/inlay_hints.rs`, `src/document_symbols.rs`,
 `src/folding.rs`, `src/phpcs.rs`, `src/fix.rs`,
-`src/selection_range.rs`, `src/text_position.rs`, and others), plus the
-wire-protocol test harness described in `test-porting.md` Phase 6B if
-that gets ported around the same time.
+`src/selection_range.rs`, `src/text_position.rs`, and others).
 
 **Where to look:** `Cargo.toml`'s `tower-lsp = { version = "0.20", features = ["proposed"] }`.
 
@@ -488,8 +304,8 @@ that gets ported around the same time.
 Type hierarchy (`textDocument/prepareTypeHierarchy`,
 `typeHierarchy/supertypes`, `typeHierarchy/subtypes`) is fully
 implemented (`src/type_hierarchy.rs`) and registered dynamically via
-`client/registerCapability` in `initialized` (`server.rs`,
-`type_hierarchy_registration()`), gated on the client declaring
+`client/registerCapability` in `initialized` (`src/backend/startup.rs`,
+using `type_hierarchy_registration()` from `server.rs`), gated on the client declaring
 `textDocument.typeHierarchy.dynamicRegistration: true`. This works for
 every client that supports dynamic registration, but there is no
 static fallback: `lsp-types` 0.94.1 (pinned by `tower-lsp` 0.20, see
@@ -516,14 +332,14 @@ capability or the dynamic registration, not both, per the client's
 declared support). Also
 verify whether the same version bump exposes `diagnostic` client
 capabilities more precisely — pull diagnostics (`diagnostic_provider`
-in `server.rs`) is unaffected by this gap (it's already advertised
+in `src/backend/startup.rs`) is unaffected by this gap (it's already advertised
 correctly whenever the client declares `textDocument.diagnostic`,
 verified by probing `initialize` directly with that capability set),
 but is worth a quick re-check after the migration in case the newer
 `lsp-types` changes the shape of that capability struct.
 
-**Where to look:** `src/server.rs` (`initialize`, `type_hierarchy_registration`),
-`src/type_hierarchy.rs`.
+**Where to look:** `src/backend/startup.rs` (`initialize`, `initialized`),
+`src/server.rs` (`type_hierarchy_registration`), `src/type_hierarchy.rs`.
 
 ---
 
@@ -566,10 +382,12 @@ The refusal message should then list only the names that could not
 move, and the response should still carry the edits for everything
 that could.
 
-**Where to look:** `src/rename/namespace.rs`
-(`namespace_merge_conflict`, `build_namespace_prefix_rename_edit`,
-`collect_merge_move_ops`), `src/rename/class.rs` (the import-adding
-rule to mirror).
+**Where to look:** `src/rename/namespace/mod.rs`
+(`build_namespace_prefix_rename_edit`), `src/rename/namespace/layout.rs`
+(`namespace_merge_conflict`, `collect_merge_move_ops`),
+`src/rename/class/mod.rs` (the import-adding rule to mirror).
+
+---
 
 ## F23. Rename a class through its YAML/XML occurrences
 
@@ -601,5 +419,5 @@ escaping" rather than a bare PHP one.
 **Where to look:** `src/resource_navigation.rs` (`scan_symbols`,
 `normalize_fqn`), `src/references/dispatch.rs`
 (`find_references_inner`), `src/rename/validate.rs`
-(`Expected`, `is_name_token`), `src/rename/class.rs`
+(`Expected`, `is_name_token`), `src/rename/class/mod.rs`
 (`build_class_move_edit`).

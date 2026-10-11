@@ -8,10 +8,6 @@ within the same impact tier.
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
-**Refactoring code actions overview:** A2 (Extract Function) depends on
-forward-pass variable usage tracking with byte offsets across function
-scopes.
-
 ## A34. Unified code action handler architecture
 
 **Impact: Medium · Complexity: Very High**
@@ -59,8 +55,8 @@ cheaper to add: write one function, append it to an array.
 **Impact: Medium · Complexity: Medium**
 
 We advertise `codeActionKinds` (`quickfix`, `refactor.extract`,
-`refactor.inline`, `source.organizeImports`) in `code_action_provider`
-(`src/server.rs`), and every collector already tags its `CodeAction`
+`refactor.inline`, `source.organizeImports`, `source.addMissingImports`)
+in `code_action_provider` (`src/backend/startup.rs`), and every collector already tags its `CodeAction`
 with a `kind`, but `handle_code_action` in `src/code_actions/mod.rs`
 never reads `params.context.only` and never filters its result against
 it. A client that asks for only quick-fixes (its Ctrl+.-style menu) or
@@ -111,9 +107,10 @@ Several collectors already emit kinds we don't declare in
 (`convert_switch_to_match`, `convert_to_arrow_function`,
 `convert_to_closure`, `convert_to_interpolation`,
 `promote_constructor_param`, `simplify_null`), `refactor.rewrite` via
-`CodeActionKind::REFACTOR_REWRITE` (`generate_constructor`), and the
-bare `CodeActionKind::REFACTOR` (`generate_getter_setter`,
-`generate_property_hooks`, `replace_fqcn`). Reconcile these as part of
+`CodeActionKind::REFACTOR_REWRITE` (`generate_constructor`,
+`change_visibility`, `replace_fqcn`), and the bare
+`CodeActionKind::REFACTOR` (`generate_getter_setter`,
+`generate_property_hooks`). Reconcile these as part of
 the same task: either add the missing kinds to the advertised list, or
 fold each action under an already-declared parent kind — a client
 that trusts our advertised capability list and asks for exactly what
@@ -130,15 +127,11 @@ there.
 
 **Where to look:** `handle_code_action` in `src/code_actions/mod.rs`
 (the ~30 `collect_*_actions` call list — each call site is where the
-early kind-gate belongs); `code_action_provider` in `src/server.rs`
-for the advertised kind list; A34 above is the natural long-term home
-for a per-handler kind table if that refactor lands first, but this
-doesn't need to wait for it — the gate works fine bolted onto the
-current call list.
-
----
-
-
+early kind-gate belongs); `code_action_provider` in
+`src/backend/startup.rs` for the advertised kind list; A34 above is the
+natural long-term home for a per-handler kind table if that refactor
+lands first, but this doesn't need to wait for it — the gate works fine
+bolted onto the current call list.
 
 ---
 
@@ -177,10 +170,11 @@ over it without an extra rename step.
 ### Implementation
 
 1. **Store client capabilities at initialisation.**  In `initialize`,
-   save the `InitializeParams.capabilities` (or at least the snippet
-   edit flag) on the `Backend` struct.
+   save the snippet edit flag on the `Backend` struct, the same way
+   `supports_code_action_resolve` is stored.
 
-2. **Check the flag in `collect_extract_function_actions`.**  When
+2. **Check the flag in `resolve_extract_function`** (extract function
+   is a deferred action, so its edit is built at resolve time).  When
    the client supports snippet edits, build the workspace edit with
    `DocumentChanges::Operations` containing `SnippetTextEdit` entries
    instead of plain `TextEdit`.  The new-text for the method name
@@ -300,7 +294,9 @@ these eagerly, removing the else changes semantics).
 **Impact: Low-Medium · Complexity: Medium-High**
 
 Replace null-checked method/property chains with PHP 8.0's nullsafe
-operator:
+operator. The ternary form (`$x !== null ? $x->foo() : null` →
+`$x?->foo()`) already ships in `src/code_actions/simplify_null.rs`; what
+remains is the if-statement form, which belongs in the same module:
 
 ```php
 // Before
@@ -323,7 +319,7 @@ $city = $user?->getAddress()?->getCity();
 
 - The if-body contains exactly one statement: an assignment or a
   standalone expression statement using the checked variable.
-- The null check is `$var !== null`, `$var !== null`, `!is_null($var)`,
+- The null check is `$var !== null`, `$var != null`, `!is_null($var)`,
   or `isset($var)` (for a single variable, not array access).
 - There is no `else` / `elseif` branch. An else branch means the
   developer wants to handle the null case explicitly, which `?->`
@@ -353,69 +349,68 @@ $city = $user?->getAddress()?->getCity();
 
 ---
 
-### A38. Convert if/elseif chain to switch
+### A38. Convert if/elseif chain to `match`
 
 **Impact: Low-Medium · Complexity: Medium-High**
 
-Convert an if/elseif chain that compares the same variable or
-expression against different values into a `switch` statement:
+Convert an if/elseif chain that compares the same subject against
+different values into a `match` expression:
 
 ```php
 // Before
 if ($status === 'active') {
-    doActive();
-} elseif ($status === 'inactive') {
-    doInactive();
-} elseif ($status === 'pending') {
-    doPending();
+    $label = 'Active';
+} elseif ($status === 'inactive' || $status === 'disabled') {
+    $label = 'Off';
 } else {
-    doDefault();
+    $label = 'Unknown';
 }
 
 // After
-switch ($status) {
-    case 'active':
-        doActive();
-        break;
-    case 'inactive':
-        doInactive();
-        break;
-    case 'pending':
-        doPending();
-        break;
-    default:
-        doDefault();
-        break;
-}
+$label = match ($status) {
+    'active' => 'Active',
+    'inactive', 'disabled' => 'Off',
+    default => 'Unknown',
+};
 ```
+
+`match` compares with `===`, so a chain of strict comparisons converts
+exactly, which `switch`'s loose comparison could not offer. It also
+sits next to the shipped switch → match action
+(`convert_switch_to_match.rs`) rather than working against it.
 
 #### When the conversion is safe
 
-- Every condition in the chain compares the same subject expression
-  against a constant value using `===` or `==` (all arms must use the
-  same comparison operator).
-- The subject expression is a simple expression (variable, property
-  access, method call) that should not have side effects when evaluated
-  once in the switch head instead of repeatedly in each condition.
-- With `===`, the conversion is semantically exact only for scalar
-  values. Switch uses loose comparison internally, so strict-equality
-  chains are converted with a comment noting the semantic difference,
-  or the action is only offered for `==` chains.
+- Every condition compares the same subject expression against a
+  value with `===`, optionally several of them joined by `||` (which
+  become one arm with comma-separated conditions). A `==` chain is
+  only converted when the subject's type makes loose and strict
+  comparison agree (e.g. both sides are strings).
+- The subject is side-effect free (variable, property access), since
+  it is evaluated once instead of once per condition.
+- `match` arms are expressions, so every branch must reduce to the same
+  shape: a single `return <expr>;` in each branch (the result is
+  `return match (…) { … };`), a single assignment to the same variable
+  in each branch (`$x = match (…) { … };`), or a `throw` (a valid arm
+  expression since PHP 8.0) in any branch of either form. Branches
+  with more than one statement are not converted.
+- The chain has a trailing `else`, which becomes `default`. Without
+  one, `match` throws `UnhandledMatchError` where the if-chain did
+  nothing, so the action is not offered. (A `return` chain followed
+  directly by a `return` statement can use that statement as the
+  `default` arm.)
 
 #### Implementation
 
-- Walk the AST for `Statement::If` nodes that have at least one
-  `elseif` branch.
-- Extract the subject from the first condition's comparison. Verify
-  all subsequent conditions compare the same subject (by source text
-  or AST structure equality).
-- Build a `switch` statement: each condition value becomes a `case`,
-  the if/elseif body becomes the case body with `break;` appended
-  (unless the body ends with `return`, `throw`, or `continue`).
-- If the chain has a trailing `else`, convert it to `default:`.
-- Replace the entire if/elseif/else block with the switch.
+- Walk the AST for `Statement::If` nodes with at least one `elseif`.
+- Extract the subject from the first condition and verify every other
+  condition compares the same subject (by AST structure equality).
+- Check the branch shape above, build the `match`, and replace the
+  whole if/elseif/else block (plus a following `return` when it was
+  folded into `default`).
 
 **Code action kind:** `refactor.rewrite`.
+**Guard:** `php_version >= 8.0`.
 
 ---
 
@@ -471,7 +466,11 @@ Phpactor has this.
 
 Auto-update or add `@extends`/`@implements` tags to match the actual
 class hierarchy when a class extends a generic parent. Phpactor has
-this as a transformer.
+this as a transformer. Typing `/**` above a class already generates
+these tags for a new docblock
+(`src/completion/phpdoc/generation/build.rs`); what remains is a code
+action for a class that already has a docblock, naturally alongside
+`update_docblock.rs`.
 
 - Inspect the `extends` and `implements` clauses of the class under
   the cursor.

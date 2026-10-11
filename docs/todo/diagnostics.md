@@ -53,8 +53,8 @@ proxies:
 **Impact: Low · Complexity: Medium**
 
 Flag function and method parameters that are never read inside the
-body. This was intentionally excluded from D4 (unused variable
-diagnostic) because false positives are common for callbacks, interface
+body. The `unused_variable` diagnostic deliberately skips parameters
+because false positives are common for callbacks, interface
 implementations, and framework conventions (e.g. Laravel event
 listeners) that require specific parameter signatures even when not
 all parameters are used. Users can now silence false positives with
@@ -317,12 +317,12 @@ cannot invent a report — but it hides one:
 
 ```php
 class Owner {
-    private static function hidden(): void {}
+    private function hidden(): void {}
 
-    public function boot(): void
+    public function boot(Owner $o): void
     {
-        Target::macro('x', function (): void {
-            self::hidden();      // fatal: the closure's scope is Target
+        Target::macro('x', function () use ($o): void {
+            $o->hidden();        // fatal: the closure's scope is Target
         });
     }
 }
@@ -335,7 +335,8 @@ class Target extends Owner {
 
 The closure is written inside `Owner`, so the enclosing class permits the
 call, while at runtime the scope is `Target` and a parent's private
-member is out of reach.
+member is out of reach. (`self::hidden()` in the same closure is already
+reported, because `self` itself resolves to the bound class.)
 
 **Fix:** Take the bound class from the resolver, which already computes
 it, and let it replace the enclosing class rather than joining it.

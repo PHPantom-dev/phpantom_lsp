@@ -21,29 +21,27 @@ within the same impact tier.
 
 These functions have return type semantics that don't fit into either
 `ARRAY_PRESERVING_FUNCS` (same array type out) or `ARRAY_ELEMENT_FUNCS`
-(single element out). Each needs its own mini-resolver.
+(single element out). Each needs its own mini-resolver (in
+`array_func_rules`) or a stub patch. The key-extracting functions
+(`array_keys`, `array_search`, `array_key_first`/`_last`, `key`,
+`array_find_key`), `array_fill_keys`, and `min`/`max` are already
+handled; the table lists what still resolves to a bare `array` or a
+loose type.
 
 | Function                             | Return type logic                                              | PHPStan extension                               |
 | ------------------------------------ | -------------------------------------------------------------- | ----------------------------------------------- |
-| `array_keys`                         | Returns `list<TKey>` — extracts the _key_ type, not value type | `ArrayKeysFunctionDynamicReturnTypeExtension`   |
 | `array_column`                       | Extracts a column from a 2D array, preserving types            | `ArrayColumnFunctionReturnTypeExtension`        |
 | `array_combine`                      | Keys from first array arg, values from second                  | `ArrayCombineFunctionReturnTypeExtension`       |
 | `array_fill`                         | `array<int, TValue>` preserving the fill value type            | `ArrayFillFunctionReturnTypeExtension`          |
-| `array_fill_keys`                    | Preserves key array type + value type                          | `ArrayFillKeysFunctionReturnTypeExtension`      |
-| `array_flip`                         | Swaps key↔value types                                          | `ArrayFlipFunctionReturnTypeExtension`          |
+| `array_flip`                         | Swaps key↔value types (today: `array<int\|string, array-key>`) | `ArrayFlipFunctionReturnTypeExtension`          |
 | `array_pad`                          | Union of existing value type + pad value type                  | `ArrayPadDynamicReturnTypeExtension`            |
 | `array_replace`                      | Merge-like, preserving types from all args                     | `ArrayReplaceFunctionReturnTypeExtension`       |
 | `array_change_key_case`              | Preserves value type, transforms key type                      | `ArrayChangeKeyCaseFunctionReturnTypeExtension` |
-| `array_intersect_key`                | Preserves first array's types (dedicated extension)            | `ArrayIntersectKeyFunctionReturnTypeExtension`  |
-| `array_search`                       | Returns key type of the haystack array                         | `ArraySearchFunctionDynamicReturnTypeExtension` |
-| `array_rand`                         | Returns key type of the input array                            | `ArrayRandFunctionReturnTypeExtension`          |
+| `array_intersect_key`                | Preserves first array's types (missing from `ARRAY_PRESERVING_FUNCS`, unlike `array_diff_key`) | `ArrayIntersectKeyFunctionReturnTypeExtension`  |
+| `array_rand`                         | Returns key type of the input array (today: `array\|string\|int`) | `ArrayRandFunctionReturnTypeExtension`          |
 | `array_count_values`                 | Returns `array<TValue, int>`                                   | `ArrayCountValuesDynamicReturnTypeExtension`    |
-| `array_key_first` / `array_key_last` | Returns key type (usually scalar, low completion value)        | `ArrayFirstLastDynamicReturnTypeExtension`      |
-| `key`                                | Returns the key type of the array at the internal pointer      | `KeyFunctionDynamicReturnTypeExtension`         |
-| `array_find_key`                     | Returns key type (PHP 8.4)                                     | `ArrayFindKeyFunctionReturnTypeExtension`       |
 | `compact`                            | Builds typed array from variable names                         | `CompactFunctionReturnTypeExtension`            |
-| `count` / `sizeof`                   | Returns precise int range based on array size                  | `CountFunctionReturnTypeExtension`              |
-| `min` / `max`                        | Returns union of argument types                                | `MinMaxFunctionReturnTypeExtension`             |
+| `count` / `sizeof`                   | Returns precise int range based on array size (today: always `int<0, max>`) | `CountFunctionReturnTypeExtension`              |
 
 ---
 
@@ -73,29 +71,26 @@ key inside the matching `array{…}` annotation.
 
 PHPStan also provides dynamic return type extensions for many non-array
 functions. These are lower priority because they mostly refine scalar
-return types (less impactful for class-based completion).
+return types (less impactful for class-based completion). `abs`,
+`explode`, `get_class`, `date_create` and `class_implements` already
+resolve precisely; the rest still return their declared stub type.
 
 | Function                                            | Return type logic                                   | PHPStan extension                                  |
 | --------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------- |
-| `abs`                                               | Preserves int/float return type                     | `AbsFunctionDynamicReturnTypeExtension`            |
-| `base64_decode`                                     | `string\|false` based on strict param               | `Base64DecodeDynamicFunctionReturnTypeExtension`   |
-| `explode`                                           | `list<string>` / `non-empty-list<string>` / `false` | `ExplodeFunctionDynamicReturnTypeExtension`        |
+| `base64_decode`                                     | `string` when strict is false                       | `Base64DecodeDynamicFunctionReturnTypeExtension`   |
 | `filter_var`                                        | Return type depends on filter constant              | `FilterVarDynamicReturnTypeExtension`              |
 | `filter_input`                                      | Same as `filter_var`                                | `FilterInputDynamicReturnTypeExtension`            |
 | `filter_var_array` / `filter_input_array`           | Typed array based on filter definitions             | `FilterVarArrayDynamicReturnTypeExtension`         |
-| `get_class`                                         | Returns `class-string<T>`                           | `GetClassDynamicReturnTypeExtension`               |
 | `get_called_class`                                  | Returns `class-string<static>`                      | `GetCalledClassDynamicReturnTypeExtension`         |
 | `get_parent_class`                                  | Returns parent class-string                         | `GetParentClassDynamicFunctionReturnTypeExtension` |
 | `gettype`                                           | Returns specific string literal for known types     | `GettypeFunctionReturnTypeExtension`               |
 | `get_debug_type`                                    | Returns specific string literal                     | `GetDebugTypeFunctionReturnTypeExtension`          |
 | `constant`                                          | Resolves named constant to its type                 | `ConstantFunctionReturnTypeExtension`              |
 | `date` / `date_format`                              | Precise string return types                         | `DateFunctionReturnTypeExtension`                  |
-| `date_create` / `date_create_immutable`             | `DateTime\|false`                                   | `DateTimeCreateDynamicReturnTypeExtension`         |
 | `hash` / `hash_file` / etc.                         | Precise return types                                | `HashFunctionsReturnTypeExtension`                 |
 | `sprintf` / `vsprintf`                              | Non-empty-string preservation                       | `SprintfFunctionDynamicReturnTypeExtension`        |
 | `preg_split`                                        | `list<string>\|false` based on flags                | `PregSplitDynamicReturnTypeExtension`              |
 | `str_split` / `mb_str_split`                        | Non-empty-list                                      | `StrSplitFunctionReturnTypeExtension`              |
-| `class_implements` / `class_uses` / `class_parents` | `array<string, string>\|false`                      | `ClassImplementsFunctionReturnTypeExtension`       |
 
 ---
 
@@ -203,8 +198,9 @@ combinations.
 Resolve `class_alias('OriginalClass', 'AliasName')` so that the alias
 name works for completion, go-to-definition, and hover. PHP's
 `class_alias()` creates a runtime alias for a class, and many codebases
-rely on this for backwards compatibility layers and framework internals
-(Laravel's Facade loader uses `class_alias` to register short names).
+rely on this for backwards compatibility layers. (Laravel's facade
+aliases from `config/app.php` are already resolved separately, in
+`virtual_members/laravel/aliases.rs`.)
 
 Today, if a file calls `class_alias('\App\Services\UserService',
 'UserService')`, using `UserService` elsewhere produces no completions
@@ -224,7 +220,7 @@ and no go-to-definition because PHPantom has no record of the alias.
    and definition logic works without changes.
 
 3. **Cross-file aliases** — for aliases defined in autoloaded files
-   (e.g. a `_ide_helper.php` or a framework bootstrap file), the alias
+   (e.g. a library's bootstrap or compatibility file), the alias
    mapping needs to be stored in `fqn_uri_index` or a parallel index so
    that it's available project-wide. This is the main effort: deciding
    where to persist the alias data and when to scan for it.
@@ -264,33 +260,15 @@ candidate file.
    integer range (e.g. 0-99).
 
 2. **Integrate into `class_sort_text`** — add a new dimension after
-   `affinity` and before `demote`. This keeps it as a tiebreaker
-   within the same affinity bracket rather than overriding the
-   namespace-usage signal. Only apply when the affinity score is zero
-   or tied.
+   `affinity` (the key is currently affinity, demote, gap). This keeps
+   it as a tiebreaker within the same affinity bracket rather than
+   overriding the namespace-usage signal. Only apply when the affinity
+   score is zero or tied.
 
 3. **Pass the current file path** through `ClassCompletionParams` and
    into `ClassItemCtx` so it's available during sort-text construction.
 
-## C10. Deprecation markers on class-name completions from all sources
-
-**Impact: Low · Complexity: Medium**
-
-Same-namespace classes (source tier 2) already carry deprecation info
-because `ClassInfo` is available. Classes from `fqn_uri_index`
-and stubs (tiers 3-4) don't check for `@deprecated` because the class
-may not be fully loaded at completion time.
-
-For classmap entries, a lightweight byte-level scan of the first
-docblock in the file (similar to `detect_stub_class_kind`) could detect
-`@deprecated` without a full parse. For stubs, the source is already
-in memory and could be scanned cheaply. For fqn_uri_index entries, the
-deprecation flag could be stored alongside the file path when the class
-is first indexed.
-
-This is a small quality-of-life improvement: deprecated classes would
-show with a strikethrough in the completion menu across all sources,
-not just same-namespace ones.
+---
 
 ## C11. Smarter member ordering after `->` / `::`
 
@@ -327,6 +305,27 @@ needs experimentation. A next step could be adding declaration origin
 on top of the existing kind tiering, which requires no new data and is
 straightforward to implement.
 
+---
+
+## C10. Deprecation markers on class-name completions from all sources
+
+**Impact: Low · Complexity: Medium**
+
+Both class-name completion passes (`fqn_uri_index` and stubs) mark a
+candidate deprecated when its `ClassInfo` is already loaded
+(`find_class_in_uri_classes_index` in `class_completion/mod.rs`),
+whatever its source. Classes that have not been loaded yet show no
+strikethrough even when they carry `@deprecated`.
+
+For classmap entries, a lightweight byte-level scan of the first
+docblock in the file (similar to `detect_stub_class_kind`) could detect
+`@deprecated` without a full parse. For stubs, the source is already
+in memory and could be scanned cheaply. For fqn_uri_index entries, the
+deprecation flag could be stored alongside the file path when the class
+is first indexed.
+
+---
+
 ## C12. The implicit `$value` of a `set` hook is not offered by variable completion
 
 **Impact: Low · Complexity: Medium**
@@ -359,6 +358,8 @@ edit that corrupts the hook. The fix needs a def kind those consumers
 skip (say `VarDefKind::ImplicitHookValue`) while variable completion
 includes it.
 
+---
+
 ## C13. `self::`/`static::` inside a `@require-extends` trait does not see the required class's static members
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -387,13 +388,13 @@ trait Bar {
 Every caller of `trait_this_bounds`/`extend_this_with_trait_bounds` is on
 a `$this`-context resolution path (`forward_walk/param_seeding.rs`,
 `forward_walk/callable_inference.rs`, `resolver/mod.rs`, and
-`diagnostics/deprecated.rs`) — none of them run for a bare `self::`/
-`static::` completion inside a trait body, so the required class's
-constants and static properties/methods never enter the candidate list
-there.
+`rhs_resolution/property_access.rs`). None of them run for a bare
+`self::`/`static::` completion inside a trait body, so the required
+class's constants and static properties/methods never enter the
+candidate list there.
 
-**Fix:** find where `self::`/`static::` completion resolves its target
-class for a trait method body (as opposed to `$this->`'s path) and feed
-it through the same `@require-extends`/`@require-implements` bound the
-`$this->` path already consults, rather than adding a second lookup of
-the tag.
+**Fix:** `SubjectExpr::SelfKw | StaticKw` goes straight to
+`resolve_self_static_class` (`type_engine/resolver/mod.rs`) with no
+trait-bound extension. Feed it through the same
+`@require-extends`/`@require-implements` bound the `$this->` path
+already consults, rather than adding a second lookup of the tag.
