@@ -1071,6 +1071,39 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#p83-most-of-methodinfo-is-fields-that-76-of-methods-leave-empty" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P83. Most of <code>MethodInfo</code> is fields that 76% of methods leave empty
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P81. Call sites are 160-byte records with up to six side allocations
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p82-trivial-memory-fixes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P82. Trivial memory fixes
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1087,6 +1120,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Commands
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Memory
       </span>
     </span>
   </a>
@@ -1334,6 +1378,39 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#p83-most-of-methodinfo-is-fields-that-76-of-methods-leave-empty" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P83. Most of <code>MethodInfo</code> is fields that 76% of methods leave empty
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P81. Call sites are 160-byte records with up to six side allocations
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p82-trivial-memory-fixes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P82. Trivial memory fixes
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1350,6 +1427,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Commands
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Memory
       </span>
     </span>
   </a>
@@ -1425,7 +1513,72 @@ against that bar.</p>
 </tbody>
 </table>
 <hr />
-<p>No outstanding items.</p>
+<h2 id="p83-most-of-methodinfo-is-fields-that-76-of-methods-leave-empty">P83. Most of <code>MethodInfo</code> is fields that 76% of methods leave empty<a class="headerlink" href="#p83-most-of-methodinfo-is-fields-that-76-of-methods-leave-empty" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<p><code>MethodInfo</code> is 360 B, and about 288 B of that is fields most methods never
+set: <code>return_description</code>, <code>links</code>, <code>see_refs</code>, the two deprecation fields,
+the four <code>template_*</code> fields, <code>throws</code>, <code>type_assertions</code>,
+<code>conditional_return</code>, <code>if_this_is</code> and <code>self_out</code>. Even empty, a <code>Vec</code> or
+<code>Option&lt;String&gt;</code> costs 24 B and an <code>AtomMap</code> 32 B. Across all 382k methods
+on the large Laravel app, <code>description</code> is set on 90%, but only 24% set
+any of the others (template fields 11.5%, <code>throws</code> 9.3%, conditional or
+<code>$this</code>-narrowing types 5.2%, everything else under 3%).</p>
+<p>Moving those fields behind one <code>Option&lt;Box&lt;MethodExtras&gt;&gt;</code> saves about
+280 B on three methods in four and costs a pointer plus a small allocation
+on the fourth: about 79 MB after <code>analyze</code> (8.5% of RSS) and 59 MB in the
+LSP (7%), measured before identical inherited members were shared, which
+lowers the method count and shrinks this to about 5-6%. The earlier
+finding that boxing docblock fields is a net loss still holds for
+<code>description</code> (set on 90%), which stays inline.</p>
+<p><strong>Where to look:</strong> <code>MethodInfo</code> in <code>types/mod.rs</code>. Most readers go through
+a handful of fields, so accessor methods for the moved ones keep the
+change mechanical. <code>ParameterInfo</code> (96 B) and <code>PropertyInfo</code> (376 B, mostly
+an inline <code>PropertySource</code> database variant) have the same shape, but there
+are fewer of them: about 13 MB and 8 MB, worth folding in only if the
+change is already touching them.</p>
+<hr />
+<h2 id="p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations">P81. Call sites are 160-byte records with up to six side allocations<a class="headerlink" href="#p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Every workspace file keeps its symbol map for the whole session
+(references, CodeLens and the Laravel string-key scanners read them), so
+<code>SymbolMap::call_sites</code> never goes away. On the large Laravel app it holds
+192k <code>CallSite</code>s at 160 B each (31 MB) plus 8 MB of heap in 380k separate
+allocations: <code>call_expression</code> is an owned <code>String</code>, and
+<code>comma_offsets</code>, <code>arg_offsets</code>, <code>named_arg_indices</code>, <code>named_arg_names</code>
+and <code>spread_arg_indices</code> are each their own <code>Vec</code>. With allocator overhead
+that is about 57 MB, 7% of the LSP's RSS.</p>
+<p><strong>Fix:</strong> move the per-site strings and offset lists into one arena per
+map (a <code>String</code> and a <code>Vec&lt;u32&gt;</code>) that each record indexes with
+offset/length pairs. That brings the record to roughly 40 B and the
+allocations to two per file. Interning <code>call_expression</code> as an <code>Atom</code>
+would be shorter to write but wrong here: <code>ustr</code> never frees, and call
+expression text changes with every edit.</p>
+<hr />
+<h2 id="p82-trivial-memory-fixes">P82. Trivial memory fixes<a class="headerlink" href="#p82-trivial-memory-fixes" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>Measured on the same app. Each is small; together they are about 5% of
+the LSP's RSS, and the intern store sweep also bounds growth over a long
+session.</p>
+<ul>
+<li><strong>Symbol map capacity slack.</strong> <code>spans</code> carry 17.7 MB of unused capacity
+  and <code>call_sites</code> about 11 MB. A <code>shrink_to_fit</code> when the map is built
+  reclaims about 29 MB (3.5%).</li>
+<li><strong>Member intern store never sweeps.</strong> <code>substituted_methods</code> and
+  <code>substituted_properties</code> in <code>virtual_members/cache.rs</code> hold the
+  transformed member strongly and are only cleared at 1M entries. An
+  edit that re-parses a file leaves its old transformed members alive,
+  and each entry's <code>Weak</code> witness keeps the dead origin's allocation
+  too. Sweep dead-witness entries when the map has doubled since the last
+  sweep, as <code>linked_aliases</code> already does at its cap. The method table
+  alone is 24.5 MB after a full <code>analyze</code>.</li>
+<li><strong>Interner buckets.</strong> <code>php_type/intern.rs</code> gives every hash its own
+  <code>Vec&lt;Weak&lt;TypeKind&gt;&gt;</code>, though almost every bucket holds one entry.
+  That is about 114k allocations and 5 MB. Store a single entry inline.</li>
+<li><strong>Audit drop probes keep table capacity.</strong> <code>mem_audit.rs</code> releases
+  each store with <code>clear()</code>, which keeps the hash table allocated, so
+  about 40 MB of table capacity is reported as "residual" instead of
+  under its store. Use <code>std::mem::take</code>.</li>
+</ul>
 <hr />
 <h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
 <h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>
@@ -1451,6 +1604,24 @@ against that bar.</p>
 <a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">  </span><span class="o">[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$cur</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="k">$((</span><span class="w"> </span><span class="o">(</span><span class="nv">cur</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">prev</span><span class="o">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="nv">prev</span><span class="o">=</span><span class="nv">$cur</span><span class="p">;</span><span class="w"> </span>sleep<span class="w"> </span><span class="m">0</span>.5
 <a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="k">done</span>
 </code></pre></div>
+<h3 id="memory">Memory<a class="headerlink" href="#memory" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Per-store deep-size audit printed at the end of `analyze`. The feature</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># installs a counting allocator, so build it into its own target dir to</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># keep the normal binary untouched.</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>cargo<span class="w"> </span>build<span class="w"> </span>--features<span class="w"> </span>mem-audit<span class="w"> </span>--target-dir<span class="w"> </span>target/memaudit
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nv">PHPANTOM_MEM_AUDIT</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>target/memaudit/debug/phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span>--project-root<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--no-colour
+</code></pre></div>
+<p>The audit walks every long-lived store with shared <code>Arc</code>s counted once,
+then drops each store in turn and reports the exact bytes released. For
+an editor session, <code>LspClient</code> in <code>benches/memory_usage.py</code> can drive the
+server (initialize, wait for indexing, open, hover) while you sample
+<code>VmRSS</code>. The two differ: a large Laravel app settled at 842 MB in the LSP
+against a 1,016 MB peak for <code>analyze</code>.</p>
+<p>Use heaptrack only on small projects (around 100 MB peak), and run it
+inside <code>systemd-run --user --scope -p MemoryMax=8G</code>. Its bookkeeping
+scales with the allocation count, and on a large Laravel app it exhausted
+a 64 GB machine.</p>
 <h3 id="growth-checks">Growth checks<a class="headerlink" href="#growth-checks" title="Permanent link">&para;</a></h3>
 <p>A whole-project profile hides a cost that only grows on one unusual
 input. Generate the input at N and 2N (a long top-level script, a
