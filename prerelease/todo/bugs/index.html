@@ -858,34 +858,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Standard-library return types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b592-class_implements-keeps-false-for-a-class-known-to-exist" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B592. <code>class_implements()</code> keeps <code>false</code> for a class known to exist
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b593-filter_var-returns-mixed-whatever-the-filter" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B593. <code>filter_var()</code> returns <code>mixed</code> whatever the filter
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -993,6 +965,17 @@
   
     <nav class="md-nav" aria-label="Array types">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b614-an-array-literal-written-inside-a-calls-arguments-is-typed-as-bare-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B614. An array literal written inside a call's arguments is typed as bare <code>array</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#b591-array_map-reads-a-parenthesised-new-receiver-as-the-element-type" class="md-nav__link">
@@ -1619,34 +1602,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Standard-library return types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b592-class_implements-keeps-false-for-a-class-known-to-exist" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B592. <code>class_implements()</code> keeps <code>false</code> for a class known to exist
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b593-filter_var-returns-mixed-whatever-the-filter" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B593. <code>filter_var()</code> returns <code>mixed</code> whatever the filter
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1754,6 +1709,17 @@
   
     <nav class="md-nav" aria-label="Array types">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b614-an-array-literal-written-inside-a-calls-arguments-is-typed-as-bare-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B614. An array literal written inside a call's arguments is typed as bare <code>array</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#b591-array_map-reads-a-parenthesised-new-receiver-as-the-element-type" class="md-nav__link">
@@ -1927,35 +1893,17 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
-<h3 id="b592-class_implements-keeps-false-for-a-class-known-to-exist">B592. <code>class_implements()</code> keeps <code>false</code> for a class known to exist<a class="headerlink" href="#b592-class_implements-keeps-false-for-a-class-known-to-exist" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">if (is_string($c) &amp;&amp; class_exists($c) &amp;&amp; in_array(Foo::class, class_implements($c), true)) {}</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">// Argument 2 ($haystack) expects array, got array&lt;string&gt;|false</span>
-</code></pre></div>
-<p><code>class_implements()</code>, <code>class_parents()</code> and <code>class_uses()</code> only return
-<code>false</code> when the class cannot be loaded. After a <code>class_exists()</code> check
-(or on a literal <code>Foo::class</code>) the <code>false</code> cannot happen. PHPStan returns a
-benevolent <code>array|false</code> here, which is why it stays quiet.</p>
-<h3 id="b593-filter_var-returns-mixed-whatever-the-filter">B593. <code>filter_var()</code> returns <code>mixed</code> whatever the filter<a class="headerlink" href="#b593-filter_var-returns-mixed-whatever-the-filter" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$id = filter_var($v, FILTER_VALIDATE_INT, [&#39;options&#39; =&gt; [&#39;min_range&#39; =&gt; 1]]);</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">// PHPantom: mixed. PHPStan: int&lt;1, max&gt;|false</span>
-</code></pre></div>
-<p><code>FILTER_VALIDATE_INT</code>, <code>FILTER_VALIDATE_FLOAT</code>, <code>FILTER_VALIDATE_BOOL</code> and
-friends decide the result type (plus <code>false</code>, or <code>null</code> with
-<code>FILTER_NULL_ON_FAILURE</code>). With <code>mixed</code>, <code>$texts[$id] = …</code> widens a
-documented <code>array&lt;int, string&gt;</code> to <code>int|string</code> keys, which then fails the
-array's own <code>@var</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b594-is_subclass_of-does-not-narrow-a-string-to-class-stringx">B594. <code>is_subclass_of()</code> does not narrow a string to <code>class-string&lt;X&gt;</code><a class="headerlink" href="#b594-is_subclass_of-does-not-narrow-a-string-to-class-stringx" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">function f(string $cls): void {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    if (is_subclass_of($cls, \Countable::class)) {</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">        takesCountableClass($cls); // got string|class-string</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    }</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function f(string $cls): void {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    if (is_subclass_of($cls, \Countable::class)) {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">        takesCountableClass($cls); // got string|class-string</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    }</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>The narrowed type should be <code>class-string&lt;Countable&gt;</code>, as with
 <code>is_a($cls, X::class, true)</code>. Early-return form
@@ -1964,71 +1912,86 @@ array's own <code>@var</code>.</p>
 affected the same way.</p>
 <h3 id="b595-a-strict-in_array-narrows-the-needle-to-null">B595. A strict <code>in_array()</code> narrows the needle to <code>null</code><a class="headerlink" href="#b595-a-strict-in_array-narrows-the-needle-to-null" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$in = $parameter[&#39;in&#39;] ?? null;</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">if (in_array($in, [&#39;path&#39;, &#39;query&#39;], true)) {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    takesString($in); // got null</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$in = $parameter[&#39;in&#39;] ?? null;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">if (in_array($in, [&#39;path&#39;, &#39;query&#39;], true)) {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    takesString($in); // got null</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>The needle should become <code>'path'|'query'</code>. It comes out as <code>null</code>, which
 is the one member the haystack rules out. The negated early-<code>continue</code>
 form gives the same result.</p>
 <h3 id="b596-a-comparison-with-null-inside-a-loop-leaves-the-null-in">B596. A comparison with <code>null</code> inside a loop leaves the <code>null</code> in<a class="headerlink" href="#b596-a-comparison-with-null-inside-a-loop-leaves-the-null-in" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @param list&lt;array{ts?: string}&gt; $rows */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function f(array $rows, DateTimeImmutable $last): DateTimeImmutable {</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    foreach ($rows as $row) {</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">        $t = isset($row[&#39;ts&#39;]) ? new DateTimeImmutable($row[&#39;ts&#39;]) : null;</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">        $last = $last &gt; $t ? $last : $t;</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">    }</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">    return $last; // DateTimeImmutable|null</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @param list&lt;array{ts?: string}&gt; $rows */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function f(array $rows, DateTimeImmutable $last): DateTimeImmutable {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    foreach ($rows as $row) {</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">        $t = isset($row[&#39;ts&#39;]) ? new DateTimeImmutable($row[&#39;ts&#39;]) : null;</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        $last = $last &gt; $t ? $last : $t;</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    }</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    return $last; // DateTimeImmutable|null</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">}</span>
 </code></pre></div>
 <p>An object is always greater than <code>null</code>, so the <code>else</code> arm never sees a
 <code>null</code> <code>$t</code>. Straight-line code gets this right; only inside the loop does
 the result keep <code>null</code>.</p>
 <h3 id="b597-a-ternary-that-pairs-a-value-with-an-instance-check-is-not-remembered">B597. A ternary that pairs a value with an instance check is not remembered<a class="headerlink" href="#b597-a-ternary-that-pairs-a-value-with-an-instance-check-is-not-remembered" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$problems = $importer instanceof BrandBibleSheet ? $importer-&gt;getProblems() : [];</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">if ($problems !== []) {</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    $this-&gt;logProblems($importer, $problems); // expects BrandBibleSheet, got BaseExcelImport</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$problems = $importer instanceof BrandBibleSheet ? $importer-&gt;getProblems() : [];</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">if ($problems !== []) {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    $this-&gt;logProblems($importer, $problems); // expects BrandBibleSheet, got BaseExcelImport</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>A non-empty <code>$problems</code> implies the <code>instanceof</code> arm ran. The stored
 conditions already record this kind of implication for <code>if</code>/<code>else</code>
 assignments; the ternary form does not record it.</p>
 <h3 id="b598-phpstan-assert-on-a-property-narrows-only-the-object-members">B598. <code>@phpstan-assert</code> on a property narrows only the object members<a class="headerlink" href="#b598-phpstan-assert-on-a-property-narrows-only-the-object-members" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">final class Job { /** @var DateTimeInterface|DateInterval|array|int|null */ public $delay; }</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">self::assertInstanceOf(DateTimeImmutable::class, $job-&gt;delay);</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">takesInt($job-&gt;delay); // got array|int|DateTimeImmutable</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">self::assertInstanceOf(DateTimeImmutable::class, $local);</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">takesInt($local);      // got DateTimeImmutable (correct)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">final class Job { /** @var DateTimeInterface|DateInterval|array|int|null */ public $delay; }</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">self::assertInstanceOf(DateTimeImmutable::class, $job-&gt;delay);</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">takesInt($job-&gt;delay); // got array|int|DateTimeImmutable</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">self::assertInstanceOf(DateTimeImmutable::class, $local);</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">takesInt($local);      // got DateTimeImmutable (correct)</span>
 </code></pre></div>
 <p>PHPUnit's <code>assertInstanceOf()</code> carries <code>@phpstan-assert =ExpectedType
 $actual</code>. On a local variable the whole type is replaced; on a property
 fetch the <code>array</code> and <code>int</code> members survive.</p>
 <h3 id="b599-phpunits-assertnotsame-x-does-not-narrow">B599. PHPUnit's <code>assertNotSame([], $x)</code> does not narrow<a class="headerlink" href="#b599-phpunits-assertnotsame-x-does-not-narrow" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">preg_match(&#39;/…/&#39;, $html, $matches);</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">self::assertNotSame([], $matches);</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">self::assertStringNotContainsString(&#39;x&#39;, $matches[0]); // got string|null</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">preg_match(&#39;/…/&#39;, $html, $matches);</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">self::assertNotSame([], $matches);</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">self::assertStringNotContainsString(&#39;x&#39;, $matches[0]); // got string|null</span>
 </code></pre></div>
 <p>PHPUnit declares no <code>@phpstan-assert</code> on <code>assertNotSame()</code>; PHPStan's
 PHPUnit extension narrows it (and <code>assertSame</code>, <code>assertNotNull</code>,
 <code>assertNotEmpty</code> and others) as if it were the matching <code>!==</code>/<code>===</code> check.
 Mirroring that table would cover the common assertions.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
+<h3 id="b614-an-array-literal-written-inside-a-calls-arguments-is-typed-as-bare-array">B614. An array literal written inside a call's arguments is typed as bare <code>array</code><a class="headerlink" href="#b614-an-array-literal-written-inside-a-calls-arguments-is-typed-as-bare-array" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">takesInt(filter_var($v, FILTER_VALIDATE_INT, [&#39;options&#39; =&gt; [&#39;min_range&#39; =&gt; 1]]));</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">// Argument 1 expects int, got mixed (should be int&lt;1, max&gt;|false)</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">$id = filter_var($v, FILTER_VALIDATE_INT, [&#39;options&#39; =&gt; [&#39;min_range&#39; =&gt; 1]]);</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">// int&lt;1, max&gt;|false, as expected</span>
+</code></pre></div>
+<p>A call nested inside another call's arguments is resolved from its argument
+text, and that resolver reads any <code>[…]</code> or <code>array(…)</code> literal as <code>array</code>
+without looking inside. Anything keyed on an array argument's shape (the
+<code>filter_var()</code> options, a template bound from a literal array, a
+conditional return type on an <code>array{…}</code> parameter) loses it there, while
+the same call as an assignment's right-hand side goes through the forward
+walker and sees the shape. Typing the literal through the shared expression
+resolver would make both paths agree.</p>
 <h3 id="b591-array_map-reads-a-parenthesised-new-receiver-as-the-element-type">B591. <code>array_map</code> reads a parenthesised <code>new</code> receiver as the element type<a class="headerlink" href="#b591-array_map-reads-a-parenthesised-new-receiver-as-the-element-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">final class R {</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    /** @return list&lt;stdClass&gt; */</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    public function all(): array { return []; }</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    public function c(): void {</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">        array_map(fn(stdClass $s) =&gt; $s-&gt;name, (new R())-&gt;all());</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">        // expects callable(R): mixed, got Closure(stdClass)</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="x">    }</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">final class R {</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    /** @return list&lt;stdClass&gt; */</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    public function all(): array { return []; }</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    public function c(): void {</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">        array_map(fn(stdClass $s) =&gt; $s-&gt;name, (new R())-&gt;all());</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">        // expects callable(R): mixed, got Closure(stdClass)</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">    }</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="x">}</span>
 </code></pre></div>
 <p>The array argument itself resolves to <code>list&lt;stdClass&gt;</code> (passing it to an
 <code>int</code> parameter says so), and the same call through a variable
@@ -2038,17 +2001,17 @@ callback's expected parameter lands on <code>R</code>, so that derivation appear
 resolve the receiver <code>(new R())</code> instead of the whole call.</p>
 <h3 id="b605-iterating-a-class-constant-of-enum-cases-gives-mixed">B605. Iterating a class constant of enum cases gives <code>mixed</code><a class="headerlink" href="#b605-iterating-a-class-constant-of-enum-cases-gives-mixed" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">enum Country: string { case DK = &#39;dk&#39;; case SE = &#39;se&#39;; }</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">final class C {</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">    private const array TYPED = [Country::DK, Country::SE];</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">    private const UNTYPED = [Country::DK, Country::SE];</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">    public function a(): void {</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">        foreach (self::TYPED as $m) { echo $m-&gt;value; }   // $m is mixed</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="x">        foreach (self::UNTYPED as $m) { echo $m-&gt;value; } // $m is mixed</span>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="x">    }</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">enum Country: string { case DK = &#39;dk&#39;; case SE = &#39;se&#39;; }</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">final class C {</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    private const array TYPED = [Country::DK, Country::SE];</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">    private const UNTYPED = [Country::DK, Country::SE];</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="x">    public function a(): void {</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="x">        foreach (self::TYPED as $m) { echo $m-&gt;value; }   // $m is mixed</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="x">        foreach (self::UNTYPED as $m) { echo $m-&gt;value; } // $m is mixed</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="x">    }</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="x">}</span>
 </code></pre></div>
 <p>The constant's value is a literal list of enum cases, so the element type
 is <code>Country::DK|Country::SE</code> (or <code>Country</code>). Both the typed and the
@@ -2056,14 +2019,14 @@ untyped constant come out as <code>mixed</code>.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <h3 id="b590-a-facade-method-tag-that-drops-generic-arguments-hides-the-accessors-return">B590. A facade <code>@method</code> tag that drops generic arguments hides the accessor's return<a class="headerlink" href="#b590-a-facade-method-tag-that-drops-generic-arguments-hides-the-accessors-return" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">use Illuminate\Http\Client\Factory;</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">use Illuminate\Support\Facades\Http;</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">Http::recorded();          // Collection</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">(new Factory)-&gt;recorded(); // Collection&lt;int, array{0: Request, 1: Response|null}&gt;</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">Http::recorded(fn (Request $r) =&gt; true)</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">    -&gt;map(fn (array $pair) =&gt; $pair[0]-&gt;url()); // cannot verify &#39;url&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">use Illuminate\Http\Client\Factory;</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">use Illuminate\Support\Facades\Http;</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">Http::recorded();          // Collection</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">(new Factory)-&gt;recorded(); // Collection&lt;int, array{0: Request, 1: Response|null}&gt;</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">Http::recorded(fn (Request $r) =&gt; true)</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">    -&gt;map(fn (array $pair) =&gt; $pair[0]-&gt;url()); // cannot verify &#39;url&#39;</span>
 </code></pre></div>
 <p><code>Http</code>'s generated tag is <code>@method static Collection recorded(…)</code>, while
 <code>Factory::recorded()</code> declares the shape. <code>facade_concrete_owner</code>
@@ -2075,12 +2038,12 @@ conditional or a method template), so a tag that merely flattened
 arguments or a shape the facade tag's return lacks, for the same bare class.</p>
 <h3 id="b606-a-when-callback-is-checked-against-the-untruthy-value-type">B606. A <code>when()</code> callback is checked against the untruthy value type<a class="headerlink" href="#b606-a-when-callback-is-checked-against-the-untruthy-value-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">/** @var ?string $jobClass */</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">$query-&gt;when(</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    $jobClass,</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    fn (Builder $query, string $jobClass) =&gt; $query-&gt;where(&#39;x&#39;, $jobClass),</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">);</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">// expects callable($this, ?string): $this, got Closure(Builder, string)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/** @var ?string $jobClass */</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">$query-&gt;when(</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    $jobClass,</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    fn (Builder $query, string $jobClass) =&gt; $query-&gt;where(&#39;x&#39;, $jobClass),</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">);</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">// expects callable($this, ?string): $this, got Closure(Builder, string)</span>
 </code></pre></div>
 <p><code>Conditionable::when()</code> only calls the callback when the value is truthy
 (and <code>unless()</code> only when it is falsy), so the callback's parameter can
@@ -2090,13 +2053,13 @@ never see <code>null</code> here. The template <code>TWhenParameter</code> is bo
 runtime.</p>
 <h3 id="b607-viewaddnamespace-in-a-provider-does-not-register-the-namespace">B607. <code>View::addNamespace()</code> in a provider does not register the namespace<a class="headerlink" href="#b607-viewaddnamespace-in-a-provider-does-not-register-the-namespace" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">final class ViewServiceProvider extends ServiceProvider {</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">    public function boot(): void {</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">        View::addNamespace(&#39;webshop&#39;, base_path(&#39;resources/webshop/views&#39;));</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">    }</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">final class ViewServiceProvider extends ServiceProvider {</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    public function boot(): void {</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">        View::addNamespace(&#39;webshop&#39;, base_path(&#39;resources/webshop/views&#39;));</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    }</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">}</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>@include(&#39;webshop::components.box&#39;) {{-- Unknown view: &#39;webshop::components.box&#39; --}}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>@include(&#39;webshop::components.box&#39;) {{-- Unknown view: &#39;webshop::components.box&#39; --}}
 </code></pre></div>
 <p><code>provider_resources.rs</code> records <code>loadViewsFrom($path, $namespace)</code> but not
 the <code>View</code> facade's <code>addNamespace()</code> (nor <code>$this-&gt;app['view']-&gt;addNamespace()</code>
@@ -2106,8 +2069,8 @@ three of its view namespaces this way, which leaves every
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <h3 id="b611-component-is-treated-as-handing-the-child-the-parents-scope">B611. <code>@component</code> is treated as handing the child the parent's scope<a class="headerlink" href="#b611-component-is-treated-as-handing-the-child-the-parents-scope" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>@php /** @bladestan-signature @var string $title */ @endphp
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>@component(&#39;alert&#39;) @endcomponent {{-- alert declares $title: not reported --}}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>@php /** @bladestan-signature @var string $title */ @endphp
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>@component(&#39;alert&#39;) @endcomponent {{-- alert declares $title: not reported --}}
 </code></pre></div>
 <p>Laravel compiles <code>@component</code> to <code>$__env-&gt;startComponent(...)</code>, which
 renders the view from the array it is passed (plus shared data) alone,
