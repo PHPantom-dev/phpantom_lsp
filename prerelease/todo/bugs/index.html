@@ -880,23 +880,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b582-a-union-of-two-or-more-non-null-values-counts-as-nullable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B582. A union of two or more non-null values counts as nullable
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1508,23 +1491,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b582-a-union-of-two-or-more-non-null-values-counts-as-nullable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B582. A union of two or more non-null values counts as nullable
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1665,46 +1631,16 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b582-a-union-of-two-or-more-non-null-values-counts-as-nullable">B582. A union of two or more non-null values counts as nullable<a class="headerlink" href="#b582-a-union-of-two-or-more-non-null-values-counts-as-nullable" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Node {}</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class A extends Node {}</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">class B extends Node {}</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">function takesAorB(A|B $x): void {}</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">function f(Node $node): void {</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    if ($node instanceof A) {</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">        $kind = &#39;a&#39;;</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    } elseif ($node instanceof B) {</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">        $kind = &#39;b&#39;;</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    } else {</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">        $kind = null;</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">    }</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">    if ($kind !== null) {</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">        takesAorB($node); // expects A|B, got Node</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">    }</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">}</span>
-</code></pre></div>
-<p>The join after the chain records that <code>$kind</code> holding a value means
-<code>$node</code> is <code>A|B</code>, but the <code>!== null</code> test never applies it. With one arm,
-or with every arm assigning the same literal, it does.</p>
-<p><code>scope_value_is_nullable</code> (<code>cond_narrowing/null_identity.rs</code>) asks
-<code>non_null_type().is_some()</code>, and <code>PhpType::non_null_type()</code> returns
-<code>Some</code> for any union with at least two members besides <code>null</code>, whether
-or not <code>null</code> is one of them. So <code>'a'|'b'</code> reads as nullable, and every
-<code>NonNull</code> trigger and non-null implication on such a holder stays unmet.
-All four callers in <code>cond_narrowing</code> go through it.</p>
-<p><strong>Fix:</strong> Ask whether the type has a <code>null</code> member instead. <code>accepts_null()</code>
-is not a drop-in replacement, since it also counts <code>mixed</code>, which the
-current check does not.</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <h3 id="b582-keybygroupby-on-an-eloquent-collection-lose-the-element-type">B582. <code>keyBy</code>/<code>groupBy</code> on an Eloquent collection lose the element type<a class="headerlink" href="#b582-keybygroupby-on-an-eloquent-collection-lose-the-element-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">Member::all()-&gt;keyBy(&#39;id&#39;);           // Eloquent\Collection&lt;array-key, mixed&gt;</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">Member::all()-&gt;groupBy(&#39;id&#39;);         // Eloquent\Collection&lt;array-key, Eloquent\Collection&lt;int, mixed&gt;&gt;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">Member::all()-&gt;toBase()-&gt;keyBy(&#39;id&#39;); // Support\Collection&lt;array-key, Member&gt;  (correct)</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">Member::all()-&gt;keyBy-&gt;id;             // Eloquent\Collection&lt;array-key, Member&gt;   (correct)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">Member::all()-&gt;keyBy(&#39;id&#39;);           // Eloquent\Collection&lt;array-key, mixed&gt;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">Member::all()-&gt;groupBy(&#39;id&#39;);         // Eloquent\Collection&lt;array-key, Eloquent\Collection&lt;int, mixed&gt;&gt;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">Member::all()-&gt;toBase()-&gt;keyBy(&#39;id&#39;); // Support\Collection&lt;array-key, Member&gt;  (correct)</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">Member::all()-&gt;keyBy-&gt;id;             // Eloquent\Collection&lt;array-key, Member&gt;   (correct)</span>
 </code></pre></div>
 <p><code>Support\Collection::keyBy</code> carries only <code>{@inheritDoc}</code>; the signature
 comes from <code>Enumerable::keyBy</code>, which returns
