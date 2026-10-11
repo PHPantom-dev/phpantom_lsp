@@ -1071,17 +1071,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p83-most-of-methodinfo-is-fields-that-76-of-methods-leave-empty" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P83. Most of <code>MethodInfo</code> is fields that 76% of methods leave empty
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1378,17 +1367,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p83-most-of-methodinfo-is-fields-that-76-of-methods-leave-empty" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P83. Most of <code>MethodInfo</code> is fields that 76% of methods leave empty
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1512,30 +1490,6 @@ against that bar.</p>
 </tr>
 </tbody>
 </table>
-<hr />
-<h2 id="p83-most-of-methodinfo-is-fields-that-76-of-methods-leave-empty">P83. Most of <code>MethodInfo</code> is fields that 76% of methods leave empty<a class="headerlink" href="#p83-most-of-methodinfo-is-fields-that-76-of-methods-leave-empty" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<p><code>MethodInfo</code> is 360 B, and about 288 B of that is fields most methods never
-set: <code>return_description</code>, <code>links</code>, <code>see_refs</code>, the two deprecation fields,
-the four <code>template_*</code> fields, <code>throws</code>, <code>type_assertions</code>,
-<code>conditional_return</code>, <code>if_this_is</code> and <code>self_out</code>. Even empty, a <code>Vec</code> or
-<code>Option&lt;String&gt;</code> costs 24 B and an <code>AtomMap</code> 32 B. Across all 382k methods
-on the large Laravel app, <code>description</code> is set on 90%, but only 24% set
-any of the others (template fields 11.5%, <code>throws</code> 9.3%, conditional or
-<code>$this</code>-narrowing types 5.2%, everything else under 3%).</p>
-<p>Moving those fields behind one <code>Option&lt;Box&lt;MethodExtras&gt;&gt;</code> saves about
-280 B on three methods in four and costs a pointer plus a small allocation
-on the fourth: about 79 MB after <code>analyze</code> (8.5% of RSS) and 59 MB in the
-LSP (7%), measured before identical inherited members were shared, which
-lowers the method count and shrinks this to about 5-6%. The earlier
-finding that boxing docblock fields is a net loss still holds for
-<code>description</code> (set on 90%), which stays inline.</p>
-<p><strong>Where to look:</strong> <code>MethodInfo</code> in <code>types/mod.rs</code>. Most readers go through
-a handful of fields, so accessor methods for the moved ones keep the
-change mechanical. <code>ParameterInfo</code> (96 B) and <code>PropertyInfo</code> (376 B, mostly
-an inline <code>PropertySource</code> database variant) have the same shape, but there
-are fewer of them: about 13 MB and 8 MB, worth folding in only if the
-change is already touching them.</p>
 <hr />
 <h2 id="p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations">P81. Call sites are 160-byte records with up to six side allocations<a class="headerlink" href="#p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
