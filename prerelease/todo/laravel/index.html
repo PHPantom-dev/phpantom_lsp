@@ -1149,17 +1149,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l61-preserve-custom-builders-in-relation-callbacks" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L61. Preserve custom builders in relation callbacks
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l62-bind-named-relation-callback-arguments-before-inference" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1855,17 +1844,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l61-preserve-custom-builders-in-relation-callbacks" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L61. Preserve custom builders in relation callbacks
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l62-bind-named-relation-callback-arguments-before-inference" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2517,28 +2495,6 @@ only the innermost collection.</p>
 the collection return-type patches for the argument forms. The property
 lookup already exists for <code>model-property&lt;Model&gt;</code>; the work is threading
 a resolved key type through the generic substitution.</p>
-<h4 id="l61-preserve-custom-builders-in-relation-callbacks">L61. Preserve custom builders in relation callbacks<a class="headerlink" href="#l61-preserve-custom-builders-in-relation-callbacks" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<p>Two sides of the relation override discard custom-builder context:</p>
-<ul>
-<li><code>Team::query()-&gt;whereHas('stocks.warehouse', …)</code> fails to identify the
-  receiver's model when <code>Team</code> uses <code>TeamBuilder</code>. The callback in the
-  assertion fixture falls back to <code>Builder&lt;Model&gt;</code> instead of
-  <code>Builder&lt;Warehouse&gt;</code>.</li>
-<li><code>Stock::whereHas('team', …)</code> resolves the related model but always builds
-  <code>Builder&lt;Team&gt;</code>, losing <code>TeamBuilder</code> and its custom methods. An explicit
-  bare <code>Builder</code> parameter has the same problem.</li>
-</ul>
-<p><strong>Reproducer:</strong> The custom-builder callback assertions in <code>relations()</code>
-in <code>tests/phpstan_nsrt/laravel-builder-relations.php</code>. Expected types follow
-<a href="https://github.com/larastan/larastan/blob/c328727e6103c1147d1c64cc96b3aedfda26bc20/tests/Type/data/relationship-query-callbacks.php">Larastan's relation callback assertions</a>.</p>
-<p><strong>Where to change:</strong> <code>find_model_from_receivers</code> and
-<code>try_relation_query_override</code> in
-<code>type_engine/variable/closure_resolution.rs</code>, using the receiver's resolved
-generic context and the existing custom-builder metadata/selection. Keep
-this in the shared callable inference path so completion, hover, and
-diagnostics agree. Refining a bare <code>Builder</code> hint to its custom subclass
-must preserve the inferred generic arguments too.</p>
 <h4 id="l62-bind-named-relation-callback-arguments-before-inference">L62. Bind named relation callback arguments before inference<a class="headerlink" href="#l62-bind-named-relation-callback-arguments-before-inference" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>Team::has(relation: 'stocks.warehouse', callback: …)</code> types the callback
