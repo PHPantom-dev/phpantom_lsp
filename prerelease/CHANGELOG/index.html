@@ -5120,6 +5120,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>object|null</code> return types.</strong> A call documented as returning <code>object|null</code> no longer gets a "could not be resolved" hint on member access, matching a native <code>?object</code>.</li>
 <li><strong><code>use X as Y</code> next to another import of the same short name.</strong> With <code>use App\Facades\Redis; use Redis as PhpRedis;</code>, <code>PhpRedis</code> is now the global <code>Redis</code> instead of the facade.</li>
 <li><strong><code>@method</code> parameters defaulting to <code>null</code>.</strong> A <code>@method</code> tag such as <code>tag(string $disk = null)</code> now accepts <code>null</code>, as the equivalent native signature does.</li>
 <li><strong><code>$this</code> in a Pest test is the configured test case.</strong> Inside <code>it()</code>, <code>test()</code>, <code>beforeEach()</code>, and <code>afterEach()</code> closures, <code>$this</code> is now the test case and traits bound to the file with <code>pest()-&gt;extends()</code> or <code>uses()</code>, whether in the test directory's <code>Pest.php</code> or in the test file itself, falling back to PHPUnit's <code>TestCase</code>. Helpers defined on them now resolve, and so do their return types.</li>

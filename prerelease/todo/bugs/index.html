@@ -1249,17 +1249,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b589-a-docblock-objectnull-subject-is-reported-as-unresolved" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B589. A docblock <code>object|null</code> subject is reported as unresolved
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2154,17 +2143,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b589-a-docblock-objectnull-subject-is-reported-as-unresolved" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B589. A docblock <code>object|null</code> subject is reported as unresolved
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2630,23 +2608,6 @@ function or method whose body calls <code>func_get_args()</code> as variadic.</p
 <p><strong>Fix:</strong> Record during parsing whether a function or method body calls
 <code>func_get_args()</code> (outside nested closures and classes) and treat it as
 variadic in the argument-count check and in signature help.</p>
-<h3 id="b589-a-docblock-objectnull-subject-is-reported-as-unresolved">B589. A docblock <code>object|null</code> subject is reported as unresolved<a class="headerlink" href="#b589-a-docblock-objectnull-subject-is-reported-as-unresolved" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="x">final class R {</span>
-<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="x">    /** @return object|null */</span>
-<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="x">    public function obj() { return null; }</span>
-<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>
-<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="x">    public function a(?object $n): void {</span>
-<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a><span class="x">        $n-&gt;projects ?? [];           // clean</span>
-<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a><span class="x">        $this-&gt;obj()-&gt;projects ?? []; // type of &#39;$this-&gt;obj()&#39; could not be resolved</span>
-<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a><span class="x">    }</span>
-<a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a><span class="x">}</span>
-</code></pre></div>
-<p>With <code>unresolved-member-access</code> on, a native <code>?object</code> subject is accepted
-but the same type written as a docblock <code>object|null</code> reports the subject
-as "could not be resolved", which is the message reserved for a gap in
-PHPantom's own inference. Laravel's <code>Http\Client\Response::object()</code>
-returns exactly this.</p>
 
 
 
