@@ -1013,45 +1013,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b590-a-facade-method-tag-that-drops-generic-arguments-hides-the-accessors-return" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B590. A facade <code>@method</code> tag that drops generic arguments hides the accessor's return
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b606-a-when-callback-is-checked-against-the-untruthy-value-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B606. A <code>when()</code> callback is checked against the untruthy value type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b607-viewaddnamespace-in-a-provider-does-not-register-the-namespace" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B607. <code>View::addNamespace()</code> in a provider does not register the namespace
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1740,45 +1701,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b590-a-facade-method-tag-that-drops-generic-arguments-hides-the-accessors-return" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B590. A facade <code>@method</code> tag that drops generic arguments hides the accessor's return
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b606-a-when-callback-is-checked-against-the-untruthy-value-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B606. A <code>when()</code> callback is checked against the untruthy value type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b607-viewaddnamespace-in-a-provider-does-not-register-the-namespace" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B607. <code>View::addNamespace()</code> in a provider does not register the namespace
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1983,55 +1905,7 @@ resolve the receiver <code>(new R())</code> instead of the whole call.</p>
 is <code>Country::DK|Country::SE</code> (or <code>Country</code>). Both the typed and the
 untyped constant come out as <code>mixed</code>.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h3 id="b590-a-facade-method-tag-that-drops-generic-arguments-hides-the-accessors-return">B590. A facade <code>@method</code> tag that drops generic arguments hides the accessor's return<a class="headerlink" href="#b590-a-facade-method-tag-that-drops-generic-arguments-hides-the-accessors-return" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">use Illuminate\Http\Client\Factory;</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">use Illuminate\Support\Facades\Http;</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">Http::recorded();          // Collection</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">(new Factory)-&gt;recorded(); // Collection&lt;int, array{0: Request, 1: Response|null}&gt;</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">Http::recorded(fn (Request $r) =&gt; true)</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">    -&gt;map(fn (array $pair) =&gt; $pair[0]-&gt;url()); // cannot verify &#39;url&#39;</span>
-</code></pre></div>
-<p><code>Http</code>'s generated tag is <code>@method static Collection recorded(…)</code>, while
-<code>Factory::recorded()</code> declares the shape. <code>facade_concrete_owner</code>
-(<code>call_resolution/facade_owner.rs</code>) only falls through to the
-<code>getFacadeAccessor()</code> class when the concrete return is call-dependent (a
-conditional or a method template), so a tag that merely flattened
-<code>Collection&lt;…&gt;</code> to <code>Collection</code> wins.</p>
-<p><strong>Fix:</strong> Also fall through when the concrete method's return carries type
-arguments or a shape the facade tag's return lacks, for the same bare class.</p>
-<h3 id="b606-a-when-callback-is-checked-against-the-untruthy-value-type">B606. A <code>when()</code> callback is checked against the untruthy value type<a class="headerlink" href="#b606-a-when-callback-is-checked-against-the-untruthy-value-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/** @var ?string $jobClass */</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">$query-&gt;when(</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    $jobClass,</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    fn (Builder $query, string $jobClass) =&gt; $query-&gt;where(&#39;x&#39;, $jobClass),</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">);</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">// expects callable($this, ?string): $this, got Closure(Builder, string)</span>
-</code></pre></div>
-<p><code>Conditionable::when()</code> only calls the callback when the value is truthy
-(and <code>unless()</code> only when it is falsy), so the callback's parameter can
-never see <code>null</code> here. The template <code>TWhenParameter</code> is bound to the raw
-<code>?string</code>. Removing the falsy members (or only the truthy ones, for
-<code>unless()</code>) from the binding before checking the callback would match the
-runtime.</p>
-<h3 id="b607-viewaddnamespace-in-a-provider-does-not-register-the-namespace">B607. <code>View::addNamespace()</code> in a provider does not register the namespace<a class="headerlink" href="#b607-viewaddnamespace-in-a-provider-does-not-register-the-namespace" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">final class ViewServiceProvider extends ServiceProvider {</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    public function boot(): void {</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">        View::addNamespace(&#39;webshop&#39;, base_path(&#39;resources/webshop/views&#39;));</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    }</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">}</span>
-</code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>@include(&#39;webshop::components.box&#39;) {{-- Unknown view: &#39;webshop::components.box&#39; --}}
-</code></pre></div>
-<p><code>provider_resources.rs</code> records <code>loadViewsFrom($path, $namespace)</code> but not
-the <code>View</code> facade's <code>addNamespace()</code> (nor <code>$this-&gt;app['view']-&gt;addNamespace()</code>
-or <code>View::prependNamespace()</code>). One large Laravel project registers all
-three of its view namespaces this way, which leaves every
-<code>view('webshop::…')</code> and <code>@include('backoffice::…')</code> unknown.</p>
+<p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
