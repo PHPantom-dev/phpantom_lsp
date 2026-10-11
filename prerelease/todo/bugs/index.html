@@ -1260,17 +1260,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b611-use-x-as-y-resolves-x-through-an-earlier-import" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B611. <code>use X as Y</code> resolves <code>X</code> through an earlier import
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2176,17 +2165,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b611-use-x-as-y-resolves-x-through-an-earlier-import" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B611. <code>use X as Y</code> resolves <code>X</code> through an earlier import
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2669,24 +2647,6 @@ but the same type written as a docblock <code>object|null</code> reports the sub
 as "could not be resolved", which is the message reserved for a gap in
 PHPantom's own inference. Laravel's <code>Http\Client\Response::object()</code>
 returns exactly this.</p>
-<h3 id="b611-use-x-as-y-resolves-x-through-an-earlier-import">B611. <code>use X as Y</code> resolves <code>X</code> through an earlier import<a class="headerlink" href="#b611-use-x-as-y-resolves-x-through-an-earlier-import" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="x">namespace App;</span>
-<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>
-<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="x">use App\Facades\ArrayObject;</span>
-<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="x">use ArrayObject as Real;</span>
-<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>
-<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="x">final class Svc2 {</span>
-<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a><span class="x">    public function a(): void {</span>
-<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a><span class="x">        $x = Real::STD_PROP_LIST; // Member &#39;STD_PROP_LIST&#39; not found on class &#39;App\Facades\ArrayObject&#39;</span>
-<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a><span class="x">    }</span>
-<a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a><span class="x">}</span>
-</code></pre></div>
-<p>A <code>use</code> statement's target is always fully qualified, so <code>Real</code> is the
-global <code>\ArrayObject</code>. PHPantom resolves it through the file's own import
-of the same short name. The real-world shape is
-<code>use Illuminate\Support\Facades\Redis; use Redis as PhpRedis;</code>, where every
-<code>PhpRedis::OPT_*</code> constant and <code>PhpRedis</code> parameter lands on the facade.</p>
 
 
 
