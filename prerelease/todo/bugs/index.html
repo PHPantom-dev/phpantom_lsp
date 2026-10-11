@@ -880,23 +880,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b615-phpunits-assertcount-and-assertarrayhaskey-do-not-narrow" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B615. PHPUnit's <code>assertCount()</code> and <code>assertArrayHasKey()</code> do not narrow
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1513,23 +1496,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b615-phpunits-assertcount-and-assertarrayhaskey-do-not-narrow" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B615. PHPUnit's <code>assertCount()</code> and <code>assertArrayHasKey()</code> do not narrow
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1675,23 +1641,14 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b615-phpunits-assertcount-and-assertarrayhaskey-do-not-narrow">B615. PHPUnit's <code>assertCount()</code> and <code>assertArrayHasKey()</code> do not narrow<a class="headerlink" href="#b615-phpunits-assertcount-and-assertarrayhaskey-do-not-narrow" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">self::assertArrayHasKey(&#39;id&#39;, $row);   // $row: array{id?: int}</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">takesInt($row[&#39;id&#39;]);                  // got int|null</span>
-</code></pre></div>
-<p>PHPUnit declares no <code>@phpstan-assert</code> on either. PHPStan's PHPUnit
-extension reads them as <code>count($actual) === $expected</code> and
-<code>array_key_exists($key, $array)</code>. <code>assertSame()</code>/<code>assertNotSame()</code> are
-already read this way; these two need the call they stand for built as a
-condition, which the existing mapping does not do yet.</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b614-an-array-literal-written-inside-a-calls-arguments-is-typed-as-bare-array">B614. An array literal written inside a call's arguments is typed as bare <code>array</code><a class="headerlink" href="#b614-an-array-literal-written-inside-a-calls-arguments-is-typed-as-bare-array" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">takesInt(filter_var($v, FILTER_VALIDATE_INT, [&#39;options&#39; =&gt; [&#39;min_range&#39; =&gt; 1]]));</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">// Argument 1 expects int, got mixed (should be int&lt;1, max&gt;|false)</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">$id = filter_var($v, FILTER_VALIDATE_INT, [&#39;options&#39; =&gt; [&#39;min_range&#39; =&gt; 1]]);</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">// int&lt;1, max&gt;|false, as expected</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">takesInt(filter_var($v, FILTER_VALIDATE_INT, [&#39;options&#39; =&gt; [&#39;min_range&#39; =&gt; 1]]));</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">// Argument 1 expects int, got mixed (should be int&lt;1, max&gt;|false)</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">$id = filter_var($v, FILTER_VALIDATE_INT, [&#39;options&#39; =&gt; [&#39;min_range&#39; =&gt; 1]]);</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">// int&lt;1, max&gt;|false, as expected</span>
 </code></pre></div>
 <p>A call nested inside another call's arguments is resolved from its argument
 text, and that resolver reads any <code>[…]</code> or <code>array(…)</code> literal as <code>array</code>
@@ -1703,14 +1660,14 @@ walker and sees the shape. Typing the literal through the shared expression
 resolver would make both paths agree.</p>
 <h3 id="b591-array_map-reads-a-parenthesised-new-receiver-as-the-element-type">B591. <code>array_map</code> reads a parenthesised <code>new</code> receiver as the element type<a class="headerlink" href="#b591-array_map-reads-a-parenthesised-new-receiver-as-the-element-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">final class R {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    /** @return list&lt;stdClass&gt; */</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    public function all(): array { return []; }</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    public function c(): void {</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        array_map(fn(stdClass $s) =&gt; $s-&gt;name, (new R())-&gt;all());</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">        // expects callable(R): mixed, got Closure(stdClass)</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    }</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">final class R {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    /** @return list&lt;stdClass&gt; */</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    public function all(): array { return []; }</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    public function c(): void {</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">        array_map(fn(stdClass $s) =&gt; $s-&gt;name, (new R())-&gt;all());</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">        // expects callable(R): mixed, got Closure(stdClass)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    }</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">}</span>
 </code></pre></div>
 <p>The array argument itself resolves to <code>list&lt;stdClass&gt;</code> (passing it to an
 <code>int</code> parameter says so), and the same call through a variable
@@ -1720,17 +1677,17 @@ callback's expected parameter lands on <code>R</code>, so that derivation appear
 resolve the receiver <code>(new R())</code> instead of the whole call.</p>
 <h3 id="b605-iterating-a-class-constant-of-enum-cases-gives-mixed">B605. Iterating a class constant of enum cases gives <code>mixed</code><a class="headerlink" href="#b605-iterating-a-class-constant-of-enum-cases-gives-mixed" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">enum Country: string { case DK = &#39;dk&#39;; case SE = &#39;se&#39;; }</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">final class C {</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    private const array TYPED = [Country::DK, Country::SE];</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    private const UNTYPED = [Country::DK, Country::SE];</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    public function a(): void {</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">        foreach (self::TYPED as $m) { echo $m-&gt;value; }   // $m is mixed</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">        foreach (self::UNTYPED as $m) { echo $m-&gt;value; } // $m is mixed</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">    }</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">enum Country: string { case DK = &#39;dk&#39;; case SE = &#39;se&#39;; }</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">final class C {</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    private const array TYPED = [Country::DK, Country::SE];</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    private const UNTYPED = [Country::DK, Country::SE];</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    public function a(): void {</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">        foreach (self::TYPED as $m) { echo $m-&gt;value; }   // $m is mixed</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">        foreach (self::UNTYPED as $m) { echo $m-&gt;value; } // $m is mixed</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">    }</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">}</span>
 </code></pre></div>
 <p>The constant's value is a literal list of enum cases, so the element type
 is <code>Country::DK|Country::SE</code> (or <code>Country</code>). Both the typed and the
