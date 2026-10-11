@@ -1238,17 +1238,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b588-a-method-that-reads-func_get_args-is-not-treated-as-variadic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B588. A method that reads <code>func_get_args()</code> is not treated as variadic
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2132,17 +2121,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b588-a-method-that-reads-func_get_args-is-not-treated-as-variadic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B588. A method that reads <code>func_get_args()</code> is not treated as variadic
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2592,22 +2570,6 @@ gets the interface's deprecation back, so inheritance enrichment seems to
 re-propagate <code>deprecation_message</code> from the interface rather than taking
 the inherited method as <code>AV</code> resolved it. PHPStan's <code>@not-deprecated</code>
 stops the inheritance for every descendant.</p>
-<h3 id="b588-a-method-that-reads-func_get_args-is-not-treated-as-variadic">B588. A method that reads <code>func_get_args()</code> is not treated as variadic<a class="headerlink" href="#b588-a-method-that-reads-func_get_args-is-not-treated-as-variadic" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="x">Socialite::shouldReceive(&#39;driver&#39;);   // Expected 0 arguments, got 1</span>
-<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="x">$query-&gt;select(&#39;id&#39;, DB::raw(&#39;...&#39;)); // Expected at most 1 argument, got 2</span>
-<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="x">$request-&gt;only(&#39;a&#39;, &#39;b&#39;);             // Expected at most 1 argument, got 2</span>
-<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="x">$model-&gt;load(&#39;a&#39;, &#39;b&#39;);</span>
-</code></pre></div>
-<p>Laravel declares these with no parameters, or one, and reads the rest
-through <code>func_get_args()</code> (<code>Facade::shouldReceive</code>, <code>Builder::select</code>,
-<code>Request::only</code>, <code>Model::load</code>/<code>with</code>/<code>isDirty</code>/<code>wasChanged</code>,
-<code>ResponseTrait::cookie</code>, …). With <code>extra-arguments = true</code> every such call
-is reported: 251 sites in one large Laravel project. PHPStan marks a
-function or method whose body calls <code>func_get_args()</code> as variadic.</p>
-<p><strong>Fix:</strong> Record during parsing whether a function or method body calls
-<code>func_get_args()</code> (outside nested closures and classes) and treat it as
-variadic in the argument-count check and in signature help.</p>
 
 
 

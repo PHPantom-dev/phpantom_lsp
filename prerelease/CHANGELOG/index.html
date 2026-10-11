@@ -5121,6 +5121,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Functions that read <code>func_get_args()</code>.</strong> Calls such as <code>$query-&gt;select('id', 'name')</code> or <code>$request-&gt;only('a', 'b')</code> no longer report extra arguments when the method collects its arguments with <code>func_get_args()</code>.</li>
 <li><strong><code>object|null</code> return types.</strong> A call documented as returning <code>object|null</code> no longer gets a "could not be resolved" hint on member access, matching a native <code>?object</code>.</li>
 <li><strong><code>use X as Y</code> next to another import of the same short name.</strong> With <code>use App\Facades\Redis; use Redis as PhpRedis;</code>, <code>PhpRedis</code> is now the global <code>Redis</code> instead of the facade.</li>
 <li><strong><code>@method</code> parameters defaulting to <code>null</code>.</strong> A <code>@method</code> tag such as <code>tag(string $disk = null)</code> now accepts <code>null</code>, as the equivalent native signature does.</li>
