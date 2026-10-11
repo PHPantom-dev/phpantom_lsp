@@ -1828,8 +1828,8 @@ proxies:</p>
 <h2 id="d15-unused-parameter-diagnostic">D15. Unused parameter diagnostic<a class="headerlink" href="#d15-unused-parameter-diagnostic" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>Flag function and method parameters that are never read inside the
-body. This was intentionally excluded from D4 (unused variable
-diagnostic) because false positives are common for callbacks, interface
+body. The <code>unused_variable</code> diagnostic deliberately skips parameters
+because false positives are common for callbacks, interface
 implementations, and framework conventions (e.g. Laravel event
 listeners) that require specific parameter signatures even when not
 all parameters are used. Users can now silence false positives with
@@ -2030,12 +2030,12 @@ well.</p>
 <p>Adding rather than replacing is safe in the direction that matters — it
 cannot invent a report — but it hides one:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Owner {</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    private static function hidden(): void {}</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    private function hidden(): void {}</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    public function boot(): void</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    public function boot(Owner $o): void</span>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    {</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">        Target::macro(&#39;x&#39;, function (): void {</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">            self::hidden();      // fatal: the closure&#39;s scope is Target</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">        Target::macro(&#39;x&#39;, function () use ($o): void {</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">            $o-&gt;hidden();        // fatal: the closure&#39;s scope is Target</span>
 <a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">        });</span>
 <a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">    }</span>
 <a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">}</span>
@@ -2047,7 +2047,8 @@ cannot invent a report — but it hides one:</p>
 </code></pre></div>
 <p>The closure is written inside <code>Owner</code>, so the enclosing class permits the
 call, while at runtime the scope is <code>Target</code> and a parent's private
-member is out of reach.</p>
+member is out of reach. (<code>self::hidden()</code> in the same closure is already
+reported, because <code>self</code> itself resolves to the bound class.)</p>
 <p><strong>Fix:</strong> Take the bound class from the resolver, which already computes
 it, and let it replace the enclosing class rather than joining it.
 Inferring a binding from the spelling of the subject is guessing at

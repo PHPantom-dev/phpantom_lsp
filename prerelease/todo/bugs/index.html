@@ -919,6 +919,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Laravel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b582-keybygroupby-on-an-eloquent-collection-lose-the-element-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B582. <code>keyBy</code>/<code>groupBy</code> on an Eloquent collection lose the element type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1530,6 +1547,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Laravel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b582-keybygroupby-on-an-eloquent-collection-lose-the-element-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B582. <code>keyBy</code>/<code>groupBy</code> on an Eloquent collection lose the element type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1665,7 +1699,24 @@ current check does not.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b582-keybygroupby-on-an-eloquent-collection-lose-the-element-type">B582. <code>keyBy</code>/<code>groupBy</code> on an Eloquent collection lose the element type<a class="headerlink" href="#b582-keybygroupby-on-an-eloquent-collection-lose-the-element-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">Member::all()-&gt;keyBy(&#39;id&#39;);           // Eloquent\Collection&lt;array-key, mixed&gt;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">Member::all()-&gt;groupBy(&#39;id&#39;);         // Eloquent\Collection&lt;array-key, Eloquent\Collection&lt;int, mixed&gt;&gt;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">Member::all()-&gt;toBase()-&gt;keyBy(&#39;id&#39;); // Support\Collection&lt;array-key, Member&gt;  (correct)</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">Member::all()-&gt;keyBy-&gt;id;             // Eloquent\Collection&lt;array-key, Member&gt;   (correct)</span>
+</code></pre></div>
+<p><code>Support\Collection::keyBy</code> carries only <code>{@inheritDoc}</code>; the signature
+comes from <code>Enumerable::keyBy</code>, which returns
+<code>static&lt;(…conditional key…), TValue&gt;</code>. <code>Eloquent\Collection</code> declares its
+own templates (<code>TKey</code>, <code>TModel</code>) and maps them through
+<code>@extends Support\Collection&lt;TKey, TModel&gt;</code>. Called on the Eloquent
+subclass, the <code>TValue</code> inside <code>static&lt;…&gt;</code> is not carried through that
+mapping to <code>TModel</code>, so it ends up unbound and becomes <code>mixed</code>. On
+<code>Support\Collection</code> itself the names line up and it resolves. The
+higher-order proxy form builds its result separately and is unaffected.</p>
+<p>Any other <code>static&lt;…, TValue&gt;</code> return inherited from <code>Enumerable</code> through
+<code>{@inheritDoc}</code> is likely affected the same way.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>

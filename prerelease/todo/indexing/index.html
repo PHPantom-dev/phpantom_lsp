@@ -1096,67 +1096,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x6-disk-cache-evaluate-later" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        X6. Disk cache (evaluate later)
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="X6. Disk cache (evaluate later)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#when-to-consider" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        When to consider
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#format-options" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Format options
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#invalidation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Invalidation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#decision-criteria" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Decision criteria
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#x7-recency-tracking" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1688,67 +1627,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x6-disk-cache-evaluate-later" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        X6. Disk cache (evaluate later)
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="X6. Disk cache (evaluate later)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#when-to-consider" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        When to consider
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#format-options" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Format options
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#invalidation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Invalidation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#decision-criteria" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Decision criteria
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#x7-recency-tracking" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1953,8 +1831,9 @@ anything the classmap missed. Whatever the classmap already covers is
 a free performance win; whatever it's missing, we find ourselves. No
 completeness heuristic needed.</p>
 <h3 id="self"><code>"self"</code><a class="headerlink" href="#self" title="Permanent link">&para;</a></h3>
-<p>Always build the classmap ourselves. Ignores <code>autoload_classmap.php</code>
-entirely. Equivalent to the merged approach with an empty skip set.
+<p>Always build the classmap ourselves: scan every PHP file under the
+workspace root, ignoring <code>autoload_classmap.php</code> and the PSR-4
+mappings. Vendor packages are still scanned via <code>installed.json</code>.
 For users who prefer PHPantom's own scanner or who are actively
 editing <code>composer.json</code> dependencies.</p>
 <h3 id="none"><code>"none"</code><a class="headerlink" href="#none" title="Permanent link">&para;</a></h3>
@@ -1970,19 +1849,14 @@ parallel with priority awareness.</p>
 <p>All prerequisites (<code>RwLock</code>, <code>Arc&lt;String&gt;</code>, <code>Arc&lt;SymbolMap&gt;</code>) are
 complete.</p>
 <h3 id="current-state-partial">Current state (partial)<a class="headerlink" href="#current-state-partial" title="Permanent link">&para;</a></h3>
-<p><code>ensure_workspace_indexed</code> (used by find references) now parses files
-in parallel via two helpers in <code>references/mod.rs</code>:</p>
-<ul>
-<li><strong><code>parse_files_parallel</code></strong> — takes <code>(uri, Option&lt;content&gt;)</code> pairs,
-  loads content via <code>get_file_content</code> when not provided, splits work
-  into chunks, and parses each chunk in a separate OS thread.</li>
-<li><strong><code>parse_paths_parallel</code></strong> — takes <code>(uri, PathBuf)</code> pairs, reads
-  files from disk and parses them in parallel.</li>
-</ul>
-<p>Both use <code>std::thread::scope</code> for structured concurrency (all threads
-join before the function returns). The thread count is capped at
-<code>std::thread::available_parallelism()</code> (typically the number of CPU
-cores). Batches of 2 or fewer files skip threading overhead.</p>
+<p><code>ensure_workspace_indexed</code> (<code>src/indexing/preload.rs</code>, used by find
+references) parses files in parallel via
+<code>parse_files_parallel_with_progress</code> (<code>(uri, Option&lt;content&gt;)</code> pairs)
+and <code>parse_paths_parallel_with_progress</code> (<code>(uri, PathBuf)</code> pairs, read
+from disk). Both run on the shared pull-index pool in <code>src/parallel.rs</code>
+(<code>map_indexed</code>): workers claim the next file as they finish the last,
+the pool is capped at <code>available_parallelism()</code>, and never spawns more
+workers than there are files.</p>
 <p>Transient entry eviction after GTI and find references has been
 removed. Parsed files stay cached in <code>uri_classes_index</code>, <code>symbol_maps</code>,
 <code>use_map</code>, and <code>namespace_map</code> so that subsequent operations benefit
@@ -2025,11 +1899,13 @@ serialized concurrent readers.</p>
   time) only still runs for <code>"composer"</code>/<code>"self"</code>/<code>"none"</code> strategies,
   for a request that arrives before the background index finishes, or
   for a target that lives under <code>/vendor/</code> (where the index-ready fast
-  path would filter out the package's own implementations).
-  Parallelizing it requires care because it interleaves reads and
-  writes through <code>class_loader</code> callbacks.</li>
+  path would filter out the package's own implementations). The
+  candidate files are then parsed one at a time (<code>parse_and_cache_file</code>
+  in a loop in <code>src/definition/implementation.rs</code>). Parallelizing it
+  requires care because it interleaves reads and writes through
+  <code>class_loader</code> callbacks.</li>
 <li><strong>Parallel autoload file scanning.</strong> The <code>scan_autoload_files</code> work
-  queue is inherently sequential due to <code>require_once</code> chain
+  queue (<code>src/indexing/scan.rs</code>) is inherently sequential due to <code>require_once</code> chain
   following, but the initial batch of files could be processed in
   parallel before following chains.</li>
 </ul>
@@ -2048,55 +1924,6 @@ completion is a minor subset of what users actually trigger. This
 means classmap generation can run at normal priority without blocking
 the user. They can start writing code immediately while the classmap
 builds in the background.</p>
-<hr />
-<h2 id="x6-disk-cache-evaluate-later">X6. Disk cache (evaluate later)<a class="headerlink" href="#x6-disk-cache-evaluate-later" title="Permanent link">&para;</a></h2>
-<p><strong>Goal:</strong> Persist the full index to disk so that restarts don't
-require a full rescan.</p>
-<h3 id="when-to-consider">When to consider<a class="headerlink" href="#when-to-consider" title="Permanent link">&para;</a></h3>
-<p>Only if full background indexing is slow enough on cold start that
-users complain. Given that:</p>
-<ul>
-<li>Mago can lint 45K files in 2 seconds.</li>
-<li>A regex classmap scan over 21K files should be sub-second.</li>
-<li>Full AST parsing of a few thousand user files should take single
-  digit seconds.</li>
-</ul>
-<p>...disk caching may never justify its complexity. The primary use
-case would be memory savings (load from disk on demand instead of
-holding everything in RAM), not startup speed.</p>
-<h3 id="format-options">Format options<a class="headerlink" href="#format-options" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>bincode</code> / <code>postcard</code>: simple, small dependency footprint, tolerant
-  of struct changes (deserialization fails gracefully instead of
-  reading garbage memory). The right default choice.</li>
-<li>SQLite: robust, queryable, but heavier than needed for a flat
-  key-value store.</li>
-</ul>
-<p>Zero-copy formats like <code>rkyv</code> are ruled out. They map serialized bytes
-directly into memory as if they were the original structs, which means
-any struct layout change between versions reads corrupt data. PHPantom's
-internal types change frequently and will continue to do so. A cache
-format that silently produces garbage after an update is worse than no
-cache at all.</p>
-<h3 id="invalidation">Invalidation<a class="headerlink" href="#invalidation" title="Permanent link">&para;</a></h3>
-<p>Store file mtime + content hash per entry. On startup, walk the
-directory, compare mtimes, re-parse only changed files. This is
-Libretto's <code>IncrementalCache</code> approach and it works well.</p>
-<p>The content hash must be the authority; mtime is only a pre-filter
-to skip hashing files that look unchanged. A peer PHP LSP project
-shipped this exact bug: its cache was keyed on <code>mtime + size</code>, so a
-size-preserving edit within the same mtime second served a stale
-index entry. It later switched to <code>blake3(uri || content)</code>.</p>
-<h3 id="decision-criteria">Decision criteria<a class="headerlink" href="#decision-criteria" title="Permanent link">&para;</a></h3>
-<p>Implement disk caching only if:</p>
-<ol>
-<li>Full-mode cold start exceeds 10 seconds on a representative large
-   codebase, AND</li>
-<li>The memory overhead of holding the full index exceeds the 512 MB
-   target, or users on constrained systems report issues.</li>
-</ol>
-<p>If neither condition is met, skip this phase entirely. Simpler is
-better.</p>
 <hr />
 <h2 id="x7-recency-tracking">X7. Recency tracking<a class="headerlink" href="#x7-recency-tracking" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
@@ -2247,9 +2074,10 @@ link to get there. Canonicalize the include roots when they are
 registered and drop the ones contained in another, the same containment
 test <code>LinkClaims::claim</code> already does.</p>
 <p><strong>Switch every walker together.</strong> <code>collect_php_files_gitignore</code>,
-<code>util::collect_php_files</code>, and <code>analyse::collect_php_files</code> each take a
-single root, so only <code>walk_roots</code> is multi-root today. Leaving the serial
-three behind would index classes from an include folder while
+<code>collect_workspace_index_files_gitignore</code> (the one find-references
+walks), <code>util::collect_php_files</code>, and <code>analyse::collect_php_files</code> each
+take a single root, so only <code>walk_roots</code> is multi-root today. Leaving
+the serial ones behind would index classes from an include folder while
 find-references, rename, and go-to-implementation never see them, which
 is the half-wired state the symlink change avoided by moving all four
 walkers at once.</p>
@@ -2278,8 +2106,9 @@ the extension's per-folder <code>documentSelector</code> as it is: a file opened
 from an include root is served by its own folder's client.</p>
 <h2 id="x13-decide-how-workspace-wide-edits-treat-excluded-files">X13. Decide how workspace-wide edits treat excluded files<a class="headerlink" href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p><code>collect_php_files_gitignore</code> feeds find-references and namespace
-rename, so an excluded tree is invisible to both: a rename can leave
+<p>Find-references walks via <code>collect_workspace_index_files_gitignore</code> and
+namespace rename via <code>collect_php_files_gitignore</code>; both apply the
+index filters, so an excluded tree is invisible to both: a rename can leave
 excluded code calling a name that no longer exists, with no warning.
 That is consistent with what an exclude means, but sharper than
 "background discovery" suggests. Options: (a) keep the behaviour and

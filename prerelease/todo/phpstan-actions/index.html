@@ -1187,15 +1187,65 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tier-3-unique-to-phpantom" class="md-nav__link">
+  <a href="#tier-3-removals" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Tier 3 — Unique to PHPantom
+        Tier 3 — Removals
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Tier 3 — Unique to PHPantom">
+    <nav class="md-nav" aria-label="Tier 3 — Removals">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#h19-propertyunused-methodunused-remove-unused-member" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H19. <code>property.unused</code> / <code>method.unused</code> — Remove unused member
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h23-instanceofalwaystrue-remove-redundant-instanceof-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H23. <code>instanceof.alwaysTrue</code> — Remove redundant <code>instanceof</code> check
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h24-catchneverthrown-remove-unnecessary-catch-clause" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H24. <code>catch.neverThrown</code> — Remove unnecessary catch clause
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tier-4-unique-to-phpantom" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tier 4 — Unique to PHPantom
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tier 4 — Unique to PHPantom">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1236,17 +1286,6 @@
   
     <nav class="md-nav" aria-label="Implementation notes">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#message-parsing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Message parsing
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#tip-extraction" class="md-nav__link">
@@ -1606,15 +1645,65 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tier-3-unique-to-phpantom" class="md-nav__link">
+  <a href="#tier-3-removals" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Tier 3 — Unique to PHPantom
+        Tier 3 — Removals
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Tier 3 — Unique to PHPantom">
+    <nav class="md-nav" aria-label="Tier 3 — Removals">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#h19-propertyunused-methodunused-remove-unused-member" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H19. <code>property.unused</code> / <code>method.unused</code> — Remove unused member
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h23-instanceofalwaystrue-remove-redundant-instanceof-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H23. <code>instanceof.alwaysTrue</code> — Remove redundant <code>instanceof</code> check
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h24-catchneverthrown-remove-unnecessary-catch-clause" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H24. <code>catch.neverThrown</code> — Remove unnecessary catch clause
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tier-4-unique-to-phpantom" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tier 4 — Unique to PHPantom
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tier 4 — Unique to PHPantom">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1655,17 +1744,6 @@
   
     <nav class="md-nav" aria-label="Implementation notes">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#message-parsing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Message parsing
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#tip-extraction" class="md-nav__link">
@@ -1777,19 +1855,13 @@ by-reference foreach variable. The fix is to insert <code>unset($var);</code> af
 foreach loop that created the binding.</p>
 <p><strong>Implementation steps:</strong></p>
 <ol>
-<li>The diagnostic line references the variable. Extract the variable name
-   from the diagnostic line by finding the <code>$var</code> on that line (we can look
-   for the first <code>$identifier</code> on the line, or parse the message — but the
-   message doesn't include the variable name, so we must scan the source).</li>
-<li>Search backward from the diagnostic line for a <code>foreach</code> statement
-   containing <code>&amp;$var</code> (the by-reference binding).</li>
-<li>Find the closing <code>}</code> (or <code>endforeach;</code>) of that foreach.</li>
-<li>Insert <code>unset($var);</code> on the line after the closing brace, with matching
-   indentation.</li>
+<li>The message doesn't include the variable name, so find the variable
+   on the diagnostic line in the AST.</li>
+<li>Walk back to the <code>foreach</code> statement that binds it by reference
+   (<code>&amp;$var</code>).</li>
+<li>Insert <code>unset($var);</code> on the line after that foreach's end (its
+   closing <code>}</code> or <code>endforeach;</code>), with matching indentation.</li>
 </ol>
-<p>This is trickier than the other Tier 1/2 items because of the need to locate
-the foreach loop and its closing brace. Brace-matching is fragile without a
-real parser, but a simple nesting-depth counter works for well-formatted code.</p>
 <p><strong>Stale detection:</strong> <code>unset($var)</code> appears between the foreach closing brace
 and the diagnostic line.</p>
 <hr />
@@ -1797,8 +1869,14 @@ and the diagnostic line.</p>
 <h3 id="h13-propertynotfound-same-class-declare-missing-property">H13. <code>property.notFound</code> (same-class) — Declare missing property<a class="headerlink" href="#h13-propertynotfound-same-class-declare-missing-property" title="Permanent link">&para;</a></h3>
 <p><strong>Identifier:</strong> <code>property.notFound</code>
 <strong>Message:</strong> <code>Access to an undefined property Foo::$bar.</code></p>
-<p>Parse class name and property name from the message:
-<code>Access to an undefined property (.+)::\$(.+)\.$</code></p>
+<p>For the PHPStan diagnostic, parse class name and property name from the
+message: <code>Access to an undefined property (.+)::\$(.+)\.$</code></p>
+<p>PHPantom's own unknown-member diagnostic fires on the same code, so build
+this as one native "Declare property" action that attaches to both that
+diagnostic and PHPStan's <code>property.notFound</code>, not a PHPStan-only one. It
+is the property counterpart of
+<a href="../actions/#a40-generate-method-from-call">A40</a> (generate method from
+call) and should share its target-class and insertion logic.</p>
 <p>Scope to same-file only: when the diagnostic is on <code>$this-&gt;bar</code>, the fix
 targets the current class. When it references a different class, skip.</p>
 <p>Offer two quickfixes:</p>
@@ -1840,13 +1918,42 @@ Insert new arms before the closing <code>}</code> with correct indentation.</p>
 a <code>TODO</code> comment — configurable later.</p>
 <p><strong>Stale detection:</strong> difficult without re-parsing the match. Skip for now.</p>
 <hr />
-<h2 id="tier-3-unique-to-phpantom">Tier 3 — Unique to PHPantom<a class="headerlink" href="#tier-3-unique-to-phpantom" title="Permanent link">&para;</a></h2>
+<h2 id="tier-3-removals">Tier 3 — Removals<a class="headerlink" href="#tier-3-removals" title="Permanent link">&para;</a></h2>
+<h3 id="h19-propertyunused-methodunused-remove-unused-member">H19. <code>property.unused</code> / <code>method.unused</code> — Remove unused member<a class="headerlink" href="#h19-propertyunused-methodunused-remove-unused-member" title="Permanent link">&para;</a></h3>
+<p><strong>Identifiers:</strong> <code>property.unused</code>, <code>method.unused</code>, <code>classConstant.unused</code></p>
+<p>Remove the whole declaration, including its docblock and attributes.
+Also expose it through <code>phpantom_lsp fix --with-phpstan</code> as the
+<code>phpstan.property.unused</code> / <code>phpstan.method.unused</code> rules (see the
+PHPStan integration notes in <a href="../fix-cli/#phpstan-integration">fix-cli.md</a>).</p>
+<p><strong>Stale detection:</strong> the class no longer declares the member.</p>
+<hr />
+<h3 id="h23-instanceofalwaystrue-remove-redundant-instanceof-check">H23. <code>instanceof.alwaysTrue</code> — Remove redundant <code>instanceof</code> check<a class="headerlink" href="#h23-instanceofalwaystrue-remove-redundant-instanceof-check" title="Permanent link">&para;</a></h3>
+<p><strong>Identifier:</strong> <code>instanceof.alwaysTrue</code></p>
+<p>Drop the check: replace the <code>instanceof</code> expression with <code>true</code> when
+it is part of a larger condition, or unwrap the <code>if</code> and keep its body
+when it is the whole condition (an <code>else</code> branch is dead and goes with
+it).</p>
+<p><strong>Stale detection:</strong> the diagnostic line no longer contains <code>instanceof</code>.</p>
+<hr />
+<h3 id="h24-catchneverthrown-remove-unnecessary-catch-clause">H24. <code>catch.neverThrown</code> — Remove unnecessary catch clause<a class="headerlink" href="#h24-catchneverthrown-remove-unnecessary-catch-clause" title="Permanent link">&para;</a></h3>
+<p><strong>Identifier:</strong> <code>catch.neverThrown</code></p>
+<p>Remove the <code>catch</code> clause the message names. When it is the only
+clause and there is no <code>finally</code>, unwrap the <code>try</code> and keep its body.
+For a multi-catch (<code>catch (A | B $e)</code>), remove only the type that is
+never thrown.</p>
+<p><strong>Stale detection:</strong> the <code>catch</code> no longer names the type from the
+message.</p>
+<hr />
+<h2 id="tier-4-unique-to-phpantom">Tier 4 — Unique to PHPantom<a class="headerlink" href="#tier-4-unique-to-phpantom" title="Permanent link">&para;</a></h2>
 <h3 id="h20-genericscallsitevarianceredundant-remove-redundant-variance-annotation">H20. <code>generics.callSiteVarianceRedundant</code> — Remove redundant variance annotation<a class="headerlink" href="#h20-genericscallsitevarianceredundant-remove-redundant-variance-annotation" title="Permanent link">&para;</a></h3>
 <p><strong>Identifier:</strong> <code>generics.callSiteVarianceRedundant</code>
 <strong>Tip (in message):</strong> <code>You can safely remove the call-site variance annotation.</code></p>
 <p>Strip <code>covariant</code> or <code>contravariant</code> keywords from generic type arguments
 in the docblock. Requires parsing PHPDoc generic syntax
-(e.g. <code>Collection&lt;covariant Foo&gt;</code> becomes <code>Collection&lt;Foo&gt;</code>).</p>
+(e.g. <code>Collection&lt;covariant Foo&gt;</code> becomes <code>Collection&lt;Foo&gt;</code>).
+Also expose it through <code>phpantom_lsp fix --with-phpstan</code> as the
+<code>phpstan.generics.callSiteVarianceRedundant</code> rule (see
+<a href="../fix-cli/#phpstan-integration">fix-cli.md</a>).</p>
 <p>No other tool (PHPStorm, Rector, PHP-CS-Fixer) offers a quickfix for this
 PHPStan-specific diagnostic. Users currently have to edit the PHPDoc manually
 or suppress with <code>@phpstan-ignore</code>.</p>
@@ -1856,8 +1963,6 @@ diagnostic line.</p>
 <h2 id="suggested-implementation-order">Suggested implementation order<a class="headerlink" href="#suggested-implementation-order" title="Permanent link">&para;</a></h2>
 <p>Based on effort-to-value ratio and shared infrastructure:</p>
 <ol>
-<li><strong>H6</strong> — return type update</li>
-<li><strong>H10</strong> — remove unused union member</li>
 <li><strong>H4</strong> — unset by-ref foreach variable</li>
 <li><strong>H13</strong> — declare missing property</li>
 <li><strong>H16</strong> — add missing match arms</li>
@@ -1865,48 +1970,25 @@ diagnostic line.</p>
 </ol>
 <hr />
 <h2 id="implementation-notes">Implementation notes<a class="headerlink" href="#implementation-notes" title="Permanent link">&para;</a></h2>
-<h3 id="message-parsing">Message parsing<a class="headerlink" href="#message-parsing" title="Permanent link">&para;</a></h3>
-<p>All message parsing should use regex with named capture groups for clarity.
-Create a shared helper module (e.g. <code>code_actions/phpstan_message.rs</code>) for
-common patterns like extracting class names, method names, types, and property
-names from PHPStan messages. Example:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">use</span><span class="w"> </span><span class="n">regex</span><span class="p">::</span><span class="n">Regex</span><span class="p">;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="sd">/// Extract the &quot;actual&quot; type from a return.type diagnostic message.</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">extract_return_type_actual</span><span class="p">(</span><span class="n">message</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;&amp;</span><span class="kt">str</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">re</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Regex</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="s">r&quot;should return .+ but returns (?P&lt;actual&gt;.+)\.$&quot;</span><span class="p">).</span><span class="n">ok</span><span class="p">()</span><span class="o">?</span><span class="p">;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="n">re</span><span class="p">.</span><span class="n">captures</span><span class="p">(</span><span class="n">message</span><span class="p">)</span><span class="o">?</span><span class="p">.</span><span class="n">name</span><span class="p">(</span><span class="s">&quot;actual&quot;</span><span class="p">).</span><span class="n">map</span><span class="p">(</span><span class="o">|</span><span class="n">m</span><span class="o">|</span><span class="w"> </span><span class="n">m</span><span class="p">.</span><span class="n">as_str</span><span class="p">())</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">}</span>
-</code></pre></div>
 <h3 id="tip-extraction">Tip extraction<a class="headerlink" href="#tip-extraction" title="Permanent link">&para;</a></h3>
 <p>Tips are appended to <code>Diagnostic.message</code> after a <code>\n</code> by
 <code>parse_phpstan_message()</code> in <code>phpstan.rs</code>. To access the tip:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">message</span><span class="p">,</span><span class="w"> </span><span class="n">tip</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">match</span><span class="w"> </span><span class="n">diag</span><span class="p">.</span><span class="n">message</span><span class="p">.</span><span class="n">split_once</span><span class="p">(</span><span class="sc">&#39;\n&#39;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">    </span><span class="nb">Some</span><span class="p">((</span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">))</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">(</span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">t</span><span class="p">)),</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nb">None</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">(</span><span class="n">diag</span><span class="p">.</span><span class="n">message</span><span class="p">.</span><span class="n">as_str</span><span class="p">(),</span><span class="w"> </span><span class="nb">None</span><span class="p">),</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="p">};</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">message</span><span class="p">,</span><span class="w"> </span><span class="n">tip</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">match</span><span class="w"> </span><span class="n">diag</span><span class="p">.</span><span class="n">message</span><span class="p">.</span><span class="n">split_once</span><span class="p">(</span><span class="sc">&#39;\n&#39;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="nb">Some</span><span class="p">((</span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">))</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">(</span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">t</span><span class="p">)),</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nb">None</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">(</span><span class="n">diag</span><span class="p">.</span><span class="n">message</span><span class="p">.</span><span class="n">as_str</span><span class="p">(),</span><span class="w"> </span><span class="nb">None</span><span class="p">),</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">};</span>
 </code></pre></div>
-<p>Actions that depend on tip text (H4, H12, H15, H20) should use this
+<p>Actions that depend on tip text (H4, H15, H20) should use this
 pattern. The tip text has ANSI/HTML tags already stripped by <code>strip_ansi_tags</code>.</p>
 <h3 id="stale-diagnostic-detection">Stale diagnostic detection<a class="headerlink" href="#stale-diagnostic-detection" title="Permanent link">&para;</a></h3>
 <p>Each new action should have a corresponding check in
-<code>is_stale_phpstan_diagnostic()</code> in <code>diagnostics/mod.rs</code> so that the diagnostic
-is eagerly cleared after the user applies the fix, without waiting for the
-next PHPStan run.</p>
-<p>The function currently handles:
-- <code>@phpstan-ignore</code> coverage (all identifiers)
-- <code>method.override</code> / <code>property.override</code> / <code>property.overrideAttribute</code>
-- <code>method.tentativeReturnType</code>
-- <code>return.phpDocType</code> / <code>parameter.phpDocType</code> / <code>property.phpDocType</code>
-- <code>new.static</code>
-- <code>class.prefixed</code>
-- <code>function.alreadyNarrowedType</code> (assert-only)
-- <code>return.void</code> / <code>return.empty</code>
-- <code>deadCode.unreachable</code></p>
-<p>Other identifiers (<code>throws.unusedType</code>, <code>throws.notThrowable</code>,
-<code>missingType.checkedException</code>, <code>method.missingOverride</code>) are cleared
-eagerly by <code>codeAction/resolve</code> rather than by content heuristics.</p>
-<p>New actions should add branches to the <code>match identifier { ... }</code> block.</p>
+<code>is_stale_phpstan_diagnostic()</code> in <code>src/diagnostics/stale.rs</code> so that the
+diagnostic is eagerly cleared after the user applies the fix, without
+waiting for the next PHPStan run. New actions add another
+<code>if identifier == "…"</code> branch there, next to the existing ones.</p>
+<p>Identifiers whose fix is not visible from content (<code>throws.notThrowable</code>,
+<code>missingType.checkedException</code>, <code>method.missingOverride</code>, …) are cleared
+eagerly by <code>codeAction/resolve</code> instead.</p>
 <h3 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h3>
 <p>Each action needs tests following the existing pattern:
 - Unit tests for pure helper functions (regex extraction, edit building)
@@ -1915,10 +1997,9 @@ eagerly by <code>codeAction/resolve</code> rather than by content heuristics.</p
 - Stale detection tests that construct <code>Diagnostic</code> objects and call
   <code>is_stale_phpstan_diagnostic</code></p>
 <h3 id="attribute-insertion-pattern">Attribute insertion pattern<a class="headerlink" href="#attribute-insertion-pattern" title="Permanent link">&para;</a></h3>
-<p><code>remove_override.rs</code> and <code>add_return_type_will_change.rs</code> each contain
-their own <code>find_method_insertion_point</code> and attribute detection helpers,
-following the same pattern as <code>add_override.rs</code>. Future attribute-related
-actions can reference any of these three modules.</p>
+<p><code>find_method_insertion_point</code> is shared from <code>code_actions/phpstan/mod.rs</code>
+and used by <code>add_override.rs</code> and <code>add_return_type_will_change.rs</code>. Future attribute-related actions should
+reuse it.</p>
 <h3 id="phpdoc-type-mismatch-pattern">PHPDoc type mismatch pattern<a class="headerlink" href="#phpdoc-type-mismatch-pattern" title="Permanent link">&para;</a></h3>
 <p><code>fix_phpdoc_type.rs</code> provides a shared helper parameterised by tag name
 (<code>@return</code>, <code>@param</code>, <code>@var</code>). Each diagnostic offers two quickfixes:

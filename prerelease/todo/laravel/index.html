@@ -1179,10 +1179,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l10-viewwithx-and-redirectresponsewithx-dynamic-methods" class="md-nav__link">
+  <a href="#l10-redirectresponsewithx-dynamic-methods" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L10. <code>View::withX()</code> and <code>RedirectResponse::withX()</code> dynamic methods
+        L10. <code>RedirectResponse::withX()</code> dynamic methods
       </span>
     </span>
   </a>
@@ -1218,17 +1218,6 @@
         
       </ul>
     </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#model-columns-from-committed-schema-artifacts" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Model columns from committed schema artifacts
-      </span>
-    </span>
-  </a>
   
 </li>
       
@@ -1415,17 +1404,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L50. "Create route" quick-fix for an unresolved route name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l51-convert-facade-call-to-dependency-injection-refactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L51. "Convert facade call to dependency injection" refactor
       </span>
     </span>
   </a>
@@ -1883,10 +1861,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l10-viewwithx-and-redirectresponsewithx-dynamic-methods" class="md-nav__link">
+  <a href="#l10-redirectresponsewithx-dynamic-methods" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L10. <code>View::withX()</code> and <code>RedirectResponse::withX()</code> dynamic methods
+        L10. <code>RedirectResponse::withX()</code> dynamic methods
       </span>
     </span>
   </a>
@@ -1922,17 +1900,6 @@
         
       </ul>
     </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#model-columns-from-committed-schema-artifacts" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Model columns from committed schema artifacts
-      </span>
-    </span>
-  </a>
   
 </li>
       
@@ -2119,17 +2086,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L50. "Create route" quick-fix for an unresolved route name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l51-convert-facade-call-to-dependency-injection-refactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L51. "Convert facade call to dependency injection" refactor
       </span>
     </span>
   </a>
@@ -2487,9 +2443,11 @@ today and what is still missing.</p>
 <p><code>keyBy</code> and <code>groupBy</code> produce a collection keyed by the column they were
 given, but we type the key <code>array-key</code>
 (<code>virtual_members/laravel/higher_order_proxy.rs</code>, <code>plan_result</code>). The
-column is a literal in the overwhelming majority of calls and the value
-type is already resolved, so the key is recoverable by the same model
-property lookup <code>model-property&lt;Model&gt;</code> validation uses:</p>
+column is a literal in the overwhelming majority of calls, so the key is
+recoverable by the same model property lookup <code>model-property&lt;Model&gt;</code>
+validation uses. (On an <code>Eloquent\Collection</code> the argument forms
+currently lose the value type as well; that is filed in
+<a href="../bugs/#laravel">bugs.md</a> and should land first.)</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$users-&gt;keyBy(&#39;email&#39;);   // want Collection&lt;string, User&gt;, get Collection&lt;array-key, User&gt;</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$users-&gt;groupBy(&#39;id&#39;);    // want Collection&lt;int, Collection&lt;int, User&gt;&gt;</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$posts-&gt;keyBy(&#39;user.id&#39;); // dotted path, resolved segment by segment</span>
@@ -2510,31 +2468,24 @@ lookup already exists for <code>model-property&lt;Model&gt;</code>; the work is 
 a resolved key type through the generic substitution.</p>
 <h4 id="l54-audit-custom-builder-and-relation-closure-inference-against-the-phpstan-extensions">L54. Audit custom-builder and relation-closure inference against the PHPStan extensions<a class="headerlink" href="#l54-audit-custom-builder-and-relation-closure-inference-against-the-phpstan-extensions" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<p>Two areas where the PHPStan Laravel extensions have moved past what we
-mirror, and where we have machinery that has not been checked against
-them:</p>
+<p>A custom builder already survives the chain (<code>Team::query()-&gt;where()</code>
+and <code>Team::where()</code> both stay on <code>TeamBuilder&lt;Team&gt;</code>), and the
+<code>whereHas</code> family types its closure for dotted relation paths and in
+non-leading argument positions. Two relation-constraint closure cases
+still fall short of the PHPStan Laravel extensions
+(<code>type_engine/variable/closure_resolution.rs</code>,
+<code>forward_walk/callable_inference.rs</code>):</p>
 <ul>
-<li><strong>A custom builder surviving the chain.</strong> We read
-  <code>newEloquentBuilder()</code> (<code>virtual_members/laravel/model_extraction.rs</code>)
-  and inject the builder, but it is not established that
-  <code>Team::query()-&gt;where(…)-&gt;orderBy(…)</code> stays on <code>TeamBuilder</code> rather than
-  degrading to <code>Builder&lt;Team&gt;</code> at the first inherited call, nor that
-  static calls on the model and instance calls on the builder agree about
-  what comes back.</li>
-<li><strong>Relation-constraint closure parameters.</strong> We type closures for the
-  <code>whereHas</code> family (<code>type_engine/variable/closure_resolution.rs</code>,
-  <code>forward_walk/callable_inference.rs</code>). Unverified: dotted relation paths
-  (<code>whereHas('stocks.warehouse', …)</code> should type the closure for
-  <code>Warehouse</code>'s builder, resolving each segment against the model the
-  previous one named), the <code>*Morph</code> variants' union of candidate builders
-  plus their <code>$type</code> parameter, <code>withWhereHas</code> receiving both a builder
-  and the relation, and closures in non-leading argument positions
-  (<code>has('stocks', '&gt;=', 1, 'and', fn ($q) =&gt; …)</code>).</li>
+<li><strong><code>*Morph</code> variants.</strong> <code>whereHasMorph('commentable', [Post::class],
+  fn ($q) =&gt; …)</code> types <code>$q</code> as <code>Builder&lt;Model&gt;</code> instead of the union of
+  the candidate models' builders, and the closure's <code>$type</code> parameter
+  is not typed from the candidates either.</li>
+<li><strong><code>withWhereHas</code>.</strong> The closure receives only the builder, not the
+  <code>Builder|Relation</code> union the framework passes.</li>
 </ul>
-<p><strong>Where to change:</strong> Write the assertion cases first — the existing
-<code>tests/integration/completion_laravel.rs</code> conventions cover both areas —
-and file what actually fails. Splitting this into concrete items once the
-gaps are known is preferable to a broad rewrite of either subsystem.</p>
+<p><strong>Where to change:</strong> add assertion cases next to the existing ones in
+<code>tests/integration/completion_laravel.rs</code> and fix them in the closure
+parameter inference.</p>
 <h4 id="l45-_count-properties-are-offered-on-every-relationship">L45. <code>*_count</code> properties are offered on every relationship<a class="headerlink" href="#l45-_count-properties-are-offered-on-every-relationship" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p>For each relationship method we synthesize a <code>{snake_name}_count</code>
@@ -2561,37 +2512,31 @@ than a missing feature. Reported as a follow-up on
 eager-loading. Cannot be inferred declaratively from the model alone;
 requires tracking call-site string arguments.</p>
 <p>Similar to <code>withCount</code>, these aggregate methods produce virtual
-properties named <code>{relation}_{function}</code> (e.g.
-<code>Order::withSum('items', 'price')</code> → <code>$order-&gt;items_sum</code>). The same
+properties named <code>{relation}_{function}_{column}</code> (e.g.
+<code>Order::withSum('items', 'price')</code> → <code>$order-&gt;items_sum_price</code>). The same
 call-site tracking challenge applies, and the type depends on the
 aggregate function (<code>withSum</code>/<code>withAvg</code> → <code>float</code>,
 <code>withMin</code>/<code>withMax</code> → <code>mixed</code>).</p>
 <p>The <code>@property</code> workaround applies here too.</p>
-<h4 id="l10-viewwithx-and-redirectresponsewithx-dynamic-methods">L10. <code>View::withX()</code> and <code>RedirectResponse::withX()</code> dynamic methods<a class="headerlink" href="#l10-viewwithx-and-redirectresponsewithx-dynamic-methods" title="Permanent link">&para;</a></h4>
+<h4 id="l10-redirectresponsewithx-dynamic-methods">L10. <code>RedirectResponse::withX()</code> dynamic methods<a class="headerlink" href="#l10-redirectresponsewithx-dynamic-methods" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>Most code uses <code>-&gt;with('key', $value)</code> instead of the dynamic
 <code>-&gt;withKey($value)</code> form. Explicitly declared methods (<code>withErrors</code>,
-<code>withInput</code>, etc.) already work.</p>
-<p>Both <code>Illuminate\View\View</code> and <code>Illuminate\Http\RedirectResponse</code>
-support dynamic <code>with*()</code> calls via <code>__call()</code>.  For example,
-<code>view('home')-&gt;withUser($user)</code> is equivalent to
-<code>-&gt;with('user', $user)</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">view(&#39;home&#39;)-&gt;withUser($user);         // dynamic, no @method annotation</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">redirect(&#39;/&#39;)-&gt;withErrors($errors);    // has explicit withErrors(), but withFoo() is dynamic</span>
+<code>withInput</code>, etc.) already work, and <code>view('home')-&gt;withUser($user)</code>
+already resolves to <code>View</code> because <code>View::__call</code> is documented
+<code>@return \Illuminate\View\View</code>.</p>
+<p><code>Illuminate\Http\RedirectResponse</code> supports the same dynamic <code>with*()</code>
+calls via <code>__call()</code>, but its <code>__call</code> is documented <code>@return mixed</code>,
+so <code>redirect('/')-&gt;withFoo($x)</code> raises no diagnostic and loses the
+chain:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">redirect(&#39;/&#39;)-&gt;withFoo($x)-&gt;withErrors($errors);   // withFoo() returns mixed</span>
 </code></pre></div>
-<p>The framework provides no <code>@method</code> annotations for arbitrary
-<code>with*</code> calls — only specific ones like <code>withErrors()</code>,
-<code>withInput()</code>, <code>withCookies()</code> etc. are declared as real methods.
-Larastan handles the dynamic case in
-<code>ViewWithMethodsClassReflectionExtension</code> and
-<code>RedirectResponseMethodsClassReflectionExtension</code>, which treat any
+<p>Larastan handles this in
+<code>RedirectResponseMethodsClassReflectionExtension</code>, which treats any
 <code>with*</code> call as valid and returning <code>$this</code>.</p>
-<p><strong>Where to change:</strong> This could be handled with a lightweight
-virtual member provider that detects classes with a <code>__call</code> method
-whose body checks <code>str_starts_with($method, 'with')</code>, or by
-hard-coding the two known classes.  A simpler approach: add
-<code>@method</code> tags to bundled stubs for the most common dynamic <code>with*</code>
-methods, or document this as a known limitation.</p>
+<p><strong>Where to change:</strong> a stub patch on <code>RedirectResponse::__call</code>
+that returns <code>static</code> when the method name starts with <code>with</code>, or a
+small virtual member provider for the one class.</p>
 <hr />
 <h4 id="l47-morph-aliases-in-_type-column-comparisons">L47. Morph aliases in <code>*_type</code> column comparisons<a class="headerlink" href="#l47-morph-aliases-in-_type-column-comparisons" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
@@ -2622,37 +2567,18 @@ positions where they are most often written:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">Relation::morphMap([&#39;|&#39; =&gt; Post::class]);</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$query-&gt;whereHasMorph(&#39;commentable&#39;, [&#39;|&#39;]);</span>
 </code></pre></div>
-<p>The blocker is not the alias index but
-<code>detect_laravel_string_key_context</code> in
-<code>completion/laravel_string_keys.rs</code>, which recognizes only a string
-that is the <em>first</em> argument of a call — it scans backwards from the
-cursor and requires <code>(</code> immediately before the opening quote. Neither
-an array key nor an element of a later argument matches that shape.</p>
-<p><strong>Where to change:</strong> teach the detector to walk back past an enclosing
-<code>[</code> (and the argument commas before it) so it can report both the call
-being made and which argument position and array slot the cursor sits
-in. Every string kind benefits: the same limitation is why a config key
-inside <code>Config::set(['a.b' =&gt; …])</code> does not complete either.</p>
-<hr />
-<h2 id="model-columns-from-committed-schema-artifacts">Model columns from committed schema artifacts<a class="headerlink" href="#model-columns-from-committed-schema-artifacts" title="Permanent link">&para;</a></h2>
-<p>Our column inference from code (casts, accessors, <code>@property</code>,
-attribute defaults, fillable) is complete and precise — on annotated
-codebases we beat every snapshot-based tool on accuracy and freshness.
-But on a project with bare models (no casts beyond dates, no
-docblocks), we draw a blank where other tools can still list columns.
-The two items below close that gap using files already committed to
-the repository, consistent with the philosophy above: <strong>schema-derived
-columns are a fallback</strong>, slotted below every code-declared source in
-the model provider's priority order, and they must never override a
-type declared in code.</p>
-<p>Shared infrastructure for both: a per-project table model
-(<code>table name → ordered column list</code>, each column carrying a PHP type,
-nullability, and the declaration site for go-to-definition). Table
-names resolve from the model's <code>$table</code> property or the conventional
-snake-case plural of the class name. The column set feeds the existing
-virtual-property synthesis, <code>where{Column}</code> generation, attribute-array
-key completion (L30), and column-string completion — one new source,
-every existing consumer benefits.</p>
+<p>The blocker is not the alias index but the context detector
+(<code>string_argument_context</code> in <code>completion/laravel_string_keys/context.rs</code>).
+It already handles named arguments and array <em>values</em> in the first
+argument, but rejects array <em>keys</em> on purpose
+(<code>string_literal_is_array_key</code>) and does not look at arrays in later
+argument positions. <code>whereHasMorph</code> is also not a completion trigger
+yet.</p>
+<p><strong>Where to change:</strong> let the detector report array keys and later
+argument positions, together with the call being made, so each string
+kind can opt in. Every string kind benefits: the same limitation is why
+a config key inside <code>Config::set(['a.b' =&gt; …])</code> does not complete
+either.</p>
 <hr />
 <h2 id="laravel-string-context-intelligence-completion-hover-diagnostics">Laravel string-context intelligence (completion, hover, diagnostics)<a class="headerlink" href="#laravel-string-context-intelligence-completion-hover-diagnostics" title="Permanent link">&para;</a></h2>
 <p>This is the set of features that live <em>inside string literals</em> passed to
@@ -2708,7 +2634,8 @@ keys</strong>, <strong>env vars</strong>, <strong>translation keys</strong>, and
 declaration scanners in <code>virtual_members/laravel/{route_names, config_keys,
 env_vars, trans_keys, view_names}.rs</code>. These walk the relevant source files
 and resolve a string key to its declaration site. <code>LaravelStringKey</code> also
-flows through find-references, rename, and document-highlight. <strong>Eloquent
+flows through find-references (rename, highlight, and semantic tokens
+are L31). <strong>Eloquent
 relation and column name strings</strong> have completion (<code>completion/eloquent_string.rs</code>).</p>
 <p>The scanners already enumerate every valid key for go-to-definition. The
 items below mostly wire that existing enumeration into three more LSP
@@ -2783,14 +2710,19 @@ group namespace prefix), and provide completion, go-to-definition, and
 an unknown-action diagnostic. Low priority: the string form is
 discouraged since Laravel 8.</p>
 <h4 id="l29-livewire-and-volt-component-names">L29. Livewire and Volt component names<a class="headerlink" href="#l29-livewire-and-volt-component-names" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low (Livewire projects only) · Complexity: Low</strong></p>
-<p>The component index (class components under <code>app/Livewire/</code>, nested
-names, and view-based Volt / Livewire v4 single-file components), the
-<code>&lt;livewire:foo-bar&gt;</code> tag resolution on the Blade side, and hover on a
-Livewire component's public properties via <code>$this</code> in its view are all
-implemented. The remaining gap is the PHP-side triggers: <code>Volt::route(
-'/path', 'component')</code> (arg 1) and <code>Route::livewire()</code> get no
-completion, go-to-definition, or unknown-component diagnostic.</p>
+<p><strong>Impact: Low (Livewire projects only) · Complexity: Low-Medium</strong></p>
+<p>Class components under the Livewire class namespace (<code>app/Livewire/</code>,
+nested names), the <code>&lt;livewire:foo-bar&gt;</code> tag resolution on the Blade
+side, and hover on a Livewire component's public properties via <code>$this</code>
+in its view are implemented (<code>blade/discovery.rs</code>). Two gaps remain:</p>
+<ul>
+<li><strong>View-based components.</strong> Volt and Livewire v4 single-file
+  components (a Blade view that carries its own component class) are
+  not indexed, so <code>&lt;livewire:…&gt;</code> naming one resolves to nothing.</li>
+<li><strong>PHP-side triggers.</strong> <code>Volt::route('/path', 'component')</code> (arg 1)
+  and <code>Route::livewire()</code> get no completion, go-to-definition, or
+  unknown-component diagnostic.</li>
+</ul>
 <h4 id="l30-eloquent-attribute-array-key-completion">L30. Eloquent attribute-array key completion<a class="headerlink" href="#l30-eloquent-attribute-array-key-completion" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Our Eloquent string completion covers where-style column arguments and
@@ -2904,24 +2836,26 @@ a method name to claim on the name alone, so the fix is the mechanism main
 already uses for render sites whose receiver only a type settles: emit a
 candidate site during extraction and confirm it in a later, type-aware
 pass, the way <code>ViewReceiverSite</code> /
-<code>Backend::typed_receiver_view_spans</code> does. A receiver that resolves to the
+<code>typed_receiver_view_spans_for</code> (<code>blade/typed_receiver.rs</code>) does. A receiver that resolves to the
 configured auth model (or to <code>Illuminate\Contracts\Auth\Access\Authorizable</code>)
 makes the call an authorization check; anything else leaves it alone. The
 existing name heuristic stays as the cheap path that needs no type
 resolution at all.</p>
 <p><strong>Where to look:</strong> <code>receiver_is_user_like</code> in
-<code>symbol_map/extraction/laravel.rs</code> and its completion-side twin in
-<code>completion/laravel_string_keys.rs</code>; <code>ViewReceiverSite</code> in
+<code>symbol_map/extraction/laravel.rs</code> and its completion-side twin (a
+local check in <code>completion/laravel_string_keys/context.rs</code>); <code>ViewReceiverSite</code> in
 <code>symbol_map/mod.rs</code> for the confirm-later shape.</p>
 <h4 id="l49-unguarded-eloquent-mass-assignment-diagnostic">L49. Unguarded Eloquent mass assignment diagnostic<a class="headerlink" href="#l49-unguarded-eloquent-mass-assignment-diagnostic" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>Model::create($request-&gt;all())</code> (and <code>fill()</code>/<code>update()</code> with an
-unfiltered array) silently drops every key the model hasn't declared
-<code>$fillable</code> for, or throws <code>MassAssignmentException</code> in strict mode —
-a common first-app footgun with no signal today. Flag a call whose
-attribute-array argument is not a literal (so its keys can't be
-checked individually) and whose target model has neither <code>$fillable</code>
-nor <code>$guarded = []]</code> declared, on <code>create()</code>, <code>fill()</code>, <code>update()</code>,
+<p>A model that declares neither <code>$fillable</code> nor <code>$guarded</code> is totally
+guarded: <code>Model::create($request-&gt;all())</code> (and <code>fill()</code>/<code>update()</code>)
+throws <code>MassAssignmentException</code> for any attribute at all, a common
+first-app footgun with no signal today. (Silently dropping unknown keys
+only happens once <code>$fillable</code> is declared.) Flag a call whose
+attribute-array argument is not a literal (so its keys can't be checked
+individually) and whose target model declares neither <code>$fillable</code> nor
+<code>$guarded</code>, nor the <code>#[Fillable]</code>/<code>#[Guarded]</code>/<code>#[Unguarded]</code> model
+attributes, and the project never calls <code>Model::unguard()</code>, on <code>create()</code>, <code>fill()</code>, <code>update()</code>,
 <code>updateOrCreate()</code>, <code>firstOrCreate()</code>, and <code>firstOrNew()</code>. The model
 resolution and column-source machinery L30 already needs (and the
 diagnostic's model-argument matching) share the same receiver-typing
@@ -2942,20 +2876,6 @@ where possible and otherwise leaving placeholders.</p>
 pattern used by other "declare the missing thing" fixes;
 <code>virtual_members/laravel/route_names.rs</code> for the existing scanner
 this reuses for the diagnostic and the insertion point.</p>
-<h4 id="l51-convert-facade-call-to-dependency-injection-refactor">L51. "Convert facade call to dependency injection" refactor<a class="headerlink" href="#l51-convert-facade-call-to-dependency-injection-refactor" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>A code action on a facade call inside a class method (<code>Cache::get(...)</code>,
-<code>Log::info(...)</code>) that adds a constructor-promoted property typed to
-the facade's underlying contract (resolved the same way <code>app('cache')</code>
-already resolves to a concrete class for member completion) and
-rewrites the call site to <code>$this-&gt;{property}-&gt;{method}(...)</code>. Purely
-mechanical once the facade-to-contract resolution already used
-elsewhere is in hand; skip call sites already inside a closure that
-captures <code>$this</code> differently, and skip static/trait contexts where
-constructor injection doesn't apply.</p>
-<p><strong>Where to look:</strong> <code>code_actions/</code> for the promote-to-constructor
-pattern already used elsewhere; <code>virtual_members/laravel/facade.rs</code>
-for the facade-to-concrete-class resolution to reuse.</p>
 
 
 

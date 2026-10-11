@@ -1036,39 +1036,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#fx4-phpstanmissingtypeiterablevalue-add-return-with-iterable-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        FX4. <code>phpstan.missingType.iterableValue</code> — Add <code>@return</code> with iterable type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#fx5-phpstanpropertyunused-phpstanmethodunused-remove-unused-member" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        FX5. <code>phpstan.property.unused</code> / <code>phpstan.method.unused</code> — Remove unused member
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#fx6-phpstangenericscallsitevarianceredundant-remove-redundant-variance" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        FX6. <code>phpstan.generics.callSiteVarianceRedundant</code> — Remove redundant variance
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1606,39 +1573,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#fx4-phpstanmissingtypeiterablevalue-add-return-with-iterable-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        FX4. <code>phpstan.missingType.iterableValue</code> — Add <code>@return</code> with iterable type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#fx5-phpstanpropertyunused-phpstanmethodunused-remove-unused-member" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        FX5. <code>phpstan.property.unused</code> / <code>phpstan.method.unused</code> — Remove unused member
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#fx6-phpstangenericscallsitevarianceredundant-remove-redundant-variance" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        FX6. <code>phpstan.generics.callSiteVarianceRedundant</code> — Remove redundant variance
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1785,6 +1719,13 @@ dedicated fix-CLI pass) that adds a fresh <code>@return</code> tag when a
 function or method has a native <code>array</code> return type (or no return
 type at all) and the body contains enough information to infer a
 specific element type, e.g. <code>@return list&lt;Butterfly&gt;</code>.</p>
+<p>This also covers PHPStan's <code>missingType.iterableValue</code> on return types
+without running PHPStan: a native <code>array</code> return with no element type
+is exactly the case above. The "Add <code>@return</code> type" quickfix for that
+identifier (<code>src/code_actions/phpstan/add_iterable_type.rs</code>) carries its
+own element-type inference from <code>return</code> statements; fold it into
+<code>enrichment_return_type</code> rather than keeping two inference paths, and
+let the quickfix and this rule share the result.</p>
 <p>This lets teams that want to reach PHPStan level 6 (require return
 type declarations) run a single command and get specific, useful
 return types across the entire codebase for free, instead of adding
@@ -1804,32 +1745,14 @@ and simplifies a resulting single-member union. What remains for this
 rule is exclusively CLI wiring: invoking the quickfix's resolve
 function headlessly from <code>fix.rs</code> against diagnostics collected via
 <code>--with-phpstan</code>.</p>
-<h3 id="fx4-phpstanmissingtypeiterablevalue-add-return-with-iterable-type">FX4. <code>phpstan.missingType.iterableValue</code> — Add <code>@return</code> with iterable type<a class="headerlink" href="#fx4-phpstanmissingtypeiterablevalue-add-return-with-iterable-type" title="Permanent link">&para;</a></h3>
-<p><strong>Backlog ID:</strong> H17</p>
-<p>The underlying logic already ships as the "Add <code>@return</code> type" LSP
-quickfix (<code>src/code_actions/phpstan/add_iterable_type.rs</code>, matching
-PHPStan identifier <code>missingType.iterableValue</code>): it infers the element
-type from <code>return</code> statements (array literals, variable types, <code>new
-ClassName()</code> expressions) and falls back to <code>&lt;mixed&gt;</code> only when
-inference cannot determine a concrete type. What remains for this rule
-is exclusively CLI wiring, same as FX3.</p>
-<h3 id="fx5-phpstanpropertyunused-phpstanmethodunused-remove-unused-member">FX5. <code>phpstan.property.unused</code> / <code>phpstan.method.unused</code> — Remove unused member<a class="headerlink" href="#fx5-phpstanpropertyunused-phpstanmethodunused-remove-unused-member" title="Permanent link">&para;</a></h3>
-<p><strong>Backlog ID:</strong> H19</p>
-<p>When PHPStan reports an unused property, method, or class constant,
-remove the entire declaration including its docblock.</p>
-<h3 id="fx6-phpstangenericscallsitevarianceredundant-remove-redundant-variance">FX6. <code>phpstan.generics.callSiteVarianceRedundant</code> — Remove redundant variance<a class="headerlink" href="#fx6-phpstangenericscallsitevarianceredundant-remove-redundant-variance" title="Permanent link">&para;</a></h3>
-<p><strong>Backlog ID:</strong> H20</p>
-<p>Strip <code>covariant</code> or <code>contravariant</code> keywords from generic type
-arguments in docblocks when PHPStan reports them as redundant.</p>
 <hr />
 <h2 id="infrastructure">Infrastructure<a class="headerlink" href="#infrastructure" title="Permanent link">&para;</a></h2>
 <h3 id="rule-selection">Rule selection<a class="headerlink" href="#rule-selection" title="Permanent link">&para;</a></h3>
 <p>Rules are identified by their diagnostic code string:
 - Native rules: bare identifiers (e.g. <code>unused_import</code>)
 - PHPStan rules: prefixed with <code>phpstan.</code> (e.g. <code>phpstan.return.unusedType</code>)</p>
-<p>When no <code>--rule</code> flags are provided, all "preferred" native rules run.
-A rule is "preferred" if its corresponding code action has
-<code>is_preferred: true</code> in the LSP protocol.</p>
+<p>When no <code>--rule</code> flags are provided, every native rule in
+<code>NATIVE_RULES</code> (<code>src/fix.rs</code>) runs.</p>
 <p>PHPStan rules only run when <code>--with-phpstan</code> is passed. This is an
 explicit opt-in because PHPStan adds significant runtime (it must
 analyze the entire project first).</p>

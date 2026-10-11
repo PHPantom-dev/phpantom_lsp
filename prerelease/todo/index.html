@@ -1337,20 +1337,8 @@ contributor even though it's short.</p>
 </tr>
 <tr>
 <td>E1</td>
-<td><a href="../todo/external-stubs/#e1-project-level-phpstorm-stubs-for-gtd">External stub packages (ide-helper, etc.)</a></td>
+<td><a href="../todo/external-stubs/#e1-project-level-phpstorm-stubs-for-gtd">Project-level phpstorm-stubs for go-to-definition</a></td>
 <td>Medium-High</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>E5</td>
-<td><a href="../todo/external-stubs/#e5-extension-stub-selection-stubs-extensions">Extension stub coverage audit</a></td>
-<td>Medium</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>E4</td>
-<td><a href="../todo/external-stubs/#e4-embedded-stub-override-with-external-stubs">Embedded stub override with external stubs</a> (depends on E1)</td>
-<td>Medium</td>
 <td>Low</td>
 </tr>
 <tr>
@@ -1405,7 +1393,7 @@ contributor even though it's short.</p>
 <td>F21</td>
 <td><a href="../todo/lsp-features/#f21-static-typehierarchyprovider-advertisement-depends-on-f20">Static <code>typeHierarchyProvider</code> advertisement</a> (depends on F20; also needs an upstream <code>lsp-types</code> fix)</td>
 <td>Low-Medium</td>
-<td></td>
+<td>Low</td>
 </tr>
 <tr>
 <td>BL1</td>
@@ -1647,7 +1635,13 @@ unlikely to move the needle for most users.</p>
 <tr>
 <td>A40</td>
 <td><a href="../todo/actions/#a40-generate-method-from-call">Generate method from call</a></td>
+<td>High</td>
 <td>Medium-High</td>
+</tr>
+<tr>
+<td>A41</td>
+<td><a href="../todo/actions/#a41-create-class-from-non-existing-name">Create class from non-existing name</a></td>
+<td>High</td>
 <td>Medium-High</td>
 </tr>
 <tr>
@@ -1675,10 +1669,10 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td>A41</td>
-<td><a href="../todo/actions/#a41-create-class-from-non-existing-name">Create class from non-existing name</a></td>
+<td>A43</td>
+<td><a href="../todo/actions/#a43-update-docblock-generics">Update docblock generics</a></td>
 <td>Medium</td>
-<td>Medium-High</td>
+<td>Medium</td>
 </tr>
 <tr>
 <td>A34</td>
@@ -1712,15 +1706,9 @@ unlikely to move the needle for most users.</p>
 </tr>
 <tr>
 <td>A38</td>
-<td><a href="../todo/actions/#a38-convert-ifelseif-chain-to-switch">Convert if/elseif chain to switch</a></td>
+<td><a href="../todo/actions/#a38-convert-ifelseif-chain-to-match">Convert if/elseif chain to <code>match</code></a></td>
 <td>Low-Medium</td>
 <td>Medium-High</td>
-</tr>
-<tr>
-<td>A43</td>
-<td><a href="../todo/actions/#a43-update-docblock-generics">Update docblock generics</a></td>
-<td>Low</td>
-<td>Medium</td>
 </tr>
 <tr>
 <td></td>
@@ -1736,7 +1724,7 @@ unlikely to move the needle for most users.</p>
 </tr>
 <tr>
 <td>H13</td>
-<td><code>property.notFound</code> — declare missing property (same-class)</td>
+<td>Declare missing property (native unknown-member diagnostic and PHPStan <code>property.notFound</code>)</td>
 <td>Medium</td>
 <td>Medium</td>
 </tr>
@@ -1801,27 +1789,9 @@ unlikely to move the needle for most users.</p>
 <td>Low</td>
 </tr>
 <tr>
-<td>FX4</td>
-<td><a href="../todo/fix-cli/#fx4-phpstanmissingtypeiterablevalue-add-return-with-iterable-type"><code>phpstan.missingType.iterableValue</code> — add <code>@return</code> with iterable type</a></td>
-<td>Medium</td>
-<td>Low</td>
-</tr>
-<tr>
 <td>FX2</td>
 <td><a href="../todo/fix-cli/#fx2-unused_variable-remove-unused-variables"><code>unused_variable</code> — remove unused variables</a></td>
 <td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>FX5</td>
-<td><a href="../todo/fix-cli/#fx5-phpstanpropertyunused-phpstanmethodunused-remove-unused-member"><code>phpstan.property.unused</code> / <code>phpstan.method.unused</code> — remove unused member</a></td>
-<td>Low</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>FX6</td>
-<td><a href="../todo/fix-cli/#fx6-phpstangenericscallsitevarianceredundant-remove-redundant-variance"><code>phpstan.generics.callSiteVarianceRedundant</code> — remove redundant variance</a></td>
-<td>Low</td>
 <td>Medium</td>
 </tr>
 <tr>
@@ -1831,22 +1801,16 @@ unlikely to move the needle for most users.</p>
 <td></td>
 </tr>
 <tr>
-<td>F11</td>
-<td><a href="../todo/lsp-features/#f11-vs-code-extension">VS Code extension</a></td>
-<td>High</td>
-<td>Medium-High</td>
-</tr>
-<tr>
 <td>F12</td>
 <td><a href="../todo/lsp-features/#f12-intellij-phpstorm-plugin">IntelliJ / PHPStorm plugin</a></td>
 <td>High</td>
 <td>Medium-High</td>
 </tr>
 <tr>
-<td>F13</td>
-<td><a href="../todo/lsp-features/#f13-homebrew-formula">Homebrew formula</a></td>
+<td>F11</td>
+<td><a href="../todo/lsp-features/#f11-windows-code-signing">Windows code signing</a></td>
 <td>Medium</td>
-<td>Low</td>
+<td>Medium</td>
 </tr>
 <tr>
 <td>F17</td>
@@ -1859,12 +1823,6 @@ unlikely to move the needle for most users.</p>
 <td><a href="../todo/lsp-features/#f23-rename-a-class-through-its-yamlxml-occurrences">Rename a class through its YAML/XML occurrences</a></td>
 <td>Medium</td>
 <td>Medium</td>
-</tr>
-<tr>
-<td>F2</td>
-<td><a href="../todo/lsp-features/#f2-partial-result-streaming-via-progress">Partial result streaming via <code>$/progress</code></a></td>
-<td>Medium</td>
-<td>Medium-High</td>
 </tr>
 <tr>
 <td>F7</td>
@@ -1880,7 +1838,7 @@ unlikely to move the needle for most users.</p>
 </tr>
 <tr>
 <td>F14</td>
-<td><a href="../todo/lsp-features/#f14-helix-upstream-pr">Helix upstream PR</a> (depends on F13)</td>
+<td><a href="../todo/lsp-features/#f14-helix-upstream-pr">Helix upstream PR</a></td>
 <td>Low-Medium</td>
 <td>Low</td>
 </tr>
@@ -1897,12 +1855,6 @@ unlikely to move the needle for most users.</p>
 <td>Low</td>
 </tr>
 <tr>
-<td>F19</td>
-<td><a href="../todo/lsp-features/#f19-connect-to-a-remotetcp-language-server-vs-code-extension">Connect to a remote/TCP language server</a></td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
 <td></td>
 <td><strong><a href="../todo/signature-help/">Signature Help</a></strong></td>
 <td></td>
@@ -1915,15 +1867,9 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td>S3</td>
-<td>Multiple overloaded signatures</td>
-<td>Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
 <td>S4</td>
 <td>Named argument awareness in active parameter</td>
-<td>Low-Medium</td>
+<td>Low</td>
 <td>Medium</td>
 </tr>
 <tr>
@@ -1931,6 +1877,12 @@ unlikely to move the needle for most users.</p>
 <td>Language construct signature help and hover</td>
 <td>Low</td>
 <td>Medium</td>
+</tr>
+<tr>
+<td>S3</td>
+<td>Multiple overloaded signatures</td>
+<td>Low</td>
+<td>Medium-High</td>
 </tr>
 <tr>
 <td></td>
@@ -2011,12 +1963,6 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td>L3</td>
-<td><code>$dates</code> array (deprecated)</td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
 <td>L44</td>
 <td><a href="../todo/laravel/#l44-sibling-resource-registrations-and-degenerate-resource-names">Sibling resource registrations and degenerate resource names</a></td>
 <td>Low-Medium</td>
@@ -2036,7 +1982,7 @@ unlikely to move the needle for most users.</p>
 </tr>
 <tr>
 <td>L8</td>
-<td><code>withSum</code>/<code>withAvg</code>/<code>withMin</code>/<code>withMax</code> aggregate properties</td>
+<td><a href="../todo/laravel/#l8-withsum-withavg-withmin-withmax-aggregate-properties"><code>withSum</code>/<code>withAvg</code>/<code>withMin</code>/<code>withMax</code> aggregate properties</a></td>
 <td>Low-Medium</td>
 <td>High</td>
 </tr>
@@ -2050,7 +1996,7 @@ unlikely to move the needle for most users.</p>
 <td>L29</td>
 <td><a href="../todo/laravel/#l29-livewire-and-volt-component-names">Livewire and Volt component names</a> (Livewire projects only)</td>
 <td>Low</td>
-<td>Low</td>
+<td>Low-Medium</td>
 </tr>
 <tr>
 <td>L27</td>
@@ -2060,19 +2006,13 @@ unlikely to move the needle for most users.</p>
 </tr>
 <tr>
 <td>L10</td>
-<td><code>View::withX()</code> / <code>RedirectResponse::withX()</code> dynamic methods</td>
+<td><a href="../todo/laravel/#l10-redirectresponsewithx-dynamic-methods"><code>RedirectResponse::withX()</code> dynamic methods</a></td>
 <td>Low</td>
 <td>Medium</td>
 </tr>
 <tr>
 <td>L39</td>
 <td><a href="../todo/laravel/#l39-unused-view-and-translation-key-detection">Unused view and translation key detection</a></td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>L51</td>
-<td><a href="../todo/laravel/#l51-convert-facade-call-to-dependency-injection-refactor">"Convert facade call to dependency injection" refactor</a></td>
 <td>Low</td>
 <td>Medium</td>
 </tr>
@@ -2087,12 +2027,6 @@ unlikely to move the needle for most users.</p>
 <td><a href="../todo/external-stubs/#e7-stub-based-framework-patches">Stub-based framework patches</a></td>
 <td>Medium</td>
 <td>Medium-High</td>
-</tr>
-<tr>
-<td>E6</td>
-<td>Stub install prompt for non-Composer projects</td>
-<td>Low</td>
-<td>Medium</td>
 </tr>
 <tr>
 <td></td>
@@ -2117,12 +2051,6 @@ unlikely to move the needle for most users.</p>
 <td><a href="../todo/indexing/#x7-recency-tracking">Recency tracking</a></td>
 <td>Medium</td>
 <td>Medium-High</td>
-</tr>
-<tr>
-<td>X6</td>
-<td>Disk cache (evaluate later)</td>
-<td>Medium</td>
-<td>Very High</td>
 </tr>
 <tr>
 <td>X16</td>

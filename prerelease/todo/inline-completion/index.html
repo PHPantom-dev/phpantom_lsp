@@ -1411,22 +1411,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phasing-and-sprint-placement" class="md-nav__link">
+  <a href="#phasing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Phasing and Sprint Placement
+        Phasing
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Phasing and Sprint Placement">
+    <nav class="md-nav" aria-label="Phasing">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#n1-template-engine-sprint-7-timeframe" class="md-nav__link">
+  <a href="#template-engine-first-n1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        N1. Template Engine (Sprint 7 timeframe)
+        Template engine first (N1)
       </span>
     </span>
   </a>
@@ -1434,10 +1434,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#n2-n-gram-engine-post-sprint-7" class="md-nav__link">
+  <a href="#then-the-n-gram-engine-n2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        N2. N-gram Engine (post-Sprint 7)
+        Then the n-gram engine (N2)
       </span>
     </span>
   </a>
@@ -1445,10 +1445,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#n3-gguf-sidecar-when-competing-with-phpstorm" class="md-nav__link">
+  <a href="#gguf-sidecar-last-n3-when-competing-with-phpstorm" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        N3. GGUF Sidecar (when competing with PHPStorm)
+        GGUF sidecar last (N3, when competing with PHPStorm)
       </span>
     </span>
   </a>
@@ -2209,22 +2209,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phasing-and-sprint-placement" class="md-nav__link">
+  <a href="#phasing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Phasing and Sprint Placement
+        Phasing
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Phasing and Sprint Placement">
+    <nav class="md-nav" aria-label="Phasing">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#n1-template-engine-sprint-7-timeframe" class="md-nav__link">
+  <a href="#template-engine-first-n1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        N1. Template Engine (Sprint 7 timeframe)
+        Template engine first (N1)
       </span>
     </span>
   </a>
@@ -2232,10 +2232,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#n2-n-gram-engine-post-sprint-7" class="md-nav__link">
+  <a href="#then-the-n-gram-engine-n2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        N2. N-gram Engine (post-Sprint 7)
+        Then the n-gram engine (N2)
       </span>
     </span>
   </a>
@@ -2243,10 +2243,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#n3-gguf-sidecar-when-competing-with-phpstorm" class="md-nav__link">
+  <a href="#gguf-sidecar-last-n3-when-competing-with-phpstorm" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        N3. GGUF Sidecar (when competing with PHPStorm)
+        GGUF sidecar last (N3, when competing with PHPStorm)
       </span>
     </span>
   </a>
@@ -2380,7 +2380,15 @@ artifact, not bundled in the main LSP binary.</p>
 <hr />
 <h2 id="n1-template-engine">N1. Template Engine<a class="headerlink" href="#n1-template-engine" title="Permanent link">&para;</a></h2>
 <p><strong>Complexity:</strong> Medium (per pattern group)
-<strong>Dependencies:</strong> None beyond existing type resolution</p>
+<strong>Dependencies:</strong> None beyond existing type resolution, but
+<code>textDocument/inlineCompletion</code> is an LSP 3.18 request. Check whether
+our <code>lsp-types</code> (0.94.1, pinned by <code>tower-lsp</code> 0.20) carries it; if
+not, this needs F20 or a custom method.</p>
+<p>Some templates overlap shipped features: getter/setter and
+constructor-assignment bodies duplicate the <code>generate_getter_setter</code>
+and <code>generate_constructor</code> code actions, and the <code>try/catch</code> template
+overlaps the existing try/catch completion. Reuse those generators
+rather than writing second copies.</p>
 <p>The template engine is pattern matching on the current AST node and
 cursor position, combined with type information from the existing
 completion resolver. No model, no data files, no latency.</p>
@@ -2399,9 +2407,10 @@ completion resolver. No model, no data files, no latency.</p>
 <h3 id="context-gathering">Context Gathering<a class="headerlink" href="#context-gathering" title="Permanent link">&para;</a></h3>
 <p>The template engine reuses existing infrastructure:</p>
 <ul>
-<li><strong>Variable types:</strong> <code>type_engine/variable/resolution.rs</code> already
-  resolves every variable in scope to a type. The template engine
-  calls the same pipeline.</li>
+<li><strong>Variable types:</strong> the forward walker
+  (<code>type_engine/variable/forward_walk/</code>, via <code>resolve_expression_type</code>)
+  already resolves every variable in scope to a type. The template
+  engine calls the same pipeline.</li>
 <li><strong>Containing function:</strong> The AST map already stores <code>MethodInfo</code>
   and <code>FunctionInfo</code> with return types, parameter lists, and
   docblocks.</li>
@@ -2642,7 +2651,8 @@ wrong.</p>
 <hr />
 <h2 id="n2-n-gram-engine">N2. N-gram Engine<a class="headerlink" href="#n2-n-gram-engine" title="Permanent link">&para;</a></h2>
 <p><strong>Complexity:</strong> Very High (novel statistical model and training pipeline, no existing pattern to follow)
-<strong>Dependencies:</strong> Training corpus, PHP tokenizer</p>
+<strong>Dependencies:</strong> N1 (the <code>InlineContext</code> builder), training corpus,
+PHP tokenizer</p>
 <p>The n-gram engine handles the cases where the template engine has no
 pattern match but there's still enough local context to make a useful
 prediction. It predicts the next few PHP tokens based on the
@@ -2763,7 +2773,7 @@ and <code>$id</code>.</p>
 <hr />
 <h2 id="n3-fine-tuned-gguf-model">N3. Fine-Tuned GGUF Model<a class="headerlink" href="#n3-fine-tuned-gguf-model" title="Permanent link">&para;</a></h2>
 <p><strong>Complexity:</strong> Very High (model selection, fine-tuning, and a new sidecar architecture, well outside the existing codebase's patterns)
-<strong>Dependencies:</strong> Phase 1 and 2 complete, training infrastructure</p>
+<strong>Dependencies:</strong> N1 and N2 complete, training infrastructure</p>
 <p>This is the "eventually" phase. A small language model fine-tuned
 exclusively on PHP code with fill-in-the-middle capability. It runs
 as a sidecar process and provides multi-line suggestions that neither
@@ -2980,32 +2990,32 @@ for a small model (target: under 512 tokens).</p>
 <hr />
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># .phpantom.toml or editor settings</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="k">[inlineCompletion]</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="k">[inline_completion]</span>
 <a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="c1"># Enable/disable the entire feature</span>
 <a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
 <a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>
 <a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="c1"># Minimum confidence to show a suggestion (0.0 - 1.0)</span>
-<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="n">minConfidence</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.4</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="n">min_confidence</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.4</span>
 <a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>
 <a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="c1"># Which engines to use (in priority order)</span>
 <a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="n">engines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;template&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;ngram&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;model&quot;</span><span class="p">]</span>
 <a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>
 <a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="c1"># Debounce delay in milliseconds</span>
-<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="n">debounceMs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">50</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="n">debounce_ms</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">50</span>
 <a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>
-<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a><span class="k">[inlineCompletion.model]</span>
+<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a><span class="k">[inline_completion.model]</span>
 <a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a><span class="c1"># Path to a custom GGUF model (overrides default)</span>
 <a id="__codelineno-17-17" name="__codelineno-17-17" href="#__codelineno-17-17"></a><span class="c1"># path = &quot;~/.phpantom/models/phpantom-completion-v1.gguf&quot;</span>
 <a id="__codelineno-17-18" name="__codelineno-17-18" href="#__codelineno-17-18"></a>
 <a id="__codelineno-17-19" name="__codelineno-17-19" href="#__codelineno-17-19"></a><span class="c1"># Maximum tokens to generate per request</span>
-<a id="__codelineno-17-20" name="__codelineno-17-20" href="#__codelineno-17-20"></a><span class="n">maxTokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">64</span>
+<a id="__codelineno-17-20" name="__codelineno-17-20" href="#__codelineno-17-20"></a><span class="n">max_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">64</span>
 <a id="__codelineno-17-21" name="__codelineno-17-21" href="#__codelineno-17-21"></a>
 <a id="__codelineno-17-22" name="__codelineno-17-22" href="#__codelineno-17-22"></a><span class="c1"># Temperature (lower = more conservative)</span>
 <a id="__codelineno-17-23" name="__codelineno-17-23" href="#__codelineno-17-23"></a><span class="n">temperature</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span>
 </code></pre></div>
 <hr />
-<h2 id="phasing-and-sprint-placement">Phasing and Sprint Placement<a class="headerlink" href="#phasing-and-sprint-placement" title="Permanent link">&para;</a></h2>
-<h3 id="n1-template-engine-sprint-7-timeframe">N1. Template Engine (Sprint 7 timeframe)<a class="headerlink" href="#n1-template-engine-sprint-7-timeframe" title="Permanent link">&para;</a></h3>
+<h2 id="phasing">Phasing<a class="headerlink" href="#phasing" title="Permanent link">&para;</a></h2>
+<h3 id="template-engine-first-n1">Template engine first (N1)<a class="headerlink" href="#template-engine-first-n1" title="Permanent link">&para;</a></h3>
 <p>Implement the <code>InlineContext</code> builder and 3-4 high-value template
 patterns:
 - <code>foreach</code> with collection type awareness
@@ -3014,7 +3024,7 @@ patterns:
 - <code>try/catch</code> with throws detection</p>
 <p>This is enough to demo the "how did it know" effect. No external
 dependencies, no model files, ships in the main binary.</p>
-<h3 id="n2-n-gram-engine-post-sprint-7">N2. N-gram Engine (post-Sprint 7)<a class="headerlink" href="#n2-n-gram-engine-post-sprint-7" title="Permanent link">&para;</a></h3>
+<h3 id="then-the-n-gram-engine-n2">Then the n-gram engine (N2)<a class="headerlink" href="#then-the-n-gram-engine-n2" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Build the PHP tokenizer</li>
 <li>Scrape and process the Packagist corpus</li>
@@ -3023,7 +3033,7 @@ dependencies, no model files, ships in the main binary.</p>
 <li>Ship the model file as a separate downloadable asset or embed it
   if it stays under 5MB</li>
 </ul>
-<h3 id="n3-gguf-sidecar-when-competing-with-phpstorm">N3. GGUF Sidecar (when competing with PHPStorm)<a class="headerlink" href="#n3-gguf-sidecar-when-competing-with-phpstorm" title="Permanent link">&para;</a></h3>
+<h3 id="gguf-sidecar-last-n3-when-competing-with-phpstorm">GGUF sidecar last (N3, when competing with PHPStorm)<a class="headerlink" href="#gguf-sidecar-last-n3-when-competing-with-phpstorm" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Select and fine-tune the base model</li>
 <li>Build the sidecar binary (Rust + llama.cpp bindings, or a small

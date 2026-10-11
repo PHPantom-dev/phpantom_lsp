@@ -932,10 +932,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#c10-deprecation-markers-on-class-name-completions-from-all-sources" class="md-nav__link">
+  <a href="#c11-smarter-member-ordering-after-" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        C10. Deprecation markers on class-name completions from all sources
+        C11. Smarter member ordering after <code>-&gt;</code> / <code>::</code>
       </span>
     </span>
   </a>
@@ -943,10 +943,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#c11-smarter-member-ordering-after-" class="md-nav__link">
+  <a href="#c10-deprecation-markers-on-class-name-completions-from-all-sources" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        C11. Smarter member ordering after <code>-&gt;</code> / <code>::</code>
+        C10. Deprecation markers on class-name completions from all sources
       </span>
     </span>
   </a>
@@ -1493,10 +1493,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#c10-deprecation-markers-on-class-name-completions-from-all-sources" class="md-nav__link">
+  <a href="#c11-smarter-member-ordering-after-" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        C10. Deprecation markers on class-name completions from all sources
+        C11. Smarter member ordering after <code>-&gt;</code> / <code>::</code>
       </span>
     </span>
   </a>
@@ -1504,10 +1504,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#c11-smarter-member-ordering-after-" class="md-nav__link">
+  <a href="#c10-deprecation-markers-on-class-name-completions-from-all-sources" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        C11. Smarter member ordering after <code>-&gt;</code> / <code>::</code>
+        C10. Deprecation markers on class-name completions from all sources
       </span>
     </span>
   </a>
@@ -1589,7 +1589,12 @@ within the same impact tier.</p>
 <p><strong>Impact: Medium · Complexity: High</strong></p>
 <p>These functions have return type semantics that don't fit into either
 <code>ARRAY_PRESERVING_FUNCS</code> (same array type out) or <code>ARRAY_ELEMENT_FUNCS</code>
-(single element out). Each needs its own mini-resolver.</p>
+(single element out). Each needs its own mini-resolver (in
+<code>array_func_rules</code>) or a stub patch. The key-extracting functions
+(<code>array_keys</code>, <code>array_search</code>, <code>array_key_first</code>/<code>_last</code>, <code>key</code>,
+<code>array_find_key</code>), <code>array_fill_keys</code>, and <code>min</code>/<code>max</code> are already
+handled; the table lists what still resolves to a bare <code>array</code> or a
+loose type.</p>
 <table>
 <thead>
 <tr>
@@ -1599,11 +1604,6 @@ within the same impact tier.</p>
 </tr>
 </thead>
 <tbody>
-<tr>
-<td><code>array_keys</code></td>
-<td>Returns <code>list&lt;TKey&gt;</code> — extracts the <em>key</em> type, not value type</td>
-<td><code>ArrayKeysFunctionDynamicReturnTypeExtension</code></td>
-</tr>
 <tr>
 <td><code>array_column</code></td>
 <td>Extracts a column from a 2D array, preserving types</td>
@@ -1620,13 +1620,8 @@ within the same impact tier.</p>
 <td><code>ArrayFillFunctionReturnTypeExtension</code></td>
 </tr>
 <tr>
-<td><code>array_fill_keys</code></td>
-<td>Preserves key array type + value type</td>
-<td><code>ArrayFillKeysFunctionReturnTypeExtension</code></td>
-</tr>
-<tr>
 <td><code>array_flip</code></td>
-<td>Swaps key↔value types</td>
+<td>Swaps key↔value types (today: <code>array&lt;int\|string, array-key&gt;</code>)</td>
 <td><code>ArrayFlipFunctionReturnTypeExtension</code></td>
 </tr>
 <tr>
@@ -1646,17 +1641,12 @@ within the same impact tier.</p>
 </tr>
 <tr>
 <td><code>array_intersect_key</code></td>
-<td>Preserves first array's types (dedicated extension)</td>
+<td>Preserves first array's types (missing from <code>ARRAY_PRESERVING_FUNCS</code>, unlike <code>array_diff_key</code>)</td>
 <td><code>ArrayIntersectKeyFunctionReturnTypeExtension</code></td>
 </tr>
 <tr>
-<td><code>array_search</code></td>
-<td>Returns key type of the haystack array</td>
-<td><code>ArraySearchFunctionDynamicReturnTypeExtension</code></td>
-</tr>
-<tr>
 <td><code>array_rand</code></td>
-<td>Returns key type of the input array</td>
+<td>Returns key type of the input array (today: <code>array\|string\|int</code>)</td>
 <td><code>ArrayRandFunctionReturnTypeExtension</code></td>
 </tr>
 <tr>
@@ -1665,34 +1655,14 @@ within the same impact tier.</p>
 <td><code>ArrayCountValuesDynamicReturnTypeExtension</code></td>
 </tr>
 <tr>
-<td><code>array_key_first</code> / <code>array_key_last</code></td>
-<td>Returns key type (usually scalar, low completion value)</td>
-<td><code>ArrayFirstLastDynamicReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>key</code></td>
-<td>Returns the key type of the array at the internal pointer</td>
-<td><code>KeyFunctionDynamicReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>array_find_key</code></td>
-<td>Returns key type (PHP 8.4)</td>
-<td><code>ArrayFindKeyFunctionReturnTypeExtension</code></td>
-</tr>
-<tr>
 <td><code>compact</code></td>
 <td>Builds typed array from variable names</td>
 <td><code>CompactFunctionReturnTypeExtension</code></td>
 </tr>
 <tr>
 <td><code>count</code> / <code>sizeof</code></td>
-<td>Returns precise int range based on array size</td>
+<td>Returns precise int range based on array size (today: always <code>int&lt;0, max&gt;</code>)</td>
 <td><code>CountFunctionReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>min</code> / <code>max</code></td>
-<td>Returns union of argument types</td>
-<td><code>MinMaxFunctionReturnTypeExtension</code></td>
 </tr>
 </tbody>
 </table>
@@ -1716,7 +1686,9 @@ key inside the matching <code>array{…}</code> annotation.</p>
 <p><strong>Impact: Low · Complexity: High</strong></p>
 <p>PHPStan also provides dynamic return type extensions for many non-array
 functions. These are lower priority because they mostly refine scalar
-return types (less impactful for class-based completion).</p>
+return types (less impactful for class-based completion). <code>abs</code>,
+<code>explode</code>, <code>get_class</code>, <code>date_create</code> and <code>class_implements</code> already
+resolve precisely; the rest still return their declared stub type.</p>
 <table>
 <thead>
 <tr>
@@ -1727,19 +1699,9 @@ return types (less impactful for class-based completion).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>abs</code></td>
-<td>Preserves int/float return type</td>
-<td><code>AbsFunctionDynamicReturnTypeExtension</code></td>
-</tr>
-<tr>
 <td><code>base64_decode</code></td>
-<td><code>string\|false</code> based on strict param</td>
+<td><code>string</code> when strict is false</td>
 <td><code>Base64DecodeDynamicFunctionReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>explode</code></td>
-<td><code>list&lt;string&gt;</code> / <code>non-empty-list&lt;string&gt;</code> / <code>false</code></td>
-<td><code>ExplodeFunctionDynamicReturnTypeExtension</code></td>
 </tr>
 <tr>
 <td><code>filter_var</code></td>
@@ -1755,11 +1717,6 @@ return types (less impactful for class-based completion).</p>
 <td><code>filter_var_array</code> / <code>filter_input_array</code></td>
 <td>Typed array based on filter definitions</td>
 <td><code>FilterVarArrayDynamicReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>get_class</code></td>
-<td>Returns <code>class-string&lt;T&gt;</code></td>
-<td><code>GetClassDynamicReturnTypeExtension</code></td>
 </tr>
 <tr>
 <td><code>get_called_class</code></td>
@@ -1792,11 +1749,6 @@ return types (less impactful for class-based completion).</p>
 <td><code>DateFunctionReturnTypeExtension</code></td>
 </tr>
 <tr>
-<td><code>date_create</code> / <code>date_create_immutable</code></td>
-<td><code>DateTime\|false</code></td>
-<td><code>DateTimeCreateDynamicReturnTypeExtension</code></td>
-</tr>
-<tr>
 <td><code>hash</code> / <code>hash_file</code> / etc.</td>
 <td>Precise return types</td>
 <td><code>HashFunctionsReturnTypeExtension</code></td>
@@ -1815,11 +1767,6 @@ return types (less impactful for class-based completion).</p>
 <td><code>str_split</code> / <code>mb_str_split</code></td>
 <td>Non-empty-list</td>
 <td><code>StrSplitFunctionReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>class_implements</code> / <code>class_uses</code> / <code>class_parents</code></td>
-<td><code>array&lt;string, string&gt;\|false</code></td>
-<td><code>ClassImplementsFunctionReturnTypeExtension</code></td>
 </tr>
 </tbody>
 </table>
@@ -1909,8 +1856,9 @@ combinations.</p>
 <p>Resolve <code>class_alias('OriginalClass', 'AliasName')</code> so that the alias
 name works for completion, go-to-definition, and hover. PHP's
 <code>class_alias()</code> creates a runtime alias for a class, and many codebases
-rely on this for backwards compatibility layers and framework internals
-(Laravel's Facade loader uses <code>class_alias</code> to register short names).</p>
+rely on this for backwards compatibility layers. (Laravel's facade
+aliases from <code>config/app.php</code> are already resolved separately, in
+<code>virtual_members/laravel/aliases.rs</code>.)</p>
 <p>Today, if a file calls <code>class_alias('\App\Services\UserService',
 'UserService')</code>, using <code>UserService</code> elsewhere produces no completions
 and no go-to-definition because PHPantom has no record of the alias.</p>
@@ -1931,7 +1879,7 @@ and no go-to-definition because PHPantom has no record of the alias.</p>
 </li>
 <li>
 <p><strong>Cross-file aliases</strong> — for aliases defined in autoloaded files
-   (e.g. a <code>_ide_helper.php</code> or a framework bootstrap file), the alias
+   (e.g. a library's bootstrap or compatibility file), the alias
    mapping needs to be stored in <code>fqn_uri_index</code> or a parallel index so
    that it's available project-wide. This is the main effort: deciding
    where to persist the alias data and when to scan for it.</p>
@@ -1970,31 +1918,17 @@ candidate file.</p>
 </li>
 <li>
 <p><strong>Integrate into <code>class_sort_text</code></strong> — add a new dimension after
-   <code>affinity</code> and before <code>demote</code>. This keeps it as a tiebreaker
-   within the same affinity bracket rather than overriding the
-   namespace-usage signal. Only apply when the affinity score is zero
-   or tied.</p>
+   <code>affinity</code> (the key is currently affinity, demote, gap). This keeps
+   it as a tiebreaker within the same affinity bracket rather than
+   overriding the namespace-usage signal. Only apply when the affinity
+   score is zero or tied.</p>
 </li>
 <li>
 <p><strong>Pass the current file path</strong> through <code>ClassCompletionParams</code> and
    into <code>ClassItemCtx</code> so it's available during sort-text construction.</p>
 </li>
 </ol>
-<h2 id="c10-deprecation-markers-on-class-name-completions-from-all-sources">C10. Deprecation markers on class-name completions from all sources<a class="headerlink" href="#c10-deprecation-markers-on-class-name-completions-from-all-sources" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>Same-namespace classes (source tier 2) already carry deprecation info
-because <code>ClassInfo</code> is available. Classes from <code>fqn_uri_index</code>
-and stubs (tiers 3-4) don't check for <code>@deprecated</code> because the class
-may not be fully loaded at completion time.</p>
-<p>For classmap entries, a lightweight byte-level scan of the first
-docblock in the file (similar to <code>detect_stub_class_kind</code>) could detect
-<code>@deprecated</code> without a full parse. For stubs, the source is already
-in memory and could be scanned cheaply. For fqn_uri_index entries, the
-deprecation flag could be stored alongside the file path when the class
-is first indexed.</p>
-<p>This is a small quality-of-life improvement: deprecated classes would
-show with a strikethrough in the completion menu across all sources,
-not just same-namespace ones.</p>
+<hr />
 <h2 id="c11-smarter-member-ordering-after-">C11. Smarter member ordering after <code>-&gt;</code> / <code>::</code><a class="headerlink" href="#c11-smarter-member-ordering-after-" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: High</strong></p>
 <p>Members after <code>-&gt;</code> and <code>::</code> are now sorted by kind (constants and
@@ -2026,6 +1960,21 @@ tiering already in place:</p>
 needs experimentation. A next step could be adding declaration origin
 on top of the existing kind tiering, which requires no new data and is
 straightforward to implement.</p>
+<hr />
+<h2 id="c10-deprecation-markers-on-class-name-completions-from-all-sources">C10. Deprecation markers on class-name completions from all sources<a class="headerlink" href="#c10-deprecation-markers-on-class-name-completions-from-all-sources" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Both class-name completion passes (<code>fqn_uri_index</code> and stubs) mark a
+candidate deprecated when its <code>ClassInfo</code> is already loaded
+(<code>find_class_in_uri_classes_index</code> in <code>class_completion/mod.rs</code>),
+whatever its source. Classes that have not been loaded yet show no
+strikethrough even when they carry <code>@deprecated</code>.</p>
+<p>For classmap entries, a lightweight byte-level scan of the first
+docblock in the file (similar to <code>detect_stub_class_kind</code>) could detect
+<code>@deprecated</code> without a full parse. For stubs, the source is already
+in memory and could be scanned cheaply. For fqn_uri_index entries, the
+deprecation flag could be stored alongside the file path when the class
+is first indexed.</p>
+<hr />
 <h2 id="c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion">C12. The implicit <code>$value</code> of a <code>set</code> hook is not offered by variable completion<a class="headerlink" href="#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>A <code>set</code> hook that declares no parameter list still receives the assigned
@@ -2051,6 +2000,7 @@ site pointing at a keyword would produce a bogus highlight and a rename
 edit that corrupts the hook. The fix needs a def kind those consumers
 skip (say <code>VarDefKind::ImplicitHookValue</code>) while variable completion
 includes it.</p>
+<hr />
 <h2 id="c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members">C13. <code>self::</code>/<code>static::</code> inside a <code>@require-extends</code> trait does not see the required class's static members<a class="headerlink" href="#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Found while porting Mago's <code>issue_1064.php</code> (Test Porting Phase 4A).
@@ -2074,15 +2024,15 @@ access does not get the same treatment:</p>
 <p>Every caller of <code>trait_this_bounds</code>/<code>extend_this_with_trait_bounds</code> is on
 a <code>$this</code>-context resolution path (<code>forward_walk/param_seeding.rs</code>,
 <code>forward_walk/callable_inference.rs</code>, <code>resolver/mod.rs</code>, and
-<code>diagnostics/deprecated.rs</code>) — none of them run for a bare <code>self::</code>/
-<code>static::</code> completion inside a trait body, so the required class's
-constants and static properties/methods never enter the candidate list
-there.</p>
-<p><strong>Fix:</strong> find where <code>self::</code>/<code>static::</code> completion resolves its target
-class for a trait method body (as opposed to <code>$this-&gt;</code>'s path) and feed
-it through the same <code>@require-extends</code>/<code>@require-implements</code> bound the
-<code>$this-&gt;</code> path already consults, rather than adding a second lookup of
-the tag.</p>
+<code>rhs_resolution/property_access.rs</code>). None of them run for a bare
+<code>self::</code>/<code>static::</code> completion inside a trait body, so the required
+class's constants and static properties/methods never enter the
+candidate list there.</p>
+<p><strong>Fix:</strong> <code>SubjectExpr::SelfKw | StaticKw</code> goes straight to
+<code>resolve_self_static_class</code> (<code>type_engine/resolver/mod.rs</code>) with no
+trait-bound extension. Feed it through the same
+<code>@require-extends</code>/<code>@require-implements</code> bound the <code>$this-&gt;</code> path
+already consults, rather than adding a second lookup of the tag.</p>
 
 
 

@@ -1008,15 +1008,15 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#a38-convert-ifelseif-chain-to-switch" class="md-nav__link">
+  <a href="#a38-convert-ifelseif-chain-to-match" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        A38. Convert if/elseif chain to switch
+        A38. Convert if/elseif chain to <code>match</code>
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="A38. Convert if&#x2f;elseif chain to switch">
+    <nav class="md-nav" aria-label="A38. Convert if&#x2f;elseif chain to match">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1851,15 +1851,15 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#a38-convert-ifelseif-chain-to-switch" class="md-nav__link">
+  <a href="#a38-convert-ifelseif-chain-to-match" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        A38. Convert if/elseif chain to switch
+        A38. Convert if/elseif chain to <code>match</code>
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="A38. Convert if&#x2f;elseif chain to switch">
+    <nav class="md-nav" aria-label="A38. Convert if&#x2f;elseif chain to match">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1982,9 +1982,6 @@ within the same impact tier.</p>
 </tr>
 </tbody>
 </table>
-<p><strong>Refactoring code actions overview:</strong> A2 (Extract Function) depends on
-forward-pass variable usage tracking with byte offsets across function
-scopes.</p>
 <h2 id="a34-unified-code-action-handler-architecture">A34. Unified code action handler architecture<a class="headerlink" href="#a34-unified-code-action-handler-architecture" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Very High</strong></p>
 <p>Refactor the code action system to use a unified handler architecture
@@ -2029,8 +2026,8 @@ cheaper to add: write one function, append it to an array.</p>
 <h2 id="a46-honor-contextonly-in-code-action-responses">A46. Honor <code>context.only</code> in code action responses<a class="headerlink" href="#a46-honor-contextonly-in-code-action-responses" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>We advertise <code>codeActionKinds</code> (<code>quickfix</code>, <code>refactor.extract</code>,
-<code>refactor.inline</code>, <code>source.organizeImports</code>) in <code>code_action_provider</code>
-(<code>src/server.rs</code>), and every collector already tags its <code>CodeAction</code>
+<code>refactor.inline</code>, <code>source.organizeImports</code>, <code>source.addMissingImports</code>)
+in <code>code_action_provider</code> (<code>src/backend/startup.rs</code>), and every collector already tags its <code>CodeAction</code>
 with a <code>kind</code>, but <code>handle_code_action</code> in <code>src/code_actions/mod.rs</code>
 never reads <code>params.context.only</code> and never filters its result against
 it. A client that asks for only quick-fixes (its Ctrl+.-style menu) or
@@ -2077,9 +2074,10 @@ would silently return nothing for that request.</p>
 (<code>convert_switch_to_match</code>, <code>convert_to_arrow_function</code>,
 <code>convert_to_closure</code>, <code>convert_to_interpolation</code>,
 <code>promote_constructor_param</code>, <code>simplify_null</code>), <code>refactor.rewrite</code> via
-<code>CodeActionKind::REFACTOR_REWRITE</code> (<code>generate_constructor</code>), and the
-bare <code>CodeActionKind::REFACTOR</code> (<code>generate_getter_setter</code>,
-<code>generate_property_hooks</code>, <code>replace_fqcn</code>). Reconcile these as part of
+<code>CodeActionKind::REFACTOR_REWRITE</code> (<code>generate_constructor</code>,
+<code>change_visibility</code>, <code>replace_fqcn</code>), and the bare
+<code>CodeActionKind::REFACTOR</code> (<code>generate_getter_setter</code>,
+<code>generate_property_hooks</code>). Reconcile these as part of
 the same task: either add the missing kinds to the advertised list, or
 fold each action under an already-declared parent kind — a client
 that trusts our advertised capability list and asks for exactly what
@@ -2093,12 +2091,11 @@ returning.</p>
 there.</p>
 <p><strong>Where to look:</strong> <code>handle_code_action</code> in <code>src/code_actions/mod.rs</code>
 (the ~30 <code>collect_*_actions</code> call list — each call site is where the
-early kind-gate belongs); <code>code_action_provider</code> in <code>src/server.rs</code>
-for the advertised kind list; A34 above is the natural long-term home
-for a per-handler kind table if that refactor lands first, but this
-doesn't need to wait for it — the gate works fine bolted onto the
-current call list.</p>
-<hr />
+early kind-gate belongs); <code>code_action_provider</code> in
+<code>src/backend/startup.rs</code> for the advertised kind list; A34 above is the
+natural long-term home for a per-handler kind table if that refactor
+lands first, but this doesn't need to wait for it — the gate works fine
+bolted onto the current call list.</p>
 <hr />
 <h2 id="a16-snippet-placeholder-for-extracted-method-name">A16. Snippet Placeholder for Extracted Method Name<a class="headerlink" href="#a16-snippet-placeholder-for-extracted-method-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
@@ -2134,11 +2131,12 @@ over it without an extra rename step.</p>
 <ol>
 <li>
 <p><strong>Store client capabilities at initialisation.</strong>  In <code>initialize</code>,
-   save the <code>InitializeParams.capabilities</code> (or at least the snippet
-   edit flag) on the <code>Backend</code> struct.</p>
+   save the snippet edit flag on the <code>Backend</code> struct, the same way
+   <code>supports_code_action_resolve</code> is stored.</p>
 </li>
 <li>
-<p><strong>Check the flag in <code>collect_extract_function_actions</code>.</strong>  When
+<p><strong>Check the flag in <code>resolve_extract_function</code></strong> (extract function
+   is a deferred action, so its edit is built at resolve time).  When
    the client supports snippet edits, build the workspace edit with
    <code>DocumentChanges::Operations</code> containing <code>SnippetTextEdit</code> entries
    instead of plain <code>TextEdit</code>.  The new-text for the method name
@@ -2242,7 +2240,9 @@ these eagerly, removing the else changes semantics).</p>
 <h3 id="a37-simplify-with-nullsafe-operator">A37. Simplify with <code>?-&gt;</code> (nullsafe operator)<a class="headerlink" href="#a37-simplify-with-nullsafe-operator" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <p>Replace null-checked method/property chains with PHP 8.0's nullsafe
-operator:</p>
+operator. The ternary form (<code>$x !== null ? $x-&gt;foo() : null</code> →
+<code>$x?-&gt;foo()</code>) already ships in <code>src/code_actions/simplify_null.rs</code>; what
+remains is the if-statement form, which belongs in the same module:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// Before</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if ($user !== null) {</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    $name = $user-&gt;getName();</span>
@@ -2262,7 +2262,7 @@ operator:</p>
 <ul>
 <li>The if-body contains exactly one statement: an assignment or a
   standalone expression statement using the checked variable.</li>
-<li>The null check is <code>$var !== null</code>, <code>$var !== null</code>, <code>!is_null($var)</code>,
+<li>The null check is <code>$var !== null</code>, <code>$var != null</code>, <code>!is_null($var)</code>,
   or <code>isset($var)</code> (for a single variable, not array access).</li>
 <li>There is no <code>else</code> / <code>elseif</code> branch. An else branch means the
   developer wants to handle the null case explicitly, which <code>?-&gt;</code>
@@ -2290,64 +2290,62 @@ operator:</p>
 <p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.
 <strong>Guard:</strong> <code>php_version &gt;= 8.0</code>.</p>
 <hr />
-<h3 id="a38-convert-ifelseif-chain-to-switch">A38. Convert if/elseif chain to switch<a class="headerlink" href="#a38-convert-ifelseif-chain-to-switch" title="Permanent link">&para;</a></h3>
+<h3 id="a38-convert-ifelseif-chain-to-match">A38. Convert if/elseif chain to <code>match</code><a class="headerlink" href="#a38-convert-ifelseif-chain-to-match" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<p>Convert an if/elseif chain that compares the same variable or
-expression against different values into a <code>switch</code> statement:</p>
+<p>Convert an if/elseif chain that compares the same subject against
+different values into a <code>match</code> expression:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// Before</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">if ($status === &#39;active&#39;) {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    doActive();</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">} elseif ($status === &#39;inactive&#39;) {</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    doInactive();</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">} elseif ($status === &#39;pending&#39;) {</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    doPending();</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">} else {</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">    doDefault();</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">}</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">// After</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">switch ($status) {</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">    case &#39;active&#39;:</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="x">        doActive();</span>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="x">        break;</span>
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="x">    case &#39;inactive&#39;:</span>
-<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="x">        doInactive();</span>
-<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="x">        break;</span>
-<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="x">    case &#39;pending&#39;:</span>
-<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="x">        doPending();</span>
-<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="x">        break;</span>
-<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="x">    default:</span>
-<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="x">        doDefault();</span>
-<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="x">        break;</span>
-<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="x">}</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    $label = &#39;Active&#39;;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">} elseif ($status === &#39;inactive&#39; || $status === &#39;disabled&#39;) {</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    $label = &#39;Off&#39;;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">} else {</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    $label = &#39;Unknown&#39;;</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">}</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">// After</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">$label = match ($status) {</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">    &#39;active&#39; =&gt; &#39;Active&#39;,</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">    &#39;inactive&#39;, &#39;disabled&#39; =&gt; &#39;Off&#39;,</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">    default =&gt; &#39;Unknown&#39;,</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="x">};</span>
 </code></pre></div>
+<p><code>match</code> compares with <code>===</code>, so a chain of strict comparisons converts
+exactly, which <code>switch</code>'s loose comparison could not offer. It also
+sits next to the shipped switch → match action
+(<code>convert_switch_to_match.rs</code>) rather than working against it.</p>
 <h4 id="when-the-conversion-is-safe_1">When the conversion is safe<a class="headerlink" href="#when-the-conversion-is-safe_1" title="Permanent link">&para;</a></h4>
 <ul>
-<li>Every condition in the chain compares the same subject expression
-  against a constant value using <code>===</code> or <code>==</code> (all arms must use the
-  same comparison operator).</li>
-<li>The subject expression is a simple expression (variable, property
-  access, method call) that should not have side effects when evaluated
-  once in the switch head instead of repeatedly in each condition.</li>
-<li>With <code>===</code>, the conversion is semantically exact only for scalar
-  values. Switch uses loose comparison internally, so strict-equality
-  chains are converted with a comment noting the semantic difference,
-  or the action is only offered for <code>==</code> chains.</li>
+<li>Every condition compares the same subject expression against a
+  value with <code>===</code>, optionally several of them joined by <code>||</code> (which
+  become one arm with comma-separated conditions). A <code>==</code> chain is
+  only converted when the subject's type makes loose and strict
+  comparison agree (e.g. both sides are strings).</li>
+<li>The subject is side-effect free (variable, property access), since
+  it is evaluated once instead of once per condition.</li>
+<li><code>match</code> arms are expressions, so every branch must reduce to the same
+  shape: a single <code>return &lt;expr&gt;;</code> in each branch (the result is
+  <code>return match (…) { … };</code>), a single assignment to the same variable
+  in each branch (<code>$x = match (…) { … };</code>), or a <code>throw</code> (a valid arm
+  expression since PHP 8.0) in any branch of either form. Branches
+  with more than one statement are not converted.</li>
+<li>The chain has a trailing <code>else</code>, which becomes <code>default</code>. Without
+  one, <code>match</code> throws <code>UnhandledMatchError</code> where the if-chain did
+  nothing, so the action is not offered. (A <code>return</code> chain followed
+  directly by a <code>return</code> statement can use that statement as the
+  <code>default</code> arm.)</li>
 </ul>
 <h4 id="implementation_2">Implementation<a class="headerlink" href="#implementation_2" title="Permanent link">&para;</a></h4>
 <ul>
-<li>Walk the AST for <code>Statement::If</code> nodes that have at least one
-  <code>elseif</code> branch.</li>
-<li>Extract the subject from the first condition's comparison. Verify
-  all subsequent conditions compare the same subject (by source text
-  or AST structure equality).</li>
-<li>Build a <code>switch</code> statement: each condition value becomes a <code>case</code>,
-  the if/elseif body becomes the case body with <code>break;</code> appended
-  (unless the body ends with <code>return</code>, <code>throw</code>, or <code>continue</code>).</li>
-<li>If the chain has a trailing <code>else</code>, convert it to <code>default:</code>.</li>
-<li>Replace the entire if/elseif/else block with the switch.</li>
+<li>Walk the AST for <code>Statement::If</code> nodes with at least one <code>elseif</code>.</li>
+<li>Extract the subject from the first condition and verify every other
+  condition compares the same subject (by AST structure equality).</li>
+<li>Check the branch shape above, build the <code>match</code>, and replace the
+  whole if/elseif/else block (plus a following <code>return</code> when it was
+  folded into <code>default</code>).</li>
 </ul>
-<p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.</p>
+<p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.
+<strong>Guard:</strong> <code>php_version &gt;= 8.0</code>.</p>
 <hr />
 <h3 id="a40-generate-method-from-call">A40. Generate method from call<a class="headerlink" href="#a40-generate-method-from-call" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Complexity: Medium-High</strong></p>
@@ -2391,7 +2389,11 @@ Phpactor has this.</p>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Auto-update or add <code>@extends</code>/<code>@implements</code> tags to match the actual
 class hierarchy when a class extends a generic parent. Phpactor has
-this as a transformer.</p>
+this as a transformer. Typing <code>/**</code> above a class already generates
+these tags for a new docblock
+(<code>src/completion/phpdoc/generation/build.rs</code>); what remains is a code
+action for a class that already has a docblock, naturally alongside
+<code>update_docblock.rs</code>.</p>
 <ul>
 <li>Inspect the <code>extends</code> and <code>implements</code> clauses of the class under
   the cursor.</li>

@@ -1633,35 +1633,32 @@ or arrow function:</p>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$format(&#39;Alice&#39;, 30);  // ← signature help here</span>
 </code></pre></div>
 <h4 id="current-state">Current state<a class="headerlink" href="#current-state" title="Permanent link">&para;</a></h4>
-<p><code>extract_callable_target_from_variable</code> handles first-class callables
-(<code>$fn = makePen(...)</code>) by scanning for the <code>(...)</code> suffix.  Closures
-and arrow functions assigned to variables are not detected because they
-don't end with <code>(...)</code>.</p>
+<p><code>extract_callable_target_from_variable</code> (<code>signature_help.rs</code>) handles
+first-class callables (<code>$fn = makePen(...)</code>) by looking the variable up
+in the first-class-callable assignments collected from the AST
+(<code>parser::with_fcc_assignments</code>). Closures and arrow functions assigned
+to variables are not collected there, so they get no signature help.</p>
 <h4 id="implementation">Implementation<a class="headerlink" href="#implementation" title="Permanent link">&para;</a></h4>
 <ol>
 <li>
-<p><strong>Detect closure/arrow assignments</strong> — in
-   <code>extract_callable_target_from_variable</code>, if the RHS does not end with
-   <code>(...)</code>, check whether it starts with <code>function(</code> or <code>fn(</code>.  If so,
-   return a synthetic identifier (e.g. <code>"__closure_at_L{line}"</code>) that
-   the resolver can look up.</p>
+<p><strong>Resolve the variable's type</strong> — ask the shared resolver for the
+   variable's type at the call site. A closure or arrow function
+   assignment resolves to a <code>Closure(...)</code> type carrying the parameter
+   and return types, so no separate parse of the closure is needed and
+   any closure the type engine understands (including ones passed
+   through other variables) gets signature help.</p>
 </li>
 <li>
-<p><strong>Parse closure parameters</strong> — alternatively, skip the
-   <code>resolve_callable_target</code> pathway entirely.  When the variable is
-   assigned a closure/arrow function, parse the parameters and return
-   type directly from the AST of the assignment RHS.  Build the
-   <code>ResolvedCallableTarget</code> inline without going through class
-   resolution.</p>
+<p><strong>Build the signature</strong> — turn the callable type into a
+   <code>ResolvedCallableTarget</code> inline, without going through class
+   resolution (closures don't have classes). Parameter names come from
+   the callable type when it carries them, otherwise from the closure's
+   AST.</p>
 </li>
-</ol>
-<p>This is the cleaner approach: closures don't have classes, so the
-   existing class-based resolution is the wrong abstraction.  The
-   <code>SymbolMap</code> already records <code>VarDefSite</code> for the assignment, and the
-   AST is available.</p>
-<ol>
-<li><strong>Label prefix</strong> — use <code>$format</code> (the variable name) or the closure's
-   inferred signature as the label prefix.</li>
+<li>
+<p><strong>Label prefix</strong> — use <code>$format</code> (the variable name) or the closure's
+   inferred signature as the label prefix.</p>
+</li>
 </ol>
 <h4 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h4>
 <ul>
