@@ -1293,17 +1293,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b584-a-save-misses-the-files-that-read-a-typed-methods-body" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B584. A save misses the files that read a typed method's body
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2242,17 +2231,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b584-a-save-misses-the-files-that-read-a-typed-methods-body" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B584. A save misses the files that read a typed method's body
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2784,35 +2762,6 @@ becomes <code>TestCall</code>. <code>pest-plugin-phpstan</code> resolves <code>$
 <code>pest()-&gt;extends()</code>/<code>uses()</code> binds for the test file's directory (falling
 back to <code>PHPUnit\Framework\TestCase</code>). Reading those bindings from
 <code>tests/Pest.php</code> would do the same.</p>
-<h3 id="b584-a-save-misses-the-files-that-read-a-typed-methods-body">B584. A save misses the files that read a typed method's body<a class="headerlink" href="#b584-a-save-misses-the-files-that-read-a-typed-methods-body" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="x">// Service.php: the body is edited and saved</span>
-<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="x">class Service {</span>
-<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="x">    public function wrap(array $items): Collection { return collect($items); }</span>
-<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="x">}</span>
-<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a>
-<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="x">// Consumer.php: open in another tab</span>
-<a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a><span class="x">class Consumer {</span>
-<a id="__codelineno-33-8" name="__codelineno-33-8" href="#__codelineno-33-8"></a><span class="x">    public function build(Service $s) { return $s-&gt;wrap([1, 2]); }</span>
-<a id="__codelineno-33-9" name="__codelineno-33-9" href="#__codelineno-33-9"></a><span class="x">    public function run(Service $s): void { $this-&gt;build($s)-&gt;first(); }</span>
-<a id="__codelineno-33-10" name="__codelineno-33-10" href="#__codelineno-33-10"></a><span class="x">}</span>
-</code></pre></div>
-<p>While an untyped body such as <code>build()</code> is being inferred,
-<code>refine_declared_return</code> (<code>rhs_resolution/calls.rs</code>) reads the body of a
-method that declares a bare class and takes parameters, to add the type
-arguments the declaration leaves out (<code>Collection&lt;int, int&gt;</code>). So
-<code>Consumer</code>'s diagnostics depend on <code>wrap()</code>'s body. On save,
-<code>open_files_affected_by_save</code> (<code>diagnostics/cross_file.rs</code>) only counts
-untyped and <code>mixed</code> methods as readable from their callers
-(<code>push_body_inferred_member_keys</code>), so <code>Consumer.php</code> keeps the
-diagnostics it had before the save until it is edited itself.</p>
-<p><strong>Fix:</strong> Count the methods <code>refine_declared_return</code> can read in
-<code>push_body_inferred_member_keys</code> too. Every method declaring a bare class
-with parameters would then fan a body edit out to all files naming it, so
-it likely wants narrowing first. The incremental slow pass answers the same
-question for its own file by recording the bodies inference reads
-(<code>type_engine::body_reads</code>), and a per-file record of those reads would
-narrow it to the methods some open file's pass actually read.</p>
 
 
 
