@@ -1071,17 +1071,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p82-trivial-memory-fixes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P82. Trivial memory fixes
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1356,17 +1345,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p82-trivial-memory-fixes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P82. Trivial memory fixes
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1469,31 +1447,7 @@ against that bar.</p>
 </tbody>
 </table>
 <hr />
-<h2 id="p82-trivial-memory-fixes">P82. Trivial memory fixes<a class="headerlink" href="#p82-trivial-memory-fixes" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p>Measured on the same app. Each is small; together they are about 5% of
-the LSP's RSS, and the intern store sweep also bounds growth over a long
-session.</p>
-<ul>
-<li><strong>Symbol map capacity slack.</strong> <code>spans</code> carry 17.7 MB of unused capacity
-  and <code>call_sites</code> about 11 MB. A <code>shrink_to_fit</code> when the map is built
-  reclaims about 29 MB (3.5%).</li>
-<li><strong>Member intern store never sweeps.</strong> <code>substituted_methods</code> and
-  <code>substituted_properties</code> in <code>virtual_members/cache.rs</code> hold the
-  transformed member strongly and are only cleared at 1M entries. An
-  edit that re-parses a file leaves its old transformed members alive,
-  and each entry's <code>Weak</code> witness keeps the dead origin's allocation
-  too. Sweep dead-witness entries when the map has doubled since the last
-  sweep, as <code>linked_aliases</code> already does at its cap. The method table
-  alone is 24.5 MB after a full <code>analyze</code>.</li>
-<li><strong>Interner buckets.</strong> <code>php_type/intern.rs</code> gives every hash its own
-  <code>Vec&lt;Weak&lt;TypeKind&gt;&gt;</code>, though almost every bucket holds one entry.
-  That is about 114k allocations and 5 MB. Store a single entry inline.</li>
-<li><strong>Audit drop probes keep table capacity.</strong> <code>mem_audit.rs</code> releases
-  each store with <code>clear()</code>, which keeps the hash table allocated, so
-  about 40 MB of table capacity is reported as "residual" instead of
-  under its store. Use <code>std::mem::take</code>.</li>
-</ul>
+<p>No outstanding items.</p>
 <hr />
 <h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
 <h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>
