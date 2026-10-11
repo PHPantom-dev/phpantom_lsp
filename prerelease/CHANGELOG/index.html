@@ -5101,6 +5101,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Format selection.</strong> Formatting a selection reformats only the lines it covers, with whichever formatter the project uses, in PHP files and Blade templates alike.</li>
+<li><strong>Conflicting trait properties.</strong> A class that gets the same property from two traits, or from a trait and its own body, with a different type, visibility, modifier or default is reported, the same fatal error PHP raises when it loads the class.</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
