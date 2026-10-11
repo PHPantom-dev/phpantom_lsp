@@ -2287,8 +2287,8 @@ within the same impact tier.</p>
 arrays and indexed by class, function, and constant name. Stub files
 are parsed lazily on first access and cached under <code>phpantom-stub://</code>
 URIs, and <code>src/stub_patches/</code> corrects or enriches individual
-declarations after parsing (templates on the SPL iterators and
-<code>WeakMap</code>, precise return types for many functions).</p>
+declarations after parsing (templates on the SPL iterator wrappers,
+precise return types for many functions).</p>
 <p>Built-in names always resolve to the embedded stubs. In
 <code>find_or_load_class</code>, Phase 0.5 sends any global-namespace class the
 embedded stubs know straight to the stub, ahead of the classmap and
