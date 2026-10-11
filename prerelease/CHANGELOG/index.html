@@ -5132,6 +5132,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Named relation callbacks keep their model types.</strong> Completion and diagnostics now resolve relationship constraints when named arguments are reordered or optional arguments are omitted. Contributed by @shuvroroy.</li>
 <li><strong>Relation callbacks keep custom builders.</strong> Constraints on related models now offer their custom builder methods, including through custom-builder query chains and bare <code>Builder</code> parameter hints. Contributed by @shuvroroy.</li>
 <li><strong>Model instance queries keep custom builders.</strong> Starting a query with <code>newQuery()</code>, <code>newModelQuery()</code>, or <code>newQueryWithoutScopes()</code> now keeps the model's custom builder and its model type through later calls. Contributed by @shuvroroy.</li>
 <li><strong><code>filter_var()</code> and <code>filter_input()</code> return types.</strong> The filter now decides the result, so <code>filter_var($v, FILTER_VALIDATE_INT, ['options' =&gt; ['min_range' =&gt; 1]])</code> is <code>int&lt;1, max&gt;|false</code> instead of <code>mixed</code>, and <code>FILTER_NULL_ON_FAILURE</code> turns the <code>false</code> into <code>null</code>.</li>
