@@ -1271,17 +1271,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b612-a-method-parameter-defaulting-to-null-is-not-implicitly-nullable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B612. A <code>@method</code> parameter defaulting to <code>null</code> is not implicitly nullable
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2198,17 +2187,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b612-a-method-parameter-defaulting-to-null-is-not-implicitly-nullable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B612. A <code>@method</code> parameter defaulting to <code>null</code> is not implicitly nullable
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2709,20 +2687,6 @@ global <code>\ArrayObject</code>. PHPantom resolves it through the file's own im
 of the same short name. The real-world shape is
 <code>use Illuminate\Support\Facades\Redis; use Redis as PhpRedis;</code>, where every
 <code>PhpRedis::OPT_*</code> constant and <code>PhpRedis</code> parameter lands on the facade.</p>
-<h3 id="b612-a-method-parameter-defaulting-to-null-is-not-implicitly-nullable">B612. A <code>@method</code> parameter defaulting to <code>null</code> is not implicitly nullable<a class="headerlink" href="#b612-a-method-parameter-defaulting-to-null-is-not-implicitly-nullable" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="x">/** @method static void tag(string $disk = null) */</span>
-<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="x">final class S {</span>
-<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="x">    public static function native(string $disk = null): void {}</span>
-<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="x">}</span>
-<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a>
-<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a><span class="x">S::tag(null);    // Argument 1 ($disk) expects string, got null</span>
-<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a><span class="x">S::native(null); // fine</span>
-</code></pre></div>
-<p>PHP makes a parameter with a <code>null</code> default implicitly nullable, and
-docblock signatures follow the same convention (PHPStan treats them so).
-Generated facade tags use it widely, e.g. Laravel Excel's
-<code>toCollection(..., string $disk = null, ...)</code>.</p>
 
 
 
