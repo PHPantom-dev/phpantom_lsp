@@ -1063,23 +1063,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Blade">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b611-component-is-treated-as-handing-the-child-the-parents-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B611. <code>@component</code> is treated as handing the child the parent's scope
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1807,23 +1790,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Blade">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b611-component-is-treated-as-handing-the-child-the-parents-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B611. <code>@component</code> is treated as handing the child the parent's scope
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -2067,20 +2033,7 @@ or <code>View::prependNamespace()</code>). One large Laravel project registers a
 three of its view namespaces this way, which leaves every
 <code>view('webshop::…')</code> and <code>@include('backoffice::…')</code> unknown.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
-<h3 id="b611-component-is-treated-as-handing-the-child-the-parents-scope">B611. <code>@component</code> is treated as handing the child the parent's scope<a class="headerlink" href="#b611-component-is-treated-as-handing-the-child-the-parents-scope" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>@php /** @bladestan-signature @var string $title */ @endphp
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>@component(&#39;alert&#39;) @endcomponent {{-- alert declares $title: not reported --}}
-</code></pre></div>
-<p>Laravel compiles <code>@component</code> to <code>$__env-&gt;startComponent(...)</code>, which
-renders the view from the array it is passed (plus shared data) alone,
-unlike the <code>@include</code> family. <code>contract.rs</code> still lists <code>component</code> and
-<code>componentFirst</code> in <code>RENDER_DIRECTIVES</code>, and <code>ViewCallWalker</code> records the
-site with <code>forwards_scope: true</code>, so a name the parent holds counts as
-supplied to the component's view and a name only the component's view
-reads counts as accepted from the parent's callers. The unused-variable
-check already tells them apart (the preprocessor lowers <code>@component</code> to
-<code>blade_component_directive</code>).</p>
+<p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
