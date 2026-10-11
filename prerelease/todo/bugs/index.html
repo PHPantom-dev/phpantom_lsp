@@ -1224,23 +1224,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b586-not-deprecated-is-lost-on-a-subclass-that-inherits-the-method" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B586. <code>@not-deprecated</code> is lost on a subclass that inherits the method
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -2107,23 +2090,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b586-not-deprecated-is-lost-on-a-subclass-that-inherits-the-method" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B586. <code>@not-deprecated</code> is lost on a subclass that inherits the method
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -2548,28 +2514,6 @@ the expected parameter type; PHPantom keeps the bare <code>array</code>.</p>
 chained method, the callback parameter receives the type arguments with
 the <code>$preserveKeys is …</code> / <code>$groupBy is …</code> conditionals still unresolved.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b586-not-deprecated-is-lost-on-a-subclass-that-inherits-the-method">B586. <code>@not-deprecated</code> is lost on a subclass that inherits the method<a class="headerlink" href="#b586-not-deprecated-is-lost-on-a-subclass-that-inherits-the-method" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="x">interface V {</span>
-<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="x">    /** @deprecated Gone in 4.0. */</span>
-<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="x">    public function visit(): void;</span>
-<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="x">}</span>
-<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>
-<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="x">abstract class AV implements V {</span>
-<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="x">    /** @not-deprecated Only the interface declaration is deprecated. */</span>
-<a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a><span class="x">    public function visit(): void {}</span>
-<a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a><span class="x">}</span>
-<a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a>
-<a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a><span class="x">class Child extends AV {</span>
-<a id="__codelineno-27-12" name="__codelineno-27-12" href="#__codelineno-27-12"></a><span class="x">    public function go(): void { $this-&gt;visit(); } // &#39;Child::visit&#39; is deprecated</span>
-<a id="__codelineno-27-13" name="__codelineno-27-13" href="#__codelineno-27-13"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>$this-&gt;visit()</code> inside <code>AV</code> itself is clean, so the tag is honoured where
-it is written. A subclass that inherits <code>visit()</code> without overriding it
-gets the interface's deprecation back, so inheritance enrichment seems to
-re-propagate <code>deprecation_message</code> from the interface rather than taking
-the inherited method as <code>AV</code> resolved it. PHPStan's <code>@not-deprecated</code>
-stops the inheritance for every descendant.</p>
 
 
 
