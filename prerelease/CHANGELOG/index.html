@@ -5123,6 +5123,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Model instance queries keep custom builders.</strong> Starting a query with <code>newQuery()</code>, <code>newModelQuery()</code>, or <code>newQueryWithoutScopes()</code> now keeps the model's custom builder and its model type through later calls. Contributed by @shuvroroy.</li>
 <li><strong><code>filter_var()</code> and <code>filter_input()</code> return types.</strong> The filter now decides the result, so <code>filter_var($v, FILTER_VALIDATE_INT, ['options' =&gt; ['min_range' =&gt; 1]])</code> is <code>int&lt;1, max&gt;|false</code> instead of <code>mixed</code>, and <code>FILTER_NULL_ON_FAILURE</code> turns the <code>false</code> into <code>null</code>.</li>
 <li><strong><code>class_implements()</code>, <code>class_parents()</code> and <code>class_uses()</code> on a class known to exist.</strong> Passing an object no longer gives a possible <code>false</code>, and a class name checked with <code>class_exists()</code> or written as <code>Foo::class</code> no longer reports the <code>false</code> as an argument mismatch.</li>
 <li><strong><code>@component</code> no longer shares the surrounding template's variables.</strong> A variable the including template holds no longer counts as passed to a <code>@component</code> view, and a name only that view reads is no longer accepted from the template's callers.</li>
