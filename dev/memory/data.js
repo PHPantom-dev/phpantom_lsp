@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791691628324,
+  "lastUpdate": 1791692654701,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -37807,6 +37807,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 84.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "549c114ca888d622d880802ddcff2921cf0cc36a",
+          "message": "Improve Pest handeling",
+          "timestamp": "2026-10-11T06:10:15+02:00",
+          "tree_id": "c70d70e458dba3449c3a95bf0d6986c56191b545",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/549c114ca888d622d880802ddcff2921cf0cc36a"
+        },
+        "date": 1791692644170,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82.7,
             "unit": "MiB"
           }
         ]
