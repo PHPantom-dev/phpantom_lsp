@@ -4,28 +4,34 @@
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/</loc>
       </url>
       <url>
-        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/editor-setup/</loc>
-      </url>
-      <url>
-        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/agent-setup/</loc>
-      </url>
-      <url>
-        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/installation/</loc>
-      </url>
-      <url>
-        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/configuration/</loc>
-      </url>
-      <url>
-        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/cli/</loc>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/ARCHITECTURE/</loc>
       </url>
       <url>
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/BUILDING/</loc>
       </url>
       <url>
-        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/ARCHITECTURE/</loc>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/CHANGELOG/</loc>
       </url>
       <url>
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/CONTRIBUTING/</loc>
+      </url>
+      <url>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/agent-setup/</loc>
+      </url>
+      <url>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/benchmarks/</loc>
+      </url>
+      <url>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/cli/</loc>
+      </url>
+      <url>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/configuration/</loc>
+      </url>
+      <url>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/editor-setup/</loc>
+      </url>
+      <url>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/installation/</loc>
       </url>
       <url>
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/</loc>
@@ -79,9 +85,6 @@
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/type-inference/</loc>
       </url>
       <url>
-        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/benchmarks/</loc>
-      </url>
-      <url>
-        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/CHANGELOG/</loc>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/wasm/</loc>
       </url>
 </urlset>
