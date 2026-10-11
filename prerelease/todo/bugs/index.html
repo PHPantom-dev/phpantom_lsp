@@ -880,6 +880,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b582-a-union-of-two-or-more-non-null-values-counts-as-nullable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B582. A union of two or more non-null values counts as nullable
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -934,6 +951,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b583-a-fake-formatter-in-the-formatting-tests-can-fail-to-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B583. A fake formatter in the formatting tests can fail to start
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1457,6 +1491,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b582-a-union-of-two-or-more-non-null-values-counts-as-nullable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B582. A union of two or more non-null values counts as nullable
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1512,6 +1563,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b583-a-fake-formatter-in-the-formatting-tests-can-fail-to-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B583. A fake formatter in the formatting tests can fail to start
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1563,7 +1631,37 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b582-a-union-of-two-or-more-non-null-values-counts-as-nullable">B582. A union of two or more non-null values counts as nullable<a class="headerlink" href="#b582-a-union-of-two-or-more-non-null-values-counts-as-nullable" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Node {}</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class A extends Node {}</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">class B extends Node {}</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">function takesAorB(A|B $x): void {}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">function f(Node $node): void {</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    if ($node instanceof A) {</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">        $kind = &#39;a&#39;;</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    } elseif ($node instanceof B) {</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">        $kind = &#39;b&#39;;</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    } else {</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">        $kind = null;</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">    }</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">    if ($kind !== null) {</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">        takesAorB($node); // expects A|B, got Node</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">    }</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">}</span>
+</code></pre></div>
+<p>The join after the chain records that <code>$kind</code> holding a value means
+<code>$node</code> is <code>A|B</code>, but the <code>!== null</code> test never applies it. With one arm,
+or with every arm assigning the same literal, it does.</p>
+<p><code>scope_value_is_nullable</code> (<code>cond_narrowing/null_identity.rs</code>) asks
+<code>non_null_type().is_some()</code>, and <code>PhpType::non_null_type()</code> returns
+<code>Some</code> for any union with at least two members besides <code>null</code>, whether
+or not <code>null</code> is one of them. So <code>'a'|'b'</code> reads as nullable, and every
+<code>NonNull</code> trigger and non-null implication on such a holder stays unmet.
+All four callers in <code>cond_narrowing</code> go through it.</p>
+<p><strong>Fix:</strong> Ask whether the type has a <code>null</code> member instead. <code>accepts_null()</code>
+is not a drop-in replacement, since it also counts <code>mixed</code>, which the
+current check does not.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
@@ -1573,7 +1671,17 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b583-a-fake-formatter-in-the-formatting-tests-can-fail-to-start">B583. A fake formatter in the formatting tests can fail to start<a class="headerlink" href="#b583-a-fake-formatter-in-the-formatting-tests-can-fail-to-start" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p><code>formatting::tests::phpcbf_fixes_against_the_phpcs_standard</code> failed once
+in a full <code>cargo test</code> run with "Failed to spawn phpcbf: Text file busy
+(os error 26)" and passed on every rerun. <code>write_fake_tool</code> writes an
+executable script that the test runs straight away. When another test
+thread forks to start its own tool while the script is still open for
+writing, the child holds the write handle until it execs, and starting
+the script in that window fails with <code>ETXTBSY</code>.</p>
+<p><strong>Fix:</strong> Retry starting the tool on <code>ETXTBSY</code>, or write every fake tool
+before any test can start a process.</p>
 
 
 
