@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791749222684,
+  "lastUpdate": 1791750338832,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -218009,6 +218009,228 @@ window.BENCHMARK_DATA = {
             "name": "find_references/hierarchy_scan/150",
             "value": 0.442,
             "range": "± 0.009",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3675f4757ffb1c7a84bba64c08cb4b7094a2cb83",
+          "message": "PHPUnit's `assertSame()`, `assertCount()` and `assertArrayHasKey()`\nnarrow",
+          "timestamp": "2026-10-11T22:14:35+02:00",
+          "tree_id": "e2c53cc80409747ffb9f28996925c492816a49c1",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3675f4757ffb1c7a84bba64c08cb4b7094a2cb83"
+        },
+        "date": 1791750327184,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 4.382,
+            "range": "± 0.116",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.046,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.105,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.155,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.244,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.296,
+            "range": "± 0.017",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 1.199,
+            "range": "± 0.034",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 2.323,
+            "range": "± 0.06",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.142,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.06,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.056,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.067,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 5.316,
+            "range": "± 0.041",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.15,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.354,
+            "range": "± 0.019",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.077,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.051,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.119,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.095,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.078,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.231,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.163,
+            "range": "± 0.022",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 6.515,
+            "range": "± 0.241",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.172,
+            "range": "± 0.026",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 1.077,
+            "range": "± 0.055",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.402,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 18.934,
+            "range": "± 0.251",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 0.816,
+            "range": "± 0.018",
+            "unit": "ms"
+          },
+          {
+            "name": "custom_builder_completion/custom_builder_deep_inheritance",
+            "value": 0.085,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_completion/model_where_prefix",
+            "value": 0.082,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_completion/model_typing_sequence",
+            "value": 0.317,
+            "range": "± 0.026",
+            "unit": "ms"
+          },
+          {
+            "name": "find_references/hierarchy_scan/50",
+            "value": 0.35,
+            "range": "± 0.02",
+            "unit": "ms"
+          },
+          {
+            "name": "find_references/hierarchy_scan/150",
+            "value": 0.466,
+            "range": "± 0.011",
             "unit": "ms"
           }
         ]
