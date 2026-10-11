@@ -1567,6 +1567,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#re-diagnosing-only-the-functions-an-edit-touched" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Re-diagnosing only the functions an edit touched
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#workspace-diagnostics-files-that-are-not-open" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3173,6 +3184,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#re-diagnosing-only-the-functions-an-edit-touched" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Re-diagnosing only the functions an edit touched
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#workspace-diagnostics-files-that-are-not-open" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4448,6 +4470,18 @@ native diagnostic set.</p>
 <p>Each worker is created during <code>initialized</code> via <code>clone_for_diagnostic_worker</code>, which builds a shallow clone of the <code>Backend</code>. All <code>Arc</code>-wrapped fields (maps, caches, the notify/pending slots) are shared by <code>Arc::clone</code>, so every worker sees all mutations the main <code>Backend</code> makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.</p>
 <p>Non-<code>Arc</code> fields are snapshotted at spawn time: <code>php_version</code>, <code>vendor_uri_prefixes</code>, and <code>vendor_dir_paths</code>. These fields are only written during <code>initialized</code> (before the workers are spawned) and never change afterwards. If a future feature adds runtime PHP version changes, the workers would need to be notified or re-cloned. This invariant ("init-time fields are write-once") should be verified before adding any post-init mutation to these fields.</p>
 <p><code>config</code> is the one exception: it is wrapped in <code>Arc&lt;Mutex&lt;Config&gt;&gt;</code> rather than snapshotted, because it <em>is</em> hot-reloaded. <code>src/indexing/watch.rs</code> reloads it on a project's own <code>.phpantom.toml</code> change (via <code>apply_watched_file_changes</code>) and on a global config change (via <code>global_config_watcher</code>, a background task polling the global config file's mtime since it lives outside the workspace and no client file watcher glob can reach it). Both reloads run on a cloned <code>Backend</code>, so <code>config</code> has to be <code>Arc</code>-shared for the write to reach every other clone, including the long-lived one that answers LSP requests.</p>
+<h3 id="re-diagnosing-only-the-functions-an-edit-touched">Re-diagnosing only the functions an edit touched<a class="headerlink" href="#re-diagnosing-only-the-functions-an-edit-touched" title="Permanent link">&para;</a></h3>
+<p>The slow native pass (type resolution for every expression) is the expensive part of each refresh. When the edit since the last pass only changed the bodies of some functions and methods, the native worker runs the slow collectors for those functions alone and keeps every other diagnostic from the previous pass, moved to its new position (<code>src/diagnostics/incremental/</code>). Psalm keeps diagnostics across edits the same way; PHPantom finds the edited functions by comparing the text outside the function bodies rather than with a line diff, since any edit outside a body forces a full pass anyway.</p>
+<p>Every slow pass leaves a baseline behind: the text it diagnosed, the function bodies in it, what the file declared, and what it reported. The next pass starts from it only when:</p>
+<ul>
+<li><strong>The index describes the text.</strong> The file's symbol map was built from exactly the text being diagnosed (open files record a hash of their parsed text), and nothing was published while the pass ran.</li>
+<li><strong>Nothing else changed.</strong> Every publication to the workspace index bumps a counter on <code>DiagnosticState</code>, and each open file's own publications are counted separately, so a pass can tell its own file's edits from a change anywhere else. A configuration reload or a deleted file bumps it too.</li>
+<li><strong>Only bodies changed.</strong> Every byte outside the function and method bodies is the same: signatures, docblocks, imports, class headers, properties, constants, top-level code.</li>
+<li><strong>The declarations did not change.</strong> The parser reads a few method bodies into the class (an Eloquent relationship's related model, a <code>casts()</code> map), so the file's classes, functions, and constants must still compare equal.</li>
+<li><strong>Nothing else reads the edited bodies.</strong> Inference that reads a body to type a call to it (a return type the declaration leaves open, what a by-reference parameter is left holding) records the read (<code>type_engine::body_reads</code>), and an edit to a body an earlier pass read forces a full pass, whichever file's code asked for it. Constructors, other magic methods, and the few framework methods read straight from the source by name always force one. <code>body_is_observable</code> lists the paths each case mirrors.</li>
+</ul>
+<p>Collectors learn which part of the file they report on from a pass-scoped filter (<code>incremental::reports_site</code>) they check before resolving each site, and the forward walk visits only the edited bodies. A save always runs a full pass, which also brings back in line anything an edit changed through a project-wide registry the file feeds, the way other open files catch up on save.</p>
+<p>Any new inference that reads a function body from outside it has to report the read through <code>body_reads::record</code>, or be added to <code>body_is_observable</code> when it scans the source for a method by name. The ignored test <code>partial_passes_match_full_passes_on_a_project</code> edits every function body of a real project (<code>PHPANTOM_INCREMENTAL_VERIFY_ROOT=&lt;project&gt;</code>) and checks each partial pass against a full one; <code>partial_passes_match_full_passes_on_the_diagnostics_demo</code> does the same over <code>examples/php</code> in the regular suite.</p>
 <h3 id="workspace-diagnostics-files-that-are-not-open">Workspace diagnostics (files that are not open)<a class="headerlink" href="#workspace-diagnostics-files-that-are-not-open" title="Permanent link">&para;</a></h3>
 <p>Everything above diagnoses files the user has opened. <code>src/diagnostics/workspace.rs</code> covers the rest of the project, off by default and enabled with <code>[diagnostics] workspace = true</code>: after the full background index finishes (which itself only starts after startup indexing completes), it runs the same fast/slow collectors over every unopened user file on a throttled worker pool, then runs each configured external tool once over the whole project (only when that tool has its own project-level config file, e.g. <code>phpstan.neon</code>). Results are stored in <code>Backend::workspace_diags</code> and reported through <code>workspace/diagnostic</code> (or pushed directly for non-pull clients). This pass never runs before the server is usable — it is chained onto the tail of the full-index task, so it can never compete with startup for CPU. Toggle with <code>[diagnostics] workspace</code> / <code>workspace-external</code> in <code>.phpantom.toml</code>.</p>
 <h2 id="forward-walker">Forward Walker<a class="headerlink" href="#forward-walker" title="Permanent link">&para;</a></h2>

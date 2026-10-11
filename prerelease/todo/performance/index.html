@@ -1071,17 +1071,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p21-offset-shifting-for-cached-diagnostics-on-partial-edits" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P21. Offset-shifting for cached diagnostics on partial edits
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1345,17 +1334,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p21-offset-shifting-for-cached-diagnostics-on-partial-edits" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P21. Offset-shifting for cached diagnostics on partial edits
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1447,41 +1425,7 @@ against that bar.</p>
 </tbody>
 </table>
 <hr />
-<h2 id="p21-offset-shifting-for-cached-diagnostics-on-partial-edits">P21. Offset-shifting for cached diagnostics on partial edits<a class="headerlink" href="#p21-offset-shifting-for-cached-diagnostics-on-partial-edits" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Very High</strong></p>
-<p>When a user edits one method in a file, PHPantom currently re-runs
-diagnostics on the entire file. For large files (500+ lines), this
-is wasteful — diagnostics in unchanged regions are still valid, just
-at shifted byte offsets.</p>
-<p><strong>Fix:</strong> After a file edit, compute a line-level diff (Myers algorithm)
-to produce byte-offset shift deltas. Apply the deltas to cached
-diagnostics in unchanged regions. Only re-diagnose methods whose
-byte ranges overlap with the edited region.</p>
-<p>Psalm implements this with:
-1. <code>FileDiffer</code> — Myers line-level diff producing byte-offset ranges
-2. <code>FileStatementsDiffer</code> — AST-level statement diff classifying
-   statements as keep/keep_signature/add_or_delete
-3. <code>shiftFileOffsets()</code> — shifts surviving diagnostics/references by
-   the offset delta, removes those in deleted ranges</p>
-<p><strong>Design:</strong></p>
-<ol>
-<li>On <code>didChange</code>, compute a line diff between old and new content.</li>
-<li>Produce a <code>diff_map: Vec&lt;(old_start, old_end, offset_delta)&gt;</code>.</li>
-<li>Walk cached diagnostics for this file:</li>
-<li>If diagnostic span falls in a deleted range → remove it.</li>
-<li>If diagnostic span is after the edit → shift by delta.</li>
-<li>If diagnostic span is before the edit → keep as-is.</li>
-<li>Re-run diagnostics only for methods/functions whose spans overlap
-   with changed regions.</li>
-<li>Merge shifted cached diagnostics with freshly-computed ones.</li>
-</ol>
-<p><strong>Prerequisites:</strong> a member-level diff. The edit path only compares
-class signatures today (<code>ast_update.rs</code>), so which members changed has
-to be worked out first.</p>
-<p><strong>References:</strong>
-- Psalm: <code>FileDiffer</code> and <code>FileStatementsDiffer</code> in
-  <code>Psalm\Internal\Diff</code>
-- Psalm: <code>Analyzer::shiftFileOffsets()</code> for the offset-shifting logic</p>
+<p>No outstanding items.</p>
 <hr />
 <h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
 <h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>
