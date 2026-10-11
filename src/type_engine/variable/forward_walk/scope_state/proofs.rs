@@ -1,8 +1,13 @@
 //! The proofs a scope carries beside its types, and how two paths' proofs
 //! join: exclusions, non-null implications and implied narrowings.
 
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
+use std::hash::{BuildHasherDefault, DefaultHasher, Hash, Hasher};
 use std::ops::ControlFlow;
+use std::sync::Arc;
+
+use ustr::IdentityHasher;
 
 use super::merge::same_types;
 use super::*;
@@ -23,117 +28,6 @@ use crate::type_engine::variable::forward_walk::is_synthetic_key;
 /// A union is compared member by member: `1|2` and `2|3` are neither a
 /// subtype of the other, yet both hold `2`.
 pub(crate) fn types_are_disjoint(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
-    /// An array type, as opposed to `iterable`, which objects satisfy too.
-    fn is_array_value(ty: &PhpType) -> bool {
-        let name = match ty.kind() {
-            TypeKind::Named(name) => name,
-            TypeKind::Generic(generic) => &generic.name,
-            _ => return ty.is_array_like(),
-        };
-        ty.is_array_like() && !name.eq_ignore_ascii_case("iterable")
-    }
-
-    /// Subtyping alone would call `non-empty-array<int, 1|2>` and
-    /// `non-empty-array<int, 2|3>` disjoint, though both hold `[2]`, and
-    /// would compare every pair of members of two element unions to say
-    /// so. Two arrays that can both be empty share `[]`. Otherwise a value
-    /// they share holds an entry, and that entry's value is one both
-    /// element types describe, so they are disjoint when those are.
-    /// Shapes keep the subtyping rule, which is what tells two tagged
-    /// shapes (`array{kind: 'a'}`, `array{kind: 'b'}`) apart.
-    fn arrays_disjoint(x: &PhpType, y: &PhpType) -> bool {
-        if !x.is_provably_non_empty() && !y.is_provably_non_empty() {
-            return false;
-        }
-        if x.is_empty_array_shape() || y.is_empty_array_shape() {
-            return true;
-        }
-        let is_shape =
-            |ty: &PhpType| matches!(ty.kind(), TypeKind::ArrayShape(_) | TypeKind::ListShape(_));
-        if is_shape(x) && is_shape(y) {
-            return !x.is_subtype_of(y) && !y.is_subtype_of(x);
-        }
-        match (x.iterable_element_type(), y.iterable_element_type()) {
-            (Some(x_values), Some(y_values)) => disjoint(&x_values, &y_values),
-            _ => false,
-        }
-    }
-
-    fn disjoint(x: &PhpType, y: &PhpType) -> bool {
-        match (x.kind(), y.kind()) {
-            (TypeKind::Union(members), _) => members.iter().all(|m| disjoint(m, y)),
-            (TypeKind::Nullable(inner), _) => disjoint(inner, y) && disjoint(&PhpType::null(), y),
-            (_, TypeKind::Union(_) | TypeKind::Nullable(_)) => disjoint(y, x),
-            _ if is_array_value(x) && is_array_value(y) => arrays_disjoint(x, y),
-            _ => {
-                !x.is_subtype_of(y)
-                    && !y.is_subtype_of(x)
-                    && !(x.is_object_like() && y.is_object_like())
-            }
-        }
-    }
-
-    /// The alternatives [`disjoint`] ends up comparing `ty` by.
-    fn alternatives(ty: &PhpType, out: &mut Vec<PhpType>) {
-        match ty.kind() {
-            TypeKind::Union(members) => members.iter().for_each(|m| alternatives(m, out)),
-            TypeKind::Nullable(inner) => {
-                alternatives(inner, out);
-                out.push(PhpType::null());
-            }
-            _ => out.push(ty.clone()),
-        }
-    }
-
-    /// [`disjoint`], without comparing every literal of one side with every
-    /// literal of the other.  Two literals are disjoint exactly when they
-    /// are not equal, so a set of one side's literals answers for all of
-    /// them at once.  Comparing them pairwise made joining the scopes of a
-    /// `switch` that assigns a different literal in every case cost the
-    /// square of its length.
-    fn disjoint_alternatives(x: &PhpType, y: &PhpType) -> bool {
-        let is_union = |ty: &PhpType| matches!(ty.kind(), TypeKind::Union(_));
-        if !is_union(x) || !is_union(y) {
-            return disjoint(x, y);
-        }
-        let (mut xs, mut ys) = (Vec::new(), Vec::new());
-        alternatives(x, &mut xs);
-        alternatives(y, &mut ys);
-        let (x_literals, x_rest): (Vec<PhpType>, Vec<PhpType>) =
-            xs.into_iter().partition(|ty| ty.as_literal().is_some());
-        let (y_literals, y_rest): (Vec<PhpType>, Vec<PhpType>) =
-            ys.into_iter().partition(|ty| ty.as_literal().is_some());
-        let rest_disjoint = x_rest
-            .iter()
-            .all(|p| y_rest.iter().chain(&y_literals).all(|q| disjoint(p, q)))
-            && x_literals
-                .iter()
-                .all(|p| y_rest.iter().all(|q| disjoint(p, q)));
-        if !rest_disjoint {
-            return false;
-        }
-        if x_literals.len() * y_literals.len() < LITERAL_SET_FROM_PAIRS {
-            return x_literals
-                .iter()
-                .all(|p| y_literals.iter().all(|q| disjoint(p, q)));
-        }
-        let (fewer, more) = if x_literals.len() <= y_literals.len() {
-            (&x_literals, &y_literals)
-        } else {
-            (&y_literals, &x_literals)
-        };
-        let hashes: HashSet<u64> = fewer.iter().map(dedup_hash).collect();
-        // A hash shared by two literals that differ is a collision, so a
-        // hit is confirmed against the literals themselves.
-        !more
-            .iter()
-            .any(|q| hashes.contains(&dedup_hash(q)) && fewer.iter().any(|p| !disjoint(p, q)))
-    }
-
-    /// How many literal pairs two types have to make before
-    /// [`disjoint_alternatives`] hashes them rather than comparing each.
-    const LITERAL_SET_FROM_PAIRS: usize = 64;
-
     if a.is_empty() || b.is_empty() {
         return false;
     }
@@ -141,6 +35,192 @@ pub(crate) fn types_are_disjoint(a: &[ResolvedType], b: &[ResolvedType]) -> bool
         b.iter()
             .all(|y| disjoint_alternatives(&x.type_string, &y.type_string))
     })
+}
+
+/// An array type, as opposed to `iterable`, which objects satisfy too.
+fn is_array_value(ty: &PhpType) -> bool {
+    let name = match ty.kind() {
+        TypeKind::Named(name) => name,
+        TypeKind::Generic(generic) => &generic.name,
+        _ => return ty.is_array_like(),
+    };
+    ty.is_array_like() && !name.eq_ignore_ascii_case("iterable")
+}
+
+/// Subtyping alone would call `non-empty-array<int, 1|2>` and
+/// `non-empty-array<int, 2|3>` disjoint, though both hold `[2]`, and
+/// would compare every pair of members of two element unions to say
+/// so. Two arrays that can both be empty share `[]`. Otherwise a value
+/// they share holds an entry, and that entry's value is one both
+/// element types describe, so they are disjoint when those are.
+/// Shapes keep the subtyping rule, which is what tells two tagged
+/// shapes (`array{kind: 'a'}`, `array{kind: 'b'}`) apart.
+fn arrays_disjoint(x: &PhpType, y: &PhpType) -> bool {
+    if !x.is_provably_non_empty() && !y.is_provably_non_empty() {
+        return false;
+    }
+    if x.is_empty_array_shape() || y.is_empty_array_shape() {
+        return true;
+    }
+    let is_shape =
+        |ty: &PhpType| matches!(ty.kind(), TypeKind::ArrayShape(_) | TypeKind::ListShape(_));
+    if is_shape(x) && is_shape(y) {
+        return !x.is_subtype_of(y) && !y.is_subtype_of(x);
+    }
+    match (x.iterable_element_type(), y.iterable_element_type()) {
+        (Some(x_values), Some(y_values)) => disjoint(&x_values, &y_values),
+        _ => false,
+    }
+}
+
+fn disjoint(x: &PhpType, y: &PhpType) -> bool {
+    match (x.kind(), y.kind()) {
+        (TypeKind::Union(members), _) => members.iter().all(|m| disjoint(m, y)),
+        (TypeKind::Nullable(inner), _) => disjoint(inner, y) && disjoint(&PhpType::null(), y),
+        (_, TypeKind::Union(_) | TypeKind::Nullable(_)) => disjoint(y, x),
+        _ if is_array_value(x) && is_array_value(y) => arrays_disjoint(x, y),
+        _ => {
+            !x.is_subtype_of(y)
+                && !y.is_subtype_of(x)
+                && !(x.is_object_like() && y.is_object_like())
+        }
+    }
+}
+
+/// The alternatives [`disjoint`] ends up comparing `ty` by.
+fn alternatives(ty: &PhpType, out: &mut Vec<PhpType>) {
+    all_alternatives(ty, &mut |alternative| {
+        out.push(alternative.clone());
+        true
+    });
+}
+
+/// Whether `test` accepts every one of `ty`'s [`alternatives`], stopping at
+/// the first it rejects.
+fn all_alternatives(ty: &PhpType, test: &mut impl FnMut(&PhpType) -> bool) -> bool {
+    match ty.kind() {
+        TypeKind::Union(members) => members.iter().all(|m| all_alternatives(m, test)),
+        TypeKind::Nullable(inner) => all_alternatives(inner, test) && test(&PhpType::null()),
+        _ => test(ty),
+    }
+}
+
+/// [`disjoint`], without comparing every literal of one side with every
+/// literal of the other.  Two literals are disjoint exactly when they
+/// are not equal, so a set of one side's literals answers for all of
+/// them at once.  Comparing them pairwise made joining the scopes of a
+/// `switch` that assigns a different literal in every case cost the
+/// square of its length.
+fn disjoint_alternatives(x: &PhpType, y: &PhpType) -> bool {
+    let is_union = |ty: &PhpType| matches!(ty.kind(), TypeKind::Union(_));
+    if !is_union(x) || !is_union(y) {
+        return disjoint(x, y);
+    }
+    let (mut xs, mut ys) = (Vec::new(), Vec::new());
+    alternatives(x, &mut xs);
+    alternatives(y, &mut ys);
+    let (x_literals, x_rest): (Vec<PhpType>, Vec<PhpType>) =
+        xs.into_iter().partition(|ty| ty.as_literal().is_some());
+    let (y_literals, y_rest): (Vec<PhpType>, Vec<PhpType>) =
+        ys.into_iter().partition(|ty| ty.as_literal().is_some());
+    let rest_disjoint = x_rest
+        .iter()
+        .all(|p| y_rest.iter().chain(&y_literals).all(|q| disjoint(p, q)))
+        && x_literals
+            .iter()
+            .all(|p| y_rest.iter().all(|q| disjoint(p, q)));
+    if !rest_disjoint {
+        return false;
+    }
+    if x_literals.len() * y_literals.len() < LITERAL_SET_FROM_PAIRS {
+        return x_literals
+            .iter()
+            .all(|p| y_literals.iter().all(|q| disjoint(p, q)));
+    }
+    let (fewer, more) = if x_literals.len() <= y_literals.len() {
+        (&x_literals, &y_literals)
+    } else {
+        (&y_literals, &x_literals)
+    };
+    let hashes: HashSet<u64> = fewer.iter().map(dedup_hash).collect();
+    // A hash shared by two literals that differ is a collision, so a
+    // hit is confirmed against the literals themselves.
+    !more
+        .iter()
+        .any(|q| hashes.contains(&dedup_hash(q)) && fewer.iter().any(|p| !disjoint(p, q)))
+}
+
+/// How many literal pairs two types have to make before
+/// [`disjoint_alternatives`] hashes them rather than comparing each.
+const LITERAL_SET_FROM_PAIRS: usize = 64;
+
+/// One side of many [`types_are_disjoint`] questions, with its literals
+/// hashed once rather than compared with every type it is asked about.
+///
+/// A join asks it of a holder's value on one path for every proof the
+/// other path holds about the holder, and the holder of an `elseif` lookup
+/// table is a union of every literal its arms compared it with: comparing
+/// that union with each trigger in turn made the join cost the square of
+/// the table.
+pub(super) struct DisjointFrom<'a> {
+    types: &'a [ResolvedType],
+    alternatives: OnceCell<HashedAlternatives>,
+}
+
+/// A type list's alternatives, with its literals findable by
+/// [`dedup_hash`].
+struct HashedAlternatives {
+    literals: HashMap<u64, Vec<PhpType>, BuildHasherDefault<IdentityHasher>>,
+    /// The alternatives that are not literals.
+    rest: Vec<PhpType>,
+}
+
+impl<'a> DisjointFrom<'a> {
+    pub(super) fn new(types: &'a [ResolvedType]) -> Self {
+        DisjointFrom {
+            types,
+            alternatives: OnceCell::new(),
+        }
+    }
+
+    /// [`types_are_disjoint`] of the list this was built from and `other`.
+    pub(super) fn disjoint_from(&self, other: &[ResolvedType]) -> bool {
+        if self.types.is_empty() || other.is_empty() {
+            return false;
+        }
+        let mine = self.alternatives.get_or_init(|| {
+            let mut all = Vec::new();
+            for rt in self.types {
+                alternatives(&rt.type_string, &mut all);
+            }
+            let mut literals: HashMap<u64, Vec<PhpType>, BuildHasherDefault<IdentityHasher>> =
+                HashMap::default();
+            let mut rest = Vec::new();
+            for ty in all {
+                if ty.as_literal().is_some() {
+                    literals.entry(dedup_hash(&ty)).or_default().push(ty);
+                } else {
+                    rest.push(ty);
+                }
+            }
+            HashedAlternatives { literals, rest }
+        });
+        let mut disjoint_from_mine = |q: &PhpType| {
+            mine.rest.iter().all(|p| disjoint(p, q))
+                && if q.as_literal().is_some() {
+                    // Two literals are disjoint unless they are equal, and
+                    // equal literals hash the same.
+                    mine.literals
+                        .get(&dedup_hash(q))
+                        .is_none_or(|same_hash| same_hash.iter().all(|p| disjoint(p, q)))
+                } else {
+                    mine.literals.values().flatten().all(|p| disjoint(p, q))
+                }
+        };
+        other
+            .iter()
+            .all(|rt| all_alternatives(&rt.type_string, &mut disjoint_from_mine))
+    }
 }
 
 /// Whether `side` has shown that `key` cannot be holding any of `types`.
@@ -438,13 +518,15 @@ pub(super) fn join_implied_narrowings(
     let mut lists: HashMap<Atom, ProofList> = HashMap::new();
 
     // Whether a proof the other path recorded is true of `side`, whose
-    // own proofs for the holder are `recorded`.
+    // own proofs for the holder are `recorded` and whose value for it is
+    // `held`.
     let survives = |side: &ScopeState,
                     recorded: &[ImpliedNarrowing],
-                    index: &KeyIndex,
+                    index: &ProofIndex,
+                    held: &DisjointFrom<'_>,
                     holder: &Atom,
                     proof: &ImpliedNarrowing| {
-        index.any(recorded, &proof.key, |p| same_types(&p.types, &proof.types))
+        index.any(recorded, proof, |p| same_types(&p.types, &proof.types))
             || side
                 .locals
                 .get(&proof.key)
@@ -456,10 +538,7 @@ pub(super) fn join_implied_narrowings(
                 // meet the trigger: that path cannot be the one a later
                 // test showing the trigger is pointing at.
                 ProofTrigger::NonNull => is_definitely_null(side, holder),
-                ProofTrigger::Within(trigger) => side
-                    .locals
-                    .get(holder)
-                    .is_some_and(|held| types_are_disjoint(held, trigger)),
+                ProofTrigger::Within(trigger) => held.disjoint_from(trigger),
                 ProofTrigger::Outside(trigger) => side
                     .locals
                     .get(holder)
@@ -475,27 +554,28 @@ pub(super) fn join_implied_narrowings(
             .implied_narrowings
             .get(&holder)
             .map_or(&[][..], Vec::as_slice);
-        let (mine_index, theirs_index) = (KeyIndex::of(mine), KeyIndex::of(theirs));
+        let mine_index = ProofIndex::new(ProofPart::Types);
+        let theirs_index = ProofIndex::new(ProofPart::Types);
+        let mine_held = DisjointFrom::new(a.locals.get(&holder).map_or(&[][..], Vec::as_slice));
+        let theirs_held = DisjointFrom::new(b.locals.get(&holder).map_or(&[][..], Vec::as_slice));
         // A proof is true of the path that recorded it, so only the other
         // one has to be asked. Neither path's list repeats itself, so the
         // only repeat to skip is one of `b`'s that asks what one of `a`'s
         // already does.
-        let mut kept: Vec<ImpliedNarrowing> = mine
-            .iter()
-            .filter(|proof| survives(b, theirs, &theirs_index, &holder, proof))
-            .cloned()
-            .collect();
-        let kept_index = KeyIndex::of(&kept);
-        let kept_from_mine = kept.len();
+        let mut kept = ProofList::of(
+            mine.iter()
+                .filter(|proof| survives(b, theirs, &theirs_index, &theirs_held, &holder, proof))
+                .cloned()
+                .collect(),
+        );
         for proof in theirs {
-            let repeated = kept_index.any(&kept[..kept_from_mine], &proof.key, |p| {
-                same_trigger(&p.trigger, &proof.trigger)
-            });
-            if !repeated && survives(a, mine, &mine_index, &holder, proof) {
+            if !kept.asks_the_same_as(proof)
+                && survives(a, mine, &mine_index, &mine_held, &holder, proof)
+            {
                 kept.push(proof.clone());
             }
         }
-        lists.insert(holder, ProofList::of(kept));
+        lists.insert(holder, kept);
     }
     let mut record = |holder: Atom, proof: ImpliedNarrowing| {
         lists
@@ -695,81 +775,135 @@ impl<'a> PinnedOffsets<'a> {
     }
 }
 
-/// Which items of a holder's proof list are about which key, kept once
-/// the list is long enough that scanning all of it for every proof the
-/// join looks up costs more than the index does.
-#[derive(Default)]
-struct KeyIndex(Option<HashMap<Atom, Vec<usize>>>);
+/// The part of a proof a [`ProofIndex`] finds it by, besides its key.
+#[derive(Clone, Copy)]
+enum ProofPart {
+    /// The types it says the key holds, as [`same_types`] compares them.
+    Types,
+    /// What it asks of its holder, as [`same_trigger`] compares it.
+    Trigger,
+}
 
-impl KeyIndex {
+impl ProofPart {
+    /// A hash two proofs share whenever they are about the same key and
+    /// this part of them is the same.
+    fn fingerprint(self, proof: &ImpliedNarrowing) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        proof.key.hash(&mut hasher);
+        let types = match self {
+            ProofPart::Types => &proof.types,
+            ProofPart::Trigger => {
+                std::mem::discriminant(&proof.trigger).hash(&mut hasher);
+                match &proof.trigger {
+                    ProofTrigger::NonNull => return hasher.finish(),
+                    ProofTrigger::Within(types) | ProofTrigger::Outside(types) => types,
+                }
+            }
+        };
+        for rt in types {
+            rt.type_string.hash(&mut hasher);
+            rt.class_info.as_ref().map(Arc::as_ptr).hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+}
+
+/// Which items of a holder's proof list are about which key and have which
+/// [`ProofPart`].  Built the first time the list is looked up, and only
+/// once it is long enough that scanning all of it for every proof the join
+/// looks up costs more than the index does: a join whose other path holds
+/// nothing about the holder never looks anything up in it.
+///
+/// The key alone narrows nothing down for an `elseif` lookup table, which
+/// records a proof per arm about the one variable every arm assigns.
+struct ProofIndex {
+    part: ProofPart,
+    /// The first item with each [`ProofPart::fingerprint`], which is a hash
+    /// already.
+    first: OnceCell<HashMap<u64, usize, BuildHasherDefault<IdentityHasher>>>,
+}
+
+impl ProofIndex {
     const FROM_LEN: usize = 16;
 
-    fn of(items: &[ImpliedNarrowing]) -> Self {
-        let mut index = KeyIndex::default();
-        if items.len() >= Self::FROM_LEN {
-            index.build(items);
+    fn new(part: ProofPart) -> Self {
+        ProofIndex {
+            part,
+            first: OnceCell::new(),
         }
-        index
-    }
-
-    fn build(&mut self, items: &[ImpliedNarrowing]) {
-        let mut by_key: HashMap<Atom, Vec<usize>> = HashMap::new();
-        for (at, item) in items.iter().enumerate() {
-            by_key.entry(item.key).or_default().push(at);
-        }
-        self.0 = Some(by_key);
     }
 
     /// Note the item just pushed onto `items`.
     fn note_last(&mut self, items: &[ImpliedNarrowing]) {
-        match &mut self.0 {
-            Some(by_key) => {
-                let at = items.len() - 1;
-                by_key.entry(items[at].key).or_default().push(at);
-            }
-            None if items.len() >= Self::FROM_LEN => self.build(items),
-            None => {}
+        if let Some(first) = self.first.get_mut() {
+            let at = items.len() - 1;
+            first.entry(self.part.fingerprint(&items[at])).or_insert(at);
         }
     }
 
-    /// Whether `test` accepts an item of `items` about `key`.
+    /// Whether `same` accepts an item of `items` about the key `probe` is
+    /// about, where `same` only accepts items whose indexed part is the
+    /// same as `probe`'s.
     fn any(
         &self,
         items: &[ImpliedNarrowing],
-        key: &Atom,
-        test: impl Fn(&ImpliedNarrowing) -> bool,
+        probe: &ImpliedNarrowing,
+        same: impl Fn(&ImpliedNarrowing) -> bool,
     ) -> bool {
-        match &self.0 {
-            Some(by_key) => by_key
-                .get(key)
-                .is_some_and(|ats| ats.iter().any(|&at| test(&items[at]))),
-            None => items.iter().any(|item| item.key == *key && test(item)),
+        let matches = |item: &ImpliedNarrowing| item.key == probe.key && same(item);
+        if items.len() < Self::FROM_LEN {
+            return items.iter().any(matches);
+        }
+        let first = self.first.get_or_init(|| {
+            let mut first: HashMap<u64, usize, BuildHasherDefault<IdentityHasher>> =
+                HashMap::with_capacity_and_hasher(items.len(), Default::default());
+            for (at, item) in items.iter().enumerate() {
+                first.entry(self.part.fingerprint(item)).or_insert(at);
+            }
+            first
+        });
+        // Every item `same` accepts shares the probe's fingerprint, so one
+        // that does not match the probe is a hash collision, which a scan
+        // settles.
+        match first.get(&self.part.fingerprint(probe)) {
+            None => false,
+            Some(&at) => matches(&items[at]) || items.iter().any(matches),
         }
     }
 }
 
 /// A holder's proof list as a join builds it.
-#[derive(Default)]
 struct ProofList {
     items: Vec<ImpliedNarrowing>,
-    index: KeyIndex,
+    index: ProofIndex,
 }
 
 impl ProofList {
     fn of(items: Vec<ImpliedNarrowing>) -> Self {
-        let index = KeyIndex::of(&items);
-        ProofList { items, index }
+        ProofList {
+            items,
+            index: ProofIndex::new(ProofPart::Trigger),
+        }
+    }
+
+    /// Whether the list already asks what `proof` does of its holder about
+    /// the same key.
+    fn asks_the_same_as(&self, proof: &ImpliedNarrowing) -> bool {
+        self.index.any(&self.items, proof, |p| {
+            same_trigger(&p.trigger, &proof.trigger)
+        })
+    }
+
+    fn push(&mut self, proof: ImpliedNarrowing) {
+        self.items.push(proof);
+        self.index.note_last(&self.items);
     }
 
     /// Add `proof` unless the list already asks the same of its holder
     /// about the same key.
     fn push_unique(&mut self, proof: ImpliedNarrowing) {
-        if self.index.any(&self.items, &proof.key, |p| {
-            same_trigger(&p.trigger, &proof.trigger)
-        }) {
-            return;
+        if !self.asks_the_same_as(&proof) {
+            self.push(proof);
         }
-        self.items.push(proof);
-        self.index.note_last(&self.items);
     }
 }

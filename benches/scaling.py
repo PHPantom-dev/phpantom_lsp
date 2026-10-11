@@ -104,6 +104,20 @@ def switch_literals(n: int) -> str:
     return "".join(out)
 
 
+def elseif_literals(n: int) -> str:
+    """The same lookup table as an ``if``/``elseif`` chain of N arms."""
+    out = [
+        "<?php\n",
+        "function takesInt(int $x): void {}\n",
+        "function countryName(string $code): void {\n",
+    ]
+    for i in range(n):
+        keyword = "if" if i == 0 else "} elseif"
+        out.append(f"    {keyword} ($code === 'C{i}') {{ $name = 'Country {i}';\n")
+    out.append("    } else { $name = 'Unknown'; }\n    takesInt($name);\n}\n")
+    return "".join(out)
+
+
 def conditional_array_writes(n: int) -> str:
     """An array filled in one literal key at a time over N ``if``s."""
     out = [
@@ -175,6 +189,7 @@ SHAPES: dict[str, Shape] = {
     "undefined_functions": Shape(undefined_functions, 30000),
     "long_script_closure_calls": Shape(long_script_closure_calls, 8000),
     "switch_literals": Shape(switch_literals, 16000),
+    "elseif_literals": Shape(elseif_literals, 4000),
     "conditional_array_writes": Shape(conditional_array_writes, 200, known_slow=True),
     "conditional_dynamic_writes": Shape(conditional_dynamic_writes, 2000),
     "method_chain": Shape(method_chain, 600, known_slow=True),

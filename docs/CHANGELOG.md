@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster analysis of methods that check many properties.** Narrowing a property or a call's result no longer walks the method again from its first line.
 - **Faster analysis of loops.** A loop body is no longer walked again once its types have settled.
 - **Faster analysis of `switch` lookup tables.** A `switch` that assigns a different literal in each case, such as a table of country or currency names, no longer slows down out of proportion to its length. One with 8,000 cases is checked in about a tenth of a second.
+- **Faster analysis of `if`/`elseif` lookup tables.** The same kind of table written as an `if`/`elseif` chain no longer slows down out of proportion to its length either. One with 1,000 arms is checked in a twentieth of a second instead of 20 seconds.
 - **Faster analysis of long files.** Checking a file of tens of thousands of lines, such as a legacy top-level script, no longer slows down out of proportion to its length. A 22,000-line script is checked in about a second instead of nearly five.
 - **Faster analysis of closures in long files.** A long script full of closures with typed parameters, called through the variables that hold them, no longer slows down out of proportion to its length. A 22,000-line script of them is checked in under half a second instead of nearly six.
 - **Faster loading of vendor and stub files.** Classes from a file loaded on demand are read with one parse of the file instead of three.

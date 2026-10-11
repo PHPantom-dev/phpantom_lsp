@@ -2736,3 +2736,58 @@ fn switch_assigning_many_distinct_literals() {
          comparing them pairwise again.",
     );
 }
+
+/// The same lookup table written as an `if`/`elseif` chain.
+///
+/// Every arm narrows the subject to its own literal as well as assigning
+/// one, so each join also records which value went with which.  Folding
+/// the arms into one accumulator rechecked every one of those proofs at
+/// every arm, which made the chain cubic in its length: 1000 arms took 20 s
+/// in a release build.
+#[test]
+fn elseif_chain_assigning_many_distinct_literals() {
+    const ARMS: usize = 1000;
+    let mut php = String::from(
+        "<?php\nfunction takesInt(int $x): void {}\n\
+         function countryName(string $code): void {\n",
+    );
+    for i in 0..ARMS {
+        let keyword = if i == 0 { "if" } else { "} elseif" };
+        php.push_str(&format!(
+            "    {keyword} ($code === 'C{i}') {{ $name = 'Country {i}';\n"
+        ));
+    }
+    php.push_str("    } else { $name = 'Unknown'; }\n    takesInt($name);\n}\n");
+
+    let uri = "file:///test/elseif_literals.php";
+    let backend = create_test_backend();
+    backend.update_ast(uri, &php);
+
+    let start = Instant::now();
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, &php, &mut out);
+    let elapsed = start.elapsed();
+
+    eprintln!();
+    eprintln!("=== If/elseif chain assigning distinct literals ===");
+    eprintln!("  {ARMS} arms: {elapsed:>10.3?}");
+    eprintln!();
+
+    assert_eq!(out.len(), 1, "expected one argument type mismatch");
+    let message = &out[0].message;
+    assert!(
+        message.contains("'Country 0'|")
+            && message.contains(&format!("'Country {}'|", ARMS - 1))
+            && message.contains("'Unknown'"),
+        "the joined type lost an arm: {message}"
+    );
+
+    // Budget: 10 s in debug, 2 s in release, as for the `switch` above.
+    let budget_secs = if cfg!(debug_assertions) { 10.0 } else { 2.0 };
+    assert!(
+        elapsed.as_secs_f64() < budget_secs,
+        "Diagnosing a {ARMS}-arm if/elseif chain took {elapsed:.3?} which \
+         exceeds the {budget_secs:.0} s budget.  The join may be rechecking \
+         every proof the arms recorded at every arm again.",
+    );
+}

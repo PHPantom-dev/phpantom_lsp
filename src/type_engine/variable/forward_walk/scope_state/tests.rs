@@ -311,3 +311,122 @@ fn arrays_are_disjoint_only_when_no_value_fits_both() {
     ));
     assert!(disjoint("array{kind: 'a'}", "array{kind: 'b'}"));
 }
+
+#[test]
+fn a_hashed_side_answers_as_types_are_disjoint_does() {
+    use super::proofs::{DisjointFrom, types_are_disjoint};
+
+    let literals = |range: std::ops::Range<usize>| {
+        range
+            .map(|i| PhpType::literal_string_value(format!("v{i}")))
+            .collect::<Vec<_>>()
+    };
+    let mut cases: Vec<Vec<ResolvedType>> = [
+        "'a'",
+        "\"a\"",
+        "'b'",
+        "'a'|'b'",
+        "'c'|'d'|null",
+        "?'a'",
+        "string",
+        "int",
+        "1",
+        "01",
+        "2",
+        "1|2|3",
+        "1.0",
+        "null",
+        "non-empty-array<int, 1|2>",
+        "array{}",
+        "Foo",
+    ]
+    .iter()
+    .map(|ty| typed(PhpType::parse(ty)))
+    .collect();
+    cases.push(typed(PhpType::union(literals(0..20))));
+    cases.push(typed(PhpType::union(literals(19..40))));
+    cases.push(typed(PhpType::union(literals(20..40))));
+    cases.push(vec![
+        ResolvedType::from_type_string(PhpType::literal_string_value("a")),
+        ResolvedType::from_type_string(foo()),
+    ]);
+    cases.push(Vec::new());
+
+    for mine in &cases {
+        let hashed = DisjointFrom::new(mine);
+        for theirs in &cases {
+            assert_eq!(
+                hashed.disjoint_from(theirs),
+                types_are_disjoint(mine, theirs),
+                "{mine:?} against {theirs:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn every_path_of_a_long_join_keeps_its_own_proof() {
+    use super::ProofTrigger;
+
+    let literal = |prefix: &str, i: usize| PhpType::literal_string_value(format!("{prefix}{i}"));
+    let paths: Vec<ScopeState> = (0..40)
+        .map(|i| {
+            let mut scope = ScopeState::new();
+            scope.set("$code", typed(literal("C", i)));
+            scope.set("$name", typed(literal("N", i)));
+            scope
+        })
+        .collect();
+
+    let joined = ScopeState::join_all(paths).expect("there are paths to join");
+
+    let proofs = joined
+        .implied_narrowings
+        .get(&atom("$code"))
+        .expect("the join records what each code meant");
+    let only = |types: &[ResolvedType], expected: PhpType| matches!(types, [only] if only.type_string == expected);
+    for i in 0..40 {
+        assert!(
+            proofs.iter().any(|proof| {
+                matches!(&proof.trigger, ProofTrigger::Within(t) if only(t, literal("C", i)))
+                    && proof.key == atom("$name")
+                    && only(&proof.types, literal("N", i))
+            }),
+            "the proof that 'C{i}' means 'N{i}' was lost"
+        );
+    }
+}
+
+#[test]
+fn a_proof_both_paths_hold_is_kept_once_however_long_the_list() {
+    use super::{ImpliedNarrowing, ProofTrigger};
+
+    let literal = |prefix: &str, i: usize| PhpType::literal_string_value(format!("{prefix}{i}"));
+    let proofs = |count: usize| -> Vec<ImpliedNarrowing> {
+        (0..count)
+            .map(|i| ImpliedNarrowing {
+                trigger: ProofTrigger::Within(typed(literal("v", i))),
+                key: atom("$k"),
+                types: typed(literal("k", i)),
+            })
+            .collect()
+    };
+    let mut a = ScopeState::new();
+    a.set(
+        "$h",
+        typed(PhpType::union((0..20).map(|i| literal("v", i)).collect())),
+    );
+    a.implied_narrowings.insert(atom("$h"), proofs(20));
+    let mut b = a.clone();
+    b.implied_narrowings.insert(atom("$h"), proofs(21));
+
+    a.merge_branch(&b);
+
+    // Each of the first twenty holds on both paths, because both recorded
+    // it, and the last holds on `a` because `a`'s holder is never `'v20'`.
+    let joined = a
+        .implied_narrowings
+        .get(&atom("$h"))
+        .expect("the proofs survive");
+    assert_eq!(joined.len(), 21);
+}

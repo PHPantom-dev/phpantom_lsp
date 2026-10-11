@@ -3703,6 +3703,101 @@ function f(?int $rangeMin, ?int $rangeMax, int $c, bool $isConst): void {
     assert_eq!(text, "```php\n<?php\n$min = int|null\n```");
 }
 
+// ─── An `elseif` lookup table can be read either way round ─────────────────
+
+/// How many arms [`elseif_table_fixture`] writes: enough that each column
+/// collects more proofs than a short chain does.
+const TABLE_ARMS: usize = 20;
+
+/// A lookup table written as an `elseif` chain, with `{test}` asked past it
+/// and `{subject}` hovered inside the test.
+fn elseif_table_fixture(test: &str, subject: &str) -> String {
+    let mut arms = String::new();
+    for i in 0..TABLE_ARMS {
+        let keyword = if i == 0 { "if" } else { "} elseif" };
+        arms.push_str(&format!(
+            "    {keyword} ($code === 'C{i}') {{\n        $name = 'N{i}';\n"
+        ));
+    }
+    format!(
+        r#"<?php
+function f(string $code): void {{
+{arms}    }} else {{
+        $name = 'Unknown';
+    }}
+    if ({test}) {{
+        {subject}; // <-- here
+    }}
+}}
+"#
+    )
+}
+
+/// One arm's value proves that arm's condition held.
+#[test]
+fn an_elseif_arms_value_proves_its_condition() {
+    let backend = create_test_backend();
+    let uri = "file:///elseif_table_one_arm.php";
+    let content = elseif_table_fixture("$name === 'N17'", "$code");
+    let text = hover_marked(&backend, uri, &content);
+    assert_eq!(text, "```php\n<?php\n$code = 'C17'\n```");
+}
+
+/// Ruling out what the `else` assigned proves one of the conditions held,
+/// whichever it was.
+#[test]
+fn ruling_out_the_else_value_proves_one_of_the_conditions() {
+    let backend = create_test_backend();
+    let uri = "file:///elseif_table_not_else.php";
+    let content = elseif_table_fixture("$name !== 'Unknown'", "$code");
+    let codes: Vec<String> = (0..TABLE_ARMS).map(|i| format!("'C{i}'")).collect();
+    let text = hover_marked(&backend, uri, &content);
+    assert_eq!(
+        text,
+        format!("```php\n<?php\n$code = {}\n```", codes.join("|"))
+    );
+}
+
+/// A code no arm compared with can only have reached the `else`.
+#[test]
+fn a_value_no_elseif_arm_tested_for_reaches_the_else() {
+    let backend = create_test_backend();
+    let uri = "file:///elseif_table_other.php";
+    let content = elseif_table_fixture("$code === 'other'", "$name");
+    let text = hover_marked(&backend, uri, &content);
+    assert_eq!(text, "```php\n<?php\n$name = 'Unknown'\n```");
+}
+
+/// Testing for the `else` arm's value recovers what the `else` knew and
+/// nothing an arm proved.
+#[test]
+fn the_else_value_of_an_elseif_chain_recovers_only_the_else() {
+    let backend = create_test_backend();
+    let uri = "file:///elseif_chain_else_value.php";
+    let content = r#"<?php
+class Node {}
+class A extends Node {}
+class B extends Node {}
+class C extends Node {}
+function f(Node $node): void {
+    if ($node instanceof A) {
+        $kind = 'a';
+    } elseif ($node instanceof B) {
+        $kind = 'b';
+    } elseif ($node instanceof C) {
+        $kind = 'c';
+    } else {
+        $kind = null;
+    }
+    if ($kind === null) {
+        $node; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$node = Node\n```");
+}
+
 // ─── What the branch a truthy test skips is left with ──────────────────────
 
 /// The branch a truthy test skips knows the flag was `false`, exactly as

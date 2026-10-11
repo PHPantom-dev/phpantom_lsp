@@ -480,34 +480,23 @@ fn merge_if_branches(
     // the code after the `if` is reached only where the condition failed.
     let guard = then_exits && !has_else_ifs && else_branch.is_none();
 
-    let mut surviving_scopes: Vec<&ScopeState> = Vec::new();
-
+    // The arms whose condition held, in source order.
+    let mut arms: Vec<&ScopeState> = Vec::new();
     if !then_exits {
-        surviving_scopes.push(&then_scope);
+        arms.push(&then_scope);
     }
     for (ei_scope, ei_exits) in else_ifs.iter() {
         if !ei_exits {
-            surviving_scopes.push(ei_scope);
+            arms.push(ei_scope);
         }
     }
-    match &else_branch {
-        Some((es, else_exits)) => {
-            if !else_exits {
-                surviving_scopes.push(es);
-            }
-        }
-        None => {
-            // No else clause: falling out of the bottom means every
-            // condition in the chain was false (e.g. `$a["test"] === null`
-            // → `$a["test"]` is NOT null in the implicit else path).
-            //
-            // The implicit else path precedes the then-body in source
-            // order, so it goes first: the merge below preserves this
-            // order in each variable's type list, and hover renders the
-            // first entry as the headline type.
-            surviving_scopes.insert(0, &fall_through);
-        }
-    }
+    // The path on which every condition failed: the `else`, or falling out
+    // of the bottom when there is none (e.g. `$a["test"] === null` →
+    // `$a["test"]` is NOT null in the implicit else path).
+    let mut rest: Option<&ScopeState> = match &else_branch {
+        Some((es, else_exits)) => (!else_exits).then_some(es),
+        None => Some(&fall_through),
+    };
 
     // A branch whose condition proved impossible describes a run that
     // cannot happen.  Dropping it is what makes a reassignment inside
@@ -516,11 +505,21 @@ fn merge_if_branches(
     // implicit else has no value to carry.  If every path is impossible
     // the whole `if` is, and the pre-if scope is the least surprising
     // answer.
-    if surviving_scopes.iter().any(|s| !s.unreachable) {
-        surviving_scopes.retain(|s| !s.unreachable);
+    if arms.iter().chain(&rest).any(|s| !s.unreachable) {
+        arms.retain(|s| !s.unreachable);
+        rest = rest.filter(|s| !s.unreachable);
     }
 
-    if surviving_scopes.is_empty() {
+    // The implicit else path precedes the then-body in source order, so it
+    // goes first: the join below preserves this order in each variable's
+    // type list, and hover renders the first entry as the headline type.
+    let rest_first = else_branch.is_none();
+    let surviving_scopes: Vec<&ScopeState> = match rest {
+        Some(rest) if rest_first => std::iter::once(rest).chain(arms.iter().copied()).collect(),
+        _ => arms.iter().copied().chain(rest).collect(),
+    };
+
+    let Some(mut merged) = join_if_paths(&arms, rest, rest_first) else {
         // Every branch returns, throws, or jumps, and the branches cover
         // every case: nothing falls out of the bottom of this `if`.  The
         // pre-if types (still in `scope`) are the least surprising answer
@@ -529,19 +528,14 @@ fn merge_if_branches(
         // always `break`s has no fall-through edge, only the break edges.
         scope.unreachable = true;
         return;
-    } else if surviving_scopes.len() == 1 {
-        *scope = surviving_scopes[0].clone();
-    } else {
-        let mut merged = surviving_scopes[0].clone();
-        for s in &surviving_scopes[1..] {
-            merged.merge_branch(s);
-        }
+    };
+    if surviving_scopes.len() > 1 {
         // Simplify unions where a child class is merged with its
         // parent — e.g. `ClassResolvesBackChild | ClassResolvesBack`
         // collapses to `ClassResolvesBack`.
         simplify_class_hierarchy_unions(&mut merged, &surviving_scopes[0].locals, ctx.class_loader);
-        *scope = merged;
     }
+    *scope = merged;
 
     // Drop synthetic property access keys that only some branches
     // established: those represent narrowing (or an assignment) that
@@ -572,6 +566,45 @@ fn merge_if_branches(
         // branch *was* possible.  Restoring the pre-if reachability keeps a
         // dropped branch from erasing the rest of the walk.
         scope.unreachable = pre_if_unreachable;
+    }
+}
+
+/// Join the paths out of an `if` chain: the arms whose condition held, in
+/// source order, and `rest`, the path on which every condition failed.
+/// `None` when no path reaches the end of the chain.
+///
+/// The arms are joined with one another before `rest` is joined with the
+/// result. A join learns proofs from whatever tells its two sides apart,
+/// so joining `rest` with every arm at once is what lets a later test that
+/// the chain did not fall through re-apply what its conditions proved
+/// together: past `if ($c === 'C0') { $name = 'N0'; } elseif …
+/// else { $name = 'Unknown'; }`, `$name !== 'Unknown'` narrows `$c` to the
+/// literals the arms compared it with.
+///
+/// The arms themselves are joined pairwise (see [`ScopeState::join_all`]).
+/// Folding them into one accumulator instead would recheck every proof it
+/// had gathered at each arm, which made a lookup table written as a few
+/// thousand `elseif`s take minutes.
+///
+/// `rest_first` puts `rest` ahead of the arms, as the fall-through of a
+/// chain with no `else` comes before them in source order.
+fn join_if_paths(
+    arms: &[&ScopeState],
+    rest: Option<&ScopeState>,
+    rest_first: bool,
+) -> Option<ScopeState> {
+    let arms = ScopeState::join_all(arms.iter().map(|&arm| arm.clone()).collect());
+    match (arms, rest) {
+        (Some(arms), Some(rest)) if rest_first => {
+            let mut joined = rest.clone();
+            joined.merge_branch(&arms);
+            Some(joined)
+        }
+        (Some(mut arms), Some(rest)) => {
+            arms.merge_branch(rest);
+            Some(arms)
+        }
+        (arms, rest) => arms.or_else(|| rest.cloned()),
     }
 }
 
