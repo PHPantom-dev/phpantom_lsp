@@ -1282,17 +1282,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b614-pest-bindings-outside-testspestphps-in-are-ignored" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B614. Pest bindings outside <code>tests/Pest.php</code>'s <code>-&gt;in()</code> are ignored
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2220,17 +2209,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b614-pest-bindings-outside-testspestphps-in-are-ignored" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B614. Pest bindings outside <code>tests/Pest.php</code>'s <code>-&gt;in()</code> are ignored
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2745,25 +2723,6 @@ of the same short name. The real-world shape is
 docblock signatures follow the same convention (PHPStan treats them so).
 Generated facade tags use it widely, e.g. Laravel Excel's
 <code>toCollection(..., string $disk = null, ...)</code>.</p>
-<h3 id="b614-pest-bindings-outside-testspestphps-in-are-ignored">B614. Pest bindings outside <code>tests/Pest.php</code>'s <code>-&gt;in()</code> are ignored<a class="headerlink" href="#b614-pest-bindings-outside-testspestphps-in-are-ignored" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="x">// tests/Feature/GiftTest.php</span>
-<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="x">uses(FeatureTestCase::class, CreatesProducts::class);</span>
-<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a>
-<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="x">it(&#39;gives a gift&#39;, function (): void {</span>
-<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="x">    $this-&gt;createProductCollection(5); // not found on PHPUnit\Framework\TestCase</span>
-<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a><span class="x">});</span>
-</code></pre></div>
-<p><code>$this</code> in a Pest test closure is read from the <code>pest()-&gt;extends()</code> and
-<code>uses()</code> chains <code>tests/Pest.php</code> binds with <code>-&gt;in()</code>. Three cases are not:</p>
-<ul>
-<li>A <code>uses()</code> or <code>pest()-&gt;extends()</code> written in the test file itself, with no
-  <code>-&gt;in()</code>, which binds that file.</li>
-<li>Traits in the binding. Pest builds the test class from the bound test case
-  plus every bound trait, but only the class is used for <code>$this</code>, so a
-  helper that lives on a trait is not found.</li>
-<li>A test directory other than <code>tests/</code> (Pest's <code>--test-directory</code>).</li>
-</ul>
 
 
 
