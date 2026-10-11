@@ -884,7 +884,7 @@ fn describes_elements(ty: &PhpType, allow_iterable: bool) -> bool {
 /// `whereHas`, `orWhereHas`, `whereDoesntHave`, etc.) and the receiver
 /// is an Eloquent model or `Builder<Model>`.  If so, resolve the
 /// relation chain from the first argument string and return
-/// the final related model’s builder as the closure parameter type.
+/// the final related model's builder as the closure parameter type.
 ///
 /// Returns `None` when the override does not apply (not a relation-query
 /// method, receiver is not a model, relation chain cannot be resolved),
@@ -1036,20 +1036,24 @@ fn find_model_from_receivers(
         }
         // Read the receiver's retained generic context before recovering it
         // from declarations; custom builders need not declare TModel at all.
-        let model_type = match receiver.type_string.kind() {
-            TypeKind::Generic(g) => g.args.first().cloned(),
+        // Each source is tried in turn, so an unsubstituted `TModel` in one
+        // does not hide a concrete model in the next.
+        let as_model = |ty: &PhpType| {
+            ty.base_name()
+                .and_then(class_loader)
+                .filter(|model| extends_eloquent_model(model, class_loader))
+        };
+        let from_generic = match receiver.type_string.kind() {
+            TypeKind::Generic(g) => g.args.first().and_then(as_model),
             _ => None,
-        }
-        .or_else(|| {
-            cls.get_method("getModel")
-                .and_then(|method| method.return_type.clone())
-        })
-        .or_else(|| extract_model_from_builder(cls));
-        if let Some(model) = model_type
-            .as_ref()
-            .and_then(PhpType::base_name)
-            .and_then(class_loader)
-            && extends_eloquent_model(&model, class_loader)
+        };
+        if let Some(model) = from_generic
+            .or_else(|| {
+                cls.get_method("getModel")
+                    .and_then(|method| method.return_type.as_ref())
+                    .and_then(as_model)
+            })
+            .or_else(|| extract_model_from_builder(cls).as_ref().and_then(as_model))
         {
             return Some(model);
         }
