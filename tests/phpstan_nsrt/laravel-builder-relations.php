@@ -298,7 +298,6 @@ namespace BuilderRelationAudit {
         });
     }
 
-
     class CustomArguments extends Team {
         /**
          * @param \Closure(Warehouse): void $operator
