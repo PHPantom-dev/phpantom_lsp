@@ -5639,6 +5639,44 @@ final class Frames
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// Untyped operands could be strings as well as numbers, so neither the
+/// compound form nor the binary operator claims an int, however many of
+/// them are chained.
+#[test]
+fn a_compound_bitwise_assignment_on_untyped_operands_is_not_an_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class Frames
+{
+    public function unmask($payload, $mask): string
+    {
+        $payload ^= $mask;
+        return $payload;
+    }
+
+    public function asValue($a, $b): string
+    {
+        return $a |= $b;
+    }
+
+    public function repeated($a, $b, $c): string
+    {
+        $a |= $b;
+        $a |= $c;
+        return $a;
+    }
+
+    public function chained($a, $b, $c): string
+    {
+        return $a | $b | $c;
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 /// Anything but two strings makes those operators produce an int, and a
 /// shift always does — in a statement or as a value — so neither
 /// satisfies a `string` return.

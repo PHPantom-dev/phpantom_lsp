@@ -126,20 +126,10 @@ pub(super) fn resolve_binary_result_type<'b>(
         }
         // `&`, `|` and `^` are the ones PHP overloads for strings; a shift
         // always produces an int.
-        if matches!(op, BitwiseOp::And | BitwiseOp::Or | BitwiseOp::Xor) {
-            if both_string_operands(&lhs_types, &rhs_types) {
-                return Some(vec![ResolvedType::from_type_string(PhpType::string())]);
-            }
-            // Two operands nobody typed decide nothing: the same operator
-            // produces a string from two strings and an int from two
-            // numbers, and a `mixed` could be either. The honest answer is
-            // the pair — benevolent, because it is a gap in what the code
-            // said rather than a value measured to be two things.
-            if operand_is_undecided(&lhs_types) && operand_is_undecided(&rhs_types) {
-                return Some(vec![ResolvedType::from_type_string(PhpType::benevolent(
-                    PhpType::union(vec![PhpType::int(), PhpType::string()]),
-                ))]);
-            }
+        if matches!(op, BitwiseOp::And | BitwiseOp::Or | BitwiseOp::Xor)
+            && let Some(ty) = string_overload_result(&lhs_types, &rhs_types)
+        {
+            return Some(vec![ResolvedType::from_type_string(ty)]);
         }
         // A mask built from constants (`$flags = JSON_PRETTY_PRINT |
         // JSON_THROW_ON_ERROR`) keeps its value, so a call that is handed it
@@ -576,32 +566,48 @@ pub(crate) fn infer_modulo_result_type(
     }
 }
 
-/// Whether `&`, `|` or `^` works byte by byte here, which PHP does only
-/// when both operands are strings — and the result is then a string too.
-fn both_string_operands(lhs_types: &[ResolvedType], rhs_types: &[ResolvedType]) -> bool {
+/// The result of `&`, `|` or `^` when the operands do not settle it as an
+/// int, or `None` when they do.
+///
+/// PHP works byte by byte, producing a string, only when both operands are
+/// strings. Two operands nobody typed decide nothing: the same operator
+/// produces a string from two strings and an int from two numbers, and a
+/// `mixed` could be either. The honest answer is the pair, benevolent
+/// because it is a gap in what the code said rather than a value measured
+/// to be two things. An operand that is already that benevolent pair (an
+/// earlier `$a | $b`, or `$a |= $b` on untyped operands) is just as
+/// undecided, so a chain keeps the answer.
+fn string_overload_result(
+    lhs_types: &[ResolvedType],
+    rhs_types: &[ResolvedType],
+) -> Option<PhpType> {
     let all_strings = |types: &[ResolvedType]| {
         !types.is_empty()
             && types
                 .iter()
                 .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()))
     };
-    all_strings(lhs_types) && all_strings(rhs_types)
+    if all_strings(lhs_types) && all_strings(rhs_types) {
+        return Some(PhpType::string());
+    }
+    let undecided = PhpType::benevolent(PhpType::union(vec![PhpType::int(), PhpType::string()]));
+    let is_undecided = |types: &[ResolvedType]| {
+        operand_is_undecided(types) || types.iter().any(|rt| rt.type_string == undecided)
+    };
+    (is_undecided(lhs_types) && is_undecided(rhs_types)).then_some(undecided)
 }
 
 /// Infer what `&=`, `|=` or `^=` leaves in its target: the overloaded
-/// number class when a side is one, a string when both sides are
-/// strings, as for the binary operator, and an int otherwise.
+/// number class when a side is one; otherwise the operands decide it the
+/// way they decide the binary operator, and anything they do not settle
+/// is an int.
 pub(crate) fn infer_bitwise_assignment_result_type(
     lhs_types: &[ResolvedType],
     rhs_types: &[ResolvedType],
 ) -> PhpType {
-    if let Some(result) = overloaded_number_result(lhs_types, rhs_types, true) {
-        result
-    } else if both_string_operands(lhs_types, rhs_types) {
-        PhpType::string()
-    } else {
-        PhpType::int()
-    }
+    overloaded_number_result(lhs_types, rhs_types, true)
+        .or_else(|| string_overload_result(lhs_types, rhs_types))
+        .unwrap_or_else(PhpType::int)
 }
 
 /// The bitwise operator `operator` is, or `None` for every other binary

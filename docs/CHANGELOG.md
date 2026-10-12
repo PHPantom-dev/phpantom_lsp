@@ -449,7 +449,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A variable a local closure writes by reference holds what was written once the closure is called.** After `$write = function () use (&$out) { $out = 'written'; };` and `$write();`, `$out` was still reported as possibly holding the value it had before, so passing it on raised a false argument type error. Calling the variable now runs the closure there and then, the same as calling it inline does. A closure that is only called on some paths, handed to another function, or replaced before the call, and a write the closure only makes on some paths, still leave both values possible. Contributed by @phcorp.
 - **Calling a closure stored in a variable applies its by-reference writes.** After `$write = function () use (&$out) { $out = 'written'; };` and `$write();`, `$out` holds `'written'` instead of possibly still its old value, so passing it on no longer raises a false argument type error. Contributed by @phcorp. Closes #474.
 - **A `finally` block sees the paths that returned early.** After `if (null !== $tool) { return; }` in the `try`, a `null !== $tool` check in the `finally` block is no longer treated as dead code. A `return` or rethrow inside a `catch` counts too. Contributed by @phcorp.
-- **A compound bitwise assignment on strings leaves a string.** `$payload ^= $mask` (and `|=`, `&=`) on two strings no longer types `$payload` as `int`, matching the binary operator. Contributed by @phcorp. Closes #479.
+- **Compound bitwise assignments on strings stay strings.** `$payload ^= $mask` (and `|=`, `&=`) on two strings, or on operands with no declared type, no longer makes `$payload` an `int`, matching `$payload ^ $mask`. Contributed by @phcorp.
 
 ### Internal
 
