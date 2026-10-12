@@ -16610,6 +16610,9 @@ async fn test_relation_callback_context_reaches_completion_and_diagnostics() {
     let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
     let backend = create_test_backend();
     let uri = Url::parse("file:///relation-context.php").unwrap();
+    // Diagnose only the call under test; the fixture supplies its classes.
+    let fixture_uri = Url::parse("file:///builder-relations-fixture.php").unwrap();
+    crate::common::open_php(&backend, &fixture_uri, fixture).await;
     for (call, expected, direct) in [
         (
             "SpecialStock::whereHas('custom', fn ($contextQuery) => BODY);",
@@ -16713,7 +16716,7 @@ async fn test_relation_callback_context_reaches_completion_and_diagnostics() {
         ),
     ] {
         let source = format!(
-            r#"{fixture}
+            r#"<?php
 namespace BuilderRelationAudit {{
     use Illuminate\Database\Eloquent\Builder;
     use Illuminate\Database\Eloquent\Relations\Relation;
