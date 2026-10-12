@@ -1260,6 +1260,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#l60-read-relation-callback-overrides-and-fallbacks-from-the-declared-signature" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L60. Read relation callback overrides and fallbacks from the declared signature
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#l29-livewire-and-volt-component-names" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1915,6 +1926,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L27. Legacy <code>Controller@method</code> action strings
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l60-read-relation-callback-overrides-and-fallbacks-from-the-declared-signature" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L60. Read relation callback overrides and fallbacks from the declared signature
       </span>
     </span>
   </a>
@@ -2631,6 +2653,26 @@ Split on <code>@</code>, resolve the class through normal resolution (honoring a
 group namespace prefix), and provide completion, go-to-definition, and
 an unknown-action diagnostic. Low priority: the string form is
 discouraged since Laravel 8.</p>
+<h4 id="l60-read-relation-callback-overrides-and-fallbacks-from-the-declared-signature">L60. Read relation callback overrides and fallbacks from the declared signature<a class="headerlink" href="#l60-read-relation-callback-overrides-and-fallbacks-from-the-declared-signature" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p>Relation-callback inference steps aside when the application redeclares
+a relation-query method, and falls back to a fixed type when it cannot
+resolve the relation. Both decisions ignore what the declaration says:</p>
+<ul>
+<li><strong>Restated <code>@method</code> tags.</strong> Any <code>@method whereHas(...)</code> or
+  <code>@method with(...)</code> on a model or builder (<code>declared_relation_method</code>
+  in <code>type_engine/variable/forward_walk/relation_callbacks.rs</code>) counts as
+  an application override and turns inference off for that class, even
+  when the tag only restates the framework signature (a common pattern
+  in hand-maintained IDE docblocks). Treat a declaration as an override
+  only when its callback parameter type differs from the framework's.</li>
+<li><strong>Hard-coded eager fallback.</strong> An eager-array callback whose relation
+  path cannot be resolved gets <code>Relation&lt;mixed, mixed, mixed&gt;</code> built in
+  code rather than the element type of the declared <code>$relations</code>
+  parameter. It matches Laravel's current declaration but will drift if
+  the stub changes; read the declared type instead, as the other
+  relation callbacks do.</li>
+</ul>
 <h4 id="l29-livewire-and-volt-component-names">L29. Livewire and Volt component names<a class="headerlink" href="#l29-livewire-and-volt-component-names" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low (Livewire projects only) · Complexity: Low-Medium</strong></p>
 <p>Class components under the Livewire class namespace (<code>app/Livewire/</code>,

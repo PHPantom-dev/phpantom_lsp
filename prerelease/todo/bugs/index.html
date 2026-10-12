@@ -850,6 +850,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Type comparison">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b1-a-closure-parameter-hint-matches-an-inferred-generic-by-short-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1. A closure parameter hint matches an inferred generic by short name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -904,6 +921,34 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Laravel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b2-relation-callbacks-on-a-relation-receiver-lose-the-related-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B2. Relation callbacks on a relation receiver lose the related model
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b3-builder-methods-called-through-a-relation-drop-the-relation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B3. Builder methods called through a relation drop the relation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1429,6 +1474,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Type comparison">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b1-a-closure-parameter-hint-matches-an-inferred-generic-by-short-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1. A closure parameter hint matches an inferred generic by short name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1483,6 +1545,34 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Laravel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b2-relation-callbacks-on-a-relation-receiver-lose-the-related-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B2. Relation callbacks on a relation receiver lose the related model
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b3-builder-methods-called-through-a-relation-drop-the-relation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B3. Builder methods called through a relation drop the relation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1564,7 +1654,33 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h4 id="b1-a-closure-parameter-hint-matches-an-inferred-generic-by-short-name">B1. A closure parameter hint matches an inferred generic by short name<a class="headerlink" href="#b1-a-closure-parameter-hint-matches-an-inferred-generic-by-short-name" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>When a closure is passed where the callee declares a callable signature,
+<code>inferred_type_is_more_specific</code> lets the inferred generic type replace
+a bare class hint if the two share a short name. A hint that names an
+unrelated class with the same short name is overwritten:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace App;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">class Collection { public function own(): void {} }</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">/** @param callable(\Illuminate\Support\Collection&lt;int, Loaf&gt;): void $cb */</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">function takesCollection(callable $cb): void {}</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">takesCollection(function (Collection $c) {</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    $c-&gt;own();   // $c is typed Illuminate\Support\Collection&lt;int, Loaf&gt;</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">});</span>
+</code></pre></div>
+<p>The parameter is <code>App\Collection</code> at runtime (PHP enforces the hint), so
+completion offers the wrong class's members and diagnostics check against
+it. The argument-level diagnostic that reports the callable mismatch is
+correct; only the type inside the closure is wrong.</p>
+<p><strong>Where to change:</strong> the short-name comparison in
+<code>inferred_type_is_more_specific</code>
+(<code>src/type_engine/variable/closure_resolution.rs</code>). The hint is already
+resolved to a FQN, so the subtype check below it covers the legitimate
+cases (<code>Collection</code> imported as <code>Illuminate\Support\Collection</code>) on its
+own.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
@@ -1574,7 +1690,55 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h4 id="b2-relation-callbacks-on-a-relation-receiver-lose-the-related-model">B2. Relation callbacks on a relation receiver lose the related model<a class="headerlink" href="#b2-relation-callbacks-on-a-relation-receiver-lose-the-related-model" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Relation-query callbacks are typed from the receiver's model, but a
+relation receiver is not recognised as carrying one. Both calls below
+reach the callback with the declared fallback type rather than the
+related model:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Team extends Model {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    /** @return HasMany&lt;Stock, $this&gt; */</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    public function stocks(): HasMany { return $this-&gt;hasMany(Stock::class); }</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">class Stock extends Model {</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    /** @return BelongsTo&lt;Warehouse, $this&gt; */</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    public function warehouse(): BelongsTo { return $this-&gt;belongsTo(Warehouse::class); }</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">}</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">$team-&gt;stocks()-&gt;whereHas('warehouse', fn ($q) =&gt; $q);  // Builder&lt;Model&gt;, expected Builder&lt;Warehouse&gt;</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">$team-&gt;stocks()-&gt;with('warehouse', fn ($r) =&gt; $r);      // Relation&lt;mixed, mixed, mixed&gt;, expected BelongsTo&lt;Warehouse, Stock&gt;</span>
+</code></pre></div>
+<p>Both forms run at runtime: <code>Relation</code> forwards <code>whereHas()</code> and <code>with()</code>
+to its query, whose model is the relation's related model.</p>
+<p><strong>Where to change:</strong> <code>find_models_from_receivers</code> in
+<code>src/type_engine/variable/closure_resolution.rs</code> reads a model from a
+builder's generic argument, <code>getModel()</code> or builder methods. A
+<code>Relation&lt;TRelated, …&gt;</code> receiver should yield <code>TRelated</code> through the
+same ancestor projection custom relation subclasses already use.</p>
+<h4 id="b3-builder-methods-called-through-a-relation-drop-the-relation">B3. Builder methods called through a relation drop the relation<a class="headerlink" href="#b3-builder-methods-called-through-a-relation-drop-the-relation" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>Relation::__call</code> forwards unknown methods to the related query and
+returns the relation itself when the forwarded call returns the builder.
+Custom builder methods do not follow this:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">#[UseEloquentBuilder(LoafBuilder::class)]</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">class Loaf extends Model {}   // LoafBuilder::stale() returns $this</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$bakery-&gt;baguettes()-&gt;stale();         // no type, expected HasMany&lt;Loaf, Bakery&gt;</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">$bakery-&gt;baguettes()-&gt;where('a', 1);   // HasMany&lt;Loaf, Bakery&gt;, correct</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">Bakery::withWhereHas('baguettes', function ($q) {</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    $q-&gt;stale();   // LoafBuilder&lt;Loaf&gt;, expected LoafBuilder&lt;Loaf&gt;|HasMany&lt;Loaf, Bakery&gt;</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">});</span>
+</code></pre></div>
+<p><code>where()</code> works because the stubs declare it on <code>Relation</code>. Methods that
+only exist on the related model's custom builder (scopes, builder
+methods) are not forwarded at all on a plain relation, and on the
+<code>withWhereHas()</code> builder/relation union they narrow to the builder arm.</p>
+<p><strong>Where to change:</strong> the <code>Relation</code> member forwarding in
+<code>virtual_members/laravel/</code> should include the related model's custom
+builder methods, rewriting a builder-typed return to the relation the
+way <code>transform_flags::FORWARDS_CALLS_SELF</code> already does for
+<code>ForwardsCalls</code> decorators.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
