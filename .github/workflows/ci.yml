@@ -44,7 +44,7 @@ jobs:
       - run: cargo test --features semantic-export semantic_export
 
   test-shard:
-    name: Test (shard ${{ matrix.shard }}/6)
+    name: Test (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -101,10 +101,15 @@ jobs:
           pattern: coverage-*
           path: coverage
           merge-multiple: true
+      - name: List coverage reports
+        id: reports
+        run: |
+          reports=(coverage/lcov-*.info)
+          (IFS=,; echo "files=${reports[*]}") >> "$GITHUB_OUTPUT"
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: coverage/lcov-1.info,coverage/lcov-2.info,coverage/lcov-3.info,coverage/lcov-4.info,coverage/lcov-5.info,coverage/lcov-6.info
+          files: ${{ steps.reports.outputs.files }}
           disable_search: true
           fail_ci_if_error: true
         env:
