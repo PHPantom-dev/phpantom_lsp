@@ -850,23 +850,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Type comparison">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b1-a-closure-parameter-hint-matches-an-inferred-generic-by-short-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B1. A closure parameter hint matches an inferred generic by short name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -972,6 +955,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Templates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b6-a-closure-returning-a-local-variable-binds-the-template-from-its-declared-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B6. A closure returning a local variable binds the template from its declared type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b7-a-class-named-like-a-template-parameter-still-shadows-it-in-type-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B7. A class named like a template parameter still shadows it in type checks
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -982,6 +993,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b8-use-x-as-y-makes-a-bare-x-skip-another-import-of-the-same-short-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B8. <code>use X as Y</code> makes a bare <code>X</code> skip another import of the same short name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1474,23 +1502,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Type comparison">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b1-a-closure-parameter-hint-matches-an-inferred-generic-by-short-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B1. A closure parameter hint matches an inferred generic by short name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1596,6 +1607,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Templates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b6-a-closure-returning-a-local-variable-binds-the-template-from-its-declared-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B6. A closure returning a local variable binds the template from its declared type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b7-a-class-named-like-a-template-parameter-still-shadows-it-in-type-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B7. A class named like a template parameter still shadows it in type checks
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1606,6 +1645,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b8-use-x-as-y-makes-a-bare-x-skip-another-import-of-the-same-short-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B8. <code>use X as Y</code> makes a bare <code>X</code> skip another import of the same short name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1654,33 +1710,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
-<h4 id="b1-a-closure-parameter-hint-matches-an-inferred-generic-by-short-name">B1. A closure parameter hint matches an inferred generic by short name<a class="headerlink" href="#b1-a-closure-parameter-hint-matches-an-inferred-generic-by-short-name" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p>When a closure is passed where the callee declares a callable signature,
-<code>inferred_type_is_more_specific</code> lets the inferred generic type replace
-a bare class hint if the two share a short name. A hint that names an
-unrelated class with the same short name is overwritten:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace App;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">class Collection { public function own(): void {} }</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">/** @param callable(\Illuminate\Support\Collection&lt;int, Loaf&gt;): void $cb */</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">function takesCollection(callable $cb): void {}</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">takesCollection(function (Collection $c) {</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    $c-&gt;own();   // $c is typed Illuminate\Support\Collection&lt;int, Loaf&gt;</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">});</span>
-</code></pre></div>
-<p>The parameter is <code>App\Collection</code> at runtime (PHP enforces the hint), so
-completion offers the wrong class's members and diagnostics check against
-it. The argument-level diagnostic that reports the callable mismatch is
-correct; only the type inside the closure is wrong.</p>
-<p><strong>Where to change:</strong> the short-name comparison in
-<code>inferred_type_is_more_specific</code>
-(<code>src/type_engine/variable/closure_resolution.rs</code>). The hint is already
-resolved to a FQN, so the subtype check below it covers the legitimate
-cases (<code>Collection</code> imported as <code>Illuminate\Support\Collection</code>) on its
-own.</p>
+<p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
@@ -1696,17 +1726,17 @@ own.</p>
 relation receiver is not recognised as carrying one. Both calls below
 reach the callback with the declared fallback type rather than the
 related model:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Team extends Model {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    /** @return HasMany&lt;Stock, $this&gt; */</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    public function stocks(): HasMany { return $this-&gt;hasMany(Stock::class); }</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">class Stock extends Model {</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    /** @return BelongsTo&lt;Warehouse, $this&gt; */</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    public function warehouse(): BelongsTo { return $this-&gt;belongsTo(Warehouse::class); }</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">}</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">$team-&gt;stocks()-&gt;whereHas('warehouse', fn ($q) =&gt; $q);  // Builder&lt;Model&gt;, expected Builder&lt;Warehouse&gt;</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">$team-&gt;stocks()-&gt;with('warehouse', fn ($r) =&gt; $r);      // Relation&lt;mixed, mixed, mixed&gt;, expected BelongsTo&lt;Warehouse, Stock&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Team extends Model {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    /** @return HasMany&lt;Stock, $this&gt; */</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    public function stocks(): HasMany { return $this-&gt;hasMany(Stock::class); }</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">class Stock extends Model {</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    /** @return BelongsTo&lt;Warehouse, $this&gt; */</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    public function warehouse(): BelongsTo { return $this-&gt;belongsTo(Warehouse::class); }</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">}</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">$team-&gt;stocks()-&gt;whereHas('warehouse', fn ($q) =&gt; $q);  // Builder&lt;Model&gt;, expected Builder&lt;Warehouse&gt;</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">$team-&gt;stocks()-&gt;with('warehouse', fn ($r) =&gt; $r);      // Relation&lt;mixed, mixed, mixed&gt;, expected BelongsTo&lt;Warehouse, Stock&gt;</span>
 </code></pre></div>
 <p>Both forms run at runtime: <code>Relation</code> forwards <code>whereHas()</code> and <code>with()</code>
 to its query, whose model is the relation's related model.</p>
@@ -1720,15 +1750,15 @@ same ancestor projection custom relation subclasses already use.</p>
 <p><code>Relation::__call</code> forwards unknown methods to the related query and
 returns the relation itself when the forwarded call returns the builder.
 Custom builder methods do not follow this:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">#[UseEloquentBuilder(LoafBuilder::class)]</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">class Loaf extends Model {}   // LoafBuilder::stale() returns $this</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$bakery-&gt;baguettes()-&gt;stale();         // no type, expected HasMany&lt;Loaf, Bakery&gt;</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">$bakery-&gt;baguettes()-&gt;where('a', 1);   // HasMany&lt;Loaf, Bakery&gt;, correct</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">Bakery::withWhereHas('baguettes', function ($q) {</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    $q-&gt;stale();   // LoafBuilder&lt;Loaf&gt;, expected LoafBuilder&lt;Loaf&gt;|HasMany&lt;Loaf, Bakery&gt;</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">});</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">#[UseEloquentBuilder(LoafBuilder::class)]</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">class Loaf extends Model {}   // LoafBuilder::stale() returns $this</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">$bakery-&gt;baguettes()-&gt;stale();         // no type, expected HasMany&lt;Loaf, Bakery&gt;</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">$bakery-&gt;baguettes()-&gt;where('a', 1);   // HasMany&lt;Loaf, Bakery&gt;, correct</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">Bakery::withWhereHas('baguettes', function ($q) {</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    $q-&gt;stale();   // LoafBuilder&lt;Loaf&gt;, expected LoafBuilder&lt;Loaf&gt;|HasMany&lt;Loaf, Bakery&gt;</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">});</span>
 </code></pre></div>
 <p><code>where()</code> works because the stubs declare it on <code>Relation</code>. Methods that
 only exist on the related model's custom builder (scopes, builder
@@ -1742,9 +1772,111 @@ way <code>transform_flags::FORWARDS_CALLS_SELF</code> already does for
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h4 id="b6-a-closure-returning-a-local-variable-binds-the-template-from-its-declared-type">B6. A closure returning a local variable binds the template from its declared type<a class="headerlink" href="#b6-a-closure-returning-a-local-variable-binds-the-template-from-its-declared-type" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>A closure's declared return type is narrowed by what its body returns
+before it binds a <code>Closure(): T</code> template, but only when the returned
+expression resolves without the closure's own local variables:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/**</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x"> * @template T</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x"> * @param \Closure(): T $cb</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x"> * @return T</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x"> */</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">function remember(\Closure $cb): mixed { return $cb(); }</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">function local(): Sub {</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    return remember(function (): Base {</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">        $p = make();          // returns Sub</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">        return $p-&gt;sortBy();  // returns static</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">    });</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">    // Return type Base is incompatible with declared return type Sub</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">}</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="x">function direct(): Sub {</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="x">    return remember(function (): Base {</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="x">        return make()-&gt;sortBy();  // fine, T = Sub</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="x">    });</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>Sub</code> extends <code>Base</code>. PHPStan intersects the declared type with the
+union of every <code>return</code> statement's type, so <code>T</code> is <code>Sub</code> in both.</p>
+<p><strong>Where to change:</strong> <code>infer_closure_return_type_seeded</code> in
+<code>src/type_engine/call_resolution/template_subs.rs</code> resolves the text of
+the first <code>return EXPR;</code> with only the closure's parameters seeded, so a
+variable assigned inside the body is unknown and the declared type wins.
+The body should be walked by the forward walker so locals are in scope,
+and every <code>return</code> should contribute.</p>
+<h4 id="b7-a-class-named-like-a-template-parameter-still-shadows-it-in-type-checks">B7. A class named like a template parameter still shadows it in type checks<a class="headerlink" href="#b7-a-class-named-like-a-template-parameter-still-shadows-it-in-type-checks" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>With a class-like named <code>T</code> anywhere in the project (PDepend's test
+fixtures declare <code>trait T</code>), member access on a <code>@template T</code> value now
+resolves correctly, but argument and return compatibility checks still
+compare against the class instead of the template's bound:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">trait T {}   // anywhere in the index</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">namespace App;</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">/** @template T of Art */</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">class ArtList {</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    /** @param T[] $artifacts */</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">    public function __construct(array $artifacts) {</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">        foreach ($artifacts as $artifact) {</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">            (new Filter())-&gt;accept($artifact);  // expects Art, got T</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">        }</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">    }</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="x">}</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="x">interface Node {</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="x">    /**</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="x">     * @template T of Node</span>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="x">     * @param class-string&lt;T&gt; $targetType</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="x">     * @return T|null</span>
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="x">     */</span>
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="x">    public function first($targetType);</span>
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a><span class="x">}</span>
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>
+<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a><span class="x">abstract class AbstractNode implements Node {</span>
+<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a><span class="x">    public function first($targetType): ?Node {</span>
+<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a><span class="x">        foreach ($this-&gt;children() as $node) {</span>
+<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a><span class="x">            if ($node instanceof $targetType) {</span>
+<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a><span class="x">                return $node;  // Return type T is incompatible with ?Node</span>
+<a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a><span class="x">            }</span>
+<a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a><span class="x">            if (($child = $node-&gt;first($targetType)) !== null) {</span>
+<a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a><span class="x">                // expects class-string&lt;Node&gt;, got class-string&lt;T&gt;</span>
+<a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a><span class="x">                return $child;</span>
+<a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a><span class="x">            }</span>
+<a id="__codelineno-4-32" name="__codelineno-4-32" href="#__codelineno-4-32"></a><span class="x">        }</span>
+<a id="__codelineno-4-33" name="__codelineno-4-33" href="#__codelineno-4-33"></a><span class="x">        return null;</span>
+<a id="__codelineno-4-34" name="__codelineno-4-34" href="#__codelineno-4-34"></a><span class="x">    }</span>
+<a id="__codelineno-4-35" name="__codelineno-4-35" href="#__codelineno-4-35"></a><span class="x">}</span>
+</code></pre></div>
+<p>Removing the trait makes all three clean.</p>
+<p><strong>Where to change:</strong> the argument and return type compatibility checks
+need the template names in scope (including ones inherited from an
+interface method's docblock) to win over class lookup, the way member
+access does since the earlier fix. An unqualified <code>T</code> inside
+<code>namespace App</code> also should not fall back to the global <code>\T</code> at all.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h4 id="b8-use-x-as-y-makes-a-bare-x-skip-another-import-of-the-same-short-name">B8. <code>use X as Y</code> makes a bare <code>X</code> skip another import of the same short name<a class="headerlink" href="#b8-use-x-as-y-makes-a-bare-x-skip-another-import-of-the-same-short-name" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">namespace App;</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">use Illuminate\Support\Facades\Redis;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">use Redis as PhpRedis;</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">Redis::connection('cache');</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">// Method 'connection' not found on class 'Redis'</span>
+</code></pre></div>
+<p>PHP resolves <code>Redis</code> through the first import, the facade. PHPantom
+resolves it to the global <code>\Redis</code> extension class.</p>
+<p><strong>Where to change:</strong> <code>resolve_class_name</code> and <code>class_loader_with</code> in
+<code>src/resolution.rs</code> deliberately skip an import when another import's
+target is the bare name, because the loader cannot tell a name spelled
+in source (<code>Redis</code>, meaning the facade) from an already-resolved FQN
+(<code>Redis</code>, expanded from <code>PhpRedis</code>). The real fix is to stop feeding
+the loader a mix of the two: resolve <code>PhpRedis</code> to <code>\Redis</code> (or mark it
+as already qualified) before it reaches the use-map check, then drop
+the heuristic.</p>
 
 
 
