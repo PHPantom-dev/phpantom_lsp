@@ -45,7 +45,7 @@ pub(crate) fn infer_relation_callback_params(
         });
         let Some(method) = method else { continue };
         let declared = extract_callable_params_at_fw(&method.parameters, argument_list, arg_idx);
-        if !is_framework_relation_method(class, method_name, ctx) {
+        if !is_framework_relation_method(receiver, class, method_name, ctx) {
             alternatives.push(declared);
             continue;
         }
@@ -120,17 +120,31 @@ fn merge_callback_parameters(mut alternatives: Vec<Vec<PhpType>>) -> Vec<PhpType
         .collect()
 }
 
-fn is_framework_relation_method(class: &ClassInfo, method: &str, ctx: &ForwardWalkCtx<'_>) -> bool {
+fn is_framework_relation_method(
+    receiver: &ResolvedType,
+    class: &ClassInfo,
+    method: &str,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
     let Some(raw) = (ctx.class_loader)(&class.fqn()) else {
         return false;
     };
     if let Some(framework) = declared_relation_method(&raw, method, ctx.class_loader, 0) {
         return framework;
     }
-    if !crate::virtual_members::laravel::extends_eloquent_model(&raw, ctx.class_loader) {
+    // Models forward to their builder statically; relations forward to the
+    // related model's builder through `__call`.
+    let model = if crate::virtual_members::laravel::extends_eloquent_model(&raw, ctx.class_loader) {
+        raw
+    } else if let Some(related) =
+        crate::virtual_members::laravel::related_model_type(&receiver.type_string, ctx.class_loader)
+            .and_then(|related| related.base_name().and_then(ctx.class_loader))
+    {
+        related
+    } else {
         return false;
-    }
-    let builder = crate::virtual_members::laravel::model_builder_type(&raw, ctx.class_loader);
+    };
+    let builder = crate::virtual_members::laravel::model_builder_type(&model, ctx.class_loader);
     builder
         .base_name()
         .and_then(ctx.class_loader)
@@ -261,7 +275,7 @@ pub(crate) fn eager_callback_arguments<'a>(
             let Some(class) = receiver.class_info.as_ref() else {
                 return false;
             };
-            if !is_framework_relation_method(class, "with", ctx) {
+            if !is_framework_relation_method(receiver, class, "with", ctx) {
                 return false;
             }
             let Some(method) = class.get_method_arc("with").or_else(|| {

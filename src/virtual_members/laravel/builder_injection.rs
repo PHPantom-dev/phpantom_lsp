@@ -271,6 +271,12 @@ fn inject_scopes_and_model_methods(
     cache: Option<&ResolvedClassCache>,
     forwarded: Option<&ForwardedSelf>,
 ) {
+    // 0. A relation forwards to the related model's custom builder, whose
+    //    own methods win over the model's scopes at runtime.
+    if let Some(forwarded) = forwarded {
+        inject_custom_builder_methods(result, model_arg, class_loader, cache, forwarded);
+    }
+
     // 1. Inject scope methods.
     let scope_methods = build_scope_methods_for_builder(model_arg, class_loader);
     for method in scope_methods {
@@ -308,13 +314,57 @@ fn inject_scopes_and_model_methods(
                 if let Some(forwarded) = forwarded
                     && let Some(ref ret) = method.return_type
                     && let Some(rewritten) =
-                        forwarded_builder_return(ret, &forwarded.ty, class_loader)
+                        forwarded_builder_return(ret, &forwarded.ty, false, class_loader)
                 {
                     method.return_type = Some(rewritten);
                 }
                 result.methods.push(Arc::new(method));
             }
         }
+    }
+}
+
+/// Inject the public methods of a model's custom builder onto a relation.
+///
+/// The relation's `@mixin Builder<TRelatedModel>` only describes Eloquent's
+/// own builder, but `Relation::__call` forwards to the related query, which
+/// is the model's custom builder when it declares one.  Methods the relation
+/// already has (its own and Eloquent's builder methods) are kept.
+fn inject_custom_builder_methods(
+    result: &mut ClassInfo,
+    model_arg: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: Option<&ResolvedClassCache>,
+    forwarded: &ForwardedSelf,
+) {
+    let Some(model) = class_loader(model_arg) else {
+        return;
+    };
+    let Some(builder) =
+        super::custom_builder_fqn(&model, class_loader).and_then(|fqn| class_loader(&fqn))
+    else {
+        return;
+    };
+    let model_fqn = model.fqn();
+    let builder = crate::virtual_members::resolve_class_fully_with_generics(
+        &builder,
+        class_loader,
+        cache,
+        &[model_fqn.to_string()],
+        &[PhpType::named(model_fqn)],
+    );
+    let mut existing = lowercase_method_names(&result.methods);
+    for method in &builder.methods {
+        if method.is_static
+            || method.visibility != crate::types::Visibility::Public
+            || method.name.starts_with("__")
+            || !existing.insert(method.name.to_ascii_lowercase())
+        {
+            continue;
+        }
+        result
+            .methods
+            .push(forward_return(method, Some(forwarded), true, class_loader));
     }
 }
 
@@ -331,13 +381,24 @@ fn forward_builder_return(
     forwarded: Option<&ForwardedSelf>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Arc<MethodInfo> {
+    forward_return(method, forwarded, false, class_loader)
+}
+
+/// [`forward_builder_return`], optionally also treating `self`, `static`
+/// and `$this` returns as the builder (for methods declared on it).
+fn forward_return(
+    method: &Arc<MethodInfo>,
+    forwarded: Option<&ForwardedSelf>,
+    rewrite_self: bool,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Arc<MethodInfo> {
     let Some(forwarded) = forwarded else {
         return Arc::clone(method);
     };
     let Some(rewritten) = method
         .return_type
         .as_ref()
-        .and_then(|ret| forwarded_builder_return(ret, &forwarded.ty, class_loader))
+        .and_then(|ret| forwarded_builder_return(ret, &forwarded.ty, rewrite_self, class_loader))
     else {
         return Arc::clone(method);
     };
@@ -348,7 +409,11 @@ fn forward_builder_return(
     let fp = crate::virtual_members::TransformFingerprint::new(
         None,
         Some(forwarded.fp_key.as_str()),
-        crate::virtual_members::cache::transform_flags::FORWARDS_CALLS_SELF,
+        if rewrite_self {
+            crate::virtual_members::cache::transform_flags::FORWARDS_CALLS_BUILDER_SELF
+        } else {
+            crate::virtual_members::cache::transform_flags::FORWARDS_CALLS_SELF
+        },
     );
     crate::virtual_members::intern_transformed_method(method, fp, || {
         let mut m = (**method).clone();
@@ -365,20 +430,22 @@ fn forward_builder_return(
 fn forwarded_builder_return(
     ret: &PhpType,
     self_ty: &PhpType,
+    rewrite_self: bool,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
     use crate::php_type::TypeKind;
 
     match ret.kind() {
         TypeKind::Nullable(inner) => {
-            forwarded_builder_return(inner, self_ty, class_loader).map(PhpType::nullable)
+            forwarded_builder_return(inner, self_ty, rewrite_self, class_loader)
+                .map(PhpType::nullable)
         }
         TypeKind::Union(members) => {
             let mut rewritten = false;
             let mapped: Vec<PhpType> = members
                 .iter()
                 .map(
-                    |m| match forwarded_builder_return(m, self_ty, class_loader) {
+                    |m| match forwarded_builder_return(m, self_ty, rewrite_self, class_loader) {
                         Some(new) => {
                             rewritten = true;
                             new
@@ -389,6 +456,7 @@ fn forwarded_builder_return(
                 .collect();
             rewritten.then(|| PhpType::union(mapped))
         }
+        _ if rewrite_self && ret.is_self_ref() => Some(self_ty.clone()),
         // `base_name` filters out scalars and the `self`/`static`/`$this`
         // keywords, so only class-named returns reach the lookup.
         _ => ret

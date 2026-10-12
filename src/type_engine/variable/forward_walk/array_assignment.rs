@@ -40,16 +40,21 @@ pub(crate) fn process_destructuring_assignment<'b>(
     }
 }
 
-/// The type a destructuring assignment takes apart: an inline `@var`
-/// docblock above it when there is one, otherwise its right-hand side,
-/// with type aliases expanded so shapes and generics can be read off it.
+/// The type a destructuring assignment takes apart: what an inline `@var`
+/// docblock above it says about the value when it says anything, otherwise
+/// its right-hand side, with type aliases expanded so shapes and generics
+/// can be read off it.
 pub(crate) fn destructuring_rhs_type(
     assignment: &Assignment<'_>,
     var_ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let stmt_offset = assignment.span().start.offset as usize;
-    let raw_type = crate::docblock::find_inline_var_docblock(var_ctx.content, stmt_offset)
-        .map(|(vt, _)| crate::util::resolve_php_type_names(&vt, var_ctx.class_loader))
+    let rhs_var = match assignment.rhs {
+        Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name)),
+        _ => None,
+    };
+    let raw_type = preceding_var_type_of_value(var_ctx.content, stmt_offset, rhs_var)
+        .map(|vt| crate::util::resolve_php_type_names(&vt, var_ctx.class_loader))
         .or_else(|| {
             super::super::foreach_resolution::resolve_expression_type(assignment.rhs, var_ctx)
         })?;

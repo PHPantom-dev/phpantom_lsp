@@ -383,7 +383,7 @@ variable needs a type for the single case, which is
 
 Found running the php-typing-conformance suite
 (`regressions_backed_enum_value_narrowing.php`). A quick fix to add the
-missing arms is [H16](phpstan-actions.md#h16-matchunhandled--add-missing-match-arms) (`match.unhandled`), which could
+missing arms is [H16](phpstan-actions.md#h16-matchunhandled-add-missing-match-arms) (`match.unhandled`), which could
 then attach to this diagnostic instead of only PHPStan's.
 
 ## D26. Reading a typed property that nothing initialises is not reported

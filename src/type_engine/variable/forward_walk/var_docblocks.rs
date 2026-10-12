@@ -9,6 +9,7 @@ use mago_span::HasSpan;
 
 use crate::atom::bytes_to_str;
 use crate::php_type::PhpType;
+use crate::types::ResolvedType;
 
 pub(crate) fn preceding_docblock_text(content: &str, node_start: usize) -> Option<&str> {
     let before = content.get(..node_start)?;
@@ -80,6 +81,21 @@ pub(crate) fn try_process_inline_var_override<'b>(
             }
             let resolved = resolve_type_to_resolved_types(php_type, ctx);
             scope.set(var_name, resolved);
+        }
+
+        // A destructuring still hands every variable no tag names its
+        // element of the value; the ones a tag names keep the tag's type.
+        if let Expression::Assignment(assignment) = expr
+            && matches!(assignment.lhs, Expression::Array(_) | Expression::List(_))
+        {
+            let annotated: Vec<(&str, Vec<ResolvedType>)> = declared
+                .iter()
+                .map(|name| (name.as_str(), scope.get(name).to_vec()))
+                .collect();
+            process_destructuring_assignment(assignment, scope, ctx);
+            for (name, types) in annotated {
+                scope.set(name, types);
+            }
         }
 
         // When the @var variable names all differ from the assignment
@@ -372,6 +388,29 @@ pub(crate) fn find_preceding_nameless_var_cast(
     let before = &content[..offset];
     let trimmed = trim_trailing_line_comments(before);
     let doc_text = trailing_docblock(trimmed)?;
+    parse_inline_var_docblock_no_var(doc_text)
+}
+
+/// The type the `@var` docblock above the statement at `stmt_start` gives
+/// the value an assignment reads: a nameless tag, or one naming `value_var`.
+///
+/// A tag naming any other variable describes that variable, not the value,
+/// so `@var Scope[] $map` above `[$map, $hashes] = $cached` says nothing
+/// about `$cached`.
+pub(crate) fn preceding_var_type_of_value(
+    content: &str,
+    stmt_start: usize,
+    value_var: Option<&str>,
+) -> Option<PhpType> {
+    let before = content.get(..stmt_start)?;
+    let doc_text = trailing_docblock(trim_trailing_line_comments(before))?;
+    if let Some(value_var) = value_var
+        && let Some((_, php_type)) = parse_var_docblock_pairs(doc_text)
+            .into_iter()
+            .find(|(name, _)| name == value_var)
+    {
+        return Some(php_type);
+    }
     parse_inline_var_docblock_no_var(doc_text)
 }
 

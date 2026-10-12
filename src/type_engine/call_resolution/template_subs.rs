@@ -941,8 +941,8 @@ pub(crate) fn array_literal_element_type(
         if elem.starts_with("...") {
             return None;
         }
-        let value_text = match elem.find("=>") {
-            Some(arrow_pos) => elem[arrow_pos + 2..].trim(),
+        let value_text = match crate::text_scan::split_top_level_arrow(elem) {
+            Some((_, value)) => value.trim(),
             None => elem,
         };
         let ty = literal_arg_type(value_text)
@@ -1015,9 +1015,9 @@ pub(crate) fn array_literal_shape_type_with(
         if elem.is_empty() {
             continue;
         }
-        let (key, value_text, unkeyed) = match elem.find("=>") {
-            Some(arrow_pos) => {
-                let key = literal_array_key_text(elem[..arrow_pos].trim());
+        let (key, value_text, unkeyed) = match crate::text_scan::split_top_level_arrow(elem) {
+            Some((key_text, value)) => {
+                let key = literal_array_key_text(key_text.trim());
                 match key.as_deref().map(str::parse::<i64>) {
                     Some(Ok(int_key)) => {
                         next_index = next_index.map(|next| next.max(int_key.saturating_add(1)));
@@ -1025,7 +1025,7 @@ pub(crate) fn array_literal_shape_type_with(
                     Some(Err(_)) => {}
                     None => next_index = None,
                 }
-                (key, elem[arrow_pos + 2..].trim(), false)
+                (key, value.trim(), false)
             }
             None if elem.starts_with("...") => {
                 next_index = None;

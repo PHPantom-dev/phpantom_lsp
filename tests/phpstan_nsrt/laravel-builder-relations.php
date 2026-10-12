@@ -937,3 +937,35 @@ namespace BuilderRelationAudit {
         });
     }
 }
+namespace BuilderRelationAudit {
+    use function PHPStan\Testing\assertType;
+    // A relation forwards its query methods to a builder over the related
+    // model, so relation callbacks on a relation receiver start from there.
+    function relationReceivers(Team $team, Stock $stock): void {
+        $team->stocks()->whereHas('warehouse', function ($q) {
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $q);
+        });
+        $team->stocks()->with('warehouse', function ($r) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $r);
+        });
+        $stock->team()->whereHas('stocks', function ($q) {
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>', $q);
+        });
+        $team->stocks()->whereHas($stock->warehouse(), function ($q) {
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $q);
+        });
+    }
+}
+namespace BuilderRelationAudit {
+    use function PHPStan\Testing\assertType;
+    // `Relation::__call` forwards to the related model's builder and hands
+    // back the relation whenever the builder returned itself.
+    function customBuilderMethodsOnRelations(Stock $stock): void {
+        assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $stock->team()->active());
+        assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $stock->team()->active()->where('a', 1));
+        assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\PlainTeam, BuilderRelationAudit\Stock>', $stock->plainTeam()->active());
+        Stock::withWhereHas('team', function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $query->active());
+        });
+    }
+}

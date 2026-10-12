@@ -1161,19 +1161,6 @@ fn find_models_from_receivers(
             models.push(Arc::clone(cls));
             continue;
         }
-        if cls.fqn() != ELOQUENT_BUILDER_FQN
-            && !crate::virtual_members::laravel::helpers::extends_eloquent_builder(
-                cls,
-                rctx.class_loader,
-            )
-        {
-            continue;
-        }
-        // Read the receiver's retained generic context before recovering it
-        // from declarations; custom builders need not declare TModel at all.
-        // Each source is tried in turn, so an unsubstituted `TModel` in one
-        // does not hide a concrete model in the next.  A source may name
-        // several models (`Builder<Post|Comment>`), and each is kept.
         let current_class = rctx
             .current_class
             .map_or_else(|| atom(""), |class| class.name);
@@ -1191,6 +1178,24 @@ fn find_models_from_receivers(
             })
             .collect()
         };
+        if cls.fqn() != ELOQUENT_BUILDER_FQN
+            && !crate::virtual_members::laravel::helpers::extends_eloquent_builder(
+                cls,
+                rctx.class_loader,
+            )
+        {
+            // A relation forwards its query methods to a builder over its
+            // related model, so that model is the one the callback sees.
+            if let Some(related) = related_model_type(&receiver.type_string, rctx.class_loader) {
+                models.extend(as_models(&related));
+            }
+            continue;
+        }
+        // Read the receiver's retained generic context before recovering it
+        // from declarations; custom builders need not declare TModel at all.
+        // Each source is tried in turn, so an unsubstituted `TModel` in one
+        // does not hide a concrete model in the next.  A source may name
+        // several models (`Builder<Post|Comment>`), and each is kept.
         let non_empty = |found: Vec<Arc<ClassInfo>>| (!found.is_empty()).then_some(found);
         let found = crate::inheritance::extract_generic_arg_from_ancestor(
             &receiver.type_string,

@@ -797,6 +797,9 @@ pub(crate) mod transform_flags {
     /// Model query factory (`newQuery()` and friends) whose return type
     /// is replaced with the model's own builder.
     pub const QUERY_FACTORY: u8 = 64;
+    /// [`FORWARDS_CALLS_SELF`] for a method declared on the builder, whose
+    /// self-referencing returns are rewritten to the decorator as well.
+    pub const FORWARDS_CALLS_BUILDER_SELF: u8 = 128;
 }
 
 /// Return a transformed copy of `origin`, shared through the active

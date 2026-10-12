@@ -594,6 +594,33 @@ pub(crate) fn scan_top_level(
     None
 }
 
+/// Split an array literal element on its key separator: the first `=>`
+/// that is not inside a nested bracket, a quoted string, or a comment.
+///
+/// An element that is itself an arrow function (`fn ($x) => $x`, also
+/// `static fn`) has no key, so its own `=>` is not taken as one.
+pub(crate) fn split_top_level_arrow(item: &str) -> Option<(&str, &str)> {
+    let index = scan_top_level(item.as_bytes(), |bytes, i| {
+        if bytes[i..].starts_with(b"=>") {
+            ScanStep::Stop
+        } else {
+            ScanStep::Skip(1)
+        }
+    })?;
+    let key = item[..index].trim_start();
+    let key = key
+        .strip_prefix("static")
+        .filter(|rest| rest.starts_with(|c: char| c.is_ascii_whitespace()))
+        .map_or(key, str::trim_start);
+    let is_arrow_fn = key
+        .strip_prefix("fn")
+        .is_some_and(|rest| rest.trim_start().starts_with('('));
+    if is_arrow_fn {
+        return None;
+    }
+    Some((&item[..index], &item[index + 2..]))
+}
+
 /// Find the position of the opening delimiter that matches the closing
 /// delimiter at `close_pos`, scanning backward.
 ///

@@ -43,7 +43,7 @@ use mago_syntax::cst::*;
 use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
 use crate::parser::extract_hint_type;
 use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, keyword_lowercase};
-use crate::text_scan::{ScanStep, scan_top_level};
+use crate::text_scan::split_top_level_arrow;
 use crate::types::{ClassInfo, ClassLikeKind, ResolvedType};
 
 use crate::type_engine::resolver::VarResolutionCtx;
@@ -2008,19 +2008,6 @@ fn literal_shape_key(text: &str) -> Option<String> {
         return Some(unquoted.to_string());
     }
     crate::php_type::parse_php_int_literal(text).map(|value| value.to_string())
-}
-
-/// Split an array item on its top-level `=>`, skipping the ones inside a
-/// nested array, a quoted string, or a comment.
-fn split_top_level_arrow(item: &str) -> Option<(&str, &str)> {
-    let index = scan_top_level(item.as_bytes(), |bytes, i| {
-        if bytes[i..].starts_with(b"=>") {
-            ScanStep::Stop
-        } else {
-            ScanStep::Skip(1)
-        }
-    })?;
-    Some((&item[..index], &item[index + 2..]))
 }
 
 /// Infer a scalar type from a constant's initializer value string.

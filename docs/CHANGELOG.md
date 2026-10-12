@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Relation callbacks follow their argument types.** Closures passed to `whereHas()` and similar methods are now typed when the relation is a variable, one of several names, or a relation object. Callbacks for `orWhereRelation()`, `whereDoesntHaveRelation()`, and `with('relation', fn)` are typed too. Contributed by @shuvroroy.
 - **Relation callbacks keep their full context.** Completion, navigation, and diagnostics retain generic model alternatives through custom relationships and eager-loading arrays. Application-defined callback signatures take precedence, and relation query methods work regardless of letter case. Contributed by @shuvroroy.
+- **Relation callbacks on a relation.** `$team->stocks()->whereHas('warehouse', fn ($q) => ...)` and `->with('warehouse', fn ($r) => ...)` now type the closure from the relation's related model instead of a generic builder or relation.
+- **Custom builder methods on relations.** Methods of a model's custom Eloquent builder can be called through a relation to that model, and keep the relation as their result when they return the builder, as `Relation::__call` does at runtime.
 - **Eager relation constraints keep both callback types.** `withWhereHas()` and `withWhereRelation()` now retain the related builder and relation through fluent calls, including dotted paths and explicit union hints. Contributed by @shuvroroy.
 - **Polymorphic relation callbacks know their candidate models.** Closures passed to `whereHasMorph()` and related methods are now typed from the listed model classes, including their custom builders. Unknown candidates and `'*'` use the relation's declared model. Contributed by @shuvroroy.
 - **Named relation callbacks keep their model types.** Completion and diagnostics now resolve relationship constraints when named arguments are reordered or optional arguments are omitted. Contributed by @shuvroroy.
@@ -121,6 +123,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Checking a union of classes, scalars and arrays against a subclass.** An `instanceof` or an asserted class on a value such as `DateTimeInterface|array|int|null` now leaves only the class, instead of keeping `array` and `int`.
 - **The fallback of `??` knows the left side was `null`.** Inside `if ($a || $b)`, the `$b` of `$a ?? $b` is no longer nullable.
 - **PHPUnit's `assertSame()`, `assertCount()` and `assertArrayHasKey()` narrow.** These and their negated forms now narrow the way the check they stand for does, so `self::assertArrayHasKey('id', $row)` makes `$row['id']` no longer possibly `null`, and `self::assertNotSame(null, $x)` removes `null` from `$x`.
+- **Array literals with keyed arguments inside them.** `collect([User::make(['name' => 'x'])])` is now a collection of `User`, instead of reading the `=>` inside the call as the element's key.
+- **A named `@var` above a destructuring.** `/** @var array<string, string> $hashes */` above `[$ids, $hashes] = $cached` now types `$hashes` alone, and `$ids` still gets its element of `$cached`.
 
 ## [0.11.1] - 2026-10-07
 

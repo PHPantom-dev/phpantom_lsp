@@ -75,13 +75,16 @@ fn callback_declaration_ownership_respects_docblocks_trait_precedence_and_cycles
         declared_relation_method(&cycle, "whereHas", &loader, 0),
         Some(false)
     );
+    let receiver = ResolvedType::from_class(owner.clone());
     assert!(!is_framework_relation_method(
+        &receiver,
         &owner,
         "with",
         &context(&owner, "", &no_loader)
     ));
     let loader = |name: &str| (name == "Owner").then(|| Arc::new(owner.clone()));
     assert!(!is_framework_relation_method(
+        &receiver,
         &owner,
         "with",
         &context(&owner, "", &loader)

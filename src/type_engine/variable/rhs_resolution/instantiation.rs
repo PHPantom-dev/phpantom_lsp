@@ -739,21 +739,12 @@ pub(crate) fn resolve_array_literal_generic(
     let elements = crate::type_engine::conditional_resolution::split_text_args(inner);
 
     let first = elements.first()?.trim();
-    let has_keys = first.contains("=>");
-
-    if has_keys {
+    if let Some((key_text, val_text)) = crate::text_scan::split_top_level_arrow(first) {
         // Collect key types (position 0) or value types (position 1)
         // from the first element (sufficient for inference).
-        let arrow_pos = first.find("=>")?;
         match tpl_position {
-            0 => {
-                let key_text = first[..arrow_pos].trim();
-                Backend::resolve_arg_text_to_type(key_text, rctx)
-            }
-            1 => {
-                let val_text = first[arrow_pos + 2..].trim();
-                Backend::resolve_arg_text_to_type(val_text, rctx)
-            }
+            0 => Backend::resolve_arg_text_to_type(key_text.trim(), rctx),
+            1 => Backend::resolve_arg_text_to_type(val_text.trim(), rctx),
             _ => None,
         }
     } else {

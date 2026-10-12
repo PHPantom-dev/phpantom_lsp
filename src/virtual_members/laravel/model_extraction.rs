@@ -602,11 +602,11 @@ fn split_top_level_commas(text: &str) -> Vec<&str> {
 fn parse_casts_array(text: &str) -> Vec<(String, String)> {
     let mut results = Vec::new();
     for segment in array_literal_entries(text) {
-        let Some(arrow_pos) = segment.find("=>") else {
+        let Some((key_part, value_part)) = crate::text_scan::split_top_level_arrow(segment) else {
             continue;
         };
-        let key = extract_string_literal(segment[..arrow_pos].trim());
-        let value = extract_cast_value(segment[arrow_pos + 2..].trim());
+        let key = extract_string_literal(key_part.trim());
+        let value = extract_cast_value(value_part.trim());
 
         if let (Some(k), Some(v)) = (key, value)
             && !k.is_empty()
@@ -886,26 +886,12 @@ fn extract_attributes<'a>(
 /// Returns a list of `(column_name, php_type)` pairs.
 fn parse_attributes_array(text: &str) -> Vec<(String, PhpType, String)> {
     let mut results = Vec::new();
-    let trimmed = text.trim();
-
-    let inner = if let Some(s) = trimmed.strip_prefix('[') {
-        s.strip_suffix(']').unwrap_or(s)
-    } else {
-        return results;
-    };
-
-    for segment in inner.split(',') {
-        let segment = segment.trim();
-        if segment.is_empty() {
-            continue;
-        }
-
-        let Some(arrow_pos) = segment.find("=>") else {
+    for segment in array_literal_entries(text) {
+        let Some((key_part, value_part)) = crate::text_scan::split_top_level_arrow(segment) else {
             continue;
         };
-
-        let key_part = segment[..arrow_pos].trim();
-        let value_part = segment[arrow_pos + 2..].trim();
+        let key_part = key_part.trim();
+        let value_part = value_part.trim();
 
         let Some(key) = extract_string_literal(key_part) else {
             continue;
