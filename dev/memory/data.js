@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791775497328,
+  "lastUpdate": 1791779386069,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1427,6 +1427,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "jwurtz@jolicode.com",
+            "name": "Joel Wurtz",
+            "username": "joelwurtz"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "78dcb15431712048f4ae1d9e61b8af3da5efd79e",
+          "message": "[config] add the possibility to include specific files / directories for scanning\n\nCo-authored-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-10-12T06:15:44+02:00",
+          "tree_id": "6f8f3500ccdbff2e326d7f2a17ff07a5af9f1a2c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/78dcb15431712048f4ae1d9e61b8af3da5efd79e"
+        },
+        "date": 1791779378168,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 44.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 89.1,
             "unit": "MiB"
           }
         ]
