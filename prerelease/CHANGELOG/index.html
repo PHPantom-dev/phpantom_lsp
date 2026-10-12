@@ -5134,6 +5134,8 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>No more busy core after indexing large legacy scripts.</strong> Preparing find-references data in the background could keep one CPU core busy indefinitely on a long file full of methods without return types.</li>
+<li><strong>Untyped methods reached through long call chains.</strong> A method without a declared return type that was first reached at the end of a long chain of such methods no longer stays untyped everywhere else it is called, so members used on its result are checked again.</li>
 <li><strong>Relation callbacks follow their argument types.</strong> Closures passed to <code>whereHas()</code> and similar methods are now typed when the relation is a variable, one of several names, or a relation object. Callbacks for <code>orWhereRelation()</code>, <code>whereDoesntHaveRelation()</code>, and <code>with('relation', fn)</code> are typed too. Contributed by @shuvroroy.</li>
 <li><strong>Relation callbacks keep their full context.</strong> Completion, navigation, and diagnostics retain generic model alternatives through custom relationships and eager-loading arrays. Application-defined callback signatures take precedence, and relation query methods work regardless of letter case. Contributed by @shuvroroy.</li>
 <li><strong>Relation callbacks on a relation.</strong> <code>$team-&gt;stocks()-&gt;whereHas('warehouse', fn ($q) =&gt; ...)</code> and <code>-&gt;with('warehouse', fn ($r) =&gt; ...)</code> now type the closure from the relation's related model instead of a generic builder or relation.</li>
