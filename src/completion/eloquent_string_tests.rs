@@ -80,6 +80,8 @@ fn column_arguments_preserve_lists_and_named_parameters() {
         "User::pluck('email', '",
         "User::pluck(key: '",
         "User::where(value: 1, column: '",
+        "User::where(['",
+        "User::orWhere(['active' => 1, '",
     ] {
         assert_eq!(
             eloquent_ctx_at(source, at_end(source)).unwrap().kind,
@@ -89,7 +91,8 @@ fn column_arguments_preserve_lists_and_named_parameters() {
     }
     for source in [
         "User::select(options: '",
-        "User::where(['",
+        "User::where(['active' => '",
+        "User::where('email', ['",
         "User::orderBy('email', '",
         "User::whereIn('email', ['",
         "User::whereNull(['email'], '",

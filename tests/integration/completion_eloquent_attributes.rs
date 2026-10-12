@@ -389,6 +389,8 @@ async fn additional_scalar_column_methods_complete_their_column_arguments() {
         "User::max('na§');",
         "User::query()->sum('na§');",
         "$query->avg(column: 'na§');",
+        "User::where(['na§' => 'Ada']);",
+        "$query->where(['age' => 18, 'na§' => 'Ada']);",
     ] {
         let labels = item_labels(complete_statement(&backend, &uri, statement).await);
         assert!(

@@ -312,6 +312,15 @@ fn accepts_column_argument(method: &str, kind: EloquentStringKind, arg: &StringA
                 || parameter(2, "second")
                 || (arg.name.is_none() && arg.index == 1 && arg.count == 2));
     }
+    // `where(['column' => $value])` adds one equality condition per key.
+    if matches!(method.as_str(), "where" | "orwhere" | "firstwhere")
+        && matches!(
+            arg.position,
+            StringArgumentPosition::ArrayKey | StringArgumentPosition::ArrayElement
+        )
+    {
+        return parameter(0, "column");
+    }
     let variadic = matches!(method.as_str(), "select" | "addselect" | "groupby");
     if !matches!(
         arg.position,
@@ -569,8 +578,7 @@ impl Backend {
         let mut items = Vec::new();
         for col in &columns {
             if !col.to_lowercase().starts_with(&partial)
-                || (es_ctx.kind == EloquentStringKind::AttributeKey
-                    && argument.is_some_and(|argument| argument.used_keys.contains(col)))
+                || argument.is_some_and(|argument| argument.used_keys.contains(col))
             {
                 continue;
             }
