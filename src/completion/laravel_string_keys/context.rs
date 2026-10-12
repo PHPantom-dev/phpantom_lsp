@@ -8,6 +8,7 @@
 
 use tower_lsp::lsp_types::Position;
 
+use crate::completion::source::code_context::{CodeContext, Operator};
 use crate::symbol_map::LaravelStringKind;
 use crate::text_position::position_to_offset;
 
@@ -26,12 +27,19 @@ pub(super) struct LaravelStringKeyContext<'a> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum StringArgumentShape {
     Scalar,
+    /// An unkeyed entry can still become a key while the user types.
+    ArrayElement,
+    ArrayKey,
     ArrayValue,
 }
 
 pub(super) struct StringArgumentContext<'a> {
     pub(super) callable: &'a str,
+    /// Method-call operator and the end of its receiver, ignoring comments.
+    pub(super) operator: Option<Operator>,
     pub(super) named_argument: Option<&'a str>,
+    /// Zero-based argument position, counting only commas in the call itself.
+    pub(super) argument_index: usize,
     pub(super) shape: StringArgumentShape,
 }
 
@@ -53,124 +61,7 @@ pub(super) enum PhpLexState {
     BlockComment,
 }
 
-/// Find the unmatched call parenthesis enclosing a named argument.
-pub(super) fn enclosing_call_open_paren(content: &str) -> Option<usize> {
-    let bytes = content.as_bytes();
-    let mut parens = 0usize;
-    let mut brackets = 0usize;
-    let mut braces = 0usize;
-    let mut quote = None;
-    let mut index = bytes.len();
-
-    while index > 0 {
-        index -= 1;
-        let byte = bytes[index];
-        if let Some(active_quote) = quote {
-            if byte == active_quote && is_unescaped(bytes, index) {
-                quote = None;
-            }
-            continue;
-        }
-        match byte {
-            b'\'' | b'"' => quote = Some(byte),
-            b')' => parens += 1,
-            b'(' if parens > 0 => parens -= 1,
-            b'(' if brackets == 0 && braces == 0 => return Some(index),
-            b']' => brackets += 1,
-            b'[' if brackets > 0 => brackets -= 1,
-            b'}' => braces += 1,
-            b'{' if braces > 0 => braces -= 1,
-            b';' if parens == 0 && brackets == 0 && braces == 0 => return None,
-            _ => {}
-        }
-    }
-
-    None
-}
-
-/// Return the callable before a scalar first argument or a named argument.
-pub(super) fn callable_before_scalar_argument(before_value: &str) -> Option<(&str, Option<&str>)> {
-    let before_value = before_value.trim_end();
-    if let Some(callable) = before_value.strip_suffix('(') {
-        return Some((callable.trim_end(), None));
-    }
-
-    let colon = before_value.rfind(':')?;
-    if !before_value[colon + 1..].trim().is_empty() {
-        return None;
-    }
-    let before_label = before_value[..colon].trim_end();
-    // Scanned by byte, the way PHP's lexer reads a label: every byte from
-    // 0x80 up is a label byte, so a non-ASCII name (`prénom:`) is read
-    // whole and the start always lands on a character boundary.
-    let label_start = before_label
-        .bytes()
-        .rposition(|b| !(b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80))
-        .map_or(0, |index| index + 1);
-    if label_start == before_label.len() {
-        return None;
-    }
-    let argument = &before_label[label_start..];
-    let before_argument = before_label[..label_start].trim_end();
-    let open_paren = enclosing_call_open_paren(before_argument)?;
-    Some((before_argument[..open_paren].trim_end(), Some(argument)))
-}
-
-/// Return the callable owning an array that directly contains this literal.
-pub(super) fn callable_before_array_argument(before_quote: &str) -> Option<(&str, Option<&str>)> {
-    let bytes = before_quote.as_bytes();
-    let mut bracket_depth = 0usize;
-    let mut paren_depth = 0usize;
-    let mut brace_depth = 0usize;
-    let mut string_quote = None;
-    let mut index = bytes.len();
-
-    while index > 0 {
-        index -= 1;
-        let byte = bytes[index];
-        if let Some(quote) = string_quote {
-            if byte == quote && is_unescaped(bytes, index) {
-                string_quote = None;
-            }
-            continue;
-        }
-
-        match byte {
-            b'\'' | b'"' => string_quote = Some(byte),
-            b']' if paren_depth == 0 && brace_depth == 0 => bracket_depth += 1,
-            b'[' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
-                return callable_before_scalar_argument(before_quote[..index].trim_end());
-            }
-            b'[' if paren_depth == 0 && brace_depth == 0 => bracket_depth -= 1,
-            b')' => paren_depth += 1,
-            b'(' if paren_depth > 0 => paren_depth -= 1,
-            b'(' if bracket_depth == 0 && brace_depth == 0 => {
-                let before_open = before_quote[..index].trim_end();
-                let mut token_start = before_open.len();
-                let token_bytes = before_open.as_bytes();
-                while token_start > 0
-                    && (token_bytes[token_start - 1].is_ascii_alphanumeric()
-                        || token_bytes[token_start - 1] == b'_')
-                {
-                    token_start -= 1;
-                }
-                if before_open[token_start..].eq_ignore_ascii_case("array") {
-                    return callable_before_scalar_argument(before_open[..token_start].trim_end());
-                }
-                return None;
-            }
-            b'}' => brace_depth += 1,
-            b'{' if brace_depth > 0 => brace_depth -= 1,
-            b'{' if bracket_depth == 0 && paren_depth == 0 => return None,
-            b';' if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 => return None,
-            _ => {}
-        }
-    }
-
-    None
-}
-
-/// Resource arrays name values; an associative key is bookkeeping, not a disk.
+/// Whether the literal is followed by an associative-array arrow.
 pub(super) fn string_literal_is_array_key(content: &str, cursor: usize, quote: u8) -> bool {
     let bytes = content.as_bytes();
     let mut index = cursor;
@@ -217,28 +108,92 @@ pub(super) fn skip_php_trivia_forward(content: &str, mut index: usize) -> usize 
     }
 }
 
-pub(super) fn string_argument_context<'a>(
-    content: &'a str,
-    before_quote: &'a str,
-    cursor: usize,
-    quote: u8,
-) -> Option<StringArgumentContext<'a>> {
-    if let Some((callable, named_argument)) = callable_before_array_argument(before_quote) {
-        if string_literal_is_array_key(content, cursor, quote) {
-            return None;
-        }
-        return Some(StringArgumentContext {
-            callable,
-            named_argument,
-            shape: StringArgumentShape::ArrayValue,
-        });
+impl StringArgumentContext<'_> {
+    /// Match PHP's positional or named spelling of a parameter.
+    fn matches_parameter(&self, index: usize, name: &str) -> bool {
+        self.named_argument
+            .map_or(self.argument_index == index, |argument| argument == name)
+    }
+}
+
+impl StringArgumentShape {
+    fn is_array_value(self) -> bool {
+        matches!(self, Self::ArrayElement | Self::ArrayValue)
     }
 
-    let (callable, named_argument) = callable_before_scalar_argument(before_quote)?;
+    fn is_array_key(self) -> bool {
+        matches!(self, Self::ArrayElement | Self::ArrayKey)
+    }
+}
+
+/// Read a literal's immediate call argument from the shared lexical scan.
+/// Nested arrays and expressions are deliberately not treated as direct keys.
+pub(super) fn string_argument_context<'a>(
+    content: &'a str,
+    code: &CodeContext<'_>,
+    cursor: usize,
+) -> Option<StringArgumentContext<'a>> {
+    let (quote_pos, quote) = code.open_string?;
+    let inner = code.open_brackets.last()?;
+    let before_inner = &content[..inner.code_before];
+    let token_start = crate::text_scan::scan_ident_backward(content.as_bytes(), inner.code_before);
+    let is_array = inner.byte == b'['
+        || (inner.byte == b'(' && before_inner[token_start..].eq_ignore_ascii_case("array"));
+    let (call, value_start, shape) = if is_array {
+        let call = code.open_brackets.iter().rev().nth(1)?;
+        let element_start = skip_php_trivia_forward(content, inner.item_start);
+        let shape = if element_start == quote_pos {
+            if string_literal_is_array_key(content, cursor, quote as u8) {
+                StringArgumentShape::ArrayKey
+            } else {
+                StringArgumentShape::ArrayElement
+            }
+        } else if code.code_before.ends_with("=>") && !inner.item_has_arrow_function {
+            StringArgumentShape::ArrayValue
+        } else {
+            return None;
+        };
+        let value_start = if inner.byte == b'[' {
+            inner.offset
+        } else {
+            token_start
+        };
+        (call, value_start, shape)
+    } else {
+        (inner, quote_pos, StringArgumentShape::Scalar)
+    };
+    if call.byte != b'(' {
+        return None;
+    }
+
+    let argument_start = skip_php_trivia_forward(content, call.item_start);
+    let named_argument = if argument_start == value_start {
+        None
+    } else {
+        let bytes = content.as_bytes();
+        let mut name_end = argument_start;
+        while name_end < value_start
+            && (bytes[name_end].is_ascii_alphanumeric()
+                || bytes[name_end] == b'_'
+                || bytes[name_end] >= 0x80)
+        {
+            name_end += 1;
+        }
+        let colon = skip_php_trivia_forward(content, name_end);
+        if name_end == argument_start
+            || bytes.get(colon) != Some(&b':')
+            || skip_php_trivia_forward(content, colon + 1) != value_start
+        {
+            return None;
+        }
+        Some(&content[argument_start..name_end])
+    };
     Some(StringArgumentContext {
-        callable,
+        callable: &content[..call.code_before],
+        operator: call.callee_operator,
         named_argument,
-        shape: StringArgumentShape::Scalar,
+        argument_index: call.commas,
+        shape,
     })
 }
 
@@ -877,12 +832,17 @@ pub(super) fn detect_laravel_string_key_context(
     content: &str,
     position: Position,
 ) -> Option<LaravelStringKeyContext<'_>> {
-    detect_laravel_string_key_context_inner(content, position, None, None, None)
+    let code = crate::completion::source::code_context::code_context_at(
+        content,
+        position_to_offset(content, position) as usize,
+    )?;
+    detect_laravel_string_key_context_inner(content, position, &code, None, None, None)
 }
 
 pub(super) fn detect_laravel_string_key_context_inner<'a>(
     content: &'a str,
     position: Position,
+    code: &CodeContext<'_>,
     resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
     indexed_function_exists: Option<&dyn Fn(&str) -> bool>,
     indexed_class_exists: Option<&dyn Fn(&str) -> bool>,
@@ -894,27 +854,11 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
         return None;
     }
 
-    // ── Find the opening quote before the cursor ────────────────────
-    let mut quote_pos = None;
-    let mut i = cursor_offset;
-    while i > 0 {
-        i -= 1;
-        let ch = bytes[i];
-        if (ch == b'\'' || ch == b'"') && is_unescaped(bytes, i) {
-            quote_pos = Some(i);
-            break;
-        }
-        if ch == b'\n' {
-            return None;
-        }
-    }
-    let quote_pos = quote_pos?;
+    let (quote_pos, _) = code.open_string?;
     let mut prefix = &content[quote_pos + 1..cursor_offset];
     let mut content_start_offset = quote_pos + 1;
-
-    // ── Locate the call argument that owns this string ─────────────
-    let before_quote = content[..quote_pos].trim_end();
-    let argument = string_argument_context(content, before_quote, cursor_offset, bytes[quote_pos])?;
+    let before_quote = code.code_before;
+    let argument = string_argument_context(content, code, cursor_offset)?;
     let before_paren = argument.callable;
 
     // ── Extract the function/method name ────────────────────────────
@@ -933,11 +877,13 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
 
     // ── Check for static method syntax (Config::get, etc.) ──────────
     let before_name = &before_paren[..name_start];
-    let is_static = before_name.trim_end().ends_with("::");
+    let is_static = argument.operator.is_some_and(|operator| operator.is_static);
 
     // Check for instance method call (->route() or ?->route())
     let trimmed_before = before_name.trim_end();
-    let is_instance_method = trimmed_before.ends_with("->") || trimmed_before.ends_with("?->");
+    let is_instance_method = argument
+        .operator
+        .is_some_and(|operator| !operator.is_static);
 
     // Check for PHP attribute syntax: #[Config('key')], grouped attributes,
     // and fully-qualified container attributes.
@@ -946,7 +892,13 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
         .flatten();
     let is_attribute = current_attribute_class_start.is_some();
 
-    let kind = if is_attribute {
+    let is_morph_types = (is_static || is_instance_method)
+        && crate::symbol_map::extraction::laravel::is_morph_types_query_method(func_name);
+    let kind = if is_morph_types {
+        (argument.matches_parameter(1, "types")
+            && (argument.shape == StringArgumentShape::Scalar || argument.shape.is_array_value()))
+        .then_some(LaravelStringKind::MorphAlias)
+    } else if is_attribute {
         if argument.shape != StringArgumentShape::Scalar {
             return None;
         }
@@ -964,15 +916,13 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
         .is_some()
         {
             argument
-                .named_argument
-                .is_none_or(|name| name == "key")
+                .matches_parameter(0, "key")
                 .then_some(LaravelStringKind::Config)
         } else if let Some(trigger) =
             config_resource_attribute_trigger(content, reference, indexed_class_exists)
         {
             argument
-                .named_argument
-                .is_none_or(|name| name == trigger.argument)
+                .matches_parameter(0, trigger.argument)
                 .then_some(LaravelStringKind::ConfigResource(trigger.kind))
         } else if resolve_known_class_reference(
             content,
@@ -984,15 +934,13 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
         )
         .is_some()
         {
-            argument
-                .named_argument
-                .is_none()
+            (argument.named_argument.is_none() && argument.argument_index == 0)
                 .then_some(LaravelStringKind::Route)
         } else {
             None
         }
     } else if is_static {
-        let before_colons = &trimmed_before[..trimmed_before.len() - 2].trim_end();
+        let before_colons = &content[..argument.operator?.code_before];
         let bc_bytes = before_colons.as_bytes();
         let mut cls_start = bc_bytes.len();
         while cls_start > 0
@@ -1017,14 +965,31 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             ("config", "getmany") | ("route", "is" | "currentroutenamed")
         );
 
-        if let Some(trigger) =
+        if crate::symbol_map::extraction::laravel::is_morph_map_registration_method(func_name)
+            && resolve_known_class_reference(
+                content,
+                reference,
+                "Illuminate\\Database\\Eloquent\\Relations",
+                &["Relation"],
+                true,
+                indexed_class_exists,
+            )
+            .is_some()
+        {
+            (argument.matches_parameter(0, "map") && argument.shape.is_array_key())
+                .then_some(LaravelStringKind::MorphAlias)
+        } else if func_name.eq_ignore_ascii_case("set")
+            && argument.matches_parameter(0, "key")
+            && argument.shape.is_array_key()
+            && is_laravel_facade_reference(content, reference, "Config", indexed_class_exists)
+        {
+            Some(LaravelStringKind::Config)
+        } else if let Some(trigger) =
             config_resource_static_trigger(content, reference, func_name, indexed_class_exists)
         {
-            if argument
-                .named_argument
-                .is_some_and(|name| name != trigger.argument)
-                || (argument.shape == StringArgumentShape::ArrayValue
-                    && !trigger.shape.accepts_array())
+            if !argument.matches_parameter(0, trigger.argument)
+                || argument.shape == StringArgumentShape::ArrayKey
+                || (argument.shape.is_array_value() && !trigger.shape.accepts_array())
                 || (argument.shape == StringArgumentShape::Scalar
                     && !trigger.shape.accepts_scalar())
             {
@@ -1032,9 +997,8 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             }
             Some(LaravelStringKind::ConfigResource(trigger.kind))
         } else if func_name.eq_ignore_ascii_case("middleware")
-            && argument
-                .named_argument
-                .is_none_or(|name| name == "middleware")
+            && argument.matches_parameter(0, "middleware")
+            && argument.shape != StringArgumentShape::ArrayKey
             && is_laravel_facade_reference(content, reference, "Route", indexed_class_exists)
         {
             let (middleware_kind, middleware_prefix, relative_start) =
@@ -1043,6 +1007,8 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             content_start_offset += relative_start;
             Some(middleware_kind)
         } else if argument.named_argument.is_some()
+            || argument.argument_index != 0
+            || argument.shape == StringArgumentShape::ArrayKey
             || (argument.shape != StringArgumentShape::Scalar
                 && (!legacy_accepts_array || !before_quote.trim_end().ends_with('[')))
         {
@@ -1082,10 +1048,7 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             }
         }
     } else if is_instance_method {
-        let receiver = trimmed_before
-            .trim_end_matches("?->")
-            .trim_end_matches("->")
-            .trim_end();
+        let receiver = &content[..argument.operator?.code_before];
         // Whether the receiver is `$this` (used to scope command-running
         // methods, whose names are too generic to match on any object).
         let receiver_is_this = receiver.ends_with("$this");
@@ -1145,9 +1108,8 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
 
         if is_middleware
             && chain_starts_at_route
-            && argument
-                .named_argument
-                .is_none_or(|name| name == "middleware")
+            && argument.matches_parameter(0, "middleware")
+            && argument.shape != StringArgumentShape::ArrayKey
         {
             let (middleware_kind, middleware_prefix, relative_start) =
                 middleware_completion_context(prefix)?;
@@ -1155,7 +1117,10 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             content_start_offset += relative_start;
             Some(middleware_kind)
         } else {
-            if argument.named_argument.is_some() || argument.shape != StringArgumentShape::Scalar {
+            if argument.named_argument.is_some()
+                || argument.argument_index != 0
+                || argument.shape != StringArgumentShape::Scalar
+            {
                 return None;
             }
             if matches!(
@@ -1193,8 +1158,13 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             fn_lower.as_str(),
             "blade_view_directive" | "blade_component_directive" | "blade_can_directive"
         );
-        if argument.shape != StringArgumentShape::Scalar
-            && (!accepts_array || !before_quote.trim_end().ends_with('['))
+        let config_array_key = fn_lower == "config"
+            && argument.matches_parameter(0, "key")
+            && argument.shape.is_array_key();
+        if !config_array_key
+            && (argument.shape == StringArgumentShape::ArrayKey
+                || (argument.shape != StringArgumentShape::Scalar
+                    && (!accepts_array || !before_quote.trim_end().ends_with('['))))
         {
             return None;
         }
@@ -1214,10 +1184,11 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             indexed_function_exists,
         ) {
             argument
-                .named_argument
-                .is_none_or(|name| name == trigger.argument)
+                .matches_parameter(0, trigger.argument)
                 .then_some(LaravelStringKind::ConfigResource(trigger.kind))
-        } else if argument.named_argument.is_some() {
+        } else if config_array_key {
+            Some(LaravelStringKind::Config)
+        } else if argument.named_argument.is_some() || argument.argument_index != 0 {
             None
         } else {
             match fn_lower.as_str() {

@@ -42,6 +42,12 @@ pub(crate) struct OpenBracket {
     /// belongs to that bracket, and one in a comment or a literal is not
     /// code, so neither is counted here.
     pub(crate) commas: usize,
+    /// Start of the current argument or array element, after the opener or
+    /// most recent comma. Whitespace and comments may follow.
+    pub(crate) item_start: usize,
+    /// Whether this item contains an arrow function at this bracket depth,
+    /// whose `=>` must not be mistaken for an associative-array arrow.
+    pub(crate) item_has_arrow_function: bool,
     /// The `->`, `?->`, or `::` immediately before this bracket's callee,
     /// when it is a `(` that opens a method or static call.  `None` for a
     /// plain function call, or for a `[`/`{`.
@@ -383,6 +389,8 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                             byte,
                             code_before: code_end,
                             commas: 0,
+                            item_start: i + 1,
+                            item_has_arrow_function: false,
                             callee_operator,
                             callee_name_start,
                         });
@@ -417,6 +425,8 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                     b',' => {
                         if let Some(bracket) = open_brackets.last_mut() {
                             bracket.commas += 1;
+                            bracket.item_start = i + 1;
+                            bracket.item_has_arrow_function = false;
                         }
                         current_op = None;
                         last_closed_call = None;
@@ -444,8 +454,18 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                         // Only the first byte of the run carries meaning, so
                         // step over the rest in one go rather than re-entering
                         // the dispatch for every character of every name.
+                        let start = i;
                         while i < end && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                             i += 1;
+                        }
+                        if bytes[start..i].eq_ignore_ascii_case(b"fn")
+                            && current_op.is_none()
+                            && (start == 0
+                                || (bytes[start - 1] != b'$' && bytes[start - 1].is_ascii()))
+                            && bytes.get(i).is_none_or(u8::is_ascii)
+                            && let Some(bracket) = open_brackets.last_mut()
+                        {
+                            bracket.item_has_arrow_function = true;
                         }
                         code_end = i;
                         continue;
