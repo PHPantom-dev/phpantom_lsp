@@ -22,8 +22,11 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::completion::source::code_context::{CodeContext, Operator};
+use crate::completion::source::string_argument::{
+    StringArgument, StringArgumentPosition, string_argument,
+};
 use crate::php_type::{PhpType, TypeKind};
-use crate::text_position::position_to_offset;
+use crate::text_position::{offset_to_position, position_to_offset};
 use crate::text_scan::collapse_continuation_lines;
 use crate::type_engine::resolver::{CtxLoaders, resolve_target_classes};
 use crate::type_engine::subject_extraction::detect_access_operator;
@@ -97,6 +100,24 @@ const COLUMN_METHODS: &[&str] = &[
     "decrement",
     "latest",
     "oldest",
+    "firstWhere",
+    "whereColumn",
+    "min",
+    "max",
+    "sum",
+    "avg",
+];
+
+/// Methods accepting model attributes as keys of an array argument.
+const ATTRIBUTE_METHODS: &[&str] = &[
+    "create",
+    "fill",
+    "make",
+    "update",
+    "updateOrCreate",
+    "firstOrCreate",
+    "firstOrNew",
+    "createOrFirst",
 ];
 
 /// The kind of string argument the cursor is inside.
@@ -106,6 +127,8 @@ enum EloquentStringKind {
     Relation,
     /// A column/attribute name.
     Column,
+    /// A model attribute in an array passed to a write or lookup method.
+    AttributeKey,
 }
 
 /// Generic context for a cursor inside a string argument of a
@@ -172,7 +195,7 @@ pub(crate) fn detect_string_call_context(
     Some(StringCallContext {
         partial,
         quote_char,
-        method_name,
+        method_name: method_name.to_string(),
         subject,
         is_static,
         arg_index: call.commas,
@@ -195,8 +218,9 @@ pub(crate) struct EloquentStringContext {
     /// Whether this is a static call (`::`) vs instance call (`->`).
     pub is_static: bool,
     /// Byte offset where the string content starts (after the opening quote).
-    #[allow(dead_code)]
     pub string_content_start: usize,
+    /// Parsed argument details for column and attribute completion.
+    argument: Option<StringArgument>,
 }
 
 /// Try to detect an Eloquent string context at the given cursor position.
@@ -208,31 +232,120 @@ pub(crate) fn detect_eloquent_string_context(
     cursor_offset: usize,
     code: &CodeContext<'_>,
 ) -> Option<EloquentStringContext> {
-    let ctx = detect_string_call_context(content, cursor_offset, code)?;
+    let (quote, quote_char) = code.open_string?;
+    let call = code.open_brackets.iter().rev().find(|bracket| {
+        bracket.byte == b'('
+            && !extract_identifier_backwards(&content[..bracket.code_before])
+                .is_some_and(|(name, _)| name.eq_ignore_ascii_case("array"))
+    })?;
+    let (method, _) = extract_identifier_backwards(&content[..call.code_before])?;
+    if RELATION_METHODS
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(method))
+    {
+        let ctx = detect_string_call_context(content, cursor_offset, code)?;
+        return Some(EloquentStringContext {
+            kind: EloquentStringKind::Relation,
+            partial: ctx.partial,
+            quote_char: ctx.quote_char,
+            subject: ctx.subject?,
+            is_static: ctx.is_static,
+            string_content_start: ctx.string_content_start,
+            argument: None,
+        });
+    }
 
-    let subject = ctx.subject?;
-
-    let kind = if RELATION_METHODS.contains(&ctx.method_name.as_str()) {
-        EloquentStringKind::Relation
-    } else if COLUMN_METHODS.contains(&ctx.method_name.as_str()) {
+    let kind = if ATTRIBUTE_METHODS
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(method))
+    {
+        EloquentStringKind::AttributeKey
+    } else if COLUMN_METHODS
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(method))
+    {
         EloquentStringKind::Column
     } else {
         return None;
     };
-
+    let operator = call.callee_operator.as_ref()?;
+    let argument = string_argument(content, cursor_offset, code, call)?;
+    if !accepts_column_argument(method, kind, &argument) {
+        return None;
+    }
     Some(EloquentStringContext {
         kind,
-        partial: ctx.partial,
-        quote_char: ctx.quote_char,
-        subject,
-        is_static: ctx.is_static,
-        string_content_start: ctx.string_content_start,
+        partial: content[quote + 1..cursor_offset].to_string(),
+        quote_char,
+        subject: extract_receiver_subject(content, operator)?,
+        is_static: operator.is_static,
+        string_content_start: quote + 1,
+        argument: Some(argument),
     })
+}
+
+/// Match the argument's role, keeping values and operators out of column lists.
+fn accepts_column_argument(method: &str, kind: EloquentStringKind, arg: &StringArgument) -> bool {
+    let method = method.to_ascii_lowercase();
+    let parameter = |index: usize, name: &str| match arg.name.as_deref() {
+        Some(actual) => actual == name,
+        None => arg.index == index,
+    };
+    if kind == EloquentStringKind::AttributeKey {
+        if !matches!(
+            arg.position,
+            StringArgumentPosition::ArrayKey | StringArgumentPosition::ArrayElement
+        ) {
+            return false;
+        }
+        return parameter(0, "attributes")
+            || (method == "update" && parameter(0, "values"))
+            || (matches!(
+                method.as_str(),
+                "updateorcreate" | "firstorcreate" | "firstornew" | "createorfirst"
+            ) && parameter(1, "values"));
+    }
+    if method == "wherecolumn" {
+        return arg.position == StringArgumentPosition::Direct
+            && (parameter(0, "first")
+                || parameter(2, "second")
+                || (arg.name.is_none() && arg.index == 1 && arg.count == 2));
+    }
+    let variadic = matches!(method.as_str(), "select" | "addselect" | "groupby");
+    if !matches!(
+        arg.position,
+        StringArgumentPosition::Direct | StringArgumentPosition::ArrayElement
+    ) {
+        return false;
+    }
+    if arg.position == StringArgumentPosition::ArrayElement
+        && !variadic
+        && !matches!(method.as_str(), "wherenull" | "wherenotnull")
+    {
+        return false;
+    }
+    if variadic {
+        return arg.name.as_deref().is_none_or(|name| {
+            name == match method.as_str() {
+                "groupby" => "groups",
+                "addselect" => "column",
+                _ => "columns",
+            }
+        });
+    }
+    parameter(
+        0,
+        if matches!(method.as_str(), "wherenull" | "wherenotnull") {
+            "columns"
+        } else {
+            "column"
+        },
+    ) || (method == "pluck" && parameter(1, "key"))
 }
 
 /// Extract an identifier (method name) scanning backwards from the end of `text`.
 /// Returns (identifier, text_before_identifier).
-fn extract_identifier_backwards(text: &str) -> Option<(String, &str)> {
+fn extract_identifier_backwards(text: &str) -> Option<(&str, &str)> {
     let trimmed = text.trim_end();
     let bytes = trimmed.as_bytes();
     let mut end = bytes.len();
@@ -247,7 +360,7 @@ fn extract_identifier_backwards(text: &str) -> Option<(String, &str)> {
     if ident.is_empty() {
         return None;
     }
-    Some((ident.to_string(), &trimmed[..end]))
+    Some((ident, &trimmed[..end]))
 }
 
 /// The receiver expression in front of the callee's operator, e.g.
@@ -296,12 +409,13 @@ impl Backend {
             EloquentStringKind::Relation => {
                 self.build_relation_completions(&model_class, &es_ctx, &class_loader)
             }
-            EloquentStringKind::Column => {
-                // Base resolution folds in the `$fillable`/`$casts` a
-                // parent model declares.
-                let model_class =
-                    crate::virtual_members::resolve_class_base_cached(&model_class, &class_loader);
-                self.build_column_completions(&model_class, &es_ctx)
+            EloquentStringKind::Column | EloquentStringKind::AttributeKey => {
+                let model_class = crate::virtual_members::resolve_class_fully_cached(
+                    &model_class,
+                    &class_loader,
+                    &self.resolved_class_cache,
+                );
+                self.build_column_completions(&model_class, &es_ctx, content)
             }
         };
 
@@ -452,21 +566,57 @@ impl Backend {
         &self,
         model: &ClassInfo,
         es_ctx: &EloquentStringContext,
+        content: &str,
     ) -> Vec<CompletionItem> {
-        let partial = &es_ctx.partial;
+        let partial = es_ctx.partial.to_lowercase();
         let columns = crate::virtual_members::laravel::where_property::collect_column_names(model);
+        let argument = es_ctx.argument.as_ref();
+        let range = argument.map(|argument| {
+            Range::new(
+                offset_to_position(content, es_ctx.string_content_start),
+                offset_to_position(content, argument.string_end),
+            )
+        });
 
         let mut items = Vec::new();
         for col in &columns {
-            if !partial.is_empty() && !col.to_lowercase().starts_with(&partial.to_lowercase()) {
+            if !col.to_lowercase().starts_with(&partial)
+                || (es_ctx.kind == EloquentStringKind::AttributeKey
+                    && argument.is_some_and(|argument| argument.used_keys.contains(col)))
+            {
                 continue;
             }
+            let fillable = es_ctx.kind == EloquentStringKind::AttributeKey
+                && model.laravel().is_some_and(|metadata| {
+                    metadata
+                        .column_names
+                        .iter()
+                        .enumerate()
+                        .any(|(index, name)| {
+                            name == col
+                                && metadata
+                                    .column_sources
+                                    .get(index)
+                                    .copied()
+                                    .unwrap_or(metadata.declared)
+                                    & crate::types::model_declaration::FILLABLE
+                                    != 0
+                        })
+                });
 
             items.push(CompletionItem {
                 label: col.clone(),
                 kind: Some(CompletionItemKind::FIELD),
                 detail: Some("column".to_string()),
                 insert_text: Some(col.clone()),
+                sort_text: (es_ctx.kind == EloquentStringKind::AttributeKey)
+                    .then(|| format!("{}_{col}", if fillable { 0 } else { 1 })),
+                text_edit: range.map(|range| {
+                    CompletionTextEdit::Edit(TextEdit {
+                        range,
+                        new_text: col.clone(),
+                    })
+                }),
                 ..Default::default()
             });
         }
