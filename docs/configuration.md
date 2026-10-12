@@ -94,14 +94,57 @@ message = "^Call to deprecated function some_legacy_helper\\(\\)"
 | Key          | Type     | Default  | Description |
 | ------------ | -------- | -------- | ----------- |
 | `strategy`   | string   | `"full"` | Class discovery strategy: `"full"`, `"composer"`, `"self"`, or `"none"`. See [Indexing Strategy](#indexing-strategy) below. |
-| `exclude`    | string[] | `[]`     | Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing `/` anchors to the root, a trailing `/` restricts to directories, and a leading `!` re-includes. Applies to background discovery and to the directories `analyze` walks. A file you open in the editor, or name outright on the `analyze` command line, is always served. The `_ide_helper.php` and `_ide_helper_models.php` files laravel-ide-helper generates are always skipped; list them with a leading `!` to index them anyway. |
+| `exclude`    | string[] | `[]`     | Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing `/` anchors to the root, a trailing `/` restricts to directories, and a leading `!` re-includes. Applies to background discovery and to the directories `analyze` walks. A file you open in the editor, or name outright on the `analyze` command line, is always served. A leading `!` only undoes your own patterns, so use `include` to bring back a hidden, gitignored, or built-in skipped path. |
 | `extensions` | string[] | `[]`     | Extra file extensions (without the dot) treated as PHP source during workspace discovery, e.g. `["module", "inc", "theme"]` for Drupal. `.php` is always included. |
+| `include`    | string[] | `[]`     | Files and directories to index even though the workspace scan skips them, relative to the workspace root unless absolute. See [Extra Include Paths](#extra-include-paths) below. |
 
 ```toml
 [indexing]
 exclude = ["generated", "web/sites/default/files"]
 extensions = ["module", "install", "theme"]
 ```
+
+#### Extra Include Paths
+
+The workspace scan respects `.gitignore` and skips hidden files and
+directories, which is what keeps it out of `node_modules/`, build output,
+and editor metadata. It also skips the `_ide_helper.php` and
+`_ide_helper_models.php` files laravel-ide-helper generates, since
+PHPantom resolves facades and models without them. That can hide PHP a
+project genuinely depends on: code in a dotted directory, or a generated
+file that is gitignored because it is a build artefact, yet is the only
+declaration of the functions the project calls.
+
+Listing a path under `include` indexes it anyway, whichever of those
+rules skipped it. A named file is read directly. A named directory is
+walked recursively, including hidden and gitignored entries inside it,
+for the same extensions the workspace scan uses, and `exclude` patterns
+still prune what is below it. Entries that do not exist are ignored.
+Relative paths resolve against the workspace root.
+
+[Castor](https://castor.jolicode.com/) task files are an example, a
+`.castor/` directory of tasks and a gitignored `.castor.stub.php`
+describing Castor's own functions:
+
+```toml
+[indexing]
+include = [".castor", ".castor.stub.php"]
+```
+
+Where the path lives decides how it is treated:
+
+- **Inside the workspace** it is your own code, the same as anything the
+  scan found. `analyze` reports on it, and rename and find-references
+  cover it.
+- **Outside the workspace** it is a library, the same as `vendor/`. Its
+  symbols complete and resolve, but it is never analysed or edited. Use
+  this for shared code that lives elsewhere on disk.
+
+Included paths fill gaps. They are indexed after everything else, so a
+class or function the project or its dependencies already declare keeps
+that declaration, and an included file cannot override it. Adding an
+entry while the editor is running indexes it straight away; removing one
+takes effect on the next restart.
 
 ### `[semantic_tokens]`
 

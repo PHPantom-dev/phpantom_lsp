@@ -61,6 +61,46 @@ This works well for the PHP standard library but has limitations:
 
 ---
 
+## Where stubs fit among the indexing settings
+
+PHPStan, Psalm, PhpStorm, and Intelephense all give a path one of the
+same three roles, plus a way to skip it:
+
+| Role | PHPStan | Psalm | PhpStorm | Intelephense |
+| ---- | ------- | ----- | -------- | ------------ |
+| Project code: indexed and reported on | `paths` | `<projectFiles>` | content roots | the workspace |
+| Library code: indexed, not reported on or edited | `scanFiles`, `scanDirectories` | `<extraFiles>` | Include Path | `environment.includePaths` |
+| Overrides: declarations that win | `stubFiles` | `<stubs>` | custom stubs path | `stubs` |
+| Skipped | `excludePaths` | `<ignoreFiles>` | Excluded | `files.exclude` |
+
+PHPantom covers the same roles with three user-facing keys, and finds
+everything else on its own:
+
+- **`[indexing] exclude`** skips. A `!` only undoes the project's own
+  patterns.
+- **`[indexing] include`** brings back what the workspace scan skips by
+  default (hidden, gitignored, the laravel-ide-helper files). Where the
+  path lives picks the role: inside the workspace it is project code,
+  outside it is library code, registered like a vendor directory. That
+  is what stands in for a separate `scanDirectories` key. Included paths
+  fill gaps and never win over a declaration found elsewhere.
+- **`[stubs] paths`** (E3) is the only way to make a declaration win.
+
+Composer stub packages (E2), the IDE-provided path (E3), sibling editor
+folders (X17), and Drupal's web root are detected or forwarded, never
+typed by the user. Keep it that way: every new source of PHP should map
+onto one of the three roles rather than add a fourth key with its own
+semantics.
+
+A generated stub such as Castor's `.castor.stub.php` works under either
+key, and the two only behave differently when something else declares
+the same name. Under `include` it is project code inside the workspace,
+so `analyze` reports on it; under `[stubs]` it would not be. Once E3
+lands, `configuration.md` should recommend `[stubs]` for generated
+stubs.
+
+---
+
 ## Stub sources (in priority order)
 
 External stubs come from four places, listed from highest to lowest
@@ -457,7 +497,22 @@ paths = [
 ```
 
 Paths are resolved relative to the workspace root unless absolute.
-Each path is scanned recursively for `.php` files at init.
+Each path is scanned recursively for `.php` files at init. Resolve them
+the way `IndexingConfig::include_paths` resolves `[indexing] include`,
+and walk them with the hidden-entry and gitignore filters off the way
+`collect_include_files` does, since a stub directory is as likely as an
+included one to be generated and gitignored. A stub path is never
+analysed or edited, whether or not it is inside the workspace.
+
+### Documentation
+
+Add a short "which key do I want?" section to `configuration.md` that
+puts `exclude`, `include`, and `[stubs] paths` side by side by role, so
+a user who wants a declaration to win does not reach for `include` and
+conclude it is broken. Two cases to spell out: a generated stub file
+(Castor's) belongs under `[stubs]`, and listing `_ide_helper.php` under
+`[stubs]` is how a user deliberately makes its stand-ins win, where
+`include` only lets it fill gaps.
 
 ### Scanning and priority
 

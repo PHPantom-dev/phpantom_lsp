@@ -158,6 +158,7 @@ unlikely to move the needle for most users.
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |
 | X16 | [Composer's own class lists bypass `[indexing] exclude`](todo/indexing.md#x16-composers-own-class-lists-bypass-indexing-exclude)                                            | Low-Medium  | Low         |
+| X18 | [Watch `[indexing] include` paths outside the workspace](todo/indexing.md#x18-watch-indexing-include-paths-outside-the-workspace)                                         | Low-Medium  | Medium      |
 | X13 | [Decide how workspace-wide edits treat excluded files](todo/indexing.md#x13-decide-how-workspace-wide-edits-treat-excluded-files)                                           | Low-Medium  | Medium      |
 | X2  | Parallel file processing — remaining work                                                                                                                                   | Low-Medium  | Medium-High |
 | X12 | [Say when an exclude hid the class a diagnostic names](todo/indexing.md#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names)                                           | Low-Medium  | Medium-High |

@@ -224,6 +224,19 @@ pub(crate) fn discover_user_files(
         collect_php_files(dir, &std::sync::Arc::default(), &[], &filters, &mut files);
     }
 
+    // `[indexing] include` paths inside the workspace are project code the
+    // walks above skip as hidden or gitignored. Those outside it are
+    // libraries, indexed but not analysed, like vendor.
+    let mut include_paths = backend.config().indexing.include_paths(workspace_root);
+    include_paths.retain(|path| path.starts_with(workspace_root));
+    files.extend(
+        crate::classmap_scanner::collect_include_files(&include_paths, &filters)
+            .into_iter()
+            .filter(|path| {
+                filter_dirs.is_empty() || filter_dirs.iter().any(|d| path.starts_with(d))
+            }),
+    );
+
     files.sort();
     files.dedup();
     files
@@ -363,6 +376,37 @@ mod tests {
             &[root.join("generated/Stub.php")],
         ));
         assert_eq!(by_file, vec!["generated/Stub.php".to_string()]);
+    }
+
+    /// An `[indexing] include` path inside the workspace is project code,
+    /// so `analyze` reports on it even though the walk skips it as hidden.
+    /// One outside the workspace is a library and is left out.
+    #[test]
+    fn discover_user_files_analyses_include_paths_inside_the_workspace() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let root = dir.path();
+        std::fs::write(root.join("index.php"), "<?php\n").unwrap();
+        std::fs::create_dir_all(root.join(".castor")).unwrap();
+        std::fs::write(root.join(".castor/tasks.php"), "<?php\n").unwrap();
+        let lib = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(lib.path().join("Lib.php"), "<?php\n").unwrap();
+
+        let backend = Backend::new_headless();
+        *backend.workspace_root().write() = Some(root.to_path_buf());
+        let mut cfg = crate::config::Config::default();
+        cfg.indexing.include = Some(vec![
+            ".castor".to_string(),
+            lib.path().display().to_string(),
+        ]);
+        backend.set_config(cfg);
+
+        let files = discover_user_files(&backend, root, &[]);
+        assert!(files.contains(&root.join(".castor/tasks.php")), "{files:?}");
+        assert!(files.contains(&root.join("index.php")), "{files:?}");
+        assert!(
+            !files.iter().any(|p| p.starts_with(lib.path())),
+            "a library include must not be analysed: {files:?}"
+        );
     }
 
     #[cfg(unix)]

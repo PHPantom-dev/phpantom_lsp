@@ -317,8 +317,8 @@ impl Backend {
     /// answers LSP requests.
     pub(crate) fn reload_config(&self, root: &std::path::Path) {
         // Captured before the reload replaces them, so the reconciliation
-        // below can tell which way the file filters moved.
-        let previous_filters = self.index_filters();
+        // below can tell which way the discovery inputs moved.
+        let previous_inputs = self.discovery_inputs();
 
         match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
             Ok(cfg) => self.set_config(cfg),
@@ -347,9 +347,10 @@ impl Backend {
         // the index keeps serving the last full scan.
         self.reregister_watched_files_if_changed();
 
-        // An edit to `[indexing] exclude` or `extensions` changes what
-        // belongs in the index, not merely what the next scan will see.
-        self.reconcile_index_for_filter_change(&previous_filters);
+        // An edit to `[indexing] exclude`, `extensions` or `include`
+        // changes what belongs in the index, not merely what the next scan
+        // will see.
+        self.reconcile_index_for_input_change(&previous_inputs);
     }
 
     /// Rewrite the paths in a watched-file batch into the spellings the

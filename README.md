@@ -42,9 +42,9 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Extract & generate<sup>8</sup>           | ✅       | ❌           | 🚧🔒       | 🚧          | ✅          |
 | Simplify & modernize<sup>9</sup>         | ✅       | ❌           | ✅🔒       | ❌          | ✅          |
 | **Performance**                          |          |              |            |             |             |
-| Time to ready (from cache)               | 2 s      | 11 s (1 s)   | 10 s       | 3 min 17 s (4 s) | 1 min 7 s (5 s)        |
+| Time to ready (from cache)               | 2 s      | 11 s (1 s)   | 10 s       | 1 min 34 s (4 s) | 1 min 7 s (5 s)        |
 | RAM                                      | 578 MB   | 766 MB       | 594 MB     | 467 MB      | 2 GB        |
-| CPU time                                 | 17 s     | 16 s         | 36 s       | 3 min 18 s  | 17 min 55 s |
+| CPU time                                 | 17 s     | 16 s         | 36 s       | 5 min 33 s  | 17 min 55 s |
 | Disk cache                               | -        | 51 MB        | -          | 2.3 GB      | 379 MB      |
 
 <p>

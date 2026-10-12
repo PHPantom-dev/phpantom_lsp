@@ -380,6 +380,10 @@ impl Backend {
 
         self.scan_autoload_files(root, &vendor_dir, progress);
 
+        // Runs for every strategy, including `none`: an explicit
+        // `include` entry is a direct instruction, not a fallback.
+        self.scan_configured_include_paths(root, progress);
+
         let symbol_count = symbol_count
             + self.symbols.autoload_function_index.read().len()
             + self.symbols.autoload_constant_index.read().len();
@@ -584,6 +588,8 @@ impl Backend {
             }
         }
 
+        self.scan_configured_include_paths(root, progress);
+
         let symbol_count = self.symbols.fqn_uri_index.read().len()
             + self.symbols.autoload_function_index.read().len()
             + self.symbols.autoload_constant_index.read().len();
@@ -641,6 +647,8 @@ impl Backend {
                 idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
             }
         }
+
+        self.scan_configured_include_paths(root, progress);
 
         let symbol_count = symbol_count
             + self.symbols.autoload_function_index.read().len()

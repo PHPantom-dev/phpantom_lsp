@@ -256,7 +256,7 @@ impl LanguageServer for Backend {
         };
         // Captured before the change, so the reconciliation below can
         // tell which way the filters moved.
-        let previous_filters = self.index_filters();
+        let previous_inputs = self.discovery_inputs();
         if !self.set_client_indexing_options(options) {
             return;
         }
@@ -270,7 +270,7 @@ impl LanguageServer for Backend {
         // The index was built under the filters the user just changed
         // away from: drop what they now exclude, and walk for what they
         // now admit.
-        self.reconcile_index_for_filter_change(&previous_filters);
+        self.reconcile_index_for_input_change(&previous_inputs);
 
         // A narrowed exclude list makes classes resolvable that were
         // missing a moment ago, so the negative cache has to go or the

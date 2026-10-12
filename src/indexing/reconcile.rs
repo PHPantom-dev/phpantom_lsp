@@ -6,7 +6,8 @@
 //! was built under the old ones, so both directions are wrong until the
 //! two are reconciled: a newly excluded tree keeps answering workspace
 //! symbol search and completion, and a newly included one contributes
-//! nothing.
+//! nothing. A new `[indexing] include` entry is the same kind of change:
+//! it names files the last walk never saw.
 //!
 //! Eviction is answered from the indexes themselves and runs
 //! immediately. Re-inclusion cannot be: nothing in memory records the
@@ -31,29 +32,63 @@ use crate::classmap_scanner::IndexFilters;
 /// exclude to look something up does not sit and wait on it.
 const REDISCOVERY_DEBOUNCE: Duration = Duration::from_millis(500);
 
-impl Backend {
-    /// Reconcile the symbol indexes with the file filters after a change.
-    ///
-    /// `previous` is the compiled filter set from before the change, so
-    /// pass the value [`index_filters`](Backend::index_filters) returned
-    /// *before* invalidating it. Cheap when nothing moved: the walk is
-    /// only scheduled when a path or extension could have come back into
-    /// scope, and a purely widened exclude list is answered by eviction
-    /// alone.
-    pub(crate) fn reconcile_index_for_filter_change(&self, previous: &Arc<IndexFilters>) {
-        let current = self.index_filters();
-        if Arc::ptr_eq(previous, &current) {
-            return;
-        }
+/// Everything that decides what a discovery walk finds, captured before a
+/// settings change so the reconciliation can tell which way it moved.
+///
+/// Every entry point that can change one of these inputs compares a
+/// snapshot rather than the inputs one by one, so a new input is added
+/// here once instead of at each site.
+pub(crate) struct DiscoveryInputs {
+    filters: Arc<IndexFilters>,
+    /// The `[indexing] include` entries as written.
+    include: Vec<String>,
+}
 
-        let evicted = self.evict_newly_filtered_symbols(previous, &current);
-        if evicted > 0 {
-            tracing::info!("PHPantom: file filters now exclude {evicted} indexed file(s)");
-            // Whatever those files declared may be baked into a resolved
-            // class (a parent, a trait, a mixin) or a cached completion
-            // list, neither of which the index purge reaches.
-            self.clear_resolved_class_cache();
-            self.member_completion_cache.lock().clear();
+impl DiscoveryInputs {
+    /// Whether replacing `previous` with `self` can bring a file into the
+    /// index that `previous` kept out, which takes another walk.
+    fn may_admit_more_than(&self, previous: &DiscoveryInputs) -> bool {
+        self.filters.may_admit_more_than(&previous.filters)
+            || self
+                .include
+                .iter()
+                .any(|entry| !previous.include.contains(entry))
+    }
+}
+
+impl Backend {
+    /// Snapshot the inputs of workspace discovery. Take it *before*
+    /// applying a settings change and hand it to
+    /// [`reconcile_index_for_input_change`](Backend::reconcile_index_for_input_change).
+    pub(crate) fn discovery_inputs(&self) -> DiscoveryInputs {
+        DiscoveryInputs {
+            filters: self.index_filters(),
+            include: self.config().indexing.include.unwrap_or_default(),
+        }
+    }
+
+    /// Reconcile the symbol indexes with the discovery inputs after a
+    /// change.
+    ///
+    /// Cheap when nothing moved: the walk is only scheduled when a path
+    /// or extension could have come back into scope or a new `include`
+    /// entry names files no walk has seen, and a purely widened exclude
+    /// list is answered by eviction alone. A removed `include` entry is
+    /// not evicted; its symbols stay until the next restart.
+    pub(crate) fn reconcile_index_for_input_change(&self, previous: &DiscoveryInputs) {
+        let current = self.discovery_inputs();
+
+        if !Arc::ptr_eq(&previous.filters, &current.filters) {
+            let evicted = self.evict_newly_filtered_symbols(&previous.filters, &current.filters);
+            if evicted > 0 {
+                tracing::info!("PHPantom: file filters now exclude {evicted} indexed file(s)");
+                // Whatever those files declared may be baked into a
+                // resolved class (a parent, a trait, a mixin) or a cached
+                // completion list, neither of which the index purge
+                // reaches.
+                self.clear_resolved_class_cache();
+                self.member_completion_cache.lock().clear();
+            }
         }
 
         if current.may_admit_more_than(previous) {
@@ -287,9 +322,9 @@ mod tests {
     fn a_newly_excluded_tree_leaves_the_index() {
         let (backend, _dir) = backend_indexing(&["src/Kept.php", "generated/Dropped.php"]);
 
-        let previous = backend.index_filters();
+        let previous = backend.discovery_inputs();
         backend.set_client_indexing_options(client_options(&["generated"]));
-        backend.reconcile_index_for_filter_change(&previous);
+        backend.reconcile_index_for_input_change(&previous);
 
         let index = backend.symbols.fqn_uri_index.read();
         assert!(index.get("C0").is_some(), "an unfiltered class must stay");
@@ -310,9 +345,9 @@ mod tests {
             extensions: vec!["module".to_string()],
         });
 
-        let previous = backend.index_filters();
+        let previous = backend.discovery_inputs();
         backend.set_client_indexing_options(config::ClientIndexingOptions::default());
-        backend.reconcile_index_for_filter_change(&previous);
+        backend.reconcile_index_for_input_change(&previous);
 
         assert!(backend.symbols.fqn_uri_index.read().get("C0").is_none());
     }
@@ -329,9 +364,9 @@ mod tests {
             .write()
             .insert(uri, Arc::new("<?php\nclass C0 {}\n".to_string()));
 
-        let previous = backend.index_filters();
+        let previous = backend.discovery_inputs();
         backend.set_client_indexing_options(client_options(&["generated"]));
-        backend.reconcile_index_for_filter_change(&previous);
+        backend.reconcile_index_for_input_change(&previous);
 
         assert!(backend.symbols.fqn_uri_index.read().get("C0").is_some());
     }
@@ -346,13 +381,28 @@ mod tests {
         let (backend, _dir) = backend_indexing(&["src/Kept.php", "generated/FromClassmap.php"]);
         backend.set_client_indexing_options(client_options(&["generated"]));
 
-        let previous = backend.index_filters();
+        let previous = backend.discovery_inputs();
         backend.set_client_indexing_options(client_options(&["generated", "build"]));
-        backend.reconcile_index_for_filter_change(&previous);
+        backend.reconcile_index_for_input_change(&previous);
 
         let index = backend.symbols.fqn_uri_index.read();
         assert!(index.get("C0").is_some());
         assert!(index.get("C1").is_some());
+    }
+
+    /// A new `include` entry names files no walk has seen, so it needs a
+    /// rescan even when the filters did not move. A dropped one does not:
+    /// a walk cannot find less than the index already holds.
+    #[test]
+    fn a_new_include_entry_asks_for_a_walk() {
+        let inputs = |include: &[&str]| DiscoveryInputs {
+            filters: IndexFilters::empty(),
+            include: include.iter().map(|s| s.to_string()).collect(),
+        };
+
+        assert!(inputs(&[".castor", "stub.php"]).may_admit_more_than(&inputs(&[".castor"])));
+        assert!(!inputs(&[".castor"]).may_admit_more_than(&inputs(&[".castor", "stub.php"])));
+        assert!(!inputs(&[".castor"]).may_admit_more_than(&inputs(&[".castor"])));
     }
 
     /// Discovery re-run over a populated index has to find the files the

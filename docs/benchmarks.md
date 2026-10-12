@@ -7,15 +7,15 @@ lines), with 27k vendor files (1.7M lines).
 
 ## Headline Numbers
 
-| Metric | PHPantom | Intelephense | PHP Tools | Phpactor | PHPStorm |
-| --- | --- | --- | --- | --- | --- |
-| Cold start, CPU time | 17 s | 16 s | 36 s | 3 min 18 s | 17 min 55 s |
-| Cold start, wall clock | 2 s | 11 s | 10 s | 3 min 17 s | 1 m 7 s |
-| Warm start, CPU time | 17 s | 4 s | 36 s | 3 s | 3 min 23 s |
-| Warm start, wall clock | 2 s | 1 s | 10 s | 4 s | 5 s |
-| RAM, cold start | 578 MB | 766 MB | 594 MB | 467 MB | 1 GB |
-| RAM, warm start | 578 MB | 759 MB | 594 MB | 60 MB | 2 GB |
-| Disk cache | 0 | 51 MB | 0 | 2.3 GB | 379 MB |
+| Metric                 | PHPantom | Intelephense | PHP Tools | Phpactor   | PHPStorm    |
+| ---------------------- | -------- | ------------ | --------- | ---------- | ----------- |
+| Cold start, CPU time   | 17 s     | 16 s         | 36 s      | 5 min 33 s | 17 min 55 s |
+| Cold start, wall clock | 2 s      | 11 s         | 10 s      | 1 min 34 s | 1 m 7 s     |
+| Warm start, CPU time   | 17 s     | 4 s          | 36 s      | 3 s        | 3 min 23 s  |
+| Warm start, wall clock | 2 s      | 1 s          | 10 s      | 4 s        | 5 s         |
+| RAM, cold start        | 578 MB   | 766 MB       | 594 MB    | 467 MB     | 1 GB        |
+| RAM, warm start        | 578 MB   | 759 MB       | 594 MB    | 60 MB      | 2 GB        |
+| Disk cache             | 0        | 51 MB        | 0         | 2.3 GB     | 379 MB      |
 
 A cold start is the first index with no disk cache; a warm start reuses
 the cache written by a previous session. CPU time is the total consumed

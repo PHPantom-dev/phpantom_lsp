@@ -2225,7 +2225,8 @@ impl Backend {
 
     /// Return the compiled `[indexing]` exclude globs and extra PHP
     /// extensions, building them on first use from the union of the
-    /// `.phpantom.toml` layer and the client-supplied layer.
+    /// `.phpantom.toml` layer and the client-supplied layer, with the
+    /// `[indexing] include` paths exempted from both.
     ///
     /// The two layers are unioned rather than one overriding the other:
     /// both name files that are not worth indexing, and a client cannot
@@ -2258,6 +2259,10 @@ impl Backend {
             classmap_scanner::IndexFilters::compile(root.as_deref(), &exclude, &extensions)
         };
         drop(client);
+        let compiled = match root.as_deref() {
+            Some(root) => compiled.with_included(indexing.include_paths(root)),
+            None => compiled,
+        };
 
         let compiled = Arc::new(compiled);
         *self.workspace.index_filters.write() = Some(Arc::clone(&compiled));
