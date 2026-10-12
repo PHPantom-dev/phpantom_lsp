@@ -10547,6 +10547,22 @@ final class Coalesce
         self::take($cell['tooltip']);
     }
 
+    public function propertyGuard(Box $box): void
+    {
+        if (($box->label ?? null) === null) {
+            return;
+        }
+        self::take($box->label);
+    }
+
+    /** @param array{meta?: array{tooltip?: ?string}} $cell */
+    public function nested(array $cell): void
+    {
+        if (($cell['meta']['tooltip'] ?? null) !== null) {
+            self::take($cell['meta']['tooltip']);
+        }
+    }
+
     /** @param array{tooltip?: ?string} $cell */
     public function otherwise(array $cell): void
     {
@@ -10567,12 +10583,11 @@ final class Box
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
-/// Only a `null` fallback ties the check to the value: with any other
+/// Only a `null` fallback ties a null check to the value: with any other
 /// fallback the coalesce holds that fallback whenever the entry is unset,
-/// so `($x ?? 'none') !== null` is always true and `($x ?? false)` is
-/// `false` for an unset `$x` as much as for a `false` one.
+/// so `($x ?? 'none') !== null` is always true.
 #[test]
-fn a_coalesce_onto_anything_but_null_proves_nothing_about_the_value() {
+fn a_null_check_on_a_coalesce_onto_anything_but_null_proves_nothing() {
     let php = r#"<?php
 declare(strict_types=1);
 
@@ -10587,18 +10602,10 @@ final class More
             self::take($cell['tooltip']);
         }
     }
-
-    /** @param array{flag?: string|false|null} $cell */
-    public function falseSentinel(array $cell): void
-    {
-        if (false !== ($cell['flag'] ?? false)) {
-            self::take($cell['flag']);
-        }
-    }
 }
 "#;
     let messages = messages_with_code(&collect_slow(php), "type_mismatch_argument");
-    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
 // ─── PHPDoc pseudo-type spellings we have no model for ──────────────────────

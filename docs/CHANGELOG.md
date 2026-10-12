@@ -438,6 +438,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **"Import all missing classes" with the cursor at the start of a name.** The bulk import is now offered there too, wherever "Import class" is.
 - **Completion shows member types next to the name.** Method and property suggestions show their return or property type right after the name (e.g. `findOneByEmail($email): ?User`) in editors such as PhpStorm and VS Code, where previously only the class name was visible. Contributed by @EranNL.
 - **A class declared in more than one file keeps what it inherits.** When a second declaration of a class (such as a stand-in defined behind `class_exists()`) was read first, members the real class inherits are no longer reported as unknown once its own file is indexed. Contributed by @Deadsquirrel93.
+- **A null check written through `?? null` narrows the value.** `if (null !== ($row['name'] ?? null))` makes `$row['name']` non-null the way `isset()` does, and so does getting past `if (($row['name'] ?? null) === null)`. Contributed by @phcorp.
 
 ### Internal
 
@@ -481,7 +482,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A `match (true)` arm knows the arms above it did not match.** `match (true) { $name === null => 'none', default => strtoupper($name) }` no longer reports `$name` as possibly `null` in the `default` arm. Hover, completion, and the value of the `match` see the same narrowing, wherever `default` is written. Contributed by @phcorp.
 - **Imports of non-ASCII class names no longer break a file.** An import such as `use App\Models\Øl;` no longer stops the file's diagnostics and code actions.
 - **Files outside the project no longer break indexing.** A PHP file opened from elsewhere, or a file change in another folder of the editor's workspace, no longer stops the server when the configuration changes or drops the other file changes reported with it.
-- **A null check written through `?? null` narrows the value.** `if (null !== ($row['name'] ?? null))` makes `$row['name']` non-null the way `isset()` does, in either operand order and on a property, as does getting past `if (($row['name'] ?? null) === null)`. Contributed by @phcorp. Closes #478.
 - **Blade `@break` and `@continue` keep their condition.** `@break($done)` and `@continue($skip)` in a loop now only leave the iteration when the condition holds, instead of being read as an unconditional jump.
 - **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp.
 - **Type checks narrow properties the way they narrow variables.** `if (\is_resource($this->stream)) { fclose($this->stream); }` on a `resource|null` property no longer reports "expects resource, got resource|null". Every type-check function now narrows a property, with or without a leading backslash. Contributed by @phcorp.
