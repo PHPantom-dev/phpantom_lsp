@@ -492,6 +492,28 @@ group namespace prefix), and provide completion, go-to-definition, and
 an unknown-action diagnostic. Low priority: the string form is
 discouraged since Laravel 8.
 
+#### L60. Read relation callback overrides and fallbacks from the declared signature
+
+**Impact: Low · Complexity: Low-Medium**
+
+Relation-callback inference steps aside when the application redeclares
+a relation-query method, and falls back to a fixed type when it cannot
+resolve the relation. Both decisions ignore what the declaration says:
+
+- **Restated `@method` tags.** Any `@method whereHas(...)` or
+  `@method with(...)` on a model or builder (`declared_relation_method`
+  in `type_engine/variable/forward_walk/relation_callbacks.rs`) counts as
+  an application override and turns inference off for that class, even
+  when the tag only restates the framework signature (a common pattern
+  in hand-maintained IDE docblocks). Treat a declaration as an override
+  only when its callback parameter type differs from the framework's.
+- **Hard-coded eager fallback.** An eager-array callback whose relation
+  path cannot be resolved gets `Relation<mixed, mixed, mixed>` built in
+  code rather than the element type of the declared `$relations`
+  parameter. It matches Laravel's current declaration but will drift if
+  the stub changes; read the declared type instead, as the other
+  relation callbacks do.
+
 #### L29. Livewire and Volt component names
 
 **Impact: Low (Livewire projects only) · Complexity: Low-Medium**
