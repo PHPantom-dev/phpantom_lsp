@@ -923,6 +923,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#where-stubs-fit-among-the-indexing-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Where stubs fit among the indexing settings
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#stub-sources-in-priority-order" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1177,6 +1188,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>.phpantom.toml</code> paths
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Documentation
       </span>
     </span>
   </a>
@@ -1776,6 +1798,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#where-stubs-fit-among-the-indexing-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Where stubs fit among the indexing settings
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#stub-sources-in-priority-order" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2030,6 +2063,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>.phpantom.toml</code> paths
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Documentation
       </span>
     </span>
   </a>
@@ -2321,6 +2365,75 @@ wins over the embedded stubs.</p>
   user has phpstorm-stubs (or another stub package) installed locally,
   GTD could navigate to those real files.</li>
 </ul>
+<hr />
+<h2 id="where-stubs-fit-among-the-indexing-settings">Where stubs fit among the indexing settings<a class="headerlink" href="#where-stubs-fit-among-the-indexing-settings" title="Permanent link">&para;</a></h2>
+<p>PHPStan, Psalm, PhpStorm, and Intelephense all give a path one of the
+same three roles, plus a way to skip it:</p>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>PHPStan</th>
+<th>Psalm</th>
+<th>PhpStorm</th>
+<th>Intelephense</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Project code: indexed and reported on</td>
+<td><code>paths</code></td>
+<td><code>&lt;projectFiles&gt;</code></td>
+<td>content roots</td>
+<td>the workspace</td>
+</tr>
+<tr>
+<td>Library code: indexed, not reported on or edited</td>
+<td><code>scanFiles</code>, <code>scanDirectories</code></td>
+<td><code>&lt;extraFiles&gt;</code></td>
+<td>Include Path</td>
+<td><code>environment.includePaths</code></td>
+</tr>
+<tr>
+<td>Overrides: declarations that win</td>
+<td><code>stubFiles</code></td>
+<td><code>&lt;stubs&gt;</code></td>
+<td>custom stubs path</td>
+<td><code>stubs</code></td>
+</tr>
+<tr>
+<td>Skipped</td>
+<td><code>excludePaths</code></td>
+<td><code>&lt;ignoreFiles&gt;</code></td>
+<td>Excluded</td>
+<td><code>files.exclude</code></td>
+</tr>
+</tbody>
+</table>
+<p>PHPantom covers the same roles with three user-facing keys, and finds
+everything else on its own:</p>
+<ul>
+<li><strong><code>[indexing] exclude</code></strong> skips. A <code>!</code> only undoes the project's own
+  patterns.</li>
+<li><strong><code>[indexing] include</code></strong> brings back what the workspace scan skips by
+  default (hidden, gitignored, the laravel-ide-helper files). Where the
+  path lives picks the role: inside the workspace it is project code,
+  outside it is library code, registered like a vendor directory. That
+  is what stands in for a separate <code>scanDirectories</code> key. Included paths
+  fill gaps and never win over a declaration found elsewhere.</li>
+<li><strong><code>[stubs] paths</code></strong> (E3) is the only way to make a declaration win.</li>
+</ul>
+<p>Composer stub packages (E2), the IDE-provided path (E3), sibling editor
+folders (X17), and Drupal's web root are detected or forwarded, never
+typed by the user. Keep it that way: every new source of PHP should map
+onto one of the three roles rather than add a fourth key with its own
+semantics.</p>
+<p>A generated stub such as Castor's <code>.castor.stub.php</code> works under either
+key, and the two only behave differently when something else declares
+the same name. Under <code>include</code> it is project code inside the workspace,
+so <code>analyze</code> reports on it; under <code>[stubs]</code> it would not be. Once E3
+lands, <code>configuration.md</code> should recommend <code>[stubs]</code> for generated
+stubs.</p>
 <hr />
 <h2 id="stub-sources-in-priority-order">Stub sources (in priority order)<a class="headerlink" href="#stub-sources-in-priority-order" title="Permanent link">&para;</a></h2>
 <p>External stubs come from four places, listed from highest to lowest
@@ -2660,7 +2773,20 @@ fast indexed lookup instead of directory scanning.</p>
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">]</span>
 </code></pre></div>
 <p>Paths are resolved relative to the workspace root unless absolute.
-Each path is scanned recursively for <code>.php</code> files at init.</p>
+Each path is scanned recursively for <code>.php</code> files at init. Resolve them
+the way <code>IndexingConfig::include_paths</code> resolves <code>[indexing] include</code>,
+and walk them with the hidden-entry and gitignore filters off the way
+<code>collect_include_files</code> does, since a stub directory is as likely as an
+included one to be generated and gitignored. A stub path is never
+analysed or edited, whether or not it is inside the workspace.</p>
+<h3 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h3>
+<p>Add a short "which key do I want?" section to <code>configuration.md</code> that
+puts <code>exclude</code>, <code>include</code>, and <code>[stubs] paths</code> side by side by role, so
+a user who wants a declaration to win does not reach for <code>include</code> and
+conclude it is broken. Two cases to spell out: a generated stub file
+(Castor's) belongs under <code>[stubs]</code>, and listing <code>_ide_helper.php</code> under
+<code>[stubs]</code> is how a user deliberately makes its stand-ins win, where
+<code>include</code> only lets it fill gaps.</p>
 <h3 id="scanning-and-priority">Scanning and priority<a class="headerlink" href="#scanning-and-priority" title="Permanent link">&para;</a></h3>
 <p>All sources use the same byte-level scanner (or the phpstorm-stubs
 map-file fast path when available). The external stub indices are

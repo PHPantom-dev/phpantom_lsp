@@ -1154,6 +1154,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#x18-watch-indexing-include-paths-outside-the-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X18. Watch <code>[indexing] include</code> paths outside the workspace
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1687,6 +1698,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#x18-watch-indexing-include-paths-outside-the-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X18. Watch <code>[indexing] include</code> paths outside the workspace
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1800,7 +1822,13 @@ access provides complete <code>FunctionInfo</code>/<code>DefineInfo</code>. All 
 walkers (full-scan, PSR-4 scanner, vendor package scanner, and
 go-to-implementation file collector) use the <code>ignore</code> crate for
 gitignore-aware traversal instead of hardcoded directory name
-filtering. Hidden directories are skipped automatically.</p>
+filtering. Hidden directories are skipped automatically, and so are the
+laravel-ide-helper files. Paths listed under <code>[indexing] include</code> are
+scanned on top of that walk, bypassing all three, for first-party PHP
+in a dotted directory and for generated files that are gitignored as
+build artefacts. An included path inside the workspace is project code;
+one outside it is registered like a vendor directory, so it resolves
+but is never analysed or edited.</p>
 <p>The monorepo path activates when there is no root <code>composer.json</code> but
 <code>discover_subproject_roots</code> finds subdirectories with their own
 <code>composer.json</code> files. Each subproject is processed through the full
@@ -2042,8 +2070,15 @@ to name the sibling explicitly; the folder list is already in front of
 the extension, so nothing needs naming.</p>
 <p>Forwarded through <code>ClientIndexingOptions</code> beside <code>exclude</code> and
 <code>extensions</code>, as a list of absolute directories:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"indexing"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"include_paths"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"/home/me/work/shared-lib"</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"indexing"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"extra_roots"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"/home/me/work/shared-lib"</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
+<p>Not <code>include</code>: that <code>.phpantom.toml</code> key already exists and means
+something else. It names paths to index <em>despite</em> the gitignore and
+hidden-entry filters, with a walk of its own that turns both off. A
+sibling folder is the opposite case. It is another project root, and
+its <code>vendor/</code>, <code>node_modules/</code>, and build output have to stay out
+exactly as they do in this one, so it is walked as a root with every
+filter in force.</p>
 <p><code>collectIndexFilters</code> fills it from <code>vscode.workspace.workspaceFolders</code>,
 dropping the client's own folder, and the extension re-sends on
 <code>onDidChangeWorkspaceFolders</code> the way it already re-sends on a
@@ -2054,46 +2089,51 @@ Code's <code>synchronize</code> pushes: that blob has no <code>indexing</code> k
 whole-value replacement in <code>set_client_indexing_options</code> stays safe.</p>
 <p>The shape stays generic, so a Zed or Neovim user can hand-write the same
 block for a directory their editor has no concept of.</p>
-<p><strong>Not in scope: a PHPantom setting for arbitrary directories.</strong> VS Code
-has no general setting that names extra source roots, so anything beyond
-the folder list means a <code>phpantom.*</code> setting the user types, which brings
-its own questions (variable and <code>~</code> expansion, a matching
-<code>.phpantom.toml</code> key so <code>analyze</code> sees what the editor sees, whether a
-named path overrides <code>exclude</code>, out-of-workspace watchers, and a document
-selector that covers a folder no client owns). A sibling folder needs
-none of that. File it separately if users ask for it.</p>
+<p><strong>Not in scope: a <code>phpantom.*</code> editor setting for arbitrary
+directories.</strong> A user who wants to name a path by hand already has
+<code>[indexing] include</code> in <code>.phpantom.toml</code>, which <code>analyze</code> sees too. It
+answers the questions a hand-typed path raises: relative paths resolve
+against the workspace root (no <code>~</code> or variable expansion), <code>exclude</code>
+prunes below a named directory but never the named path itself, and a
+removed entry keeps its symbols until restart. An included path outside
+the workspace gets no file watcher, which is X18 rather than part of
+this item.</p>
 <p><strong>Append to the existing roots slice.</strong> <code>walk_roots</code> already takes a
 roots slice and puts every root in a single <code>ignore</code> walk, which is what
 compiles each shared ancestor <code>.gitignore</code> once instead of once per root.
-Include roots belong in that slice, not in a walk of their own. Its
+Extra roots belong in that slice, not in a walk of their own. Its
 attribute-by-depth accounting holds for a root whose files were reached
 through a followed link, pinned by
 <code>walk_roots_attributes_a_followed_link_to_the_root_that_reached_it</code>.</p>
 <p>Putting them in that slice also gets the duplicate protection for free:
 <code>LinkClaims</code> claims every root up front, so a symlink pointing at an
-include folder loses to the include folder's own walk rather than
+extra root loses to that root's own walk rather than
 indexing the tree a second time under the link's spelling.</p>
 <p><strong>Two folders can still overlap.</strong> The guard above only sees symlinks,
 and VS Code lets a workspace hold both a folder and its parent. An
-include root that is a parent, child, or exact duplicate of another one
+extra root that is a parent, child, or exact duplicate of another one
 (or of the server's own root) is walked twice, because nothing crossed a
-link to get there. Canonicalize the include roots when they are
+link to get there. Canonicalize the extra roots when they are
 registered and drop the ones contained in another, the same containment
 test <code>LinkClaims::claim</code> already does.</p>
 <p><strong>Switch every walker together.</strong> <code>collect_php_files_gitignore</code>,
 <code>collect_workspace_index_files_gitignore</code> (the one find-references
 walks), <code>util::collect_php_files</code>, and <code>analyse::collect_php_files</code> each
 take a single root, so only <code>walk_roots</code> is multi-root today. Leaving
-the serial ones behind would index classes from an include folder while
+the serial ones behind would index classes from an extra root while
 find-references, rename, and go-to-implementation never see them, which
 is the half-wired state the symlink change avoided by moving all four
-walkers at once.</p>
-<p><strong>Fold the "did the inputs widen?" check into one place.</strong> Two entry
-points reconcile a live change, <code>reload_config</code> and
-<code>did_change_configuration</code>, and both compare the compiled filters.
-Include roots make a second input and a second bespoke comparison at each
-site. Replace them with one snapshot of everything that decides what a
-walk finds, so the next input is added once.</p>
+walkers at once. (<code>[indexing] include</code> gets away with one walk of its own
+because its paths are few and named. Discovery and the full background
+index both list them, and namespace rename and go-to-implementation read
+them back out of the indexes. An extra root is a whole project tree, so
+that shortcut does not scale to it.)</p>
+<p><strong>Add the roots to the discovery snapshot.</strong> Both entry points that
+reconcile a live change, <code>reload_config</code> and <code>did_change_configuration</code>,
+take a <code>DiscoveryInputs</code> snapshot before applying it and hand it to
+<code>reconcile_index_for_input_change</code>, which already covers the compiled
+filters and <code>[indexing] include</code>. The extra roots go in as a third field
+of that snapshot, not as a comparison of their own at either site.</p>
 <p><strong>Confirm the watchers before building any.</strong> VS Code limits a
 string-pattern watcher to paths inside the workspace, and a sibling
 folder is inside it, so the <code>**/*.php</code> watchers every session registers
@@ -2107,10 +2147,32 @@ deliver events at all
 <p><strong>Resolution only: no diagnostics, no edits.</strong> The sibling folder has its
 own server publishing its own diagnostics, so a second pass from this one
 would duplicate every message the user sees on those files. Index an
-include root, resolve into it, and leave publishing and workspace-wide
+extra root, resolve into it, and leave publishing and workspace-wide
 edits (rename, fix) to the server that owns the folder. That also keeps
 the extension's per-folder <code>documentSelector</code> as it is: a file opened
-from an include root is served by its own folder's client.</p>
+from an extra root is served by its own folder's client. An
+<code>[indexing] include</code> path outside the workspace already gets exactly
+this treatment by being registered like a vendor directory
+(<code>add_library_path</code> in <code>indexing/scan.rs</code>), so register each extra root
+the same way rather than adding a second notion of library code.</p>
+<h2 id="x18-watch-indexing-include-paths-outside-the-workspace">X18. Watch <code>[indexing] include</code> paths outside the workspace<a class="headerlink" href="#x18-watch-indexing-include-paths-outside-the-workspace" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>An include path outside the workspace is indexed at startup and then
+never refreshed. The client only watches its workspace folders, so an
+edit to a shared library at <code>/opt/company/lib</code> leaves stale symbols, and
+a class added there stays unknown, until the editor restarts. Paths
+inside the workspace are covered by the <code>**/*.php</code> watchers every
+session registers, and the exclude exemption <code>IndexFilters</code> gives a
+named path keeps their events from being dropped.</p>
+<p>Followed symlinks have the same problem and already solve it:
+<code>build_watched_file_registration</code> adds a
+<a href="https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#relativePattern"><code>RelativePattern</code></a>
+watcher based at each link. Add the outside include paths to that list,
+then check against VS Code that a server-registered relative pattern
+outside the workspace actually delivers events
+(<a href="https://github.com/microsoft/vscode-languageserver-node/issues/1783">vscode-languageserver-node#1783</a>
+reports that it does not). If it does not, fall back to a server-side
+<code>notify</code> watcher for these few named paths.</p>
 <h2 id="x13-decide-how-workspace-wide-edits-treat-excluded-files">X13. Decide how workspace-wide edits treat excluded files<a class="headerlink" href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Find-references walks via <code>collect_workspace_index_files_gitignore</code> and
