@@ -1149,17 +1149,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l64-infer-both-callback-receivers-for-withwherehas" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L64. Infer both callback receivers for withWhereHas
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l45-_count-properties-are-offered-on-every-relationship" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1822,17 +1811,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l64-infer-both-callback-receivers-for-withwherehas" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L64. Infer both callback receivers for withWhereHas
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l45-_count-properties-are-offered-on-every-relationship" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2451,23 +2429,6 @@ only the innermost collection.</p>
 the collection return-type patches for the argument forms. The property
 lookup already exists for <code>model-property&lt;Model&gt;</code>; the work is threading
 a resolved key type through the generic substitution.</p>
-<h4 id="l64-infer-both-callback-receivers-for-withwherehas">L64. Infer both callback receivers for withWhereHas<a class="headerlink" href="#l64-infer-both-callback-receivers-for-withwherehas" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<p><code>withWhereHas('stocks', …)</code> calls the constraint with <code>Builder&lt;Stock&gt;</code> for
-the existence query and <code>HasMany&lt;Stock, Team&gt;</code> for eager loading. We infer
-only the builder. Dotted paths likewise lose the final relation type, and
-the <code>stocks:id</code> column-selection form fails relation lookup entirely,
-falling back to unbound <code>Builder&lt;mixed&gt;|Relation&lt;mixed, mixed, mixed&gt;</code>.</p>
-<p><strong>Reproducer:</strong> The <code>eagerRelations()</code> assertions in
-<code>tests/phpstan_nsrt/laravel-builder-relations.php</code>. The Laravel runtime
-assertions also verify both invocations without executing eager-load SQL.</p>
-<p><strong>Where to change:</strong> Extend the shared relation-chain resolver to retain
-the terminal instantiated relation and its declaring model, then use the
-builder/relation union for this callback. Strip the column suffix where
-Laravel accepts it, preserve custom builders, and bind named arguments.
-The callback's ordinary fluent methods must preserve that union. Cover
-explicit <code>Builder|Relation</code> hints and the <code>withWhereRelation</code> counterpart;
-ordinary <code>whereHas</code> must continue to receive just the related builder.</p>
 <h4 id="l45-_count-properties-are-offered-on-every-relationship">L45. <code>*_count</code> properties are offered on every relationship<a class="headerlink" href="#l45-_count-properties-are-offered-on-every-relationship" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p>For each relationship method we synthesize a <code>{snake_name}_count</code>
