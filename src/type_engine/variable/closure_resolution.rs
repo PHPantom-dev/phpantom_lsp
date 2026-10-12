@@ -919,9 +919,10 @@ fn try_relation_query_override(
     Some(vec![query?])
 }
 
-/// Combine known relation alternatives without replacing unresolved eager
-/// constraints with the outer model's builder. Their declaration remains the
-/// fallback when the relation name cannot be determined.
+/// The callback parameter for one relation argument type. Every alternative
+/// of a union must resolve: when any of them is unknown (a plain `string`, a
+/// name the relation resolver cannot follow), the declared callback type is
+/// the fallback rather than a narrower union of the known alternatives.
 fn relation_callback_type(
     model: &ClassInfo,
     method_name: &str,
@@ -929,20 +930,21 @@ fn relation_callback_type(
     rctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     if let TypeKind::Union(parts) = relation.kind() {
-        let queries: Vec<_> = parts
+        let queries = parts
             .iter()
-            .filter_map(|part| relation_callback_type(model, method_name, part, rctx))
-            .collect();
-        return (!queries.is_empty()).then(|| PhpType::union(queries).simplified());
+            .map(|part| relation_callback_type(model, method_name, part, rctx))
+            .collect::<Option<Vec<_>>>()?;
+        return Some(PhpType::union(queries).simplified());
     }
     let eager = matches!(method_name, "with" | "withWhereHas" | "withWhereRelation");
     if let Some(name) = relation
         .as_literal()
         .and_then(|value| value.string_content())
     {
-        // `with` and `withWhereHas` understand column selections. The
-        // existence half of withWhereRelation receives its name unchanged.
-        let chain = if matches!(method_name, "with" | "withWhereHas") {
+        // Only withWhereHas strips a column selection before its existence
+        // query. `with($name, $callback)` keys the eager load by the name
+        // verbatim, so `with('rel:id', fn)` names no relation at runtime.
+        let chain = if method_name == "withWhereHas" {
             name.split_once(':').map_or(name.as_ref(), |(name, _)| name)
         } else {
             name.as_ref()
@@ -966,27 +968,13 @@ fn relation_callback_type(
     if eager {
         return None;
     }
-    if relation.is_string_type() {
-        return Some(model_builder_type(model, rctx.class_loader));
-    }
 
-    // Resolve the ancestor's actual template argument rather than assuming
-    // that a custom relation puts its related model in the first slot.
+    // A relation object hands its related model to the `Relation` ancestor;
+    // projecting through the ancestor chain (which applies the object's own
+    // type arguments) copes with subclasses that reorder or fix them.
     const RELATION_FQN: &str = "Illuminate\\Database\\Eloquent\\Relations\\Relation";
-    if !crate::class_lookup::is_subtype_of_typed(
-        relation,
-        &PhpType::named(atom(RELATION_FQN)),
-        rctx.class_loader,
-    ) {
-        return None;
-    }
-    let mut related =
+    let related =
         super::rhs_resolution::extract_generic_arg_from_ancestor(relation, RELATION_FQN, 0, rctx)?;
-    if let TypeKind::Generic(g) = relation.kind()
-        && let Some(class) = (rctx.class_loader)(&g.name)
-    {
-        related = related.substitute(&crate::inheritance::build_generic_subs(&class, &g.args));
-    }
     let fallback = PhpType::generic(
         ELOQUENT_BUILDER_FQN,
         vec![PhpType::named(atom(ELOQUENT_MODEL_FQN))],

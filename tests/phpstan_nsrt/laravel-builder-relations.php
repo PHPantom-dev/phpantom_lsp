@@ -496,15 +496,24 @@ namespace BuilderRelationAudit {
         Stock::query()->with(callback: function (Relation $query) {
             assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $query);
         }, relations: $relation);
-        $name = 'stocks.warehouse:id';
+        $name = 'stocks.warehouse';
         Team::query()->with($name, function (Relation $query) {
             assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $query->orderBy('id'));
+        });
+        // A closure keys the eager load by the name verbatim, so a column
+        // selection is not stripped and names no relation.
+        Team::query()->with('stocks:id', function ($query) {
+            assertType('Illuminate\Database\Eloquent\Relations\Relation<mixed, mixed, mixed>', $query);
         });
         Stock::query()->with($unknown, function ($query) {
             assertType('Illuminate\Database\Eloquent\Relations\Relation<mixed, mixed, mixed>', $query);
         });
         Stock::whereHas($unknown, function ($query) {
-            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>', $query);
+            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query);
+        });
+        $partlyKnown = $unknown === '' ? 'team' : 'missing';
+        Stock::whereHas($partlyKnown, function ($query) {
+            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query);
         });
     }
 
