@@ -581,8 +581,16 @@ namespace BuilderRelationAudit {
      * @param class-string<Team> $teamClass
      * @param list<class-string<Team|Warehouse>> $classes
      * @param list<string> $unknownClasses
+     * @param ?class-string<Team> $maybeTeam
+     * @param class-string<Team>|class-string<Warehouse>|null $teamOrWarehouse
      */
-    function morphCandidates(string $teamClass, array $classes, array $unknownClasses, string $unknown): void {
+    function morphCandidates(string $teamClass, array $classes, array $unknownClasses, string $unknown, ?string $maybeTeam, ?string $teamOrWarehouse): void {
+        Comment::whereHasMorph('commentable', $maybeTeam, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Comment::whereHasMorph('commentable', $teamOrWarehouse, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
+        });
         Comment::whereHasMorph('commentable', $teamClass, function (Builder $query) {
             assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
         });

@@ -1001,10 +1001,14 @@ fn morph_candidate_builders(
     fallback: &PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> PhpType {
+    // Laravel casts `$types` to an array, so a `null` candidate adds no
+    // model: the callback only runs for the others.
     match candidates.kind() {
-        TypeKind::Union(parts) => PhpType::union(
+        TypeKind::Nullable(inner) => morph_candidate_builders(inner, fallback, class_loader),
+        TypeKind::Union(parts) if parts.iter().any(|part| !part.is_null()) => PhpType::union(
             parts
                 .iter()
+                .filter(|part| !part.is_null())
                 .map(|part| morph_candidate_builders(part, fallback, class_loader))
                 .collect(),
         ),
