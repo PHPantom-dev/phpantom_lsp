@@ -5132,6 +5132,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Polymorphic relation callbacks know their candidate models.</strong> Closures passed to <code>whereHasMorph()</code> and related methods are now typed from the listed model classes, including their custom builders. Unknown candidates and <code>'*'</code> use the relation's declared model. Contributed by @shuvroroy.</li>
 <li><strong>Named relation callbacks keep their model types.</strong> Completion and diagnostics now resolve relationship constraints when named arguments are reordered or optional arguments are omitted. Contributed by @shuvroroy.</li>
 <li><strong>Relation callbacks keep custom builders.</strong> Constraints on related models now offer their custom builder methods, including through custom-builder query chains and bare <code>Builder</code> parameter hints. Contributed by @shuvroroy.</li>
 <li><strong>Model instance queries keep custom builders.</strong> Starting a query with <code>newQuery()</code>, <code>newModelQuery()</code>, or <code>newQueryWithoutScopes()</code> now keeps the model's custom builder and its model type through later calls. Contributed by @shuvroroy.</li>

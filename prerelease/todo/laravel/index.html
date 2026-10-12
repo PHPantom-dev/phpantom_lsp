@@ -1149,17 +1149,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l63-infer-morph-constraint-callbacks-from-candidate-models" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L63. Infer morph constraint callbacks from candidate models
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l64-infer-both-callback-receivers-for-withwherehas" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1833,17 +1822,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l63-infer-morph-constraint-callbacks-from-candidate-models" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L63. Infer morph constraint callbacks from candidate models
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l64-infer-both-callback-receivers-for-withwherehas" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2473,32 +2451,6 @@ only the innermost collection.</p>
 the collection return-type patches for the argument forms. The property
 lookup already exists for <code>model-property&lt;Model&gt;</code>; the work is threading
 a resolved key type through the generic substitution.</p>
-<h4 id="l63-infer-morph-constraint-callbacks-from-candidate-models">L63. Infer morph constraint callbacks from candidate models<a class="headerlink" href="#l63-infer-morph-constraint-callbacks-from-candidate-models" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<p>The <code>whereHasMorph</code> family does not participate in relation-query
-inference. A literal model class or an array of candidates falls back to
-<code>Builder&lt;Model&gt;</code> in the assertion fixture, losing both the related
-models and their custom builders. The second <code>$type</code> callback parameter
-already resolves to <code>string</code> from Laravel's declaration and must stay
-typed when the first parameter is refined.</p>
-<p><strong>Reproducer:</strong> The <code>morphs()</code> assertions in
-<code>tests/phpstan_nsrt/laravel-builder-relations.php</code> cover all six
-callback-taking existence methods, single and multiple candidates,
-reordered named arguments, wildcard and empty-list fallbacks, and a
-declared <code>MorphTo&lt;Team&gt;</code> target. The desired builder types remain in the
-<code>SKIP</code> assertions; the <code>$type</code> assertions and the <code>MorphTo&lt;Model&gt;</code>
-wildcard and empty-list cases, whose <code>Builder&lt;Model&gt;</code> fallback is already
-correct, run normally.</p>
-<p><strong>Where to change:</strong> Extend shared callable inference using bound
-<code>relation</code>, <code>types</code>, and <code>callback</code> arguments. Build a union of candidate
-builders, preserving custom builders. For unresolved/wildcard candidates,
-use the relation's declared target, falling back to <code>Model</code> when that is
-all the declaration knows. Also cover class-string variables and mixed
-known/unknown candidate arrays, as
-<a href="https://github.com/larastan/larastan/blob/c328727e6103c1147d1c64cc96b3aedfda26bc20/src/ClosureTypes/RelationshipQueryCallbackExtension.php">Larastan's callback extension</a>
-does. Do not boot the application or query the database for wildcard
-discovery. Check the <code>whereMorphRelation</code> shortcuts when sharing the
-callback logic.</p>
 <h4 id="l64-infer-both-callback-receivers-for-withwherehas">L64. Infer both callback receivers for withWhereHas<a class="headerlink" href="#l64-infer-both-callback-receivers-for-withwherehas" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p><code>withWhereHas('stocks', …)</code> calls the constraint with <code>Builder&lt;Stock&gt;</code> for
