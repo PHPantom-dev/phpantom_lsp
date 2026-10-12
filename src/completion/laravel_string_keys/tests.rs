@@ -867,6 +867,8 @@ fn detects_every_forget_disk_array_value_and_spelling() {
         "Storage::forgetDisk(array('archive', 'backup'))",
         "Storage::forgetDisk(disk: ['archive', 'backup'])",
         "Storage::forgetDisk(disk: array('archive', 'backup'))",
+        "Storage::forgetDisk([$fn => 'archive', Keys::fn() => 'backup'])",
+        "Storage::forgetDisk([$caféfn => 'archive', fnclé => 'backup'])",
     ] {
         let content = storage_source(expression);
         for value in ["archive", "backup"] {
@@ -1039,6 +1041,60 @@ Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive'
         "'value".len(),
         b'\'',
     ));
+}
+
+#[test]
+fn morph_and_config_arrays_complete_while_unfinished() {
+    for (source, expected) in [
+        ("Relation::morphMap(['po", StringKeyKind::MorphAlias),
+        (
+            "Relation::morphMap(array(/* key */ 'po",
+            StringKeyKind::MorphAlias,
+        ),
+        (
+            "$query->whereHasMorph(wrap('a,b', [1, 2]), ['po",
+            StringKeyKind::MorphAlias,
+        ),
+        (
+            "Config::set(['po' /* note */ => true])",
+            StringKeyKind::Config,
+        ),
+        ("config(['po", StringKeyKind::Config),
+        ("config(array('first' => true, 'po", StringKeyKind::Config),
+    ] {
+        let ctx = detect_at_end(source, "po").unwrap_or_else(|| panic!("{source}"));
+        assert_eq!(ctx.kind, expected, "{source}");
+        assert_eq!(ctx.prefix, "po");
+    }
+}
+
+#[test]
+fn array_context_does_not_leak_into_other_parameters_or_expressions() {
+    for source in [
+        "Relation::morphMap(['post' => 'po'])",
+        "Relation::morphMap(['prefix' . 'po' => Post::class])",
+        "Relation::morphMap([['po' => Post::class]])",
+        "Relation::morphMap(array(array('po' => Post::class)))",
+        "$query->whereHasMorph('commentable', ['po' => 'video'])",
+        "$query->whereHasMorph('commentable', ['post'], ['po'])",
+        "$query->whereHasMorph('commentable', [TYPES['po']])",
+        "Config::set(['app.name' => 'po'])",
+        "Config::set('app.name', ['po'])",
+        "Config::set(['outer' => ['po' => true]])",
+        "config(['app.name' => 'po'])",
+        "config('app.name', ['po'])",
+        "route('home', ['po' => true])",
+        "view('home', ['po' => true])",
+        "Storage::forgetDisk(['po' => 'local'])",
+        "Storage::forgetDisk('local', ['po'])",
+        "$query->whereHasMorph('commentable', [fn () => 'po'])",
+        "$query->whereHasMorph('commentable', ['x' => fn () => 'po'])",
+        "Storage::fake('local', 'po')",
+        "Route::middleware(['po' => 'auth:web'])",
+        "#[\\Illuminate\\Container\\Attributes\\Config('app.name', 'po')] class C {}",
+    ] {
+        assert!(detect_at_end(source, "po").is_none(), "{source}");
+    }
 }
 
 #[test]

@@ -320,35 +320,6 @@ small virtual member provider for the one class.
 
 ---
 
-#### L42. Morph alias completion in array positions
-
-**Impact: Low-Medium · Complexity: Medium**
-
-Morph aliases complete inside `Relation::getMorphedModel('|')` and
-`Model::getActualClassNameForMorph('|')`, but not in the two array
-positions where they are most often written:
-
-```php
-Relation::morphMap(['|' => Post::class]);
-$query->whereHasMorph('commentable', ['|']);
-```
-
-The blocker is not the alias index but the context detector
-(`string_argument_context` in `completion/laravel_string_keys/context.rs`).
-It already handles named arguments and array *values* in the first
-argument, but rejects array *keys* on purpose
-(`string_literal_is_array_key`) and does not look at arrays in later
-argument positions. `whereHasMorph` is also not a completion trigger
-yet.
-
-**Where to change:** let the detector report array keys and later
-argument positions, together with the call being made, so each string
-kind can opt in. Every string kind benefits: the same limitation is why
-a config key inside `Config::set(['a.b' => …])` does not complete
-either.
-
----
-
 ## Laravel string-context intelligence (completion, hover, diagnostics)
 
 This is the set of features that live *inside string literals* passed to

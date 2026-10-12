@@ -97,7 +97,23 @@ normalisation of shapes in `src/php_type/normalize.rs`.
 
 ## Laravel
 
-No outstanding items.
+### B689. A comment inside a call's arguments stops Laravel name completion
+
+**Impact: Low · Complexity: Low**
+
+```php
+$query->whereHasMorph('commentable', ['video', /* '[( */ 'po|']);
+```
+
+No morph aliases are offered. The completion detector in
+`completion/laravel_string_keys/context.rs` finds the call and the array
+the literal sits in by scanning the text backward
+(`callable_before_array_argument`, `enclosing_call_open_paren`), and
+that scan reads a quote or bracket inside a comment as code. Every
+Laravel string kind goes through it. The forward `CodeContext` scan the
+completion handler already runs once per request skips comments and
+literals correctly; reading the call and the argument position from it
+would fix this.
 
 ## Blade
 

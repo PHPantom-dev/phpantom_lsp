@@ -38,7 +38,8 @@ pub(in crate::symbol_map::extraction) use views::*;
 pub(crate) use config::{config_keys_written_by, is_config_repository_method};
 pub(crate) use container::is_laravel_container_expr;
 pub(crate) use facade_calls::{
-    argument_takes_name_list, facade_static_call_arg_kind, helper_function_accepts_name_list,
+    argument_takes_name_keys, argument_takes_name_list, facade_static_call_arg_kind,
+    facade_static_call_array_key_kind, helper_function_accepts_name_list,
     helper_function_first_arg_kind,
 };
 pub(crate) use gates::is_gate_check_method;
