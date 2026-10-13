@@ -883,6 +883,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b552-a-by-reference-closure-capture-keeps-the-narrowing-from-where-the-closure-was-created" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B552. A by-reference closure capture keeps the narrowing from where the closure was created
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1479,6 +1496,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b552-a-by-reference-closure-capture-keeps-the-narrowing-from-where-the-closure-was-created" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B552. A by-reference closure capture keeps the narrowing from where the closure was created
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1604,7 +1638,22 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b552-a-by-reference-closure-capture-keeps-the-narrowing-from-where-the-closure-was-created">B552. A by-reference closure capture keeps the narrowing from where the closure was created<a class="headerlink" href="#b552-a-by-reference-closure-capture-keeps-the-narrowing-from-where-the-closure-was-created" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">if ($c !== null) {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    $f = function () use (&amp;$c) { take($c); };   // `$c` reads as non-null</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    $c = null;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    $f();                                        // TypeError at runtime, not reported</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>A by-value capture is copied when the closure is created, so seeding it from
+the scope at that point is right. A by-reference capture is read when the
+closure runs, and the variable can be reassigned in between, so the
+narrowing at the creation point does not hold inside the body.
+<code>seed_closure_captures</code> seeds both kinds the same way, in an <code>if</code> block as in
+a ternary, <code>&amp;&amp;</code> or <code>match</code> branch. A by-reference capture should also
+carry every type the enclosing function assigns to the variable after the
+closure is created.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
@@ -1616,13 +1665,13 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h4 id="b8-use-x-as-y-makes-a-bare-x-skip-another-import-of-the-same-short-name">B8. <code>use X as Y</code> makes a bare <code>X</code> skip another import of the same short name<a class="headerlink" href="#b8-use-x-as-y-makes-a-bare-x-skip-another-import-of-the-same-short-name" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace App;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">use Illuminate\Support\Facades\Redis;</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">use Redis as PhpRedis;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">Redis::connection('cache');</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">// Method 'connection' not found on class 'Redis'</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">namespace App;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">use Illuminate\Support\Facades\Redis;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">use Redis as PhpRedis;</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">Redis::connection('cache');</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">// Method 'connection' not found on class 'Redis'</span>
 </code></pre></div>
 <p>PHP resolves <code>Redis</code> through the first import, the facade. PHPantom
 resolves it to the global <code>\Redis</code> extension class.</p>
