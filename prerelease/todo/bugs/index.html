@@ -938,23 +938,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b25-a-docblock-class-name-that-no-class-answers-to-reads-as-a-global-class-when-the-file-declares-a-template-of-that-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B25. A docblock class name that no class answers to reads as a global class when the file declares a template of that name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1545,23 +1528,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b25-a-docblock-class-name-that-no-class-answers-to-reads-as-a-global-class-when-the-file-declares-a-template-of-that-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B25. A docblock class name that no class answers to reads as a global class when the file declares a template of that name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1636,31 +1602,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
-<h4 id="b25-a-docblock-class-name-that-no-class-answers-to-reads-as-a-global-class-when-the-file-declares-a-template-of-that-name">B25. A docblock class name that no class answers to reads as a global class when the file declares a template of that name<a class="headerlink" href="#b25-a-docblock-class-name-that-no-class-answers-to-reads-as-a-global-class-when-the-file-declares-a-template-of-that-name" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace App;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">/** @template Node */</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">class Box {}</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">class Walker {</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    public function run(): void {</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">        /** @var Node $n */</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">        $n = make();</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">        $n-&gt;missing(); // PHPantom: Method 'missing' not found on class 'Node'</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    }</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">}</span>
-</code></pre></div>
-<p>PHP reads <code>Node</code> in the <code>@var</code> as <code>App\Node</code>. <code>resolve_source_php_type_names</code>
-(<code>src/util.rs</code>) keeps a missed name as written when any docblock in the file
-declares it as a <code>@template</code> or type alias, since it may be one in scope
-there. The resolved loader then reads the bare <code>Node</code> as the global class.
-Checking the whole file rather than the declarations in scope is what lets
-<code>Box</code>'s template reach <code>Walker</code>.</p>
-<p><strong>Where to change:</strong> decide template and alias names from the declarations in
-scope at the name (the enclosing class's and function's <code>@template</code> tags and
-the class's aliases), and qualify every other miss with the namespace as
-<code>resolve_code_class_name</code> does.</p>
+<p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 
