@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791912762921,
+  "lastUpdate": 1791919302538,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1835,6 +1835,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b24b0af37f960387a3106b359dc259333a32453c",
+          "message": "Classes inside a phar no longer go missing on a busy machine",
+          "timestamp": "2026-10-13T21:06:55+02:00",
+          "tree_id": "73c053e9c4c5591bd00a2e717635461d0f3c3f9c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b24b0af37f960387a3106b359dc259333a32453c"
+        },
+        "date": 1791919290346,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82.4,
             "unit": "MiB"
           }
         ]
