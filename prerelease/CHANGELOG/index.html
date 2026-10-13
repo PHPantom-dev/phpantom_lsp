@@ -5134,6 +5134,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Classes inside a phar no longer go missing on a busy machine.</strong> Classes shipped in a <code>.phar</code>, such as PHPStan's, could sometimes be reported as not found when the machine was under load.</li>
 <li><strong>No more busy core after indexing large legacy scripts.</strong> Preparing find-references data in the background could keep one CPU core busy indefinitely on a long file full of methods without return types.</li>
 <li><strong>Untyped methods reached through long call chains.</strong> A method without a declared return type that was first reached at the end of a long chain of such methods no longer stays untyped everywhere else it is called, so members used on its result are checked again.</li>
 <li><strong>Class names held in properties, constants, and return values.</strong> A function such as <code>app()</code> or one taking <code>@param class-string&lt;T&gt;</code> and returning <code>T</code> now resolves to the class when given a property, class constant, or method result that holds a <code>class-string</code>, not only when given <code>Foo::class</code>.</li>

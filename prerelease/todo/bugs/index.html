@@ -1044,23 +1044,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b17-classes-inside-a-phar-sometimes-go-missing-when-the-machine-is-busy" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B17. Classes inside a phar sometimes go missing when the machine is busy
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1746,23 +1729,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b17-classes-inside-a-phar-sometimes-go-missing-when-the-machine-is-busy" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B17. Classes inside a phar sometimes go missing when the machine is busy
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1995,34 +1961,7 @@ the case above but breaks the <code>key-of</code> over class constant tests.</p>
 when the declaring file is parsed, as other docblock types are, then read
 them with the resolved loader.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h4 id="b17-classes-inside-a-phar-sometimes-go-missing-when-the-machine-is-busy">B17. Classes inside a phar sometimes go missing when the machine is busy<a class="headerlink" href="#b17-classes-inside-a-phar-sometimes-go-missing-when-the-machine-is-busy" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>seq<span class="w"> </span><span class="m">12</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">    </span>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>projects/bladestan<span class="w"> </span>--no-colour<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-1<span class="w"> </span><span class="p">&amp;</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">done</span><span class="p">;</span><span class="w"> </span><span class="nb">wait</span>
-</code></pre></div>
-<p>Bladestan's PHPStan dependency ships as <code>vendor/phpstan/phpstan/phpstan.phar</code>.
-On an idle machine <code>analyze</code> reports no errors for it, run after run. With a
-dozen runs side by side, roughly one in eight reports between 3 and 104
-errors, every one of them a <code>PHPStan\…</code> class from the phar that is "not
-found" (<code>PHPStan\Rules\Rule</code>, <code>PHPStan\Type\Type</code>, <code>PHPStan\Analyser\Error</code>,
-…) or a member access on one. Each failing run loses a different set of
-classes, and no class outside the phar ever goes missing. The failing runs
-finish as fast as the clean ones, in about two seconds, so the ten-second
-escape hatch in <code>ParseInflight::wait_until_released</code> (<code>src/resolution.rs</code>)
-is not what fires.</p>
-<p>The cause is not pinned down yet. <code>scan_phar_archive</code> in
-<code>src/indexing/scan.rs</code> registers each phar class under an
-<code>archive.phar!inner.php</code> sentinel path, and the phar branch of
-<code>parse_and_cache_file</code> in <code>src/resolution.rs</code> reads it back and caches the
-parse under a <code>phar://</code> URI. A lookup that fails on either leg is
-remembered in <code>class_not_found_cache</code> for the rest of the run. One ordering
-there is wrong regardless: <code>scan_phar_archive</code> publishes the archive's
-classes and clears the not-found caches before it stores the archive in
-<code>phar_archives</code>, so a lookup in between finds the class, cannot read it,
-and caches the miss. Nothing in <code>analyze</code> looks classes up while the
-autoload files are scanned, so that alone does not explain these runs, but
-any lookup that runs alongside the scan can hit it.</p>
+<p>No outstanding items.</p>
 
 
 
