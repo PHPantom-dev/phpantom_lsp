@@ -1019,17 +1019,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b26-a-key-ofvalue-of-operand-in-a-callees-docblock-is-read-through-the-callers-imports" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B26. A <code>key-of</code>/<code>value-of</code> operand in a callee's docblock is read through the caller's imports
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1704,17 +1693,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b26-a-key-ofvalue-of-operand-in-a-callees-docblock-is-read-through-the-callers-imports" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B26. A <code>key-of</code>/<code>value-of</code> operand in a callee's docblock is read through the caller's imports
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1936,30 +1914,6 @@ would spread the collision above to every signature.</p>
 <p><strong>Where to change:</strong> keep function and constant imports out of the class
 import table (a separate map per kind, as <code>mago-names</code> resolves them), then
 switch <code>resolve_name</code> to <code>lookup_import</code>.</p>
-<h4 id="b26-a-key-ofvalue-of-operand-in-a-callees-docblock-is-read-through-the-callers-imports">B26. A <code>key-of</code>/<code>value-of</code> operand in a callee's docblock is read through the caller's imports<a class="headerlink" href="#b26-a-key-ofvalue-of-operand-in-a-callees-docblock-is-read-through-the-callers-imports" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">namespace {</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    enum Suit: string { case Hearts = 'h'; }</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    /** @param value-of&lt;Suit&gt; $s */</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    function take(string $s): void {}</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">namespace App {</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">    enum Suit: string { case Other = 'x'; }</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">    function run(): void {</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="x">        take('h'); // PHPantom: Argument 1 ($s) expects 'x', got 'h'</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="x">    }</span>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>constant_operand_shape</code> and <code>enum_backing_values</code>
-(<code>src/type_engine/call_resolution/template_subs.rs</code>) resolve the class an
-operand names with the call site's source loader and namespace. Some operands
-arrive already qualified by the declaring file and some as written (a
-<code>key-of&lt;Foo::BAR&gt;</code> class constant is not qualified at parse time), so neither
-loader is right for all of them. Switching both to the resolved loader fixes
-the case above but breaks the <code>key-of</code> over class constant tests.</p>
-<p><strong>Where to change:</strong> qualify the class names inside type-operator operands
-when the declaring file is parsed, as other docblock types are, then read
-them with the resolved loader.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 
