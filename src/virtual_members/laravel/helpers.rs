@@ -940,6 +940,10 @@ pub(crate) fn chain_uri_modifier<'a>(expr: &Expression<'a>, content: &str) -> St
 pub(crate) fn chain_as_prefix<'a>(expr: &Expression<'a>, content: &str) -> Option<String> {
     let is_as =
         |ident: &[u8]| ident.eq_ignore_ascii_case(b"as") || ident.eq_ignore_ascii_case(b"name");
+    let prefix = |args: &ArgumentList<'_>| {
+        extract_string_literal_including_empty(args.arguments.first()?.value(), content)
+            .map(|(value, _, _)| value.to_string())
+    };
     match expr {
         Expression::Call(Call::Method(mc)) => {
             let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
@@ -948,7 +952,7 @@ pub(crate) fn chain_as_prefix<'a>(expr: &Expression<'a>, content: &str) -> Optio
             // The outermost link is applied last, so it wins over anything
             // the rest of the chain set.
             if is_as(ident.value) {
-                return Some(first_string_arg(&mc.argument_list, content)?.to_string());
+                return prefix(&mc.argument_list);
             }
             chain_as_prefix(mc.object, content)
         }
@@ -957,7 +961,7 @@ pub(crate) fn chain_as_prefix<'a>(expr: &Expression<'a>, content: &str) -> Optio
                 return None;
             };
             is_as(ident.value)
-                .then(|| first_string_arg(&sc.argument_list, content).map(str::to_string))
+                .then(|| prefix(&sc.argument_list))
                 .flatten()
         }
         _ => None,
@@ -1141,15 +1145,21 @@ pub(crate) fn extract_string_literal<'c>(
     expr: &Expression<'_>,
     content: &'c str,
 ) -> Option<(&'c str, usize, usize)> {
+    extract_string_literal_including_empty(expr, content).filter(|(value, _, _)| !value.is_empty())
+}
+
+/// Extract a literal and its inner offsets when an empty string is meaningful,
+/// such as a resource name or an explicit override of a route-name prefix.
+pub(crate) fn extract_string_literal_including_empty<'c>(
+    expr: &Expression<'_>,
+    content: &'c str,
+) -> Option<(&'c str, usize, usize)> {
     let Expression::Literal(literal::Literal::String(s)) = expr else {
         return None;
     };
     let start = s.span.start.offset as usize + 1;
     let end = s.span.end.offset as usize - 1;
-    if start >= end || end > content.len() {
-        return None;
-    }
-    Some((&content[start..end], start, end))
+    Some((content.get(start..end)?, start, end))
 }
 
 /// [`extract_string_literal`], but the text returned is the literal's

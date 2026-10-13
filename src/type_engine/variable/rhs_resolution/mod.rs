@@ -259,7 +259,7 @@ fn simplify_branch_results(results: Vec<ResolvedType>) -> Vec<ResolvedType> {
 ///
 /// Returns `None` for anything that isn't a bare scalar literal (a variable,
 /// a call, a comparison, ...), so the caller falls back to unioning both arms.
-fn static_condition_truthiness(expr: &Expression) -> Option<bool> {
+pub(crate) fn static_condition_truthiness(expr: &Expression) -> Option<bool> {
     match expr {
         Expression::Parenthesized(inner) => static_condition_truthiness(inner.expression),
         Expression::Literal(Literal::True(_)) => Some(true),

@@ -377,10 +377,167 @@ fn api_resource_member_routes_share_one_uri() {
 
 #[test]
 fn unrecoverable_resource_name_generates_no_routes() {
-    // A variable or empty name yields nothing rather than a bogus route.
     assert!(routes_of("<?php\nRoute::resource($name, PhotoController::class);\n").is_empty());
-    assert!(routes_of("<?php\nRoute::resource('', PhotoController::class);\n").is_empty());
-    assert!(routes_of("<?php\nRoute::resource('.', PhotoController::class);\n").is_empty());
+}
+
+#[test]
+fn resource_empty_segments_are_preserved_in_names_and_uris() {
+    for (resource, name, index_uri, show_uri) in [
+        ("", "", "/", "{}"),
+        (".", "", "/", "{}"),
+        ("/photos", "photos.", "photos", "photos/{photo}"),
+        ("/photos/", "", "photos", "photos/{}"),
+        ("photos/", "", "photos", "photos/{}"),
+        (
+            "photos..comments",
+            "photos..comments.",
+            "photos/{photo}//{}/comments",
+            "photos/{photo}//{}/comments/{comment}",
+        ),
+        (
+            "photos.",
+            "photos..",
+            "photos/{photo}",
+            "photos/{photo}//{}",
+        ),
+    ] {
+        let content = format!("<?php Route::resource('{resource}', C::class);");
+        assert_eq!(
+            uri_of(&content, &format!("{name}index")),
+            index_uri,
+            "{resource}"
+        );
+        assert_eq!(
+            uri_of(&content, &format!("{name}show")),
+            show_uri,
+            "{resource}"
+        );
+    }
+}
+
+#[test]
+fn api_registration_options_are_applied_before_fluent_overrides() {
+    for method in ["apiResource", "apiSingleton"] {
+        let content = format!("<?php Route::{method}('photos', C::class, ['only' => null]);");
+        assert!(
+            routes_of(&content)
+                .iter()
+                .any(|route| route.name == "photos.edit")
+        );
+        let content = format!(
+            "<?php Route::{method}('photos', C::class, ['except' => ['show']])->except([]);"
+        );
+        assert!(
+            !routes_of(&content)
+                .iter()
+                .any(|route| route.name == "photos.show")
+        );
+        let content = format!(
+            "<?php Route::{method}('photos', C::class, ['except' => ['show']])->only('show')->except([]);"
+        );
+        assert_eq!(
+            routes_of(&content)
+                .iter()
+                .map(|route| route.name.as_str())
+                .collect::<Vec<_>>(),
+            ["photos.show"]
+        );
+    }
+}
+
+#[test]
+fn singleton_option_presence_and_filter_replacement_follow_laravel() {
+    let content = "<?php Route::singleton('profile', C::class, ['creatable' => false, 'only' => ['create', 'store', 'destroy']]);";
+    assert_eq!(
+        routes_of(content)
+            .iter()
+            .map(|route| route.name.as_str())
+            .collect::<Vec<_>>(),
+        ["profile.create", "profile.store", "profile.destroy"]
+    );
+    let content = "<?php Route::apiSingleton('profile', C::class, ['destroyable' => null, 'except' => null])->only('edit', 'destroy');";
+    assert_eq!(
+        routes_of(content)
+            .iter()
+            .map(|route| route.name.as_str())
+            .collect::<Vec<_>>(),
+        ["profile.edit"]
+    );
+}
+
+#[test]
+fn shallow_resource_options_use_php_truthiness() {
+    for (value, shallow) in [
+        ("true", true),
+        ("1", true),
+        ("'yes'", true),
+        ("[1]", true),
+        ("array(1)", true),
+        ("PHP_INT_MAX", true),
+        ("0", false),
+        ("0.0", false),
+        ("'0'", false),
+        ("''", false),
+        ("false", false),
+        ("null", false),
+        ("[]", false),
+        ("array()", false),
+    ] {
+        for registration in [
+            format!("Route::resources(['photos.comments' => C::class], ['shallow' => {value}]);"),
+            format!("Route::resource('photos.comments', C::class)->shallow({value});"),
+        ] {
+            let content = format!("<?php {registration}");
+            let (name, expected_uri) = if shallow {
+                ("comments.show", "comments/{comment}")
+            } else {
+                ("photos.comments.show", "photos/{photo}/comments/{comment}")
+            };
+            assert_eq!(uri_of(&content, name), expected_uri, "{registration}");
+        }
+    }
+}
+
+#[test]
+fn repeated_resource_names_options_replace_the_previous_map() {
+    let content = "<?php Route::singleton('profile', C::class, ['names' => ['show' => 'old']])->names(['edit' => 'edit-profile']);";
+    assert_eq!(
+        routes_of(content)
+            .iter()
+            .map(|route| route.name.as_str())
+            .collect::<Vec<_>>(),
+        ["profile.show", "edit-profile", "profile.update"]
+    );
+    let content =
+        "<?php Route::singleton('profile', C::class)->names(['show' => 'old'])->names('account');";
+    assert_eq!(
+        routes_of(content)
+            .iter()
+            .map(|route| route.name.as_str())
+            .collect::<Vec<_>>(),
+        ["account.show", "account.edit", "account.update"]
+    );
+}
+
+#[test]
+fn an_empty_registrar_prefix_overrides_resource_options() {
+    for chain in ["Route::name('')", "Route::as('admin')->as('')"] {
+        for method in ["resource", "singleton"] {
+            let content = format!(
+                "<?php {chain}->{method}('photos', C::class, ['as' => 'admin'])->only('show');"
+            );
+            assert_eq!(routes_of(&content)[0].name, "photos.show");
+        }
+    }
+}
+
+#[test]
+fn resource_maps_keep_literal_entries_and_skip_unrecoverable_names() {
+    let content = "<?php Route::ReSoUrCeS(array('photos' => C::class, $name => C::class, C::class, ...$resources), array('only' => array('action' => 'show', ...$methods), 'parameters' => array('photos' => 'image'), 'middleware' => 'auth', $option => true, 'ignored'));";
+    assert_eq!(routes_of(content).len(), 1);
+    assert_eq!(uri_of(content, "photos.show"), "photos/{image}");
+    assert!(routes_of("<?php Route::resources($resources);").is_empty());
+    assert!(routes_of("<?php Route::resources(...$args);").is_empty());
 }
 
 /// `->name()` on a resource registration is Laravel's per-method name
