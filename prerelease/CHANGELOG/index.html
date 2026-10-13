@@ -5134,6 +5134,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Function and constant imports no longer stand in for a class.</strong> A <code>use function</code> or <code>use const</code> import spelled like a class, such as <code>use function Laravel\Prompts\table;</code> next to a class <code>Table</code>, no longer makes that class name resolve to the function or constant. A type hint that spells an imported class in a different case, such as <code>money</code> for <code>Money</code>, now names the imported class.</li>
 <li><strong>Chained calls on container lookups keep their class.</strong> <code>$container-&gt;get(Foo::class)-&gt;bar()</code> now resolves to <code>Foo</code> when the method's return type also depends on an optional argument left out of the call, as Symfony's <code>ContainerInterface::get()</code> does.</li>
 <li><strong><code>instanceof</code> on an <code>object</code> no longer sticks after the <code>if</code>.</strong> Once an <code>if ($o instanceof Foo)</code> with no <code>else</code> ends, <code>$o</code> is plain <code>object</code> again, and calls on it are no longer reported as missing from <code>Foo</code>.</li>
 <li><strong>Identity checks on values of unknown type.</strong> <code>assert($array[1] === null)</code> or <code>if ($x === 'a')</code> now narrows the checked value even when its type could not be resolved, such as an offset on an object of a missing class.</li>

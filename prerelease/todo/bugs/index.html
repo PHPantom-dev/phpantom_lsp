@@ -952,17 +952,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b28-a-use-function-or-use-const-import-can-claim-a-class-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B28. A <code>use function</code> or <code>use const</code> import can claim a class name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1570,17 +1559,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b28-a-use-function-or-use-const-import-can-claim-a-class-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B28. A <code>use function</code> or <code>use const</code> import can claim a class name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1683,34 +1661,6 @@ Checking the whole file rather than the declarations in scope is what lets
 scope at the name (the enclosing class's and function's <code>@template</code> tags and
 the class's aliases), and qualify every other miss with the namespace as
 <code>resolve_code_class_name</code> does.</p>
-<h4 id="b28-a-use-function-or-use-const-import-can-claim-a-class-name">B28. A <code>use function</code> or <code>use const</code> import can claim a class name<a class="headerlink" href="#b28-a-use-function-or-use-const-import-can-claim-a-class-name" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">namespace App\Console;</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">use function Laravel\Prompts\table;</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">class Table {}</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">$t = new Table(); // PHPantom: `Laravel\Prompts\table`, not `App\Console\Table`</span>
-</code></pre></div>
-<p>The file's <code>use</code> map holds function and constant imports under their short
-name alongside class imports (<code>register_use_item</code> in
-<code>src/parser/use_statements.rs</code>), and class-name resolution cannot tell them
-apart. Since class imports match case-insensitively (<code>lookup_import</code> in
-<code>src/util.rs</code>), <code>Table</code> finds the <code>table</code> function import, and an import that
-claims a name is final, so the class is never looked up in the namespace. A
-<code>use const App\VERSION;</code> does the same to a class <code>Version</code>. When two keys
-differ only in case, which one answers depends on hash-map order. Other
-readers of the map treat every entry as a class too (class completion,
-<code>use_map.values()</code> in <code>completion/handler/class_constant.rs</code>).</p>
-<p>The same split leaves declarations case-sensitive: <code>resolve_name</code> in
-<code>src/parser/ast_update.rs</code> matches imports exactly, so with <code>use Lib\Money;</code>
-a hint <code>money $m</code> reads as <code>App\money</code> while <code>new money()</code> in a body reads as
-<code>Lib\Money</code>. Making it case-insensitive before function imports are split out
-would spread the collision above to every signature.</p>
-<p><strong>Where to change:</strong> keep function and constant imports out of the class
-import table (a separate map per kind, as <code>mago-names</code> resolves them), then
-switch <code>resolve_name</code> to <code>lookup_import</code>.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 
