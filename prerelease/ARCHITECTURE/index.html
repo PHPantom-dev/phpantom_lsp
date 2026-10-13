@@ -848,6 +848,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#source-names-and-resolved-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Source Names and Resolved Names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#symbol-resolution-find_or_load_class" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2468,6 +2479,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#source-names-and-resolved-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Source Names and Resolved Names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#symbol-resolution-find_or_load_class" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3692,6 +3714,104 @@ class context for resolution.</p>
    if the expression is a <code>$variable</code>, scans backward for
    <code>$var = target(...)</code> and recursively resolves the underlying target.</li>
 </ol>
+<h2 id="source-names-and-resolved-names">Source Names and Resolved Names<a class="headerlink" href="#source-names-and-resolved-names" title="Permanent link">&para;</a></h2>
+<p>The same spelling can name different classes depending on where it was
+read. With <code>use App\Facades\Redis;</code> in <code>namespace App</code>, the written name
+<code>Redis</code> is the facade, while the resolved name <code>Redis</code> (from <code>\Redis</code>, or
+from <code>use Redis as PhpRedis;</code>) is the global class. Every name is one of
+two kinds, and each kind has one rule:</p>
+<ul>
+<li><strong>Written names</strong> are spelled in the file: in code (<code>new Foo</code>,
+  <code>Foo::bar()</code>, <code>Foo::class</code>, <code>instanceof Foo</code>, <code>catch (Foo $e)</code>, a type
+  hint) or in a docblock (<code>@var Foo</code>, <code>@param Foo</code>). They follow PHP's rule:
+  the block's imports, else the current namespace, and never a global class.
+  PHP falls back to the global namespace only for functions and constants,
+  and PHPStan, Psalm and Mago read docblock names the same way. The source
+  loader applies this rule. Resolve a name in code with
+  <code>util::resolve_code_class_name</code> (or the contexts' <code>resolve_written_class</code>),
+  a native hint with <code>resolve_hint_type</code>, and a docblock type with
+  <code>resolve_written_type</code>.</li>
+<li><strong>Resolved names</strong> (<code>ClassInfo::fqn()</code>, <code>parent_class</code>, stored member
+  types, any type the engine produced) are exactly the FQN they spell, so a
+  bare <code>Redis</code> is the global class. Look them up with the resolved loader
+  or <code>class_lookup::load_resolved_name</code>.</li>
+</ul>
+<p>A written name that no class answers to still has to come out as the FQN PHP
+reads it, or the resolved loader would later read the bare spelling as a
+global class. <code>resolve_code_class_name</code> qualifies it through the block's
+imports and namespace. A docblock name is qualified the same way unless a
+docblock anywhere in the file declares it as a template parameter or a type
+alias, in which case it keeps its spelling. Checking the whole file rather
+than the declarations in scope is filed in <code>docs/todo/bugs.md</code>.</p>
+<p>A declaration's own types are code-name qualified by the parser while
+their file's imports are in scope (<code>resolve_parent_class_names</code>,
+<code>parser/initializers.rs</code>), so every consumer sees them as resolved names:
+<code>extends</code>, <code>implements</code>, trait <code>use</code>, <code>@property</code> and <code>@method</code> tags,
+constant initializers and declared types, <code>@template</code> bounds and defaults,
+<code>@param-out</code> and <code>@phpstan-assert</code> types, and the effective type of every
+method, parameter, property and function (the docblock type when it wins
+over the native hint, else the native hint). A re-parse of patched content
+goes through <code>Backend::parse_php_resolved</code> for the same reason; <code>parse_php</code>
+leaves names as written. Some native hints kept alongside for display stay as
+written: <code>MethodInfo::native_return_type</code>, <code>PropertyInfo::native_type_hint</code>
+and a function parameter's <code>native_type_hint</code>. Qualify those before
+comparing them with anything.</p>
+<p>The parser decides whether a docblock type wins from the two types alone,
+which it cannot do where the docblock names a class the native hint does
+not: whether that class narrows the hint takes the class hierarchy. There it
+lets the docblock win and records the type with the hint qualified
+(<code>ClassInfo::unverified_doc_types</code>, <code>FunctionInfo::unverified_doc_types</code>).
+Loading the declaration puts the hint back unless the docblock class narrows
+it (<code>type_engine/types/docblock_narrowing.rs</code>): <code>Backend::link_loaded_class</code>
+for every class the loader returns and the open file's own classes, and
+<code>Backend::verify_function_doc_types</code> for a function. The forward walker reads
+a parameter's docblock again inside the body, and checks it the same way.</p>
+<p>The type engine contexts (<code>ResolutionCtx</code>, <code>VarResolutionCtx</code>,
+<code>ForwardWalkCtx</code>) carry two loaders and the imports:</p>
+<ul>
+<li><strong><code>source_class_loader</code></strong> (<code>Backend::class_loader_with</code>) applies the
+  written-name rule: a leading <code>\</code> is exact, otherwise the first segment
+  goes through the imports, else the name is qualified with the current
+  namespace. Hand it only written names: a resolved global <code>Exception</code> read
+  through it inside <code>namespace App</code> is <code>App\Exception</code>.</li>
+<li><strong><code>class_loader</code></strong> (<code>Backend::resolved_class_loader_with</code>) looks the
+  name up as an FQN, in the index and then among the caller's own classes
+  (a re-parse of patched content holds classes the index does not). A miss
+  is final: it is never retried against a file's imports or namespace.</li>
+<li><strong><code>source_imports</code></strong> is the block's <code>use</code> table, which
+  <code>resolve_code_class_name</code> qualifies a name no class answers to with. It is
+  <code>None</code> only where no file context exists; a miss then keeps its spelling.</li>
+</ul>
+<p><code>class_lookup::load_resolved_name</code> looks a resolved name up as the explicit
+<code>\Name</code> with whichever loader it is given, so a source loader cannot read it
+through the imports. Every loader, a test's plain map included, has to accept
+that leading <code>\</code>. <code>resolve_class_fully</code> wraps its loader this way.</p>
+<p>Rules for code that touches names:</p>
+<ol>
+<li><strong>Resolve a name once, where it is read, by the rule for its kind,</strong> then
+   carry the FQN. Never hand a resolved name back to anything that resolves
+   source text: the source loader, <code>resolve_code_class_name</code>,
+   <code>resolve_source_php_type_names</code>, or <code>resolve_arg_text_to_type</code>.</li>
+<li><strong>Text built from a resolved name gets a leading <code>\</code>.</strong> Rewriting
+   <code>self::X</code> to <code>Foo\Bar::X</code>, or building <code>Foo\Bar::class</code>, produces source
+   text, and a reader inside <code>namespace App</code> qualifies an unprefixed
+   <code>Foo\Bar</code> as <code>App\Foo\Bar</code>. <code>qualify_class_keyword</code>, the initializer
+   qualifier and a <code>Foo::class</code> parameter default write <code>\Foo\Bar::X</code>.</li>
+<li><strong>Text written in another file is not read with the reader's loaders.</strong>
+   A callee's parameter defaults, a constant's initializer and a parent's
+   docblock were written against their own file's imports. Qualify them when
+   that file is parsed, or resolve them as resolved names, never through the
+   call site's source loader.</li>
+<li><strong>Identify classes by FQN.</strong> <code>ClassInfo::name</code> is the short name, and
+   <code>class_lookup::find_class_by_name</code> matches a bare name against the
+   classes of every namespace block in the file. Use <code>ClassInfo::fqn()</code> and
+   <code>find_class_by_fqn</code> when the question is "which class".</li>
+</ol>
+<p>A change to name resolution needs tests with a global class and a
+namespaced class sharing one short name: the global one imported, not
+imported, and written with a leading <code>\</code>; inside a namespace and in the
+global namespace; and read from a caller in a different namespace than the
+file that declares it.</p>
 <h2 id="symbol-resolution-find_or_load_class">Symbol Resolution: <code>find_or_load_class</code><a class="headerlink" href="#symbol-resolution-find_or_load_class" title="Permanent link">&para;</a></h2>
 <p>When the LSP needs to resolve a class name (e.g. during completion on <code>Iterator::</code> or when following a type hint), it calls <code>find_or_load_class</code>. This method tries four phases in order, returning as soon as one succeeds:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>find_or_load_class("Iterator")
@@ -4527,7 +4647,7 @@ span it is looking at can be reached.</p>
 <li><strong>Unqualified, not in use map</strong> → prepend current namespace.</li>
 <li><strong>No namespace</strong> → keep as-is.</li>
 </ol>
-<p>This runs on <code>parent_class</code>, <code>used_traits</code>, and <code>mixins</code> for every <code>ClassInfo</code> extracted from a file.</p>
+<p>This runs on every name a <code>ClassInfo</code> extracted from a file carries: its parents, interfaces, traits and mixins, its members' native and docblock types, its <code>@property</code> and <code>@method</code> tags, and the classes its constants' initializers name. A function's types get the same treatment. Names read later, in a method body or by whoever consumes a resolved name, follow <a href="#source-names-and-resolved-names">Source Names and Resolved Names</a>.</p>
 
 
 
