@@ -5134,6 +5134,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>instanceof</code> on an <code>object</code> no longer sticks after the <code>if</code>.</strong> Once an <code>if ($o instanceof Foo)</code> with no <code>else</code> ends, <code>$o</code> is plain <code>object</code> again, and calls on it are no longer reported as missing from <code>Foo</code>.</li>
 <li><strong>Identity checks on values of unknown type.</strong> <code>assert($array[1] === null)</code> or <code>if ($x === 'a')</code> now narrows the checked value even when its type could not be resolved, such as an offset on an object of a missing class.</li>
 <li><strong><code>key-of</code> and <code>value-of</code> read in the function's own file.</strong> A <code>key-of&lt;Foo::BAR&gt;</code> or <code>value-of&lt;Suit&gt;</code> in a function's docblock now names the class the function's file imports or declares, rather than one the caller happens to have under the same short name.</li>
 <li><strong>Functions in a global <code>namespace { }</code> block.</strong> A function declared in an unnamed <code>namespace { }</code> block after a named one is now global, instead of being placed in the earlier block's namespace.</li>
