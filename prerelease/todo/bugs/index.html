@@ -11,6 +11,7 @@
         <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/bugs/">
       
       
+      
         <link rel="prev" href="../blade/">
       
       
@@ -21,7 +22,7 @@
       
       
       <link rel="icon" href="../../assets/spookaphant.svg">
-      <meta name="generator" content="zensical-0.0.69">
+      <meta name="generator" content="zensical-0.0.70">
     
     
       
@@ -32,12 +33,12 @@
       
         
       
-      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e15858d4.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e442bf79.min.css">
       
         
           
         
-        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.b27955a4.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.b60ce83d.min.css">
       
       
 
@@ -949,6 +950,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b616-phpstan-quick-fixes-write-n-line-endings-into-rn-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B616. PHPStan quick fixes write <code>\n</code> line endings into <code>\r\n</code> files
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b617-add-throws-is-not-offered-when-the-method-body-has-a-in-a-string-before-the-throw" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B617. "Add @throws" is not offered when the method body has a <code>}</code> in a string before the throw
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1539,6 +1568,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b616-phpstan-quick-fixes-write-n-line-endings-into-rn-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B616. PHPStan quick fixes write <code>\n</code> line endings into <code>\r\n</code> files
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b617-add-throws-is-not-offered-when-the-method-body-has-a-in-a-string-before-the-throw" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B617. "Add @throws" is not offered when the method body has a <code>}</code> in a string before the throw
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1604,7 +1661,32 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b616-phpstan-quick-fixes-write-n-line-endings-into-rn-files">B616. PHPStan quick fixes write <code>\n</code> line endings into <code>\r\n</code> files<a class="headerlink" href="#b616-phpstan-quick-fixes-write-n-line-endings-into-rn-files" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>In a file saved with <code>\r\n</code> line endings, the text a PHPStan quick fix
+inserts (an <code>#[Override]</code> line, an <code>@throws</code> or <code>@return</code> tag, a whole new
+docblock) ends its lines with <code>\n</code>, and a docblock the fix rewrites comes
+back with all of its lines ending in <code>\n</code>. The file is left with mixed line
+endings. <code>sort_use_statements</code> and <code>insert_translation_key</code> already use the
+file's own terminator (<code>content.contains("\r\n")</code>, each with its own copy
+of the check); the actions in <code>code_actions/phpstan/</code> and the shared edits
+in <code>code_actions/docblock_edit.rs</code> write a literal <code>\n</code>. One
+<code>line_ending(content)</code> helper in <code>text_position.rs</code> would serve all of
+them.</p>
+<h3 id="b617-add-throws-is-not-offered-when-the-method-body-has-a-in-a-string-before-the-throw">B617. "Add @throws" is not offered when the method body has a <code>}</code> in a string before the throw<a class="headerlink" href="#b617-add-throws-is-not-offered-when-the-method-body-has-a-in-a-string-before-the-throw" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">public function second(): void {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    $close = '}';</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    throw new \RuntimeException();   // no "Add @throws" action</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>find_enclosing_docblock</code> in <code>code_actions/phpstan/add_throws.rs</code> finds the
+method by counting braces backwards from the diagnostic line, without
+skipping strings or comments. The <code>}</code> in the literal throws the count off
+by one, the scan settles on the class's <code>{</code>, and with no <code>function</code>
+keyword before it the action is dropped. <code>find_enclosing_function_line_range</code>
+in the same file already locates the method through the parsed AST; the
+docblock lookup should start from that method's span (refactor.md item 2).</p>
 
 
 
@@ -1668,10 +1750,10 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
       
         
         
-      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"redirect":null,"search":"../../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"redirect":null,"search":"../../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.8b1c90bd.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a2388154.min.js"></script>
       
     
   </body>
