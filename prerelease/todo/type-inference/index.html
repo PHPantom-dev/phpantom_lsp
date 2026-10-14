@@ -1840,7 +1840,7 @@ separate resolver. Lower-value cases can wait: <code>use (&amp;$x)</code> fixed 
 nested closures typed from an expected return type, generator escapes.</p>
 <p><strong>Where to look:</strong> ours: <code>forward_walk/closures.rs</code>,
 <code>forward_walk/callable_inference.rs</code>, <code>diagnostic_walk.rs</code>
-(<code>walk_closures_in_call</code>, <code>seed_closure_params</code>), <code>rhs_resolution/calls.rs</code>
+(<code>walk_closures_in_call</code>, <code>seed_closure_params</code>), <code>rhs_resolution/function_calls.rs</code>
 (<code>$f()</code> reads only the variable's callable return type today).</p>
 <hr />
 <h2 id="t41-a-reading-of-the-callees-body-overrides-a-declared-param-out">T41. A reading of the callee's body overrides a declared <code>@param-out</code><a class="headerlink" href="#t41-a-reading-of-the-callees-body-overrides-a-declared-param-out" title="Permanent link">&para;</a></h2>

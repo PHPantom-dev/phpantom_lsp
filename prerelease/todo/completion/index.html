@@ -2030,7 +2030,7 @@ access does not get the same treatment:</p>
 </code></pre></div>
 <p>Every caller of <code>trait_this_bounds</code>/<code>extend_this_with_trait_bounds</code> is on
 a <code>$this</code>-context resolution path (<code>forward_walk/param_seeding.rs</code>,
-<code>forward_walk/callable_inference.rs</code>, <code>resolver/mod.rs</code>, and
+<code>forward_walk/callable_inference.rs</code>, <code>resolver/variable_subjects.rs</code>, and
 <code>rhs_resolution/property_access.rs</code>). None of them run for a bare
 <code>self::</code>/<code>static::</code> completion inside a trait body, so the required
 class's constants and static properties/methods never enter the
