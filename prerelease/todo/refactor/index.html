@@ -1817,50 +1817,7 @@ multi-week rewrites that would stall the sprint indefinitely).</p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<p>Filed by a refactoring pass on 2026-10-14 that worked through duplicated
-code in the files changed since 0.11.1 without running the full Step 3
-checklist. Each item touches its own set of files.</p>
-<h2 id="1-one-per-offset-resolution-context-for-the-diagnostic-collectors">1. One per-offset resolution context for the diagnostic collectors<a class="headerlink" href="#1-one-per-offset-resolution-context-for-the-diagnostic-collectors" title="Permanent link">&para;</a></h2>
-<p>Ten collectors build the same resolution environment by hand. Once per
-file they take <code>class_loaders</code>, <code>resolved_class_loaders</code> and
-<code>function_loaders</code> (and often <code>constant_loader_with</code> through
-<code>file_ctx.per_block</code>); then at every site they pick each loader with
-<code>.at(offset)</code>, find the enclosing class (falling back to a
-<code>ClassInfo::default()</code>), and fill in
-<code>VarResolutionCtx { source_imports: Some(file_ctx.use_map_at(offset)),
-backend: Some(self), loaders: …, resolved_class_cache:
-Some(&amp;self.resolved_class_cache), ..VarResolutionCtx::new(…) }</code>.</p>
-<p>Add a struct built once per file, next to <code>class_loaders</code> in
-<code>src/resolution/loaders.rs</code>, that owns the per-block loaders and hands out
-the <code>VarResolutionCtx</code> for an offset. Use it in
-<code>blade/call_site_inference.rs</code>, <code>blade/typed_receiver.rs</code>,
-<code>virtual_members/laravel/typed_morph_columns.rs</code>,
-<code>backend/laravel/macros.rs</code>, and <code>diagnostics/</code> <code>unknown_members/mod.rs</code>,
-<code>type_errors/mod.rs</code>, <code>match_type_errors.rs</code>, <code>destructuring_offsets.rs</code>,
-<code>deprecated.rs</code> and <code>readonly_writes.rs</code>.</p>
-<h2 id="2-one-way-to-find-the-docblock-above-a-function-in-the-code-actions">2. One way to find the docblock above a function in the code actions<a class="headerlink" href="#2-one-way-to-find-the-docblock-above-a-function-in-the-code-actions" title="Permanent link">&para;</a></h2>
-<p>There are three: <code>find_docblock_above_line</code> (a byte span,
-<code>DocblockAbove</code>) and <code>find_function_docblock</code> (line indices,
-<code>FunctionDocblock</code>) in <code>code_actions/docblock_edit.rs</code>, and
-<code>find_enclosing_docblock</code> (<code>DocblockInfo</code>) in
-<code>code_actions/phpstan/add_throws.rs</code>, which finds the method by counting
-braces back from a line in its body (B617). Locate the declaration through
-the parsed AST, the way <code>find_enclosing_function_line_range</code> in
-<code>add_throws.rs</code> already does, read the docblock from its span, and give the
-three callers that one model. Files: <code>code_actions/docblock_edit.rs</code>,
-<code>code_actions/phpstan/add_throws.rs</code>, and the users of
-<code>find_function_docblock</code> (<code>add_iterable_type.rs</code>,
-<code>fix_return_type/mod.rs</code>, <code>fix_return_type/edits.rs</code>,
-<code>remove_unused_return_type.rs</code>).</p>
-<h2 id="3-share-the-written-name-helpers-of-forwardwalkctx-and-varresolutionctx">3. Share the written-name helpers of <code>ForwardWalkCtx</code> and <code>VarResolutionCtx</code><a class="headerlink" href="#3-share-the-written-name-helpers-of-forwardwalkctx-and-varresolutionctx" title="Permanent link">&para;</a></h2>
-<p><code>written_class_names</code>, <code>resolve_written_type</code>, <code>resolve_hint_type</code> and
-<code>resolve_written_class</code> have identical bodies on <code>VarResolutionCtx</code>
-(<code>type_engine/resolver/context.rs</code>) and on <code>ForwardWalkCtx</code>
-(<code>type_engine/variable/forward_walk/walk_ctx.rs</code>). All four read the same
-six fields: <code>current_class</code>, <code>source_imports</code>, <code>content</code>, <code>cursor_offset</code>,
-<code>all_classes</code> and <code>source_class_loader</code>. Put those fields behind one small
-view type that carries the four methods, and have both contexts hand it
-out.</p>
+<p>No outstanding items.</p>
 
 
 

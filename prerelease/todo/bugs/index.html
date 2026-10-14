@@ -965,10 +965,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b617-add-throws-is-not-offered-when-the-method-body-has-a-in-a-string-before-the-throw" class="md-nav__link">
+  <a href="#b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B617. "Add @throws" is not offered when the method body has a <code>}</code> in a string before the throw
+        B618. "Update return type" on a closure writes the enclosing method's type
       </span>
     </span>
   </a>
@@ -1583,10 +1583,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b617-add-throws-is-not-offered-when-the-method-body-has-a-in-a-string-before-the-throw" class="md-nav__link">
+  <a href="#b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B617. "Add @throws" is not offered when the method body has a <code>}</code> in a string before the throw
+        B618. "Update return type" on a closure writes the enclosing method's type
       </span>
     </span>
   </a>
@@ -1673,20 +1673,30 @@ of the check); the actions in <code>code_actions/phpstan/</code> and the shared 
 in <code>code_actions/docblock_edit.rs</code> write a literal <code>\n</code>. One
 <code>line_ending(content)</code> helper in <code>text_position.rs</code> would serve all of
 them.</p>
-<h3 id="b617-add-throws-is-not-offered-when-the-method-body-has-a-in-a-string-before-the-throw">B617. "Add @throws" is not offered when the method body has a <code>}</code> in a string before the throw<a class="headerlink" href="#b617-add-throws-is-not-offered-when-the-method-body-has-a-in-a-string-before-the-throw" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">public function second(): void {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    $close = '}';</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    throw new \RuntimeException();   // no "Add @throws" action</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
+<h3 id="b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type">B618. "Update return type" on a closure writes the enclosing method's type<a class="headerlink" href="#b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">public function run(): array {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    $f = function (): string {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">        return 42;   // PHPStan: Anonymous function should return string but returns int.</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    };</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    return [];</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
 </code></pre></div>
-<p><code>find_enclosing_docblock</code> in <code>code_actions/phpstan/add_throws.rs</code> finds the
-method by counting braces backwards from the diagnostic line, without
-skipping strings or comments. The <code>}</code> in the literal throws the count off
-by one, the scan settles on the class's <code>{</code>, and with no <code>function</code>
-keyword before it the action is dropped. <code>find_enclosing_function_line_range</code>
-in the same file already locates the method through the parsed AST; the
-docblock lookup should start from that method's span (refactor.md item 2).</p>
+<p>The quick fix rewrites the closure to <code>function (): array</code> and adds a
+<code>@return array{}</code> docblock above the statement: the type it writes is the
+method's, not the closure's. The return-type quick fixes
+(<code>code_actions/phpstan/fix_return_type/</code>, <code>remove_unused_return_type.rs</code>,
+<code>add_iterable_type.rs</code>) find their function by scanning text (braces back
+from the diagnostic line, the <code>)</code> before the <code>{</code>, the line holding
+<code>function</code>), and the inference behind them (<code>declared_body</code> in
+<code>fix_return_type/inference.rs</code>) then looks for a named function or method
+around the body brace, so a closure resolves to the method it sits in. An
+arrow function has no brace at all, and the text scan lands on the
+method's. Locate the function through the parsed AST instead
+(<code>find_enclosing_function</code> in <code>code_actions/cursor_context.rs</code>, with
+<code>FunctionKinds::All</code>) and read the native return type, the body to infer
+from and the docblock (already <code>paren_function_docblock</code>) from that one
+node.</p>
 
 
 
