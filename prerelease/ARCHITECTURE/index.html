@@ -3336,12 +3336,12 @@ sit next to.</p>
 <a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>├── scope_collector/        # Variable scope-map construction
 <a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>├── classmap_scanner/       # Byte-level PHP scanning for class discovery (no full parse)
 <a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>├── composer.rs             # composer.json / PSR-4 autoload parsing
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>├── names.rs                # Name resolution (FQN, use-map, namespace)
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>├── names/                  # Name resolution: written names via imports/namespace, docblock template/alias scoping, per-file resolved names
 <a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>├── reference_index.rs      # Workspace-wide reference index for find-references / rename
 <a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>├── reference_counts.rs     # Bounded exact member-reference cache for declaration hints and lenses
 <a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│
 <a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│   # Class &amp; type resolution
-<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>├── resolution.rs           # Multi-phase class/function lookup across files (find_or_load_class)
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>├── resolution/             # Multi-phase class/function lookup across files (find_or_load_class), lazy parsing, loader closures
 <a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>├── class_lookup.rs         # Subtype checks (is_subtype_of_typed) and class-lookup helpers
 <a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>├── inheritance/            # Parent/trait/mixin member merging, generics substitution
 <a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>├── virtual_members/        # Synthesized members: phpdoc.rs (@method/@property/@mixin) + laravel/ (one file per Eloquent/framework feature)
@@ -3381,31 +3381,33 @@ sit next to.</p>
 <a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>│
 <a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>│   # Diagnostics
 <a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>├── diagnostics/
-<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>│   ├── mod.rs              # Native collection/publishing orchestration + scheduling
-<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>│   ├── external/           # PHPStan / PHPCS / PHPMD / Mago subprocess pipelines
-<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>│   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
-<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>│   └── &lt;collector&gt;.rs      # One module per diagnostic (unknown_classes, unknown_functions,
-<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>│                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
-<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>│
-<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>│   # External tools &amp; CLI subcommands
-<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>├── phpstan.rs, phpcs.rs, phpmd.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
-<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
-<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
-<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a>├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
-<a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a>├── self_update.rs          # Binary self-update
-<a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a>│
-<a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a>│   # Blade &amp; shared utilities
-<a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a>├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
-<a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a>└── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
-<a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a>
-<a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a>build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
-<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a>stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
-<a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>tests/
-<a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a>├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
-<a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>├── unit/                   # Unit tests (composer, docblock, named args, …)
-<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a>├── fixtures/               # Fixtures driven by fixture_runner.rs
-<a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a>├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var =&gt; 'ExpectedType'` assertion suites ported from Psalm / PHPStan
-<a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a>└── assert_type_runner.rs, fixture_runner.rs
+<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>│   ├── mod.rs              # Module map, code naming rules, shared range helpers
+<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>│   ├── collect.rs          # Running the fast and slow collectors over one file
+<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>│   ├── delivery.rs         # Debounced scheduling, two-phase publish, push and pull delivery, the worker
+<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>│   ├── external/           # PHPStan / PHPCS / PHPMD / Mago subprocess pipelines
+<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>│   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
+<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>│   └── &lt;collector&gt;.rs      # One module per diagnostic (unknown_classes, unknown_functions,
+<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>│                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
+<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>│
+<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>│   # External tools &amp; CLI subcommands
+<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>├── phpstan.rs, phpcs.rs, phpmd.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
+<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a>├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
+<a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a>├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
+<a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a>├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
+<a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a>├── self_update.rs          # Binary self-update
+<a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a>│
+<a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a>│   # Blade &amp; shared utilities
+<a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a>├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
+<a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a>└── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
+<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a>
+<a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
+<a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a>stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
+<a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>tests/
+<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a>├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
+<a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a>├── unit/                   # Unit tests (composer, docblock, named args, …)
+<a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a>├── fixtures/               # Fixtures driven by fixture_runner.rs
+<a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a>├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var =&gt; 'ExpectedType'` assertion suites ported from Psalm / PHPStan
+<a id="__codelineno-0-90" name="__codelineno-0-90" href="#__codelineno-0-90"></a>└── assert_type_runner.rs, fixture_runner.rs
 </code></pre></div>
 <p><strong>The shared type engine lives under <code>type_engine/</code>.</strong> <code>type_engine/resolver/</code>,
 <code>type_engine/variable/</code> (including the <code>forward_walk/</code> forward walker),
@@ -3728,7 +3730,7 @@ two kinds, and each kind has one rule:</p>
   PHP falls back to the global namespace only for functions and constants,
   and PHPStan, Psalm and Mago read docblock names the same way. The source
   loader applies this rule. Resolve a name in code with
-  <code>util::resolve_code_class_name</code> (or the contexts' <code>resolve_written_class</code>),
+  <code>names::resolve_code_class_name</code> (or the contexts' <code>resolve_written_class</code>),
   a native hint with <code>resolve_hint_type</code>, and a docblock type with
   <code>resolve_written_type</code>.</li>
 <li><strong>Resolved names</strong> (<code>ClassInfo::fqn()</code>, <code>parent_class</code>, stored member
