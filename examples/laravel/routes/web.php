@@ -1,5 +1,6 @@
 <?php
 use App\Http\Controllers\BakeryController;
+use App\Http\Controllers\ResourceDemoController;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use Illuminate\Support\Facades\Route;
@@ -39,6 +40,21 @@ Route::prefix('bakeries')
 // name, singularizing each segment to build the {parameters}.  This nested
 // name yields bakeries/{bakery}/ovens and bakeries/{bakery}/ovens/{oven}.
 Route::resource('bakeries.ovens', BakeryController::class)->only(['index', 'show']);
+
+// Plural registrations generate the usual routes for every array entry.
+// Singletons keep the parent parameter but have no parameter of their own.
+Route::name('catalog.')->prefix('catalog')->group(function () {
+    Route::resources([
+        'collections' => ResourceDemoController::class,
+        'menus' => ResourceDemoController::class,
+    ]);
+    Route::apiResources([
+        'deliveries' => ResourceDemoController::class,
+        'orders' => ResourceDemoController::class,
+    ]);
+    Route::singleton('bakeries.profile', ResourceDemoController::class)->creatable();
+    Route::apiSingleton('status', ResourceDemoController::class)->destroyable();
+});
 
 // A route file pulled in by path rather than by closure.  The path is held in
 // a variable, which PHPantom follows back to the assignment, so the routes

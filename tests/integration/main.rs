@@ -210,6 +210,7 @@ mod laravel_provider_refresh;
 mod laravel_references;
 mod laravel_request_input;
 mod laravel_request_keys;
+mod laravel_resource_registrations;
 mod laravel_route_controller;
 mod laravel_route_discovery;
 mod laravel_route_folio;
