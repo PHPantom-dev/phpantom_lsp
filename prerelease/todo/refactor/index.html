@@ -1817,7 +1817,105 @@ multi-week rewrites that would stall the sprint indefinitely).</p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<p>No outstanding items.</p>
+<p>Filed by the Step 3 analysis on 2026-10-15, run over every source file
+changed since 0.11.1. Items 1-2 are prerequisites for Sprint 8 tasks
+(D26, BL1); the rest came out of the change-set sweep. Each item touches
+its own set of files.</p>
+<h2 id="1-share-the-constructor-initialisation-facts-with-d26">1. Share the constructor-initialisation facts with D26<a class="headerlink" href="#1-share-the-constructor-initialisation-facts-with-d26" title="Permanent link">&para;</a></h2>
+<p><code>class_init_facts</code> and <code>ClassInitFacts</code>
+(<code>src/diagnostics/readonly_writes.rs:132-150, 271-330</code>) work out which
+properties a class's constructor is guaranteed to have initialised
+(promoted parameters plus unconditional top-level <code>$this-&gt;x = …</code>). D26's
+declaration-side check needs exactly that set. Move both, with <code>is_this</code>,
+into a module of their own under <code>src/diagnostics/</code> as <code>pub(crate)</code> so
+D26 builds on them instead of writing a second scan.</p>
+<h2 id="2-split-the-use-line-deletion-edits-out-of-remove_unused_importrs">2. Split the use-line deletion edits out of <code>remove_unused_import.rs</code><a class="headerlink" href="#2-split-the-use-line-deletion-edits-out-of-remove_unused_importrs" title="Permanent link">&para;</a></h2>
+<p><code>src/code_actions/remove_unused_import.rs</code> has 688 production lines doing
+two jobs: the code action handlers (37-193) and the edit builders that
+delete a <code>use</code> line, a group member or a Blade <code>@use</code> directive (194-688),
+which <code>fix.rs</code> also calls through the re-export in <code>code_actions/mod.rs</code>.
+BL1 changes both halves. Move 194-688 (<code>range_touches_use_import</code>,
+<code>build_line_deletion_edit</code>, <code>build_use_directive_deletion_edit</code> and their
+private helpers) with their unit tests into
+<code>src/code_actions/use_line_deletion.rs</code>.</p>
+<h2 id="3-remove-per-edit-and-per-call-waste-in-indexing-and-resolution">3. Remove per-edit and per-call waste in indexing and resolution<a class="headerlink" href="#3-remove-per-edit-and-per-call-waste-in-indexing-and-resolution" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>symbols.method_store</code> (<code>src/symbol_index.rs:225-249</code>) is filled on
+  every parse and evicted on every edit with a full-map <code>retain</code> per
+  FQN, but nothing outside tests and <code>mem_audit.rs</code> reads it. Delete
+  <code>MethodStore</code>, its population and eviction, the tests that assert on it
+  (<code>indexing/watch.rs</code>, <code>resolution/tests.rs</code>, <code>parser/ast_update.rs</code>),
+  its <code>mem_audit.rs</code> probe, and the "first step toward" comment in
+  <code>src/types/method.rs:13-19</code>.</li>
+<li><code>src/parser/ast_update.rs:1525-1531</code> scans every class in
+  <code>uri_classes_index</code> on an edit that evicts classes, allocating
+  <code>class.fqn().to_string()</code> per class for a linear <code>contains</code>. Binary
+  search the already sorted <code>evicted_fqns</code> by <code>&amp;str</code>, or look the evicted
+  FQNs up through their URIs.</li>
+<li><code>rhs_resolution/static_calls.rs:93-98</code> deep-clones the owner class
+  (<code>Arc::unwrap_or_clone</code> on a cached <code>Arc</code>) on every <code>Foo::bar()</code>
+  resolution though <code>static_call_on_class</code> takes <code>&amp;ClassInfo</code>; the same
+  happens in <code>closure_resolution.rs</code> (<code>find_owner_by_name</code>, ~590-600, 715,
+  719) and <code>forward_walk/callable_inference.rs:400</code>. Keep the <code>Arc</code>
+  (<code>ResolvedType::from_arc</code>).</li>
+</ul>
+<h2 id="4-split-the-large-type-engine-files-along-their-seams">4. Split the large type-engine files along their seams<a class="headerlink" href="#4-split-the-large-type-engine-files-along-their-seams" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>src/type_engine/types/conditional.rs</code> (1,935 production lines): move
+  the 230-line <code>class-string</code> branch (309-540) into its own function and
+  the argument-form classification (742-1090) into
+  <code>conditional/arg_form.rs</code>.</li>
+<li><code>src/type_engine/variable/forward_walk/assignment.rs</code> (1,960): move the
+  assert, guard and <code>@phpstan-self-out</code> narrowing (1393-1960) to
+  <code>forward_walk/assert_narrowing.rs</code>.</li>
+<li><code>src/parser/ast_update.rs</code>: <code>apply_ast_index_updates_batch</code> (988-1672)
+  is one 684-line function. Extract its function/define publication
+  (1189-1376), resolved-class cache invalidation (1417-1572) and Laravel
+  candidate refresh (1574-1640) phases.</li>
+<li><code>src/type_engine/call_resolution/template_subs.rs</code>: move constant and
+  type-operator operand evaluation (1138-1391) to
+  <code>call_resolution/constant_operands.rs</code>.</li>
+<li><code>src/php_type/normalize.rs</code>: move the runtime-value join and
+  containment (265-333, 407-681) to <code>php_type/runtime_join.rs</code>.</li>
+</ul>
+<h2 id="5-move-logic-out-of-four-modrs-files">5. Move logic out of four <code>mod.rs</code> files<a class="headerlink" href="#5-move-logic-out-of-four-modrs-files" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>src/type_engine/variable/rhs_resolution/mod.rs</code>: the branch and arm
+  helpers (274-1083) to <code>rhs_resolution/branches.rs</code>.</li>
+<li><code>src/inheritance/mod.rs</code>: <code>resolve_class_with_inheritance</code> (173-621)
+  and the rebind code (621-779) to files of their own.</li>
+<li><code>src/virtual_members/laravel/mod.rs</code> (~1,100 lines of logic after the
+  <code>mod</code> declarations): collection rewriting (379-640) to
+  <code>collections.rs</code>, <code>expand_model_type</code> and its helpers (641-890) to
+  <code>model_type.rs</code>, table-name derivation and pluralisation (936-1018) to
+  <code>table_names.rs</code>.</li>
+<li><code>src/hover/mod.rs</code>: the Laravel and Blade hover (626-1002:
+  <code>hover_laravel_string_key</code>, <code>blade_block_detail</code>,
+  <code>gate_ability_detail</code>, <code>try_model_property_hover</code>) to <code>hover/laravel.rs</code>
+  next to <code>laravel_trans.rs</code>.</li>
+</ul>
+<h2 id="6-split-virtual_memberslaravelprovider_resourcesrs">6. Split <code>virtual_members/laravel/provider_resources.rs</code><a class="headerlink" href="#6-split-virtual_memberslaravelprovider_resourcesrs" title="Permanent link">&para;</a></h2>
+<p>2,779 lines (~1,640 production) built around one ~400-line closure in
+<code>extract_provider_resources</code> (421-819), doing four jobs: the data model
+and <code>ProviderScans</code> (1-420), container bindings (583-667, 821-910,
+1356-1540), Blade and view registration (930-1170), and spatie
+package-tools plus path resolution (1195-1356, 1543-1640). Make it a
+directory with <code>mod.rs</code> (the model), <code>extract.rs</code>, <code>bindings.rs</code>,
+<code>views.rs</code>, <code>package_tools.rs</code> and <code>paths.rs</code>. Build <code>PathContext</code> once
+instead of three times inside the closure (484, 514, 677) and have
+<code>resolve_path_arg</code> take it rather than the same five arguments at six
+call sites.</p>
+<h2 id="7-test-placement">7. Test placement<a class="headerlink" href="#7-test-placement" title="Permanent link">&para;</a></h2>
+<p>Seven tests in <code>src/parser/ast_update.rs</code> (2035-2110, 2201, 2247) use only
+<code>Backend::new_test</code> and <code>update_ast</code>; move them to <code>tests/integration/</code>.</p>
+<h2 id="8-small-leftovers">8. Small leftovers<a class="headerlink" href="#8-small-leftovers" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>src/php_type/normalize.rs:766-777</code>: the doc comment for
+  <code>has_duplicate_members</code> is merged into <code>absorb_exact_class_names</code>'s.</li>
+<li><code>resolved_type_with_lookup</code>
+  (<code>src/type_engine/variable/rhs_resolution/mod.rs:508</code>) never uses its
+  <code>_current_class_name</code> parameter.</li>
+</ul>
 
 
 
