@@ -1,4 +1,4 @@
-//! Tests for the config-key diagnostic.
+//! Tests for config-key completion and diagnostics.
 //!
 //! A library package ships no `config/` directory of its own: its keys come
 //! from the host application's config files, which we never see.  Keys under
@@ -7,7 +7,10 @@
 //! names, so a later read of that key is as valid as a read of one declared
 //! on disk.
 
-use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace};
+use crate::common::{
+    LARAVEL_SRC_COMPOSER, complete_at_opened, create_initialized_psr4_workspace,
+    create_psr4_workspace, position_after,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -159,4 +162,72 @@ async fn a_library_reads_config_its_host_application_declares() {
         messages.is_empty(),
         "a package's config comes from the application that installs it, got: {messages:?}"
     );
+}
+
+#[tokio::test]
+async fn config_array_keys_complete_and_replace_the_typed_prefix() {
+    let consumer = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Config;
+
+Config::set(['app.na' => 'Acme']);
+Config::set(array('app.na' => 'Acme'));
+config(['app.na' => 'Acme']);
+config(array('app.na' => 'Acme'));
+Config::set(['app.name' => 'app.na']);
+config(['app.name' => 'app.na']);
+Config::set('app.name', ['app.na' => 'Acme']);
+config('app.name', ['app.na' => 'Acme']);
+"#;
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_SRC_COMPOSER,
+        &[
+            ("config/app.php", APP_CONFIG),
+            ("src/Settings.php", consumer),
+        ],
+        "src/Settings.php",
+    )
+    .await;
+
+    for needle in [
+        "Config::set(['app.na",
+        "Config::set(array('app.na",
+        "config(['app.na",
+        "config(array('app.na",
+    ] {
+        let position = position_after(consumer, needle);
+        let items = complete_at_opened(&backend, &uri, position.line, position.character).await;
+        let prefix = &needle[needle.len() - 6..];
+        assert!(items.iter().all(|item| item.label.starts_with(prefix)));
+        let item = items
+            .iter()
+            .find(|item| item.label == "app.name")
+            .unwrap_or_else(|| panic!("completion at `{needle}`: {items:?}"));
+        assert_eq!(item.kind, Some(CompletionItemKind::PROPERTY));
+        let Some(CompletionTextEdit::Edit(edit)) = &item.text_edit else {
+            panic!("config key completion should replace the typed prefix");
+        };
+        assert_eq!(edit.new_text, "app.name");
+        assert_eq!(
+            edit.range,
+            Range::new(
+                Position::new(position.line, position.character - 6),
+                position,
+            ),
+        );
+    }
+
+    for needle in [
+        "Config::set(['app.name' => 'app.na",
+        "config(['app.name' => 'app.na",
+        "Config::set('app.name', ['app.na",
+        "config('app.name', ['app.na",
+    ] {
+        let position = position_after(consumer, needle);
+        let items = complete_at_opened(&backend, &uri, position.line, position.character).await;
+        assert!(
+            items.iter().all(|item| item.label != "app.name"),
+            "config keys should not complete at `{needle}`, got {items:?}",
+        );
+    }
 }

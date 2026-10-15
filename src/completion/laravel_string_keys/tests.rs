@@ -787,6 +787,8 @@ fn detects_every_forget_disk_array_value_and_spelling() {
         "Storage::forgetDisk(array('archive', 'backup'))",
         "Storage::forgetDisk(disk: ['archive', 'backup'])",
         "Storage::forgetDisk(disk: array('archive', 'backup'))",
+        "Storage::forgetDisk([$fn => 'archive', Keys::fn() => 'backup'])",
+        "Storage::forgetDisk([$caféfn => 'archive', fnclé => 'backup'])",
     ] {
         let content = storage_source(expression);
         for value in ["archive", "backup"] {
@@ -843,6 +845,34 @@ fn forget_disk_array_completion_filters_and_edits_the_current_value() {
             new_text: "archive".to_string(),
         }))
     );
+}
+
+#[test]
+fn string_key_completion_ignores_calls_outside_php_code() {
+    let backend = crate::Backend::new_test();
+    backend.laravel_string_key_cache.write().config_keys =
+        Some(vec!["app.name".to_string()].into());
+
+    let call = "Config::set(['app.na' => 'Demo']);";
+    for (content, is_code) in [
+        (format!("<?php\n{call}"), true),
+        (format!("<?php\n// {call}"), false),
+        (format!("<?php\n# {call}"), false),
+        (format!("<?php\n/* {call} */"), false),
+        (format!("<?php\n$template = <<<'PHP'\n{call}\nPHP;"), false),
+        (format!("<?php ?>\n{call}"), false),
+    ] {
+        let cursor = content.find("app.na").unwrap() + "app.na".len();
+        let position = crate::text_position::offset_to_position(&content, cursor);
+        let response = backend.try_laravel_string_key_completion(&content, position);
+        if is_code {
+            let items = completion_response_items(response.expect("a config key in PHP code"));
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].label, "app.name");
+        } else {
+            assert!(response.is_none(), "unexpected completion in {content}");
+        }
+    }
 }
 
 #[test]
@@ -904,11 +934,10 @@ fn rejects_invalid_resource_argument_names_and_shapes() {
 
 #[test]
 fn storage_argument_scanners_handle_nested_and_malformed_php() {
-    let before_named = r#"Storage::fake(config: ['message' => 'it\'s', 'factory' => wrap(fn () => new class {})], disk:"#;
-    assert_eq!(
-        callable_before_scalar_argument(before_named),
-        Some(("Storage::fake", Some("disk")))
+    let named = storage_source(
+        r#"Storage::fake(config: ['message' => 'it\'s', 'factory' => wrap(fn () => new class {})], disk: 'archive')"#,
     );
+    assert!(detect_at_end(&named, "archive").is_some());
 
     let nested = r#"<?php
 use Illuminate\Support\Facades\Storage;
@@ -917,20 +946,21 @@ Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive'
         .expect("balanced nested expressions must not hide the outer array");
     assert_eq!(ctx.config_sub_prefix, Some("filesystems.disks."));
 
-    assert!(callable_before_scalar_argument("Storage::disk(:").is_none());
-    assert!(callable_before_scalar_argument("Storage::disk(name: value").is_none());
-    assert!(callable_before_scalar_argument("orphan name:").is_none());
-    assert_eq!(
-        callable_before_scalar_argument("foo(prénom:"),
-        Some(("foo", Some("prénom"))),
-        "a non-ASCII argument name is read whole, not sliced mid-character"
-    );
-    assert!(enclosing_call_open_paren("completed(); orphan").is_none());
-    assert!(enclosing_call_open_paren("orphan").is_none());
-    assert!(callable_before_array_argument("factory('archive").is_none());
-    assert!(callable_before_array_argument("{ 'archive").is_none());
-    assert!(callable_before_array_argument("broken; 'archive").is_none());
-    assert!(callable_before_array_argument("orphan").is_none());
+    for source in [
+        "Storage::disk(:'archive",
+        "Storage::disk(name: value 'archive",
+        "orphan name:'archive",
+        "{ 'archive",
+        "broken; 'archive",
+        "orphan 'archive",
+    ] {
+        assert!(detect_at_end(source, "archive").is_none(), "{source}");
+    }
+    let source = "foo(prénom: 'archive";
+    let code =
+        crate::completion::source::code_context::code_context_at(source, source.len()).unwrap();
+    let argument = string_argument_context(source, &code, source.len()).unwrap();
+    assert_eq!(argument.named_argument, Some("prénom"));
 
     let escaped_key = r#"'key\'part' => 'archive'"#;
     assert!(string_literal_is_array_key(
@@ -955,6 +985,107 @@ Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive'
         "'value".len(),
         b'\'',
     ));
+}
+
+#[test]
+fn array_context_reports_the_call_parameter_and_key_position() {
+    let source =
+        "$query->whereHasMorph(relation: wrap('a,b', [1, 2]), /* '[( */ types: array('post', 'vi";
+    let code =
+        crate::completion::source::code_context::code_context_at(source, source.len()).unwrap();
+    let argument = string_argument_context(source, &code, source.len()).unwrap();
+    assert_eq!(argument.callable, "$query->whereHasMorph");
+    assert_eq!(argument.argument_index, 1);
+    assert_eq!(argument.named_argument, Some("types"));
+    assert!(matches!(argument.shape, StringArgumentShape::ArrayElement));
+}
+
+#[test]
+fn morph_and_config_arrays_complete_while_unfinished_and_across_comments() {
+    for (source, expected) in [
+        ("Relation::morphMap(['po", LaravelStringKind::MorphAlias),
+        (
+            "Relation /* receiver */ :: /* call */ morphMap(['po",
+            LaravelStringKind::MorphAlias,
+        ),
+        (
+            "$query-> /* call */ whereHasMorph('commentable', ['po",
+            LaravelStringKind::MorphAlias,
+        ),
+        (
+            "Relation::morphMap(array(/* key */ 'po",
+            LaravelStringKind::MorphAlias,
+        ),
+        (
+            "Relation::enforceMorphMap(merge: false, map: ['po",
+            LaravelStringKind::MorphAlias,
+        ),
+        (
+            "$query->whereHasMorph('commentable', ['video', /* '[( */ 'po",
+            LaravelStringKind::MorphAlias,
+        ),
+        (
+            "$query?->whereHasMorph(types: array('po",
+            LaravelStringKind::MorphAlias,
+        ),
+        (
+            "$query->whereHasMorph(types: 'po",
+            LaravelStringKind::MorphAlias,
+        ),
+        (
+            "$query->whereHasMorph(wrap('a,b', [1, 2]), ['po",
+            LaravelStringKind::MorphAlias,
+        ),
+        (
+            "Config::set(['po' /* note */ => true])",
+            LaravelStringKind::Config,
+        ),
+        (
+            "Config::set(value: null, key: array('first' => true, 'po' => false))",
+            LaravelStringKind::Config,
+        ),
+        ("config(['po", LaravelStringKind::Config),
+        (
+            "config(array('first' => true, /* '[( */ 'po",
+            LaravelStringKind::Config,
+        ),
+    ] {
+        let ctx = detect_at_end(source, "po").unwrap_or_else(|| panic!("{source}"));
+        assert_eq!(ctx.kind, expected, "{source}");
+        assert_eq!(ctx.prefix, "po");
+    }
+}
+
+#[test]
+fn array_context_does_not_leak_into_other_parameters_or_expressions() {
+    for source in [
+        "Relation::morphMap(['post' => 'po'])",
+        "Relation::morphMap(['prefix' . 'po' => Post::class])",
+        "Relation::morphMap([['po' => Post::class]])",
+        "Relation::morphMap(array(array('po' => Post::class)))",
+        "$query->whereHasMorph('commentable', ['po' => 'video'])",
+        "$query->whereHasMorph('commentable', ['post'], ['po'])",
+        "$query->whereHasMorph('commentable', ['prefix' . 'po'])",
+        "$query->whereHasMorph('commentable', [/* 'po */ 'video'])",
+        "$query->whereHasMorph('commentable', [TYPES['po']])",
+        "Config::set(['app.name' => 'po'])",
+        "Config::set('app.name', ['po'])",
+        "Config::set(['outer' => ['po' => true]])",
+        "config(['app.name' => 'po'])",
+        "config('app.name', ['po'])",
+        "route('home', ['po' => true])",
+        "view('home', ['po' => true])",
+        "Storage::forgetDisk(['po' => 'local'])",
+        "Storage::forgetDisk('local', ['po'])",
+        "Storage::forgetDisk([fn () => 'po'])",
+        "$query->whereHasMorph('commentable', [fn () => 'po'])",
+        "$query->whereHasMorph('commentable', ['x' => fn () => 'po'])",
+        "Storage::fake('local', 'po')",
+        "Route::middleware(['po' => 'auth:web'])",
+        "#[\\Illuminate\\Container\\Attributes\\Config('app.name', 'po')] class C {}",
+    ] {
+        assert!(detect_at_end(source, "po").is_none(), "{source}");
+    }
 }
 
 #[test]
