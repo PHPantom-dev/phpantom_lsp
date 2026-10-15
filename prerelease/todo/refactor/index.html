@@ -1817,7 +1817,37 @@ multi-week rewrites that would stall the sprint indefinitely).</p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<p>No outstanding items.</p>
+<p>Filed by a refactoring pass on 2026-10-15 that worked through duplicated
+code without running the full Step 3 checklist. Each item touches its own
+set of files.</p>
+<h2 id="1-one-enrichment-decision-for-generated-docblocks">1. One enrichment decision for generated docblocks<a class="headerlink" href="#1-one-enrichment-decision-for-generated-docblocks" title="Permanent link">&para;</a></h2>
+<p><code>enrichment_snippet</code> (a string with tab stops) and
+<code>enrichment_plain_typed_fqn</code> (a <code>PhpType</code>) in
+<code>src/completion/phpdoc/generation/build.rs</code> make the same decisions twice:
+a missing type becomes <code>mixed</code>, a bare <code>array</code> becomes <code>array&lt;mixed&gt;</code>, a
+bare callable gets a <code>(): mixed</code> signature, union members are enriched one
+by one, and a templated class gets its template parameters. Decide once,
+building the enriched <code>PhpType</code>, and render it either way through the
+<code>DocForm</code> in the same file, so the snippet and plain-text docblocks cannot
+drift apart. Files: <code>completion/phpdoc/generation/build.rs</code> and the four
+<code>enrichment_snippet</code> callers in <code>completion/phpdoc/mod.rs</code>.</p>
+<h2 id="2-one-code-offset-scan-for-the-text-based-throws-analysis">2. One code-offset scan for the text-based throws analysis<a class="headerlink" href="#2-one-code-offset-scan-for-the-text-based-throws-analysis" title="Permanent link">&para;</a></h2>
+<p>Four byte loops in <code>src/completion/source/throws_analysis/</code> open with the
+same string, <code>//</code> and <code>/* */</code> skipping (<code>find_throw_statements</code>,
+<code>find_throw_expression_types</code> and <code>find_propagated_throws</code> in
+<code>scanning.rs</code>, <code>find_cross_file_propagated_throws</code> in <code>cross_file.rs</code>),
+and <code>catch.rs</code> repeats it twice more. None of them skips a <code>#</code> comment,
+which <code>text_scan::skip_php_comment</code> handles. Give them one iterator over
+the offsets outside strings and comments, built on <code>skip_php_comment</code> and
+<code>skip_string_forward</code>, and use <code>text_scan::keyword_ends_at</code> for their
+<code>throw</code> / <code>new</code> word-boundary checks.</p>
+<h2 id="3-one-state-machine-for-the-two-classmap-scanners">3. One state machine for the two classmap scanners<a class="headerlink" href="#3-one-state-machine-for-the-two-classmap-scanners" title="Permanent link">&para;</a></h2>
+<p><code>find_symbols</code> and <code>find_classes</code> in <code>src/classmap_scanner/lexer.rs</code>
+repeat about 120 lines of the same string, comment, heredoc and
+namespace handling. Merge them into one scanner generic over a
+<code>const SYMBOLS: bool</code>, so the PSR-4 path still compiles to the code it
+runs today, and compare a vendor scan before and after to confirm startup
+time does not move.</p>
 
 
 
