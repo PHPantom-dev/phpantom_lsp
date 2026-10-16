@@ -3889,9 +3889,9 @@ what keeps the two class indexes from describing different files for one
 name, and keeps a runner-up recorded by one path from going stale when the
 other withdraws a declaration. Readers that take more than one of these
 locks must take them in the same order.</p>
-<p>The indexes derived from the class index (<code>method_store</code>, <code>gti_index</code>) are
-keyed by FQN, so they are repopulated from whichever declaration won
-rather than from the classes the current parse produced.</p>
+<p>The index derived from the class index (<code>gti_index</code>) is keyed by FQN,
+so it is repopulated from whichever declaration won rather than from the
+classes the current parse produced.</p>
 <h3 id="lifecycle-invariants">Lifecycle Invariants<a class="headerlink" href="#lifecycle-invariants" title="Permanent link">&para;</a></h3>
 <ol>
 <li>Every class in <code>uri_classes_index</code> has a corresponding entry in
