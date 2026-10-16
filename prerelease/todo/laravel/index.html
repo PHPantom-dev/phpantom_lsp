@@ -2807,7 +2807,7 @@ makes the call an authorization check; anything else leaves it alone. The
 existing name heuristic stays as the cheap path that needs no type
 resolution at all.</p>
 <p><strong>Where to look:</strong> <code>receiver_is_user_like</code> in
-<code>symbol_map/extraction/laravel.rs</code> and its completion-side twin (a
+<code>symbol_map/extraction/laravel/gates.rs</code> and its completion-side twin (a
 local check in <code>completion/laravel_string_keys/context.rs</code>); <code>ViewReceiverSite</code> in
 <code>symbol_map/mod.rs</code> for the confirm-later shape.</p>
 <h4 id="l49-unguarded-eloquent-mass-assignment-diagnostic">L49. Unguarded Eloquent mass assignment diagnostic<a class="headerlink" href="#l49-unguarded-eloquent-mass-assignment-diagnostic" title="Permanent link">&para;</a></h4>
