@@ -960,10 +960,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b625-a-qualified-function-call-through-a-class-import-is-not-found-without-a-resolved-name" class="md-nav__link">
+  <a href="#b631-top-level-code-in-two-namespace-blocks-shares-one-cached-subject-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B625. A qualified function call through a class import is not found without a resolved name
+        B631. Top-level code in two <code>namespace</code> blocks shares one cached subject type
       </span>
     </span>
   </a>
@@ -1025,6 +1025,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B628. A deleted file's workspace diagnostics are still reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b630-an-unclosed-call-inside-a-braced-namespace-block-drops-the-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B630. An unclosed call inside a braced <code>namespace</code> block drops the block
       </span>
     </span>
   </a>
@@ -1634,10 +1645,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b625-a-qualified-function-call-through-a-class-import-is-not-found-without-a-resolved-name" class="md-nav__link">
+  <a href="#b631-top-level-code-in-two-namespace-blocks-shares-one-cached-subject-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B625. A qualified function call through a class import is not found without a resolved name
+        B631. Top-level code in two <code>namespace</code> blocks shares one cached subject type
       </span>
     </span>
   </a>
@@ -1699,6 +1710,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B628. A deleted file's workspace diagnostics are still reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b630-an-unclosed-call-inside-a-braced-namespace-block-drops-the-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B630. An unclosed call inside a braced <code>namespace</code> block drops the block
       </span>
     </span>
   </a>
@@ -1788,24 +1810,26 @@ walk already resolved for it, rather than a second resolution.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b625-a-qualified-function-call-through-a-class-import-is-not-found-without-a-resolved-name">B625. A qualified function call through a class import is not found without a resolved name<a class="headerlink" href="#b625-a-qualified-function-call-through-a-class-import-is-not-found-without-a-resolved-name" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">namespace App;</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">use Lib\Helpers;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">Helpers\greet(   // no signature help for Lib\Helpers\greet()</span>
+<h3 id="b631-top-level-code-in-two-namespace-blocks-shares-one-cached-subject-type">B631. Top-level code in two <code>namespace</code> blocks shares one cached subject type<a class="headerlink" href="#b631-top-level-code-in-two-namespace-blocks-shares-one-cached-subject-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">namespace</span> <span class="nx">A</span> <span class="p">{</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="k">use</span> <span class="k">function</span> <span class="nf">Lib\make</span><span class="p">;</span>   <span class="c1">// returns Lib\Widget, which has spin()</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="nx">make</span><span class="p">()</span><span class="o">-&gt;</span><span class="na">spin</span><span class="p">();</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">}</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="nx">make</span><span class="p">()</span><span class="o">-&gt;</span><span class="na">spin</span><span class="p">();</span>          <span class="c1">// the global make() returns Gadget: not reported</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">}</span>
 </code></pre></div>
-<p>PHP expands the first segment of a qualified function name through the
-file's class imports. <code>Backend::resolve_function_name_at</code>
-(<code>resolution/functions.rs</code>) only gets that right when mago's resolved
-name for the call's offset is available. Without it, the
-<code>names::function_lookup_names</code> fallback gets the <code>use function</code> table
-and no class imports, so it builds <code>App\Helpers\greet</code>. The callers that
-pass no resolved name are <code>resolve_function_name</code> (signature help through
-<code>callable_target.rs</code>, <code>replace_deprecated.rs</code>) and every
-<code>function_loader_with(None, …)</code> (Blade echoes, discovery, the
-fix-return-type inference). Give the function loader the class <code>use</code> map
-as well (or the <code>FileContext</code> it comes from) and pass it to
-<code>function_lookup_names</code>.</p>
+<p>The unknown-member pass caches each subject's type under a
+<code>SubjectCacheKey</code> (<code>diagnostics/subject_cache.rs</code>), and top-level code gets
+the same scope, <code>ScopeKey::TopLevel { fn_scope_start: 0 }</code>, in every
+<code>namespace</code> block of the file. The first block to resolve <code>make()</code> answers
+for the same text in every later block, though the name means something
+else there, and a class subject such as <code>Foo::</code> is shared the same way
+between blocks that import different <code>Foo</code>s. Key top-level code by its
+namespace block as well (the start of the <code>NamespaceSpan</code> containing the
+access).</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b616-phpstan-quick-fixes-write-n-line-endings-into-rn-files">B616. PHPStan quick fixes write <code>\n</code> line endings into <code>\r\n</code> files<a class="headerlink" href="#b616-phpstan-quick-fixes-write-n-line-endings-into-rn-files" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
@@ -1868,6 +1892,30 @@ the file until the session restarts. Clear the native and external
 entries for a deleted URI; its result id stays, so the next pull tells
 the client the set is empty. Found by reading the code, not yet
 reproduced in an editor.</p>
+<h3 id="b630-an-unclosed-call-inside-a-braced-namespace-block-drops-the-block">B630. An unclosed call inside a braced <code>namespace</code> block drops the block<a class="headerlink" href="#b630-an-unclosed-call-inside-a-braced-namespace-block-drops-the-block" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">namespace</span> <span class="nx">Lib</span> <span class="p">{</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="k">function</span> <span class="nf">greet</span><span class="p">(</span><span class="nx">string</span> <span class="nv">$name</span><span class="p">)</span><span class="o">:</span> <span class="nx">void</span> <span class="p">{}</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="p">}</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">namespace</span> <span class="nx">App</span> <span class="p">{</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="k">use</span> <span class="k">function</span> <span class="nf">Lib\greet</span><span class="p">;</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="nx">greet</span><span class="p">(</span>   <span class="c1">// until the `)` is typed, this line reads as `namespace Lib`</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="p">}</span>
+</code></pre></div>
+<p>While a call inside a braced <code>namespace App { … }</code> block is missing its
+<code>)</code>, mago's parser leaves the whole block out of <code>program.statements</code>, so
+<code>update_ast</code> (<code>parser/ast_update.rs</code>) records no <code>NamespaceSpan</code> for it and
+indexes none of its imports, classes or functions. An offset in it falls
+into the last block the parse kept (<code>NamespaceSpan::containing</code>), and
+every name typed there resolves against that block's namespace and imports
+until the call is closed. Signature help runs on exactly this text, so it
+shows the wrong function or none. A file that declares its blocks as
+<code>namespace App;</code> keeps every block. The block survives only if the
+parser's recovery ends the argument list at the block's <code>}</code> instead of
+dropping the statement: upstream in <code>mago-syntax</code>, or by re-parsing with
+the call closed, as signature help's text fallback already does for the
+classes (<code>patch_content_for_signature</code>).</p>
 
 
 
