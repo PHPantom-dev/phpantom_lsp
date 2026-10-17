@@ -5116,6 +5116,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Faster diagnostics in Blade templates.</strong> A template is parsed once per diagnostic pass instead of once per check.</li>
 <li><strong>Faster diagnostics while editing.</strong> After an edit inside a function or method, only that function is type-checked again, and the rest of the file keeps its diagnostics, moved along with the text. In a 1,500-line class the type checking after such an edit is around 70 times cheaper. Saving still checks the whole file.</li>
 <li><strong>Faster analysis of methods that check many properties.</strong> Narrowing a property or a call's result no longer walks the method again from its first line.</li>
 <li><strong>Faster analysis of loops.</strong> A loop body is no longer walked again once its types have settled.</li>
@@ -5135,6 +5136,20 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Constants in <code>switch</code> cases.</strong> Hover, go-to-definition, find references and rename now work on a constant or class constant written in a <code>case</code> label, and an import used only there is no longer reported as unused.</li>
+<li><strong>Unused imports named only in text.</strong> An import whose name appears only in a string, a comment or as a property name is now reported as unused.</li>
+<li><strong>Variables imported with <code>global</code>.</strong> A function that reads a top-level variable through <code>global</code> now sees the type the top-level code gave it in diagnostics too, as hover already did.</li>
+<li><strong>A docblock wider than the parameter's type.</strong> <code>@param object $money</code> on a <code>Money $money</code> parameter no longer turns <code>$money</code> into a plain <code>object</code>; the native type stands, as in PHPStan.</li>
+<li><strong><code>@var</code> above code that sits behind other comments.</strong> A <code>/** @var */</code> block is still applied when a plain comment, an empty docblock or a Blade component tag stands between it and the code, or when a string above it contains <code>/*</code>.</li>
+<li><strong>Existence checks and attributes written in strings.</strong> A <code>function_exists()</code>, <code>class_exists()</code> or <code>method_exists()</code> check, or a <code>#[</code>, that appears inside a string or comment no longer silences unknown-function, unknown-class or unknown-member diagnostics. A check in an <code>elseif</code> condition now covers its branch.</li>
+<li><strong>Closure types in <code>@var</code>.</strong> <code>@var Closure(int $x): void $cb</code> no longer counts <code>$x</code> as defined.</li>
+<li><strong>Go-to-definition on <code>@property</code> and <code>@method</code> members.</strong> Jumps to the tag in the docblock of the class that declares the member, not to the first tag of that name in the file, and to the key of an Eloquent <code>$casts</code> entry rather than a cast type spelled the same.</li>
+<li><strong>A namespace declared on the <code>&lt;?php</code> line.</strong> <code>&lt;?php namespace App\Models;</code> is no longer reported as a namespace mismatch, and the fix no longer offers to add a second declaration.</li>
+<li><strong>Deleted files in workspace diagnostics.</strong> A file deleted while workspace diagnostics are on no longer keeps reporting its problems.</li>
+<li><strong>Non-ASCII variable names before <code>-&gt;can()</code>.</strong> Such a variable no longer stops the file from being indexed.</li>
+<li><strong>Hover on <code>model-property</code> arguments passed by name.</strong> <code>where(column: 'email')</code> now hovers as the model property, like the positional form.</li>
+<li><strong>Arrow functions that yield.</strong> <code>fn () =&gt; yield $x</code> is now typed as a <code>Generator</code>.</li>
+<li><strong>Enum backing types after a comment.</strong> <code>enum Ratio /* exact */ : float</code> now reports the invalid backing type.</li>
 <li><strong>Method calls typed in more places.</strong> Some calls were only typed when assigned straight to a variable, and are now typed wherever they appear, such as in an argument, an array or a <code>return</code>: calls on a <code>$this</code> narrowed by <code>assert($this instanceof TestCase)</code> in a test closure, static calls on a variable holding a class name such as <code>$class = 'App\Stamp'</code>, and calls to an override without a docblock whose parent declares a conditional <code>@return</code>.</li>
 <li><strong>Variables holding a class name follow the code's branches.</strong> After <code>if (…) { $class = Apple::class; } else { $class = Pear::class; }</code>, a call such as <code>$class::make()</code>, <code>new $class</code>, and completion after <code>$class::</code> now cover both classes, not only the one assigned last in the file.</li>
 <li><strong>The pipe operator with methods and closures.</strong> <code>$input |&gt; $formatter-&gt;format(...)</code>, <code>$input |&gt; Stamp::fromString(...)</code>, and a closure or a variable holding one on the right of <code>|&gt;</code> now give the callable's return type, as a function such as <code>trim(...)</code> already did.</li>

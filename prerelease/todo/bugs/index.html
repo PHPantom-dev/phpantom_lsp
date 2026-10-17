@@ -1010,28 +1010,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b626-a-namespace-declared-on-the-php-line-is-reported-as-a-psr-4-mismatch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B626. A namespace declared on the <code>&lt;?php</code> line is reported as a PSR-4 mismatch
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b628-a-deleted-files-workspace-diagnostics-are-still-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B628. A deleted file's workspace diagnostics are still reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b630-an-unclosed-call-inside-a-braced-namespace-block-drops-the-block" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1695,28 +1673,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b626-a-namespace-declared-on-the-php-line-is-reported-as-a-psr-4-mismatch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B626. A namespace declared on the <code>&lt;?php</code> line is reported as a PSR-4 mismatch
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b628-a-deleted-files-workspace-diagnostics-are-still-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B628. A deleted file's workspace diagnostics are still reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b630-an-unclosed-call-inside-a-braced-namespace-block-drops-the-block" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1867,41 +1823,16 @@ method's. Locate the function through the parsed AST instead
 <code>FunctionKinds::All</code>) and read the native return type, the body to infer
 from and the docblock (already <code>paren_function_docblock</code>) from that one
 node.</p>
-<h3 id="b626-a-namespace-declared-on-the-php-line-is-reported-as-a-psr-4-mismatch">B626. A namespace declared on the <code>&lt;?php</code> line is reported as a PSR-4 mismatch<a class="headerlink" href="#b626-a-namespace-declared-on-the-php-line-is-reported-as-a-psr-4-mismatch" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="cp">&lt;?php</span> <span class="k">namespace</span> <span class="nx">App\Models</span><span class="p">;</span>   <span class="c1">// Namespace `&lt;global&gt;` does not match PSR-4 expected `App\Models`</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">final</span> <span class="k">class</span> <span class="nc">User</span> <span class="p">{}</span>
-</code></pre></div>
-<p><code>namespace_decl_from_content</code> (<code>diagnostics/namespace_mismatch.rs:76-119</code>)
-takes the first line that starts with <code>namespace</code>, so a declaration that
-shares the <code>&lt;?php</code> line is never seen and the file counts as global. "Fix
-namespace" (<code>code_actions/fix_namespace.rs:43</code>) reads the same function and
-offers to insert a second declaration. The diagnostic already parses the
-file (<code>is_structural_single_classlike_file</code>); read the <code>Namespace</code>
-statement's name span from that AST.</p>
-<h3 id="b628-a-deleted-files-workspace-diagnostics-are-still-reported">B628. A deleted file's workspace diagnostics are still reported<a class="headerlink" href="#b628-a-deleted-files-workspace-diagnostics-are-still-reported" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p>With workspace diagnostics on, a file the background pass diagnosed keeps
-its entries in <code>diag.workspace_diags</code> (<code>diagnostics/workspace.rs:411-427</code>)
-after it is deleted: the watched-file deletion path
-(<code>indexing/reindex.rs:122-150</code>) purges the file's indexes but not this
-store, and the pull handler goes on reporting the URI through
-<code>tracked_uris</code> (<code>diagnostics/pull.rs:194-200</code>), so its problems outlive
-the file until the session restarts. Clear the native and external
-entries for a deleted URI; its result id stays, so the next pull tells
-the client the set is empty. Found by reading the code, not yet
-reproduced in an editor.</p>
 <h3 id="b630-an-unclosed-call-inside-a-braced-namespace-block-drops-the-block">B630. An unclosed call inside a braced <code>namespace</code> block drops the block<a class="headerlink" href="#b630-an-unclosed-call-inside-a-braced-namespace-block-drops-the-block" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">namespace</span> <span class="nx">Lib</span> <span class="p">{</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="k">function</span> <span class="nf">greet</span><span class="p">(</span><span class="nx">string</span> <span class="nv">$name</span><span class="p">)</span><span class="o">:</span> <span class="nx">void</span> <span class="p">{}</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="p">}</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">namespace</span> <span class="nx">App</span> <span class="p">{</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="k">use</span> <span class="k">function</span> <span class="nf">Lib\greet</span><span class="p">;</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="nx">greet</span><span class="p">(</span>   <span class="c1">// until the `)` is typed, this line reads as `namespace Lib`</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">namespace</span> <span class="nx">Lib</span> <span class="p">{</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="k">function</span> <span class="nf">greet</span><span class="p">(</span><span class="nx">string</span> <span class="nv">$name</span><span class="p">)</span><span class="o">:</span> <span class="nx">void</span> <span class="p">{}</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="p">}</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">namespace</span> <span class="nx">App</span> <span class="p">{</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="k">use</span> <span class="k">function</span> <span class="nf">Lib\greet</span><span class="p">;</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="nx">greet</span><span class="p">(</span>   <span class="c1">// until the `)` is typed, this line reads as `namespace Lib`</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">}</span>
 </code></pre></div>
 <p>While a call inside a braced <code>namespace App { … }</code> block is missing its
 <code>)</code>, mago's parser leaves the whole block out of <code>program.statements</code>, so
