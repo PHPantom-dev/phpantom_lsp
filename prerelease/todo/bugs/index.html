@@ -884,23 +884,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b629-a-method-reached-through-a-property-or-a-chained-call-is-not-asked-whether-it-runs-its-callback-now" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B629. A method reached through a property or a chained call is not asked whether it runs its callback now
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1547,23 +1530,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b629-a-method-reached-through-a-property-or-a-chained-call-is-not-asked-whether-it-runs-its-callback-now" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B629. A method reached through a property or a chained call is not asked whether it runs its callback now
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1739,24 +1705,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b629-a-method-reached-through-a-property-or-a-chained-call-is-not-asked-whether-it-runs-its-callback-now">B629. A method reached through a property or a chained call is not asked whether it runs its callback now<a class="headerlink" href="#b629-a-method-reached-through-a-property-or-a-chained-call-is-not-asked-whether-it-runs-its-callback-now" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$found = null;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$this-&gt;db-&gt;transaction(function () use (&amp;$found) {   // tagged @param-immediately-invoked-callable</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    $found = new Order();</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">});</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">$found;   // Order|null, should be Order</span>
-</code></pre></div>
-<p><code>call_invokes_arg_immediately</code> (<code>type_engine/variable/forward_walk/by_ref.rs</code>)
-reads a method's <code>@param-immediately-invoked-callable</code> tag only when the
-receiver is <code>$this</code>, a plain variable or a static class name. Any other
-receiver (a property, a chained call, a parenthesised <code>new</code>) gets the
-later-invoked default, so a by-reference capture keeps its pre-call type
-alongside what the closure wrote. Resolving every receiver through the
-shared pipeline (<code>resolve_rhs_with_scope</code>) would cover these, but
-<code>receiver_mutation.rs</code> asks the question for every closure argument of every
-call, so the receiver's type has to come cheaply: the type the expression
-walk already resolved for it, rather than a second resolution.</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
@@ -1768,14 +1717,14 @@ walk already resolved for it, rather than a second resolution.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b631-top-level-code-in-two-namespace-blocks-shares-one-cached-subject-type">B631. Top-level code in two <code>namespace</code> blocks shares one cached subject type<a class="headerlink" href="#b631-top-level-code-in-two-namespace-blocks-shares-one-cached-subject-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">namespace</span> <span class="nx">A</span> <span class="p">{</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="k">use</span> <span class="k">function</span> <span class="nf">Lib\make</span><span class="p">;</span>   <span class="c1">// returns Lib\Widget, which has spin()</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="nx">make</span><span class="p">()</span><span class="o">-&gt;</span><span class="na">spin</span><span class="p">();</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">}</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="nx">make</span><span class="p">()</span><span class="o">-&gt;</span><span class="na">spin</span><span class="p">();</span>          <span class="c1">// the global make() returns Gadget: not reported</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">namespace</span> <span class="nx">A</span> <span class="p">{</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="k">use</span> <span class="k">function</span> <span class="nf">Lib\make</span><span class="p">;</span>   <span class="c1">// returns Lib\Widget, which has spin()</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="nx">make</span><span class="p">()</span><span class="o">-&gt;</span><span class="na">spin</span><span class="p">();</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="p">}</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="nx">make</span><span class="p">()</span><span class="o">-&gt;</span><span class="na">spin</span><span class="p">();</span>          <span class="c1">// the global make() returns Gadget: not reported</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="p">}</span>
 </code></pre></div>
 <p>The unknown-member pass caches each subject's type under a
 <code>SubjectCacheKey</code> (<code>diagnostics/subject_cache.rs</code>), and top-level code gets
@@ -1801,12 +1750,12 @@ in <code>code_actions/docblock_edit.rs</code> write a literal <code>\n</code>. O
 them.</p>
 <h3 id="b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type">B618. "Update return type" on a closure writes the enclosing method's type<a class="headerlink" href="#b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">public function run(): array {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    $f = function (): string {</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">        return 42;   // PHPStan: Anonymous function should return string but returns int.</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    };</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    return [];</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">public function run(): array {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    $f = function (): string {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">        return 42;   // PHPStan: Anonymous function should return string but returns int.</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    };</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    return [];</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>The quick fix rewrites the closure to <code>function (): array</code> and adds a
 <code>@return array{}</code> docblock above the statement: the type it writes is the
@@ -1825,14 +1774,14 @@ from and the docblock (already <code>paren_function_docblock</code>) from that o
 node.</p>
 <h3 id="b630-an-unclosed-call-inside-a-braced-namespace-block-drops-the-block">B630. An unclosed call inside a braced <code>namespace</code> block drops the block<a class="headerlink" href="#b630-an-unclosed-call-inside-a-braced-namespace-block-drops-the-block" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">namespace</span> <span class="nx">Lib</span> <span class="p">{</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="k">function</span> <span class="nf">greet</span><span class="p">(</span><span class="nx">string</span> <span class="nv">$name</span><span class="p">)</span><span class="o">:</span> <span class="nx">void</span> <span class="p">{}</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="p">}</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">namespace</span> <span class="nx">App</span> <span class="p">{</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="k">use</span> <span class="k">function</span> <span class="nf">Lib\greet</span><span class="p">;</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="nx">greet</span><span class="p">(</span>   <span class="c1">// until the `)` is typed, this line reads as `namespace Lib`</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">namespace</span> <span class="nx">Lib</span> <span class="p">{</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="k">function</span> <span class="nf">greet</span><span class="p">(</span><span class="nx">string</span> <span class="nv">$name</span><span class="p">)</span><span class="o">:</span> <span class="nx">void</span> <span class="p">{}</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="p">}</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">namespace</span> <span class="nx">App</span> <span class="p">{</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="k">use</span> <span class="k">function</span> <span class="nf">Lib\greet</span><span class="p">;</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="nx">greet</span><span class="p">(</span>   <span class="c1">// until the `)` is typed, this line reads as `namespace Lib`</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">}</span>
 </code></pre></div>
 <p>While a call inside a braced <code>namespace App { … }</code> block is missing its
 <code>)</code>, mago's parser leaves the whole block out of <code>program.statements</code>, so
