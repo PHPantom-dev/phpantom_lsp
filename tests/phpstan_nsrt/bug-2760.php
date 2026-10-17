@@ -20,5 +20,6 @@ function (): void {
 
 	$fn();
 
-	assertType('bool', $boolean);
+	// PHPantom is more precise than PHPStan here: calling `$fn` runs the closure, whose loop over `[0]` always sets the capture before returning.
+	assertType('true', $boolean);
 };
