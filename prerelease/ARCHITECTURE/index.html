@@ -3714,8 +3714,11 @@ class context for resolution.</p>
    (e.g. <code>$cls = Pen::class; $cls::make()</code>).</li>
 <li><strong><code>functionName</code></strong> — resolves via <code>resolve_function_name</code> (use map,
    namespace, stubs). Falls back to first-class callable resolution:
-   if the expression is a <code>$variable</code>, scans backward for
-   <code>$var = target(...)</code> and recursively resolves the underlying target.</li>
+   if the expression is a <code>$variable</code>, looks up the last
+   <code>$var = target(...)</code> assignment visible from the call among the
+   file's first-class callable assignments (collected by one AST walk
+   per parse, <code>collect_fcc_assignments</code>) and recursively resolves the
+   underlying target.</li>
 </ol>
 <h2 id="source-names-and-resolved-names">Source Names and Resolved Names<a class="headerlink" href="#source-names-and-resolved-names" title="Permanent link">&para;</a></h2>
 <p>The same spelling can name different classes depending on where it was
