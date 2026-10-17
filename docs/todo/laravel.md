@@ -530,24 +530,6 @@ in its view are implemented (`blade/discovery.rs`). Two gaps remain:
   and `Route::livewire()` get no completion, go-to-definition, or
   unknown-component diagnostic.
 
-#### L30. Eloquent attribute-array key completion
-
-**Impact: Medium · Complexity: Medium**
-
-Our Eloquent string completion covers where-style column arguments and
-relation names, but not **attribute-array keys**: `User::create(['name'
-=> …])`, `fill()`, `make()`, `update()`, `updateOrCreate()`,
-`firstOrCreate()`, `firstOrNew()`, `createOrFirst()` should complete
-array keys from the model's column sources (preferring fillable
-columns, skipping keys already present in the literal). Also extend the
-scalar column list with `firstWhere()`, `whereColumn()`, and the
-aggregate methods (`min`/`max`/`sum`/`avg`), and cover the model-level
-PHP attributes that take column-name arguments where the installed
-framework version has them. The Laravel LSP gets its column list from
-`artisan model:show --json` (live DB required); ours comes from the
-same static sources the model provider already uses (casts, fillable,
-accessors, `@property` tags) — no database needed.
-
 #### L31. String-key rename, highlight, and semantic tokens
 
 **Impact: Low-Medium · Complexity: Medium**

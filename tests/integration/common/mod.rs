@@ -1471,10 +1471,7 @@ pub const ILLUMINATE_COMPONENT_STUB: &str = "<?php\nnamespace Illuminate\\View;\
 /// editor would hold and the position the marker stood at.
 pub fn split_cursor(content: &str) -> (String, Position) {
     let offset = content.find('§').expect("test source needs a § cursor");
-    let before = &content[..offset];
-    let line = before.matches('\n').count() as u32;
-    let character = before.rsplit('\n').next().unwrap_or("").chars().count() as u32;
-    (content.replace('§', ""), Position { line, character })
+    (content.replace('§', ""), offset_position(content, offset))
 }
 
 // ── Shared Laravel fixtures ─────────────────────────────────────────────────

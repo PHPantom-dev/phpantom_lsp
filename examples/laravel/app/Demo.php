@@ -1071,6 +1071,35 @@ class Demo
         BlogAuthor::where('');           // offers: name, email, active, genre, …
         BlogPost::orderBy('');           // offers: title, published, author_id, …
         Bakery::select('');              // offers: flour, apricot, kitchen_id, …
+
+        // Try: complete the column strings, including both whereColumn arguments.
+        Customer::firstWhere('email', 'ada@example.test');
+        Customer::whereColumn('name', 'email');
+        Bakery::min('egg_count');
+        Bakery::max('egg_count');
+        Bakery::sum('egg_count');
+        Bakery::avg('egg_count');
+    }
+
+
+    // ── Eloquent Attribute Array Completion ─────────────────────────────────
+
+    public function eloquentAttributeArrays(): void
+    {
+        // Model PHP attributes complete columns too: see Hidden in Models/Customer.php.
+        // Try: complete each array key. Fillable attributes appear first.
+        $customer = Customer::create(['name' => 'Ada', 'email' => 'ada@example.test']);
+
+        // Try: erase email and complete its key; name is already present and omitted.
+        Customer::make(['name' => 'Grace', 'email' => 'grace@example.test']);
+        $customer->fill(['name' => 'Ada Lovelace']);
+        $customer->update(['email' => 'ada.lovelace@example.test']);
+
+        // Both arrays complete columns: matching attributes, then values to save.
+        Customer::updateOrCreate(['email' => 'ada@example.test'], ['name' => 'Ada']);
+
+        // Flour is fillable, so it ranks ahead of other known Bakery attributes.
+        Bakery::make(['flour' => 'whole wheat']);
     }
 
 
