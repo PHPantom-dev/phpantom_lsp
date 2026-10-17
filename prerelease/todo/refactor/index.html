@@ -1830,8 +1830,8 @@ functions that lock and await and every guard bound across a loader
 call, 143 slices with offset arithmetic, 120 parse sites, 80 deep clones,
 every per-file cache, 387 linear membership checks, 319 text-scanning
 lines in the type engine and request handlers, and the test helpers
-shared across suites. Item 1 is a prerequisite for E1. B626, B627 and
-B628 went to <code>bugs.md</code>.</p>
+shared across suites. Item 1 is a prerequisite for E1. B626 and B628
+went to <code>bugs.md</code>.</p>
 <h2 id="1-split-definitionmembermodrs-before-e1">1. Split <code>definition/member/mod.rs</code> before E1<a class="headerlink" href="#1-split-definitionmembermodrs-before-e1" title="Permanent link">&para;</a></h2>
 <p>E1 changes member go-to-definition, which lives in a 989-line <code>mod.rs</code>
 whose <code>resolve_member_definition_with</code> (128-467) is one 340-line
@@ -1845,10 +1845,9 @@ into its lookup phases, and fold its two copies of the Eloquent
 array-entry fallback (277-295 before <code>classify_member</code>, 363-380 after)
 into one helper.</p>
 <h2 id="2-release-index-guards-before-loading-or-long-work">2. Release index guards before loading or long work<a class="headerlink" href="#2-release-index-guards-before-loading-or-long-work" title="Permanent link">&para;</a></h2>
-<p>B627 is the two guards that do deadlock. These hold a read guard across
-work that loads classes, parses or walks the disk. No cycle was found
-for them yet, but the next caller that adds one becomes the next B627,
-and meanwhile each stalls the writers queued behind it:
+<p>These hold a read guard across work that loads classes, parses or walks
+the disk. No cycle was found for them yet, but the next caller that adds
+one deadlocks, and meanwhile each stalls the writers queued behind it:
 <code>resolution/classes.rs:383</code> (an <code>if let</code> temporary of
 <code>workspace_root.read()</code> across <code>parse_and_cache_file</code>),
 <code>resolution/functions.rs:153</code> (the <code>stub_function_index</code> read held to 247

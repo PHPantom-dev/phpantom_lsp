@@ -840,23 +840,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Crashes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b627-find-references-can-hang-on-a-constructor-or-a-laravel-macro" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B627. Find References can hang on a constructor or a Laravel macro
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1531,23 +1514,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Crashes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b627-find-references-can-hang-on-a-constructor-or-a-laravel-macro" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B627. Find References can hang on a constructor or a Laravel macro
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1787,29 +1753,7 @@ task, or sweeps of the sample projects under <code>projects/</code>. Entries are
 grouped by the mechanism that has to change, not by the symptom that
 surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
-<h3 id="b627-find-references-can-hang-on-a-constructor-or-a-laravel-macro">B627. Find References can hang on a constructor or a Laravel macro<a class="headerlink" href="#b627-find-references-can-hang-on-a-constructor-or-a-laravel-macro" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: Low</strong></p>
-<p>Two reference searches hold a read guard across a call that takes the same
-lock again:</p>
-<ul>
-<li><code>collect_constructor_hierarchy</code> (<code>references/classes.rs:281-317</code>) holds
-  <code>symbols.gti_index.read()</code> while <code>declares_ctor</code> loads each descendant
-  through <code>find_or_load_class</code>. When that load parses a file (an index
-  miss, or a class the descendant's docblock types link to), publishing
-  the parse ends in <code>index_inheritance</code> (<code>symbol_index.rs:209</code>), which
-  takes <code>gti_index.write()</code> on the same thread. Find References on a
-  <code>__construct</code> hangs, and every later parse blocks behind it.</li>
-<li><code>collect_macro_declaring_targets</code> (<code>references/member_scope.rs:606-627</code>)
-  holds <code>laravel_macros.read()</code> while <code>collect_ancestors</code> loads classes,
-  and loading a class reads <code>laravel_macros</code> again
-  (<code>inject_laravel_macros</code>, <code>resolution/classes.rs:207</code>). The lock is
-  task-fair, so a macro index rebuild queued between the two reads (an
-  edit to a file that calls <code>macro(</code> or <code>mixin(</code>) deadlocks member Find
-  References.</li>
-</ul>
-<p>Read each step under its own short-lived guard
-(<code>let children = self.symbols.gti_index.read().get(&amp;fqn).cloned();</code>), and
-collect the ancestors before taking the macro index.</p>
+<p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
