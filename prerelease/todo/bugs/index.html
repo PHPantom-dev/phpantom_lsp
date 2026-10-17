@@ -888,10 +888,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b622-whether-a-by-reference-callback-runs-now-is-read-from-the-current-files-text-only" class="md-nav__link">
+  <a href="#b629-a-method-reached-through-a-property-or-a-chained-call-is-not-asked-whether-it-runs-its-callback-now" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B622. Whether a by-reference callback runs now is read from the current file's text only
+        B629. A method reached through a property or a chained call is not asked whether it runs its callback now
       </span>
     </span>
   </a>
@@ -1562,10 +1562,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b622-whether-a-by-reference-callback-runs-now-is-read-from-the-current-files-text-only" class="md-nav__link">
+  <a href="#b629-a-method-reached-through-a-property-or-a-chained-call-is-not-asked-whether-it-runs-its-callback-now" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B622. Whether a by-reference callback runs now is read from the current file's text only
+        B629. A method reached through a property or a chained call is not asked whether it runs its callback now
       </span>
     </span>
   </a>
@@ -1761,19 +1761,24 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b622-whether-a-by-reference-callback-runs-now-is-read-from-the-current-files-text-only">B622. Whether a by-reference callback runs now is read from the current file's text only<a class="headerlink" href="#b622-whether-a-by-reference-callback-runs-now-is-read-from-the-current-files-text-only" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p><code>src/type_engine/variable/forward_walk/by_ref.rs</code> decides whether a
-callback argument is invoked immediately (so its by-reference writes
-reach the variables after the call) by re-walking the current file's AST
-with <code>with_parsed_program</code> and text-scanning the docblock above the callee
-for <code>@param-immediately-invoked-callable</code> /
-<code>@param-later-invoked-callable</code>. A callee declared in another file never
-has its tag seen and gets the default, and methods are matched by short
-class name within the current file. The re-parse also runs per call when
-no parse cache is active. The docblock parser already reads both tags
-(<code>docblock/parser.rs</code>): carry the invocation mode on <code>ParameterInfo</code> and
-look it up through the function loader and the resolved class.</p>
+<h3 id="b629-a-method-reached-through-a-property-or-a-chained-call-is-not-asked-whether-it-runs-its-callback-now">B629. A method reached through a property or a chained call is not asked whether it runs its callback now<a class="headerlink" href="#b629-a-method-reached-through-a-property-or-a-chained-call-is-not-asked-whether-it-runs-its-callback-now" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$found = null;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$this-&gt;db-&gt;transaction(function () use (&amp;$found) {   // tagged @param-immediately-invoked-callable</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    $found = new Order();</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">});</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">$found;   // Order|null, should be Order</span>
+</code></pre></div>
+<p><code>call_invokes_arg_immediately</code> (<code>type_engine/variable/forward_walk/by_ref.rs</code>)
+reads a method's <code>@param-immediately-invoked-callable</code> tag only when the
+receiver is <code>$this</code>, a plain variable or a static class name. Any other
+receiver (a property, a chained call, a parenthesised <code>new</code>) gets the
+later-invoked default, so a by-reference capture keeps its pre-call type
+alongside what the closure wrote. Resolving every receiver through the
+shared pipeline (<code>resolve_rhs_with_scope</code>) would cover these, but
+<code>receiver_mutation.rs</code> asks the question for every closure argument of every
+call, so the receiver's type has to come cheaply: the type the expression
+walk already resolved for it, rather than a second resolution.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
@@ -1785,9 +1790,9 @@ look it up through the function loader and the resolved class.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b625-a-qualified-function-call-through-a-class-import-is-not-found-without-a-resolved-name">B625. A qualified function call through a class import is not found without a resolved name<a class="headerlink" href="#b625-a-qualified-function-call-through-a-class-import-is-not-found-without-a-resolved-name" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace App;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">use Lib\Helpers;</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">Helpers\greet(   // no signature help for Lib\Helpers\greet()</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">namespace App;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">use Lib\Helpers;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">Helpers\greet(   // no signature help for Lib\Helpers\greet()</span>
 </code></pre></div>
 <p>PHP expands the first segment of a qualified function name through the
 file's class imports. <code>Backend::resolve_function_name_at</code>
@@ -1816,12 +1821,12 @@ in <code>code_actions/docblock_edit.rs</code> write a literal <code>\n</code>. O
 them.</p>
 <h3 id="b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type">B618. "Update return type" on a closure writes the enclosing method's type<a class="headerlink" href="#b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">public function run(): array {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    $f = function (): string {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">        return 42;   // PHPStan: Anonymous function should return string but returns int.</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    };</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    return [];</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">public function run(): array {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    $f = function (): string {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">        return 42;   // PHPStan: Anonymous function should return string but returns int.</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    };</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    return [];</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>The quick fix rewrites the closure to <code>function (): array</code> and adds a
 <code>@return array{}</code> docblock above the statement: the type it writes is the
@@ -1840,9 +1845,9 @@ from and the docblock (already <code>paren_function_docblock</code>) from that o
 node.</p>
 <h3 id="b626-a-namespace-declared-on-the-php-line-is-reported-as-a-psr-4-mismatch">B626. A namespace declared on the <code>&lt;?php</code> line is reported as a PSR-4 mismatch<a class="headerlink" href="#b626-a-namespace-declared-on-the-php-line-is-reported-as-a-psr-4-mismatch" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="cp">&lt;?php</span> <span class="k">namespace</span> <span class="nx">App\Models</span><span class="p">;</span>   <span class="c1">// Namespace `&lt;global&gt;` does not match PSR-4 expected `App\Models`</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">final</span> <span class="k">class</span> <span class="nc">User</span> <span class="p">{}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="cp">&lt;?php</span> <span class="k">namespace</span> <span class="nx">App\Models</span><span class="p">;</span>   <span class="c1">// Namespace `&lt;global&gt;` does not match PSR-4 expected `App\Models`</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">final</span> <span class="k">class</span> <span class="nc">User</span> <span class="p">{}</span>
 </code></pre></div>
 <p><code>namespace_decl_from_content</code> (<code>diagnostics/namespace_mismatch.rs:76-119</code>)
 takes the first line that starts with <code>namespace</code>, so a declaration that
