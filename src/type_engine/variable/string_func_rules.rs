@@ -1,22 +1,23 @@
-/// Constant folding for the string standard library.
-///
-/// A signature like `strtolower(string $string): string` describes the
-/// widest result the function can produce, not the result *this* call
-/// produces.  When every argument the transform reads is a literal the
-/// answer is a literal too, and callers that check a value against a
-/// literal union (`'class'|'interface'|'trait'`) depend on getting it:
-/// `strtolower($kind)` over `'Class'|'Interface'|'Trait'` is
-/// `'class'|'interface'|'trait'`, not `string`.
-///
-/// The rules live beside [`super::array_func_rules`] and read their
-/// arguments through the same [`ArrayFuncArgs`] seam, so the AST walker
-/// and the text-driven call resolver both reach them.
-///
-/// Folding only happens when it is exact.  Every transform here is
-/// byte-oriented in PHP, and the case-mapping ones have been
-/// locale-independent ASCII since PHP 8.2, so an argument that is not
-/// pure ASCII declines rather than guessing at a Unicode mapping the
-/// runtime would not perform.
+//! Constant folding for the string standard library.
+//!
+//! A signature like `strtolower(string $string): string` describes the
+//! widest result the function can produce, not the result *this* call
+//! produces.  When every argument the transform reads is a literal the
+//! answer is a literal too, and callers that check a value against a
+//! literal union (`'class'|'interface'|'trait'`) depend on getting it:
+//! `strtolower($kind)` over `'Class'|'Interface'|'Trait'` is
+//! `'class'|'interface'|'trait'`, not `string`.
+//!
+//! The rules live beside [`super::array_func_rules`] and read their
+//! arguments through the same [`ArrayFuncArgs`] seam, so the AST walker
+//! and the text-driven call resolver both reach them.
+//!
+//! Folding only happens when it is exact.  Every transform here is
+//! byte-oriented in PHP, and the case-mapping ones have been
+//! locale-independent ASCII since PHP 8.2, so an argument that is not
+//! pure ASCII declines rather than guessing at a Unicode mapping the
+//! runtime would not perform.
+
 use crate::php_type::{PhpType, TypeKind};
 
 use super::array_func_rules::ArrayFuncArgs;

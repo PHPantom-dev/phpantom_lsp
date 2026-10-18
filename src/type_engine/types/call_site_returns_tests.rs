@@ -16,6 +16,7 @@ fn params(names: &[&str]) -> Vec<ParameterInfo> {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         })
         .collect()
 }
@@ -142,6 +143,14 @@ fn resolved_literal_int_argument_is_bit_tested() {
 #[test]
 fn a_boolean_or_is_not_read_as_a_mask() {
     assert_eq!(split_bitwise_or("$a || JSON_THROW_ON_ERROR").len(), 1);
+}
+
+#[test]
+fn a_pipe_in_a_string_does_not_split_a_mask() {
+    assert_eq!(
+        split_bitwise_or("f('a|b') | JSON_THROW_ON_ERROR"),
+        vec!["f('a|b') ", " JSON_THROW_ON_ERROR"]
+    );
 }
 
 #[test]

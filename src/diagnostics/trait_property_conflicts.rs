@@ -43,7 +43,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let class_loaders = self.class_loaders(&ctx.file);
+        let class_loaders = self.resolved_class_loaders(&ctx.file);
 
         for span in &ctx.symbol_map.spans {
             let SymbolKind::ClassDeclaration { name } = &span.kind else {

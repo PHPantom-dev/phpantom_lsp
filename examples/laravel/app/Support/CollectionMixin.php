@@ -3,7 +3,6 @@
 namespace App\Support;
 
 use Closure;
-use Illuminate\Support\Collection;
 
 /**
  * A Macroable mixin: every public method returns a closure that becomes a

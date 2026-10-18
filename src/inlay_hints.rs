@@ -237,7 +237,7 @@ impl Backend {
             // makes the parameter obvious, skip the hint.
             if !param.is_reference
                 && call_site.arg_count == 1
-                && is_obvious_single_param(call_site.call_expression, param_display_name)
+                && is_obvious_single_param(call_site.call_expression)
             {
                 continue;
             }
@@ -548,15 +548,14 @@ fn eq_ignore_case_snake(a: &str, b: &str) -> bool {
 ///
 /// For example, `strlen($text)` — the function name already implies
 /// the parameter is a string.
-fn is_obvious_single_param(call_expression: &str, _param_name: &str) -> bool {
+fn is_obvious_single_param(call_expression: &str) -> bool {
     // Extract the function/method name from the call expression.
     let func_name = if let Some(pos) = call_expression.rfind("->") {
         &call_expression[pos + 2..]
     } else if let Some(pos) = call_expression.rfind("::") {
         &call_expression[pos + 2..]
-    } else if let Some(name) = call_expression.strip_prefix("new ") {
+    } else if call_expression.starts_with("new ") {
         // Constructor calls: `new Foo($bar)` — always show.
-        let _ = name;
         return false;
     } else {
         call_expression
@@ -712,10 +711,10 @@ mod tests {
 
     #[test]
     fn test_is_obvious_single_param() {
-        assert!(is_obvious_single_param("strlen", "string"));
-        assert!(is_obvious_single_param("count", "array"));
-        assert!(is_obvious_single_param("json_encode", "value"));
-        assert!(!is_obvious_single_param("customFunc", "value"));
-        assert!(!is_obvious_single_param("new Foo", "bar"));
+        assert!(is_obvious_single_param("strlen"));
+        assert!(is_obvious_single_param("count"));
+        assert!(is_obvious_single_param("json_encode"));
+        assert!(!is_obvious_single_param("customFunc"));
+        assert!(!is_obvious_single_param("new Foo"));
     }
 }

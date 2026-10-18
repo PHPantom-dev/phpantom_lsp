@@ -247,9 +247,6 @@ fn positional_parameters_would_change(
         .any(|(ep, ap)| parameter_enrichment_would_change(ep, ap))
 }
 
-/// Whether [`enrich_single_parameter`] would change `existing_param`.
-///
-/// Mirrors the apply function's conditions (keep the two in sync).
 /// Whether the child's own native parameter hint supersedes the
 /// ancestor's docblock type.
 ///
@@ -274,6 +271,9 @@ fn child_native_hint_overrides(
         })
 }
 
+/// Whether [`enrich_single_parameter`] would change `existing_param`.
+///
+/// Mirrors the apply function's conditions (keep the two in sync).
 fn parameter_enrichment_would_change(
     existing_param: &ParameterInfo,
     ancestor_param: &ParameterInfo,
@@ -285,7 +285,8 @@ fn parameter_enrichment_would_change(
     {
         return true;
     }
-    existing_param.description.is_none() && ancestor_param.description.is_some()
+    existing_param.callable_invocation.is_none() && ancestor_param.callable_invocation.is_some()
+        || existing_param.description.is_none() && ancestor_param.description.is_some()
 }
 
 /// Enrich a child method with docblock information from an ancestor method.
@@ -453,6 +454,12 @@ pub(crate) fn enrich_single_parameter(
         && ancestor_has_richer_type(&ancestor_param.type_hint, &ancestor_param.native_type_hint)
     {
         existing_param.type_hint = ancestor_param.type_hint.clone();
+    }
+    // An override that does not say when it runs a callable runs it when
+    // the method it overrides promised to, the way PHPStan inherits the
+    // invocation tags.
+    if existing_param.callable_invocation.is_none() {
+        existing_param.callable_invocation = ancestor_param.callable_invocation;
     }
     // Description enrichment
     if existing_param.description.is_none() && ancestor_param.description.is_some() {

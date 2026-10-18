@@ -21,6 +21,7 @@ use crate::class_lookup::find_class_at_offset;
 use crate::completion::eloquent_string::detect_string_call_context;
 use crate::completion::source::code_context::{CodeContext, code_context_at};
 use crate::text_position::position_to_offset;
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FileContext};
 
 use super::validation_rules::{
@@ -239,7 +240,8 @@ pub(crate) fn request_fields_at_position(
         loaded.as_deref()?
     };
 
-    if !is_request_like(receiver_class, &class_loader) {
+    let resolved_class_loader = backend.resolved_class_loader_with(&ctx.classes);
+    if !is_request_like(receiver_class, &resolved_class_loader) {
         return None;
     }
 
@@ -269,27 +271,26 @@ fn resolve_variable_class(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     backend: &Backend,
 ) -> Option<Arc<ClassInfo>> {
-    let fallback;
-    let effective_class = match current_class {
-        Some(cc) => cc,
-        None => {
-            fallback = crate::class_lookup::class_context_placeholder(content, cursor_offset);
-            &fallback
-        }
-    };
-    let types = crate::type_engine::variable::resolution::resolve_variable_types(
-        variable,
-        effective_class,
-        &ctx.classes,
-        content,
+    let resolved_class_loader =
+        |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
+    let types = crate::type_engine::variable::resolution::resolve_variable_types(VarQuery {
+        var_name: variable,
         cursor_offset,
-        class_loader,
-        Some(backend),
-        crate::type_engine::resolver::Loaders::default(),
-    );
-    types
-        .iter()
-        .find_map(|resolved| resolved.type_string.base_name().and_then(class_loader))
+        content,
+        current_class,
+        all_classes: &ctx.classes,
+        class_loader: &resolved_class_loader,
+        source_class_loader: class_loader,
+        source_imports: Some(ctx.use_map_at(cursor_offset)),
+        backend: Some(backend),
+        loaders: crate::type_engine::resolver::Loaders::default(),
+    });
+    types.iter().find_map(|resolved| {
+        resolved
+            .type_string
+            .base_name()
+            .and_then(resolved_class_loader)
+    })
 }
 
 // ─── Go to definition ───────────────────────────────────────────────────────

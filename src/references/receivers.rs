@@ -315,8 +315,10 @@ impl Backend {
             subject.starts_with('$') && !subject.starts_with("$this")
         });
         if needs_variable_scopes {
-            let class_loaders = self.class_loaders(&file_ctx);
+            let class_loaders = self.resolved_class_loaders(&file_ctx);
             let class_loaders = class_loaders.as_dyn();
+            let source_class_loaders = self.class_loaders(&file_ctx);
+            let source_class_loaders = source_class_loaders.as_dyn();
             let function_loader = self.function_loader(&file_ctx);
             let constant_loader = self.constant_loader(&file_ctx);
             let config_resolver = |key: &str| self.resolve_config_type(key);
@@ -340,6 +342,8 @@ impl Backend {
                         content,
                         &file_ctx.classes,
                         &class_loaders,
+                        &source_class_loaders,
+                        &file_ctx.block_imports(),
                         Some(self),
                         loaders,
                         Some(&self.resolved_class_cache),
@@ -353,6 +357,8 @@ impl Backend {
                         content,
                         &file_ctx.classes,
                         &class_loaders,
+                        &source_class_loaders,
+                        &file_ctx.block_imports(),
                         Some(self),
                         loaders,
                         Some(&self.resolved_class_cache),

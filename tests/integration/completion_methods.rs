@@ -743,6 +743,79 @@ class Consumer {
     );
 }
 
+/// A member's documentation is found from its owner's FQN, so a class the
+/// completing file never imports still gets one.
+#[tokio::test]
+async fn test_completion_resolve_member_of_class_not_imported() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///lib_widget.php",
+        r#"<?php
+namespace Lib;
+class Widget {
+    /** Spins the widget. */
+    public function spin(): void {}
+}
+"#,
+    );
+
+    let uri = Url::parse("file:///not_imported_resolve.php").unwrap();
+    let text = r#"<?php
+namespace App;
+class Consumer {
+    public function run(\Lib\Widget $w): void {
+        $w->
+    }
+}
+"#
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 4,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    let items = match result.unwrap() {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    let spin = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("spin"))
+        .expect("Should have spin in completions");
+
+    let resolved = backend.completion_resolve(spin.clone()).await.unwrap();
+    let doc = match resolved.documentation {
+        Some(Documentation::MarkupContent(mc)) => mc.value,
+        other => panic!("Expected MarkupContent documentation, got: {:?}", other),
+    };
+    assert!(
+        doc.contains("Spins the widget."),
+        "resolved documentation should describe Lib\\Widget::spin, got: {}",
+        doc
+    );
+}
+
 #[tokio::test]
 async fn test_completion_resolve_union_deduplicates_common_ancestor() {
     let backend = create_test_backend();

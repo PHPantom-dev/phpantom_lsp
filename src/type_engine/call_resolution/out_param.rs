@@ -39,6 +39,7 @@ use crate::type_engine::conditional_resolution::{
     resolve_conditional_with_text_args_and_defaults,
 };
 use crate::type_engine::resolver::{Loaders, ResolutionCtx};
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FunctionInfo, ParameterInfo};
 
 // ─── Callee identity ────────────────────────────────────────────────────────
@@ -259,8 +260,9 @@ pub(crate) fn resolve_out_type_for_call(
         &text_args,
         var_resolver,
         ConditionalClassContext {
-            calling: resolution_ctx.current_class.map(|c| c.name.as_str()),
+            calling: resolution_ctx.current_class.map(|c| c.fqn().as_str()),
             declaring: declaring_fqn.as_deref(),
+            written_class: Some(&|name: &str| resolution_ctx.written_names().resolve_class(name)),
         },
         resolution_ctx.class_loader,
         &tpl,
@@ -319,8 +321,13 @@ fn read_out_type(
     let namespace = file_ctx.namespace_at(name_offset);
     let use_map = file_ctx.use_map_at(name_offset);
     let class_loader = backend.class_loader_with(&file_ctx.classes, use_map, namespace);
-    let function_loader =
-        backend.function_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace);
+    let resolved_class_loader = backend.resolved_class_loader_with(&file_ctx.classes);
+    let function_loader = backend.function_loader_with(
+        file_ctx.resolved_names.as_deref(),
+        use_map,
+        &file_ctx.symbol_imports_at(name_offset).functions,
+        namespace,
+    );
 
     // The scope cache and the chain cache both key on offsets alone, and
     // the offsets below belong to another file. Neither may answer, nor
@@ -330,8 +337,9 @@ fn read_out_type(
         crate::type_engine::resolver::with_isolated_chain_cache(),
     );
 
-    // The request's parse cache holds only the request's own file, so this
-    // one parse serves both finding the body and walking it.
+    // Every resolution while the walk below reads the body parses the
+    // declaring file, so share one parse of it with the rest of the pass.
+    let _parse_guard = crate::parser::with_parse_cache_arc(std::sync::Arc::clone(&content));
     let types = with_parsed_program(&content, "out_param_body", |program, content| {
         let Some(body) = body_block(program, name_offset) else {
             return Vec::new();
@@ -357,11 +365,14 @@ fn read_out_type(
         let exit_ctx = crate::type_engine::types::narrowing::ExitCtx {
             current_class,
             all_classes: &file_ctx.classes,
-            class_loader: &class_loader,
+            class_loader: &resolved_class_loader,
+            source_class_loader: &class_loader,
+            source_imports: Some(use_map),
             function_loader: loaders.function_loader,
             resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
             var_types: None,
             receiver_resolver: None,
+            static_receiver_resolver: None,
         };
         // The walker reads a position no path reaches as the state before
         // the statement that left, so a body whose every path returns
@@ -379,14 +390,18 @@ fn read_out_type(
             .flat_map(|exit| {
                 crate::type_engine::variable::resolution::resolve_variable_types_in_program(
                     program,
-                    param_name,
-                    current_class,
-                    &file_ctx.classes,
-                    content,
-                    exit,
-                    &class_loader,
-                    Some(backend),
-                    loaders,
+                    VarQuery {
+                        var_name: param_name,
+                        cursor_offset: exit,
+                        content,
+                        current_class: Some(current_class),
+                        all_classes: &file_ctx.classes,
+                        class_loader: &resolved_class_loader,
+                        source_class_loader: &class_loader,
+                        source_imports: Some(use_map),
+                        backend: Some(backend),
+                        loaders,
+                    },
                 )
             })
             .collect()
@@ -410,10 +425,9 @@ fn body_block<'a>(program: &'a Program<'a>, name_offset: u32) -> Option<&'a Bloc
                 Statement::Function(func) if func.name.span.start.offset == name_offset => {
                     Some(&func.body)
                 }
-                Statement::Class(class) => in_members(class.members.iter(), name_offset),
-                Statement::Trait(tr) => in_members(tr.members.iter(), name_offset),
-                Statement::Enum(en) => in_members(en.members.iter(), name_offset),
-                Statement::Interface(itf) => in_members(itf.members.iter(), name_offset),
+                _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+                    in_members(body.members.iter(), name_offset)
+                }
                 Statement::Namespace(ns) => in_statements(ns.statements().iter(), name_offset),
                 Statement::Block(block) => in_statements(block.statements.iter(), name_offset),
                 _ => None,

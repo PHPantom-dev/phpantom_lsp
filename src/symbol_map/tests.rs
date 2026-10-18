@@ -4959,6 +4959,29 @@ class Service {}
     )));
 }
 
+#[test]
+fn config_container_attribute_key_is_the_unescaped_value() {
+    let php = r#"<?php
+use Illuminate\Container\Attributes\Config;
+#[Config('app.it\'s')]
+class Service {}
+"#;
+    let map = parse_and_extract(php);
+    let keys: Vec<&str> = map
+        .spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::Config,
+                key,
+                ..
+            } => Some(key.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(keys, ["app.it's"]);
+}
+
 // ── Direct config-backed resource spans ───────────────────────────
 
 fn resource_keys(map: &SymbolMap, resource: LaravelConfigResource) -> Vec<(String, bool, bool)> {

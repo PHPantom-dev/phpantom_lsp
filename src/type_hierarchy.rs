@@ -10,7 +10,6 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind as MapSymbolKind};
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::{ClassInfo, ClassLikeKind};
@@ -45,25 +44,12 @@ impl Backend {
                 ctx.resolve_name_at(name, span.start)
             }
             MapSymbolKind::SelfStaticParent(ssp_kind) => {
-                let classes: Vec<std::sync::Arc<ClassInfo>> = self
-                    .symbols
-                    .uri_classes_index
-                    .read()
-                    .get(uri)
-                    .cloned()
-                    .unwrap_or_default();
-                let current_class = find_class_at_offset(&classes, offset)?;
-
+                let current_class = self.class_at_offset(uri, offset)?;
+                // The parser has already resolved `parent_class` to an FQN.
                 if *ssp_kind == SelfStaticParentKind::Parent {
-                    let parent_name = current_class.parent_class.as_ref()?;
-                    let ctx = self.file_context(uri);
-                    ctx.resolve_name_at(parent_name, span.start)
+                    current_class.parent_class?.to_string()
                 } else {
-                    // self, static, or $this
-                    crate::util::build_fqn(
-                        &current_class.name,
-                        current_class.file_namespace.as_deref(),
-                    )
+                    current_class.fqn().to_string()
                 }
             }
             _ => return None,
@@ -139,7 +125,7 @@ impl Backend {
 
         let item_uri = item.uri.as_str();
         let ctx = self.file_context(item_uri);
-        let class_loader = self.class_loader(&ctx);
+        let class_loader = self.resolved_class_loader(&ctx);
 
         // direct_only = true so only immediate children are returned;
         // the client walks the tree one level at a time.

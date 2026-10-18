@@ -1,0 +1,16 @@
+// test: a closure's declared return type names the class of the namespace it is written in
+// feature: hover
+// expect: $stamp = Stamp
+// expect_absent: App\
+---
+<?php
+
+namespace App;
+
+class Stamp {}
+
+function demo(): void {
+    $make = fn (): Stamp => new Stamp();
+    $stamp = $make();
+    echo $sta<>mp;
+}

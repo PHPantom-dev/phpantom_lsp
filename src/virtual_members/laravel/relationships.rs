@@ -383,10 +383,10 @@ pub fn infer_relationship_from_body(body_text: &str) -> Option<PhpType> {
         // the concrete type is determined at runtime.
         //
         // The FQN is prefixed with `\` so that the post-parse
-        // name-resolution pass (`resolve_name`, invoked via
-        // `build_type_resolver` in `ast_update.rs`) treats it as
+        // name-resolution pass (`resolve_to_fqn`, invoked via
+        // `build_type_resolver` in `parser/name_resolution.rs`) treats it as
         // already-qualified and does not prepend the declaring file's
-        // namespace. `resolve_name` strips the leading `\` back off
+        // namespace. `resolve_to_fqn` strips the leading `\` back off
         // to produce the canonical FQN form.
         if method_name == "morphTo" {
             return Some(PhpType::named(atom(&format!("\\{fqn}"))));

@@ -29,10 +29,11 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{
     CodeActionData, DocblockAbove, find_docblock_above_line, make_code_action_data,
 };
-use crate::text_position::{offset_to_position, ranges_overlap};
+use crate::docblock::strip_docblock_line_delimiters;
 
 // ── PHPStan identifiers ─────────────────────────────────────────────────────
 
@@ -81,19 +82,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if !ALL_IDS.contains(&identifier) {
@@ -112,7 +105,7 @@ impl Backend {
                 None => continue,
             };
 
-            if find_tag_line_in_docblock(&docblock, &mismatch).is_none() {
+            if find_tag_line(&docblock, &mismatch).is_none() {
                 continue;
             }
 
@@ -207,7 +200,7 @@ impl Backend {
 /// PHPDoc type from the original message, or the tag has been removed
 /// entirely.
 ///
-/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/mod.rs`.
+/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/stale.rs`.
 pub(crate) fn is_fix_phpdoc_type_stale(
     content: &str,
     diag_line: usize,
@@ -228,8 +221,8 @@ pub(crate) fn is_fix_phpdoc_type_stale(
         }
     };
 
-    match find_tag_line_in_docblock(&docblock, &mismatch) {
-        Some(tag_text) => {
+    match find_tag_line(&docblock, &mismatch) {
+        Some((_, tag_text)) => {
             // The tag exists.  Check if it still contains the PHPDoc
             // type from the diagnostic message.
             !tag_text.contains(&mismatch.phpdoc_type)
@@ -374,92 +367,29 @@ fn extract_types_from_rest(rest: &str) -> Option<(String, String)> {
 
 // ── Tag finding ─────────────────────────────────────────────────────────────
 
-/// Find the tag line in the docblock that matches the mismatch.
+/// Find the docblock line holding the tag the mismatch is about.
 ///
-/// Returns the trimmed content of the tag line (the `* @tag type ...`
-/// portion) if found, or `None`.
-fn find_tag_line_in_docblock(
-    docblock: &DocblockAbove,
+/// Returns the line's index within the docblock and its tag text (the
+/// line without its `*` prefix and docblock delimiters).
+fn find_tag_line<'d>(
+    docblock: &'d DocblockAbove,
     mismatch: &PhpDocMismatch,
-) -> Option<String> {
-    let tag_prefix = mismatch.tag; // e.g. "@return", "@param", "@var"
-
-    for line in docblock.text.lines() {
-        let mut trimmed = line.trim();
-        // Strip docblock delimiters.
-        if let Some(inner) = trimmed.strip_prefix("/**") {
-            trimmed = inner.trim_start();
-        }
-        if let Some(inner) = trimmed.strip_suffix("*/") {
-            trimmed = inner.trim_end();
-        }
-        trimmed = trimmed.trim_start_matches('*').trim();
-
-        if !trimmed.starts_with(tag_prefix) {
-            continue;
-        }
-
-        let after_tag = trimmed[tag_prefix.len()..].trim_start();
-
-        match mismatch.tag {
-            "@param" => {
-                // For @param, check that this is the right parameter.
-                // Format: `@param type $name description`
-                // The param name could be the second or later token.
-                if let Some(ref param_name) = mismatch.param_name
-                    && after_tag.contains(param_name.as_str())
-                {
-                    return Some(trimmed.to_string());
-                }
-            }
-            "@return" | "@var" => {
-                // Any @return or @var line is the one we're looking for.
-                return Some(trimmed.to_string());
-            }
-            _ => {}
-        }
-    }
-
-    None
-}
-
-/// Find the line index (within the docblock lines) that contains the
-/// matching tag.
-fn find_tag_line_index(docblock: &DocblockAbove, mismatch: &PhpDocMismatch) -> Option<usize> {
-    let tag_prefix = mismatch.tag;
-
-    for (i, line) in docblock.text.lines().enumerate() {
-        let mut trimmed = line.trim();
-        if let Some(inner) = trimmed.strip_prefix("/**") {
-            trimmed = inner.trim_start();
-        }
-        if let Some(inner) = trimmed.strip_suffix("*/") {
-            trimmed = inner.trim_end();
-        }
-        trimmed = trimmed.trim_start_matches('*').trim();
-
-        if !trimmed.starts_with(tag_prefix) {
-            continue;
-        }
-
-        let after_tag = trimmed[tag_prefix.len()..].trim_start();
-
-        match mismatch.tag {
-            "@param" => {
-                if let Some(ref param_name) = mismatch.param_name
-                    && after_tag.contains(param_name.as_str())
-                {
-                    return Some(i);
-                }
-            }
-            "@return" | "@var" => {
-                return Some(i);
-            }
-            _ => {}
-        }
-    }
-
-    None
+) -> Option<(usize, &'d str)> {
+    docblock.text.lines().enumerate().find_map(|(i, line)| {
+        let tag_text = strip_docblock_line_delimiters(line.trim());
+        let after_tag = tag_text.strip_prefix(mismatch.tag)?.trim_start();
+        let found = match mismatch.tag {
+            // A `@param` line is the one naming the parameter.
+            "@param" => mismatch
+                .param_name
+                .as_ref()
+                .is_some_and(|name| after_tag.contains(name.as_str())),
+            // Any `@return` or `@var` line is the one we're looking for.
+            "@return" | "@var" => true,
+            _ => false,
+        };
+        found.then_some((i, tag_text))
+    })
 }
 
 // ── Edit builders ───────────────────────────────────────────────────────────
@@ -470,34 +400,11 @@ fn build_update_tag_edit(
     docblock: &DocblockAbove,
     mismatch: &PhpDocMismatch,
 ) -> Option<TextEdit> {
-    let doc_lines: Vec<&str> = docblock.text.lines().collect();
-    let tag_line_idx = find_tag_line_index(docblock, mismatch)?;
-
-    let original_line = doc_lines[tag_line_idx];
-
-    let new_line = replace_type_in_tag_line(original_line, mismatch)?;
-
-    let mut result_lines: Vec<String> = Vec::with_capacity(doc_lines.len());
-    for (i, line) in doc_lines.iter().enumerate() {
-        if i == tag_line_idx {
-            result_lines.push(new_line.clone());
-        } else {
-            result_lines.push((*line).to_string());
-        }
-    }
-
-    let mut new_text = result_lines.join("\n");
-    if docblock.text.ends_with('\n') && !new_text.ends_with('\n') {
-        new_text.push('\n');
-    }
-
-    let start = offset_to_position(content, docblock.start);
-    let end = offset_to_position(content, docblock.end);
-
-    Some(TextEdit {
-        range: Range { start, end },
-        new_text,
-    })
+    let (tag_line_idx, _) = find_tag_line(docblock, mismatch)?;
+    let mut lines: Vec<&str> = docblock.text.lines().collect();
+    let new_line = replace_type_in_tag_line(lines[tag_line_idx], mismatch)?;
+    lines[tag_line_idx] = &new_line;
+    Some(docblock.rewrite_edit(content, &lines))
 }
 
 /// Replace the PHPDoc type in a tag line with the native type.
@@ -541,7 +448,7 @@ fn build_remove_tag_edit(
     mismatch: &PhpDocMismatch,
 ) -> Option<TextEdit> {
     let doc_lines: Vec<&str> = docblock.text.lines().collect();
-    let tag_line_idx = find_tag_line_index(docblock, mismatch)?;
+    let (tag_line_idx, _) = find_tag_line(docblock, mismatch)?;
 
     let mut lines_to_remove = vec![tag_line_idx];
 
@@ -558,47 +465,7 @@ fn build_remove_tag_edit(
         }
     }
 
-    lines_to_remove.sort();
-    lines_to_remove.dedup();
-
-    let new_lines: Vec<&str> = doc_lines
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| !lines_to_remove.contains(i))
-        .map(|(_, l)| *l)
-        .collect();
-
-    // Check if the docblock is essentially empty after removal.
-    let has_content = new_lines.iter().any(|l| {
-        let mut t = l.trim();
-        if let Some(inner) = t.strip_prefix("/**") {
-            t = inner.trim_start();
-        }
-        if let Some(inner) = t.strip_suffix("*/") {
-            t = inner.trim_end();
-        }
-        t = t.trim_start_matches('*').trim();
-        !t.is_empty()
-    });
-
-    let new_text = if !has_content && new_lines.len() <= 3 {
-        // Docblock is empty after removal — remove it entirely.
-        String::new()
-    } else {
-        let mut text = new_lines.join("\n");
-        if docblock.text.ends_with('\n') && !text.ends_with('\n') {
-            text.push('\n');
-        }
-        text
-    };
-
-    let start = offset_to_position(content, docblock.start);
-    let end = offset_to_position(content, docblock.end);
-
-    Some(TextEdit {
-        range: Range { start, end },
-        new_text,
-    })
+    Some(docblock.remove_lines_edit(content, &lines_to_remove))
 }
 
 /// Check if a docblock line is a blank `*` line (no content besides
@@ -754,7 +621,7 @@ mod tests {
             native_type: "string".to_string(),
             param_name: None,
         };
-        let found = find_tag_line_in_docblock(&db, &mismatch).unwrap();
+        let (_, found) = find_tag_line(&db, &mismatch).unwrap();
         assert!(found.contains("@return"));
     }
 
@@ -768,7 +635,7 @@ mod tests {
             native_type: "int".to_string(),
             param_name: Some("$b".to_string()),
         };
-        let found = find_tag_line_in_docblock(&db, &mismatch).unwrap();
+        let (_, found) = find_tag_line(&db, &mismatch).unwrap();
         assert!(found.contains("$b"));
     }
 
@@ -783,7 +650,7 @@ mod tests {
             native_type: "string".to_string(),
             param_name: None,
         };
-        assert!(find_tag_line_in_docblock(&db, &mismatch).is_some());
+        assert!(find_tag_line(&db, &mismatch).is_some());
     }
 
     // ── Update edit ─────────────────────────────────────────────────
@@ -950,6 +817,28 @@ mod tests {
                 "orphaned blank * line should be removed"
             );
         }
+    }
+
+    #[test]
+    fn keeps_crlf_line_endings() {
+        let content = "<?php\r\n/**\r\n * Summary.\r\n *\r\n * @param int $a\r\n * @return int\r\n */\r\nfunction foo(string $a): string {}";
+        let db = find_docblock_above_line(content, 7).unwrap();
+        let mismatch = PhpDocMismatch {
+            tag: "@return",
+            phpdoc_type: "int".to_string(),
+            native_type: "string".to_string(),
+            param_name: None,
+        };
+        let edit = build_update_tag_edit(content, &db, &mismatch).unwrap();
+        assert_eq!(
+            edit.new_text,
+            "/**\r\n * Summary.\r\n *\r\n * @param int $a\r\n * @return string\r\n */\r\n"
+        );
+        let edit = build_remove_tag_edit(content, &db, &mismatch).unwrap();
+        assert_eq!(
+            edit.new_text,
+            "/**\r\n * Summary.\r\n *\r\n * @param int $a\r\n */\r\n"
+        );
     }
 
     // ── Stale detection ─────────────────────────────────────────────

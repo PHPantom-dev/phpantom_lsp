@@ -240,6 +240,145 @@ pub(crate) fn make_code_action_data(
     .unwrap_or_default()
 }
 
+/// A `refactor.rewrite` action that replaces the bytes `[start, end)` of
+/// the document `uri` holding `content` with `replacement`.
+pub(crate) fn rewrite_action(
+    title: String,
+    uri: Url,
+    content: &str,
+    (start, end): (usize, usize),
+    replacement: String,
+    is_preferred: bool,
+) -> CodeActionOrCommand {
+    CodeActionOrCommand::CodeAction(CodeAction {
+        title,
+        kind: Some(CodeActionKind::REFACTOR_REWRITE),
+        diagnostics: None,
+        edit: Some(single_edit(
+            uri,
+            crate::text_position::byte_range_to_lsp_range(content, start, end),
+            replacement,
+        )),
+        command: None,
+        is_preferred: Some(is_preferred),
+        disabled: None,
+        data: None,
+    })
+}
+
+/// Offer a deferred extract action (`Extract {noun}`) for `range`, plus
+/// an "all occurrences" variant when `needle` appears more than once in
+/// the file.
+///
+/// The variants are told apart by the `all_occurrences` flag in their
+/// data and by their kinds, `action_kind` and `{action_kind}All`.
+pub(crate) fn push_extract_actions(
+    out: &mut Vec<CodeActionOrCommand>,
+    uri: &str,
+    range: &Range,
+    content: &str,
+    needle: &str,
+    noun: &str,
+    action_kind: &str,
+) {
+    // A cheap text search, so the action list does not have to scope
+    // the occurrences just to decide whether to offer the variant.
+    let has_other_occurrences = content
+        .find(needle)
+        .is_some_and(|pos| content[pos + needle.len()..].contains(needle));
+
+    let mut push = |title: String, kind: &str, all_occurrences: bool| {
+        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            title,
+            kind: Some(CodeActionKind::REFACTOR_EXTRACT),
+            diagnostics: None,
+            edit: None,
+            command: None,
+            is_preferred: Some(false),
+            disabled: None,
+            data: Some(make_code_action_data(
+                kind,
+                uri,
+                range,
+                serde_json::json!({ "all_occurrences": all_occurrences }),
+            )),
+        }));
+    };
+    if has_other_occurrences {
+        push(
+            format!("Extract {noun} (this occurrence)"),
+            action_kind,
+            false,
+        );
+        push(
+            format!("Extract {noun} (all occurrences)"),
+            &format!("{action_kind}All"),
+            true,
+        );
+    } else {
+        push(format!("Extract {noun}"), action_kind, false);
+    }
+}
+
+/// Whether a deferred action from [`push_extract_actions`] asked for
+/// every occurrence.
+pub(crate) fn extract_wants_all_occurrences(data: &CodeActionData, all_kind: &str) -> bool {
+    data.extra
+        .get("all_occurrences")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(data.action_kind == all_kind)
+}
+
+/// The byte range `[start, end)` that `range` selects in `content`, or
+/// `None` for an empty selection or one that runs past the end.
+pub(crate) fn selected_byte_range(content: &str, range: Range) -> Option<(usize, usize)> {
+    let start = crate::text_position::position_to_byte_offset(content, range.start);
+    let end = crate::text_position::position_to_byte_offset(content, range.end);
+    (start < end && end <= content.len()).then_some((start, end))
+}
+
+/// The selection `[start, end)` and every textually identical expression
+/// within `[scope_start, scope_end)`, in source order.
+///
+/// Surrounding whitespace in the selection is ignored when matching.
+pub(crate) fn selection_and_identical_occurrences(
+    content: &str,
+    start: usize,
+    end: usize,
+    scope_start: usize,
+    scope_end: usize,
+) -> Vec<(usize, usize)> {
+    let selected = &content[start..end];
+    let trimmed_start = start + (selected.len() - selected.trim_start().len());
+    let trimmed_end = end - (selected.len() - selected.trim_end().len());
+    let mut offsets = vec![(start, end)];
+    offsets.extend(find_identical_occurrences(
+        content,
+        selected.trim(),
+        trimmed_start,
+        trimmed_end,
+        scope_start,
+        scope_end,
+    ));
+    offsets.sort_by_key(|&(s, _)| s);
+    offsets
+}
+
+/// One edit per `(start, end)` byte span, replacing it with `replacement`.
+pub(crate) fn replace_spans_edits<'a>(
+    content: &'a str,
+    spans: &'a [(usize, usize)],
+    replacement: &'a str,
+) -> impl Iterator<Item = TextEdit> + 'a {
+    spans.iter().map(move |&(start, end)| TextEdit {
+        range: Range {
+            start: crate::text_position::offset_to_position(content, start),
+            end: crate::text_position::offset_to_position(content, end),
+        },
+        new_text: replacement.to_string(),
+    })
+}
+
 /// Find all occurrences of `needle` in `content` within the byte range
 /// `[scope_start, scope_end)` that are textually identical to the selected
 /// expression, excluding the original selection `[sel_start, sel_end)`.

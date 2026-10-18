@@ -164,6 +164,75 @@ impl fmt::Display for PhpType {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Spelling for the type engine
+// ---------------------------------------------------------------------------
+
+impl PhpType {
+    /// This type spelled for text the type engine parses again, such as the
+    /// `@var` that declares a variable in a Blade template's prologue.
+    ///
+    /// The `Display` form leaves the leniency marker out, which suits
+    /// anything a developer reads but turns a benevolent union strict once
+    /// the text is parsed back: a value accepted where it was resolved would
+    /// be reported where the text is read.  This is the `Display` form with
+    /// each marker spelled as the `__benevolent<…>` wrapper
+    /// [`PhpType::parse`] reads it from.  The wrapper is analyzer
+    /// vocabulary, so this is never for a developer's own file.
+    pub fn to_reparseable_string(&self) -> String {
+        spell_benevolence(self).to_string()
+    }
+}
+
+/// `ty` with each leniency marker in it replaced by the `__benevolent<…>`
+/// wrapper that spells it.
+fn spell_benevolence(ty: &PhpType) -> PhpType {
+    match ty.raw_kind() {
+        TypeKind::Benevolent(inner) => {
+            PhpType::generic("__benevolent", vec![spell_benevolence(inner)])
+        }
+        _ if contains_benevolent(ty) => ty.map_children(&spell_benevolence),
+        _ => ty.clone(),
+    }
+}
+
+/// Whether a leniency marker appears anywhere in `ty`.
+fn contains_benevolent(ty: &PhpType) -> bool {
+    if ty.is_benevolent() {
+        return true;
+    }
+    match ty.kind() {
+        TypeKind::Nullable(inner)
+        | TypeKind::Array(inner)
+        | TypeKind::ClassString(Some(inner))
+        | TypeKind::InterfaceString(Some(inner))
+        | TypeKind::KeyOf(inner)
+        | TypeKind::ValueOf(inner) => contains_benevolent(inner),
+        TypeKind::Union(members) | TypeKind::Intersection(members) => {
+            members.iter().any(contains_benevolent)
+        }
+        TypeKind::Generic(g) => g.args.iter().any(contains_benevolent),
+        TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => entries
+            .iter()
+            .any(|entry| contains_benevolent(&entry.value_type)),
+        TypeKind::Callable(c) => {
+            c.params
+                .iter()
+                .any(|param| contains_benevolent(&param.type_hint))
+                || c.return_type.as_ref().is_some_and(contains_benevolent)
+        }
+        TypeKind::Conditional(c) => {
+            contains_benevolent(&c.condition)
+                || contains_benevolent(&c.then_type)
+                || contains_benevolent(&c.else_type)
+        }
+        TypeKind::IndexAccess(target, index) => {
+            contains_benevolent(target) || contains_benevolent(index)
+        }
+        _ => false,
+    }
+}
+
 /// Write `base{entry, entry, …}`, the form every shape type shares.
 fn write_shape(f: &mut fmt::Formatter<'_>, base: &str, entries: &[ShapeEntry]) -> fmt::Result {
     write!(f, "{base}{{")?;

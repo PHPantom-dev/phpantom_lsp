@@ -15,6 +15,16 @@ fn collect(php: &str) -> Vec<Diagnostic> {
     )
 }
 
+/// [`collect`] with the full stubs loaded, for a check that needs a stub
+/// class such as `Generator` to exist.
+fn collect_with_stubs(php: &str) -> Vec<Diagnostic> {
+    collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    )
+}
+
 // ─── Basic: return wrong type from function ─────────────────────────────────
 
 #[test]
@@ -510,7 +520,7 @@ function gen(): \Generator {
     return "done";
 }
 "#;
-    let diags = collect(php);
+    let diags = collect_with_stubs(php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag return in generator function, got: {diags:?}"
@@ -528,7 +538,7 @@ class Streamer {
     }
 }
 "#;
-    let diags = collect(php);
+    let diags = collect_with_stubs(php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag return in generator method, got: {diags:?}"
@@ -545,7 +555,7 @@ function range_gen(int $start, int $end): \Generator {
     return "finished";
 }
 "#;
-    let diags = collect(php);
+    let diags = collect_with_stubs(php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag generator with yield in loop, got: {diags:?}"
@@ -562,7 +572,7 @@ function conditional_gen(bool $flag): \Generator {
     return [];
 }
 "#;
-    let diags = collect(php);
+    let diags = collect_with_stubs(php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag generator with yield inside if, got: {diags:?}"
@@ -581,7 +591,7 @@ function safe_gen(): \Generator {
     return false;
 }
 "#;
-    let diags = collect(php);
+    let diags = collect_with_stubs(php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag generator with yield inside try/catch, got: {diags:?}"
@@ -602,10 +612,46 @@ function switch_gen(int $mode): \Generator {
     return 0;
 }
 "#;
-    let diags = collect(php);
+    let diags = collect_with_stubs(php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag generator with yield in switch, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_generator_whose_yields_are_values() {
+    // A coroutine reads what is sent back from `yield`, so the yields sit
+    // inside an assignment or an argument rather than standing alone.
+    let php = r#"<?php
+function coroutine(): \Generator {
+    $received = yield 1;
+    log_value(yield $received);
+    return "done";
+}
+function log_value(mixed $value): void {}
+"#;
+    let diags = collect_with_stubs(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "Should not flag a generator whose yields are used as values, got: {diags:?}"
+    );
+}
+
+#[test]
+fn yield_in_nested_closure_does_not_make_outer_a_generator() {
+    let php = r#"<?php
+function label(): string {
+    $gen = function () {
+        $sent = yield 1;
+    };
+    return [];
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "The outer function is not a generator and returns the wrong type, got: {diags:?}"
     );
 }
 
@@ -2433,11 +2479,7 @@ function add_flag(array $pairs): array {
     return $pairs;
 }
 "#;
-    let diags = collect_diagnostics_with(
-        &create_test_backend_with_full_stubs(),
-        php,
-        Backend::collect_return_type_diagnostics,
-    );
+    let diags = collect_with_stubs(php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "A foreach over array_keys($arr) that rewrites every element should keep \
@@ -3007,12 +3049,20 @@ namespace {
 }
 "#;
 
+/// Collect return-type diagnostics in a Laravel project, where `now()` and
+/// `today()` return the date factory's configured class.
+fn collect_with_laravel_dates(php: &str) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    *backend.laravel_date_class().write() = Some(None);
+    collect_diagnostics_with(&backend, php, Backend::collect_return_type_diagnostics)
+}
+
 #[test]
 fn now_and_today_satisfy_datetime_return() {
     let php = format!(
         "<?php\n{CARBON_SCAFFOLD}\nnamespace App {{\n    class Job {{\n        public function a(): \\DateTime {{ return now(); }}\n        public function b(): \\DateTime {{ return today(); }}\n    }}\n}}\n"
     );
-    let diags = collect(&php);
+    let diags = collect_with_laravel_dates(&php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "now()/today() resolve to Illuminate\\Support\\Carbon (a \\DateTime), so returning them \
@@ -3029,7 +3079,7 @@ fn now_chain_narrows_to_concrete_carbon() {
     let php = format!(
         "<?php\n{CARBON_SCAFFOLD}\nnamespace App {{\n    class Job {{\n        public function retryUntil(): \\DateTime {{ return now()->addHours(1); }}\n    }}\n}}\n"
     );
-    let diags = collect(&php);
+    let diags = collect_with_laravel_dates(&php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "now()->addHours(1) should resolve to the concrete Carbon (a \\DateTime), got: {}",
@@ -5156,11 +5206,7 @@ final readonly class EntitiesLister {
     }
 }
 "#;
-    let diags = collect_diagnostics_with(
-        &create_test_backend_with_full_stubs(),
-        php,
-        Backend::collect_return_type_diagnostics,
-    );
+    let diags = collect_with_stubs(php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "array_map over a first-class method callable should produce the method's \
@@ -5329,5 +5375,47 @@ function locate(string $name): ?array {
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "`Trap::$files` is a string[], not a Trap, got: {diags:?}"
+    );
+}
+
+/// A docblock class that is neither the native class nor a subclass of it
+/// does not replace the native return type, which PHP enforces.
+#[test]
+fn docblock_class_that_does_not_narrow_the_native_class_loses_to_it() {
+    let php = r#"<?php
+namespace App\Support;
+
+class Clock
+{
+    /** @return DateTimeImmutable */
+    public function now(): \DateTimeImmutable
+    {
+        return new \DateTimeImmutable();
+    }
+}
+"#;
+    let diags = collect_with_stubs(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "`App\\Support\\DateTimeImmutable` does not exist, so the native hint stands, got: {diags:?}"
+    );
+}
+
+/// The same for a function.
+#[test]
+fn docblock_class_that_does_not_narrow_a_functions_native_class_loses_to_it() {
+    let php = r#"<?php
+namespace App\Support;
+
+/** @return DateTimeImmutable */
+function now(): \DateTimeImmutable
+{
+    return new \DateTimeImmutable();
+}
+"#;
+    let diags = collect_with_stubs(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "`App\\Support\\DateTimeImmutable` does not exist, so the native hint stands, got: {diags:?}"
     );
 }

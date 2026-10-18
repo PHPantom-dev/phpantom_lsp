@@ -24,9 +24,10 @@
 //! file therefore folds only when the same name resolves the same way here;
 //! otherwise it stays unfolded.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use crate::php_type::{LiteralValue, PhpType, TypeKind, parse_php_int_literal};
+use crate::text_scan::{ScanStep, find_matching_forward, scan_top_level};
 
 /// Resolver from an expression's source text to its type, as
 /// [`crate::type_engine::types::conditional::ArgTypeResolver`] provides.
@@ -190,90 +191,61 @@ pub(crate) fn has_top_level_int_operator(text: &str) -> bool {
 /// not follow an operand is a sign rather than a binary operator. Returns
 /// `None` for an expression with no operator of its own.
 fn split_point(text: &str) -> Option<(usize, usize, IntOp)> {
-    let bytes = text.as_bytes();
-    let mut depth: u32 = 0;
-    let mut quote: Option<u8> = None;
-    let mut best: Option<(usize, usize, IntOp)> = None;
-    // Whether the last significant byte ended an operand, which is what makes
-    // a following `+`/`-` a binary operator rather than a sign.
-    let mut after_operand = false;
-    let mut i = 0;
-    while i < bytes.len() {
+    let best: Cell<Option<(usize, usize, IntOp)>> = Cell::new(None);
+    scan_top_level(text.as_bytes(), |bytes, i| {
         let byte = bytes[i];
-        if let Some(q) = quote {
-            if byte == b'\\' {
-                i += 2;
-                continue;
-            }
-            if byte == q {
-                quote = None;
-            }
-            i += 1;
-            continue;
+        // `||`, `&&` and `**` are not operators this folds, so they are
+        // never a split point either, and `->` is a member access.
+        if (matches!(byte, b'|' | b'&' | b'*') && bytes.get(i + 1) == Some(&byte))
+            || bytes[i..].starts_with(b"->")
+        {
+            return ScanStep::Skip(2);
         }
-        if byte.is_ascii_whitespace() {
-            i += 1;
-            continue;
+        let matched = match byte {
+            b'|' => Some((1, IntOp::Bitwise(BitwiseOp::Or))),
+            b'^' => Some((1, IntOp::Bitwise(BitwiseOp::Xor))),
+            b'&' => Some((1, IntOp::Bitwise(BitwiseOp::And))),
+            b'<' if bytes.get(i + 1) == Some(&b'<') => {
+                Some((2, IntOp::Bitwise(BitwiseOp::LeftShift)))
+            }
+            b'>' if bytes.get(i + 1) == Some(&b'>') => {
+                Some((2, IntOp::Bitwise(BitwiseOp::RightShift)))
+            }
+            b'+' if follows_operand(bytes, i) => Some((1, IntOp::Add)),
+            b'-' if follows_operand(bytes, i) => Some((1, IntOp::Sub)),
+            b'*' => Some((1, IntOp::Mul)),
+            b'/' => Some((1, IntOp::Div)),
+            b'%' => Some((1, IntOp::Mod)),
+            _ => None,
+        };
+        let Some((op_len, op)) = matched else {
+            return ScanStep::Skip(1);
+        };
+        if best
+            .get()
+            .is_none_or(|(_, _, found)| op.precedence() <= found.precedence())
+        {
+            best.set(Some((i, op_len, op)));
         }
-        match byte {
-            b'\'' | b'"' => {
-                quote = Some(byte);
-                after_operand = true;
-                i += 1;
-                continue;
-            }
-            b'(' | b'[' | b'{' => depth += 1,
-            b')' | b']' | b'}' => {
-                depth = depth.saturating_sub(1);
-                after_operand = true;
-                i += 1;
-                continue;
-            }
-            b'|' | b'&' | b'*' if bytes.get(i + 1) == Some(&byte) => {
-                // `||`, `&&` and `**` are not operators this folds, so they
-                // are never a split point either.
-                after_operand = false;
-                i += 2;
-                continue;
-            }
-            b'-' if bytes.get(i + 1) == Some(&b'>') => {
-                i += 2;
-                continue;
-            }
-            _ if depth == 0 => {
-                let matched = match byte {
-                    b'|' => Some((1, IntOp::Bitwise(BitwiseOp::Or))),
-                    b'^' => Some((1, IntOp::Bitwise(BitwiseOp::Xor))),
-                    b'&' => Some((1, IntOp::Bitwise(BitwiseOp::And))),
-                    b'<' if bytes.get(i + 1) == Some(&b'<') => {
-                        Some((2, IntOp::Bitwise(BitwiseOp::LeftShift)))
-                    }
-                    b'>' if bytes.get(i + 1) == Some(&b'>') => {
-                        Some((2, IntOp::Bitwise(BitwiseOp::RightShift)))
-                    }
-                    b'+' if after_operand => Some((1, IntOp::Add)),
-                    b'-' if after_operand => Some((1, IntOp::Sub)),
-                    b'*' => Some((1, IntOp::Mul)),
-                    // `//` and `/*` open a comment rather than divide.
-                    b'/' if !matches!(bytes.get(i + 1), Some(b'/' | b'*')) => Some((1, IntOp::Div)),
-                    b'%' => Some((1, IntOp::Mod)),
-                    _ => None,
-                };
-                if let Some((op_len, op)) = matched {
-                    if best.is_none_or(|(_, _, found)| op.precedence() <= found.precedence()) {
-                        best = Some((i, op_len, op));
-                    }
-                    after_operand = false;
-                    i += op_len;
-                    continue;
-                }
-            }
-            _ => {}
-        }
-        after_operand = byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$' | b'\\');
-        i += 1;
-    }
-    best
+        ScanStep::Skip(op_len)
+    });
+    best.get()
+}
+
+/// Whether the code before `i` ends an operand, which is what makes a `+`
+/// or `-` at `i` a binary operator rather than a sign.
+fn follows_operand(bytes: &[u8], i: usize) -> bool {
+    bytes[..i]
+        .iter()
+        .rev()
+        .find(|byte| !byte.is_ascii_whitespace())
+        .is_some_and(|&byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'_' | b'$' | b'\\' | b')' | b']' | b'}' | b'\'' | b'"'
+                )
+        })
 }
 
 /// The integer a single operand folds to: an integer literal, a unary
@@ -301,34 +273,14 @@ fn fold_term(text: &str, resolve: TextResolver<'_>) -> Option<i64> {
 /// `text` without a pair of parentheses wrapping the whole of it.
 fn strip_wrapping_parens(text: &str) -> &str {
     let mut text = text;
-    while let Some(inner) = text.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
-        // `(a) | (b)` also starts with `(` and ends with `)`, but the two
-        // pairs are not one wrapper: the depth returns to zero in between.
-        if !is_balanced(inner) {
-            return text;
-        }
-        text = inner.trim();
+    // `(a) | (b)` also starts with `(` and ends with `)`, but the two
+    // pairs are not one wrapper: the first `(` closes before the end.
+    while text.starts_with('(')
+        && find_matching_forward(text, 0, b'(', b')') == Some(text.len() - 1)
+    {
+        text = text[1..text.len() - 1].trim();
     }
     text
-}
-
-/// Whether every bracket in `text` is closed within it, i.e. whether it is a
-/// complete expression rather than the middle of one.
-fn is_balanced(text: &str) -> bool {
-    let mut depth: i32 = 0;
-    for byte in text.bytes() {
-        match byte {
-            b'(' | b'[' | b'{' => depth += 1,
-            b')' | b']' | b'}' => {
-                depth -= 1;
-                if depth < 0 {
-                    return false;
-                }
-            }
-            _ => {}
-        }
-    }
-    depth == 0
 }
 
 thread_local! {

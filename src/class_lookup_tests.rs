@@ -47,7 +47,10 @@ fn make_class(
 
 /// Build a class loader from a slice of `Arc<ClassInfo>`.
 fn loader_from(classes: &[Arc<ClassInfo>]) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + '_ {
-    move |name: &str| classes.iter().find(|c| c.fqn() == name).cloned()
+    move |name: &str| {
+        let name = name.strip_prefix('\\').unwrap_or(name);
+        classes.iter().find(|c| c.fqn() == name).cloned()
+    }
 }
 
 // ── is_subtype_of: FQN self-check ──────────────────────────
@@ -202,22 +205,15 @@ fn subtype_of_global_interface_not_broken_by_shadowing_use_import() {
     ];
 
     // A loader that mirrors `class_loader_with`: an unqualified name in
-    // the use-map resolves to the imported class first; the `__fqn__\`
-    // bypass skips the use-map and resolves the global short name.
+    // the use-map resolves to the imported class, while a leading `\`
+    // skips the use-map and names the global class.
     let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
-        let stripped = name.strip_prefix('\\').unwrap_or(name);
-        if !stripped.contains('\\') && stripped == "Iterator" {
+        if name == "Iterator" {
             // use-map shadow: unqualified `Iterator` → App\Input\Iterator
             return Some(app_iterator.clone());
         }
-        if let Some(cls) = classes.iter().find(|c| c.fqn() == stripped).cloned() {
-            return Some(cls);
-        }
-        if stripped.contains('\\') {
-            let short = crate::util::short_name(stripped);
-            return classes.iter().find(|c| c.fqn() == short).cloned();
-        }
-        None
+        let stripped = name.strip_prefix('\\').unwrap_or(name);
+        classes.iter().find(|c| c.fqn() == stripped).cloned()
     };
 
     // Without the fix, the intermediate global `Iterator` node resolves

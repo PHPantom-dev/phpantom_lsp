@@ -57,6 +57,7 @@ pub(crate) mod add_iterable_type;
 mod add_override;
 pub(crate) mod add_return_type_will_change;
 pub(crate) mod add_throws;
+mod attributes;
 pub(crate) mod fix_phpdoc_type;
 pub(crate) mod fix_prefixed_class;
 pub(crate) mod fix_return_type;
@@ -72,341 +73,36 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::CodeActionData;
+use crate::text_position::ranges_overlap;
 
-// ── Method-insertion-point helpers ──────────────────────────────────────────
-//
-// Shared by `add_override` and `add_return_type_will_change`, which both
-// insert an attribute line above a method declaration and need to locate
-// where that declaration truly starts (walking back past any existing
-// modifiers and attribute lists).
-
-use crate::util::contains_function_keyword;
-
-/// Information about where to insert an attribute above a method
-/// declaration.
-pub(super) struct InsertionPoint {
-    /// The byte offset where the attribute line should be inserted.
-    /// This is the start of the line containing the first token of
-    /// the method declaration (attribute, modifier, or `function`).
-    pub(super) insert_offset: usize,
-    /// The indentation whitespace of the method declaration line.
-    pub(super) indent: String,
-    /// The byte offset of the start of the first attribute list (if
-    /// any), or the start of the first modifier / `function` keyword.
-    /// Used to check if the target attribute already exists in
-    /// attribute lines above the method.
-    pub(super) first_token_offset: usize,
-    /// The byte offset just past the end of the last attribute list
-    /// before the modifiers/function keyword. If no attributes exist,
-    /// this equals `first_token_offset`.
-    pub(super) attrs_end_offset: usize,
+impl Backend {
+    /// The cached PHPStan diagnostics for `uri` that overlap `range`, the
+    /// ones a code action requested there can act on.
+    ///
+    /// Only those are cloned out of the cache, rather than every PHPStan
+    /// diagnostic in the file once per action kind.
+    pub(super) fn phpstan_diags_overlapping(&self, uri: &str, range: &Range) -> Vec<Diagnostic> {
+        let cache = self.phpstan_tool.last_diags.lock();
+        cache
+            .get(uri)
+            .map(|diags| {
+                diags
+                    .iter()
+                    .filter(|diag| ranges_overlap(&diag.range, range))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
-/// Find the insertion point for an attribute on a method whose PHPStan
-/// diagnostic is on `diag_line`.
-///
-/// The diagnostic line from PHPStan points at the method name. We need
-/// to find where the method declaration truly starts, which may be
-/// several lines above if there are docblocks and existing attribute
-/// lists.
-///
-/// We walk backward from the diagnostic line to find:
-/// 1. The `function` keyword on or before the diagnostic line
-/// 2. Any modifiers (`public`, `static`, etc.) before `function`
-/// 3. Any attribute lists (`#[...]`) before the modifiers
-///
-/// The insertion point is the start of the line containing the
-/// earliest attribute list, or the start of the line containing the
-/// first modifier/`function` keyword if no attributes exist.
-pub(super) fn find_method_insertion_point(
-    content: &str,
-    diag_line: usize,
-) -> Option<InsertionPoint> {
-    let lines: Vec<&str> = content.lines().collect();
-    if diag_line >= lines.len() {
-        return None;
+/// The PHPStan identifier a diagnostic carries as its code, such as
+/// `return.type`.
+pub(super) fn phpstan_identifier(diag: &Diagnostic) -> Option<&str> {
+    match &diag.code {
+        Some(NumberOrString::String(s)) => Some(s),
+        _ => None,
     }
-
-    // Find the `function` keyword on or near the diagnostic line.
-    // PHPStan places the diagnostic on the method name line, which
-    // contains `function`.  In rare cases with very long signatures
-    // the diagnostic might be on a continuation line, so we search
-    // backward a few lines.
-    let mut func_line = None;
-    let search_start = diag_line.min(lines.len().saturating_sub(1));
-    for i in (search_start.saturating_sub(5)..=search_start).rev() {
-        if contains_function_keyword(lines[i]) {
-            func_line = Some(i);
-            break;
-        }
-    }
-    let func_line = func_line?;
-
-    // Walk backward from the function line past modifier keywords to
-    // find the first modifier line.
-    let mut first_decl_line = func_line;
-    let mut check_line = func_line;
-    loop {
-        if check_line == 0 {
-            break;
-        }
-        let prev = check_line - 1;
-        let prev_trimmed = lines[prev].trim();
-
-        // Skip blank lines between attributes and modifiers.
-        if prev_trimmed.is_empty() {
-            break;
-        }
-
-        // Check for modifier keywords on the previous line.
-        if is_modifier_line(prev_trimmed) {
-            first_decl_line = prev;
-            check_line = prev;
-            continue;
-        }
-
-        // Stop: the previous line is not a modifier or attribute.
-        break;
-    }
-
-    // Now walk backward from `first_decl_line` to find attribute lists.
-    let mut first_attr_line = first_decl_line;
-    let mut check_line = first_decl_line;
-    loop {
-        if check_line == 0 {
-            break;
-        }
-        let prev = check_line - 1;
-        let prev_trimmed = lines[prev].trim();
-
-        if prev_trimmed.is_empty() {
-            break;
-        }
-
-        // Check for PHP attribute syntax `#[...]`.
-        if is_attribute_line(prev_trimmed) {
-            first_attr_line = prev;
-            check_line = prev;
-            continue;
-        }
-
-        break;
-    }
-
-    // Compute the line byte offset for the first attribute (or first
-    // modifier/function line if no attributes).
-    let target_line = first_attr_line;
-    let insert_offset = line_byte_offset(content, target_line);
-
-    // Indentation of the method declaration (use the function keyword
-    // line's indentation as the canonical one).
-    let indent: String = lines[func_line]
-        .chars()
-        .take_while(|c| c.is_whitespace())
-        .collect();
-
-    // first_token_offset is the byte offset of the start of the
-    // first attribute or modifier line's content.
-    let first_token_offset = insert_offset;
-
-    // attrs_end_offset: byte offset just past the last attribute line.
-    let attrs_end_offset = if first_attr_line < first_decl_line {
-        line_byte_offset(content, first_decl_line)
-    } else {
-        first_token_offset
-    };
-
-    Some(InsertionPoint {
-        insert_offset,
-        indent,
-        first_token_offset,
-        attrs_end_offset,
-    })
-}
-
-/// Check if a trimmed line consists of (or starts with) PHP modifier
-/// keywords, possibly followed by `function`.
-pub(super) fn is_modifier_line(trimmed: &str) -> bool {
-    let modifiers = [
-        "public",
-        "protected",
-        "private",
-        "static",
-        "abstract",
-        "final",
-        "readonly",
-    ];
-    // The line should start with a modifier keyword.
-    modifiers.iter().any(|kw| {
-        trimmed.starts_with(kw)
-            && trimmed[kw.len()..].starts_with(|c: char| c.is_whitespace() || c == '\0')
-    })
-}
-
-/// Check if a trimmed line is a PHP attribute line (`#[...]`).
-pub(super) fn is_attribute_line(trimmed: &str) -> bool {
-    trimmed.starts_with("#[")
-}
-
-/// Compute the byte offset of the start of the given line number
-/// (0-based).
-pub(super) fn line_byte_offset(content: &str, line: usize) -> usize {
-    let mut offset = 0;
-    for (i, l) in content.lines().enumerate() {
-        if i == line {
-            return offset;
-        }
-        offset += l.len() + 1; // +1 for newline
-    }
-    content.len()
-}
-
-/// Check if a `#[...]` line contains a specific PHP attribute name.
-///
-/// Matches patterns like `#[Override]`, `#[\Override]`,
-/// `#[Override, SomethingElse]`, `#[SomethingElse, \Override]`, etc.
-/// The attribute name is matched as a standalone token: preceded by
-/// `[`, `\`, `,`, or whitespace and followed by `]`, `,`, `(`, or
-/// whitespace.
-pub(crate) fn contains_php_attribute(line: &str, attr_name: &[u8]) -> bool {
-    let bytes = line.as_bytes();
-    let target_len = attr_name.len();
-
-    let mut i = 0;
-    while i + target_len <= bytes.len() {
-        if &bytes[i..i + target_len] == attr_name {
-            let ok_before = if i == 0 {
-                false
-            } else {
-                let prev = bytes[i - 1];
-                prev == b'[' || prev == b'\\' || prev == b',' || prev == b' ' || prev == b'\t'
-            };
-            let ok_after = if i + target_len >= bytes.len() {
-                true
-            } else {
-                let next = bytes[i + target_len];
-                next == b']' || next == b',' || next == b'(' || next == b' ' || next == b'\t'
-            };
-            if ok_before && ok_after {
-                return true;
-            }
-        }
-        i += 1;
-    }
-    false
-}
-
-/// Scan forward through `lines` starting at `start_line`, tracking brace
-/// depth while respecting string literals (`'…'`, `"…"`) and comments
-/// (`// …`, `/* … */`).
-///
-/// Calls `pred(depth)` after every `}` decrement.  Returns the line
-/// index of the first `}` where `pred` returns `true`.
-///
-/// # Examples
-///
-/// Find the closing `}` that matches the `{` on `brace_line` (depth
-/// starts at 0, first `{` pushes to 1, match when depth returns to 0):
-///
-/// ```ignore
-/// find_brace_match_line(&lines, brace_line, |d| d == 0);
-/// ```
-///
-/// Find the enclosing block's `}` from inside a body (depth starts at
-/// 0, first unmatched `}` brings depth to −1):
-///
-/// ```ignore
-/// find_brace_match_line(&lines, start_line, |d| d < 0);
-/// ```
-pub(crate) fn find_brace_match_line(
-    lines: &[&str],
-    start_line: usize,
-    pred: impl Fn(i32) -> bool,
-) -> Option<usize> {
-    let mut depth: i32 = 0;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut in_block_comment = false;
-
-    for (line_idx, line) in lines.iter().enumerate().skip(start_line) {
-        let bytes = line.as_bytes();
-        let len = bytes.len();
-        let mut in_line_comment = false;
-        let mut i = 0;
-
-        while i < len {
-            let b = bytes[i];
-
-            if in_single_quote {
-                if b == b'\\' && i + 1 < len {
-                    i += 2; // skip escaped character
-                    continue;
-                }
-                if b == b'\'' {
-                    in_single_quote = false;
-                }
-                i += 1;
-                continue;
-            }
-
-            if in_double_quote {
-                if b == b'\\' && i + 1 < len {
-                    i += 2; // skip escaped character
-                    continue;
-                }
-                if b == b'"' {
-                    in_double_quote = false;
-                }
-                i += 1;
-                continue;
-            }
-
-            if in_block_comment {
-                if b == b'*' && i + 1 < len && bytes[i + 1] == b'/' {
-                    in_block_comment = false;
-                    i += 2;
-                    continue;
-                }
-                i += 1;
-                continue;
-            }
-
-            if in_line_comment {
-                i += 1;
-                continue;
-            }
-
-            if b == b'/' && i + 1 < len {
-                if bytes[i + 1] == b'/' {
-                    in_line_comment = true;
-                    i += 2;
-                    continue;
-                }
-                if bytes[i + 1] == b'*' {
-                    in_block_comment = true;
-                    i += 2;
-                    continue;
-                }
-            }
-
-            match b {
-                b'\'' => in_single_quote = true,
-                b'"' => in_double_quote = true,
-                b'{' => depth += 1,
-                b'}' => {
-                    depth -= 1;
-                    if pred(depth) {
-                        return Some(line_idx);
-                    }
-                }
-                _ => {}
-            }
-
-            i += 1;
-        }
-    }
-
-    None
 }
 
 /// Split a PHPStan diagnostic message into the primary message and optional tip.
@@ -532,11 +228,7 @@ impl Backend {
 
         for cached_d in cached {
             // Must be the same identifier.
-            let ident = match &cached_d.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
-            };
-            if ident != "missingType.checkedException" {
+            if phpstan_identifier(cached_d) != Some("missingType.checkedException") {
                 continue;
             }
 

@@ -446,10 +446,8 @@ fn call_node_invalidations<'b>(
             // A constructor that returns nothing is still not read as
             // changing its arguments: building an object from them is what
             // it is for.  Only a declared `@impure` says otherwise.
-            let impure = static_receiver_class_names(inst.class, ctx)
-                .iter()
-                .filter_map(|name| (ctx.class_loader)(name))
-                .any(|cls| declared_purity(&cls, "__construct", ctx) == Some(false));
+            let impure = static_receiver_class(inst.class, ctx)
+                .is_some_and(|cls| declared_purity(&cls, "__construct", ctx) == Some(false));
             if impure {
                 push_argument_invalidations(args, scope, out);
             }
@@ -482,8 +480,16 @@ fn call_node_invalidations<'b>(
                 }
             }
 
+            // What a callable argument does matters only to a scope holding
+            // something a call could change, and finding out means asking
+            // the callee, which resolves its receiver.
+            let arguments = if scope_holds_call_state(scope) {
+                args.arguments.as_slice()
+            } else {
+                &[]
+            };
             let mut next_positional = 0usize;
-            for arg in args.arguments.iter() {
+            for arg in arguments {
                 let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
                 // A callable argument the callee is known to invoke before
                 // returning (`call_user_func($cb)`, `array_map($cb, …)`)
@@ -903,6 +909,15 @@ fn scope_tracks_paths(scope: &ScopeState) -> bool {
         || scope.assertions.values().any(|checks| !checks.is_empty())
 }
 
+/// Whether the scope holds anything a call could invalidate: what
+/// [`scope_tracks_paths`] looks for, or a proof about some key, which
+/// [`ScopeState::invalidate_receiver_state`] drops along with the keys.
+fn scope_holds_call_state(scope: &ScopeState) -> bool {
+    scope_tracks_paths(scope)
+        || !scope.non_null_implications.is_empty()
+        || !scope.implied_narrowings.is_empty()
+}
+
 /// Whether the scope holds any synthetic key read through `subject`.
 fn scope_reads_through(scope: &ScopeState, subject: &str) -> bool {
     let reads = |key: &str| {
@@ -1108,14 +1123,10 @@ fn static_call_effect(
     method_name: &str,
     ctx: &ForwardWalkCtx<'_>,
 ) -> (CallEffect, bool) {
-    let classes: Vec<Arc<crate::types::ClassInfo>> = static_receiver_class_names(class, ctx)
-        .iter()
-        .filter_map(|name| (ctx.class_loader)(name))
-        .collect();
-    let Some(cls) = classes.first() else {
+    let Some(cls) = static_receiver_class(class, ctx) else {
         return (CallEffect::Unknown, false);
     };
-    class_method_effect(cls, method_name, ctx)
+    class_method_effect(&cls, method_name, ctx)
 }
 
 /// [`method_call_effect`] for one class, plus whether the method is static.
@@ -1225,58 +1236,20 @@ fn returns_this(ty: &PhpType) -> bool {
     }
 }
 
-pub(crate) fn receiver_class_names(
-    expr: &Expression<'_>,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) -> Vec<String> {
-    match expr {
-        Expression::Variable(Variable::Direct(dv)) => {
-            let var_name = bytes_to_str(dv.name);
-            if var_name == "$this" && !ctx.current_class.name.is_empty() {
-                return vec![
-                    ctx.current_class.name.to_string(),
-                    ctx.current_class.fqn().to_string(),
-                ];
-            }
-            scope
-                .get(var_name)
-                .iter()
-                .filter_map(|rt| rt.class_info.as_ref())
-                .flat_map(|cls| [cls.name.to_string(), cls.fqn().to_string()])
-                .collect()
-        }
-        Expression::Parenthesized(inner) => receiver_class_names(inner.expression, scope, ctx),
-        _ => Vec::new(),
-    }
-}
-
-pub(crate) fn static_receiver_class_names(
+/// The class a static receiver (`Foo::`, `self::`, `new Foo`) names.
+fn static_receiver_class(
     expr: &Expression<'_>,
     ctx: &ForwardWalkCtx<'_>,
-) -> Vec<String> {
-    match expr {
-        Expression::Self_(_) | Expression::Static(_) if !ctx.current_class.name.is_empty() => {
-            vec![
-                ctx.current_class.name.to_string(),
-                ctx.current_class.fqn().to_string(),
-            ]
-        }
-        Expression::Parent(_) => ctx
-            .current_class
-            .parent_class
-            .map(|name| vec![name.to_string()])
-            .unwrap_or_default(),
-        Expression::Identifier(ident) => vec![bytes_to_str(ident.value()).to_string()],
-        Expression::Parenthesized(inner) => static_receiver_class_names(inner.expression, ctx),
-        _ => Vec::new(),
+) -> Option<Arc<crate::types::ClassInfo>> {
+    if let Expression::Parenthesized(inner) = expr {
+        return static_receiver_class(inner.expression, ctx);
     }
-}
-
-pub(crate) fn class_name_matches_receiver(name: &[u8], receiver_names: &[String]) -> bool {
-    let class_name = bytes_to_str(name);
-    receiver_names.iter().any(|receiver| {
-        receiver.eq_ignore_ascii_case(class_name)
-            || crate::util::short_name(receiver).eq_ignore_ascii_case(class_name)
-    })
+    let name = crate::class_lookup::class_expression_name(
+        expr,
+        ctx.current_class,
+        ctx.all_classes,
+        ctx.source_class_loader,
+        ctx.source_imports,
+    )?;
+    (ctx.class_loader)(&name)
 }

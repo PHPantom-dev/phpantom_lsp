@@ -19,7 +19,8 @@ use std::ops::Range;
 
 use super::directives::{BladeDirectives, DirectiveHead, directive_head};
 use super::pairing::{self, Pair, Stray, Token};
-use super::signature::{InertOpener, inert_regions, mask_regions, split_top_level_args};
+use super::signature::{InertOpener, inert_regions, mask_regions};
+use crate::text_scan::split_top_level_commas;
 
 /// A byte range of the original Blade source.
 pub(crate) type Span = Range<usize>;
@@ -437,7 +438,7 @@ pub(crate) fn opens_block(block: &Block, content: &str, args: Option<&Span>) -> 
         Opens::Always => true,
         Opens::WithArgs => args.is_some(),
         Opens::UnlessContent => args.is_some_and(|args| {
-            let parts = split_top_level_args(inside(content, args));
+            let parts = split_top_level_commas(inside(content, args));
             parts.len() < 2 || matches!(parts[1].trim(), "null" | "''" | "\"\"")
         }),
         Opens::Lang => args.is_none_or(|args| inside(content, args).trim_start().starts_with('[')),

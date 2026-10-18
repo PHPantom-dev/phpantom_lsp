@@ -1,20 +1,19 @@
-/// Standalone function and `define()` constant extraction.
-///
-/// This module handles extracting standalone (non-method) function
-/// definitions and `define('NAME', value)` constant declarations from
-/// the PHP AST.
+//! Standalone function and `define()` constant extraction.
+//!
+//! This module handles extracting standalone (non-method) function
+//! definitions and `define('NAME', value)` constant declarations from
+//! the PHP AST.
+
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::Backend;
-use crate::atom::{atom, atom_bytes, bytes_to_str, literal_bytes_to_str};
+use crate::atom::{atom_bytes, bytes_to_str, literal_bytes_to_str};
 use crate::docblock;
 use crate::types::*;
 
-use super::{
-    DocblockCtx, extract_hint_type, extract_parameters, is_available_for_version,
-    is_removed_for_version, merge_deprecation_info,
-};
+use super::signature::{Signature, extract_signature};
+use super::{DocblockCtx, for_each_nested_statement_list, merge_deprecation_info};
 
 /// Whether a function or method body calls `func_get_args()`,
 /// `func_get_arg()` or `func_num_args()`, which makes it accept more
@@ -120,243 +119,66 @@ impl Backend {
         for statement in statements {
             match statement {
                 Statement::Function(func) => {
-                    // Skip functions whose #[PhpStormStubsElementAvailable]
-                    // range excludes the target PHP version.
-                    if let Some(ctx) = doc_ctx
-                        && let Some(ver) = ctx.php_version
-                        && !is_available_for_version(&func.attribute_lists, ctx, ver)
-                    {
+                    let Some(Signature {
+                        mut parameters,
+                        native_return_type,
+                        return_type,
+                        conditional_return,
+                        docblock: info,
+                        template_params: func_template_params,
+                        template_param_bounds: func_template_param_bounds,
+                        template_param_defaults: func_template_param_defaults,
+                        template_bindings: func_template_bindings,
+                        ..
+                    }) = extract_signature(
+                        func,
+                        &func.attribute_lists,
+                        &func.parameter_list,
+                        func.return_type_hint.as_ref(),
+                        doc_ctx,
+                        &[],
+                    )
+                    else {
                         continue;
-                    }
-
-                    // Skip functions whose docblock has `@removed X.Y`
-                    // where X.Y <= the target PHP version.
-                    if let Some(ctx) = doc_ctx
-                        && let Some(ver) = ctx.php_version
-                        && is_removed_for_version(func, ctx, ver)
-                    {
-                        continue;
-                    }
+                    };
 
                     let name = atom_bytes(func.name.value);
                     let name_offset = func.name.span.start.offset;
-                    let php_version = doc_ctx.and_then(|ctx| ctx.php_version);
-                    let mut parameters = extract_parameters(
-                        &func.parameter_list,
-                        doc_ctx.map(|ctx| ctx.content),
-                        php_version,
+
+                    let type_assertions = info
+                        .as_ref()
+                        .map(docblock::extract_type_assertions_from_info)
+                        .unwrap_or_default();
+
+                    let depr_info = merge_deprecation_info(
+                        info.as_ref()
+                            .and_then(docblock::extract_deprecation_message_from_info),
+                        &func.attribute_lists,
                         doc_ctx,
                     );
-                    let raw_native_return_type = func
-                        .return_type_hint
+
+                    let description = info
                         .as_ref()
-                        .map(|rth| extract_hint_type(&rth.hint));
+                        .and_then(crate::hover::extract_description_from_info);
 
-                    // Check for a #[LanguageLevelTypeAware] override on the
-                    // function's return type.  When present, it replaces the
-                    // native type hint with the version-appropriate string.
-                    let lang_level_return = if let Some(ctx) = doc_ctx
-                        && let Some(ver) = ctx.php_version
-                    {
-                        super::extract_language_level_type(&func.attribute_lists, ctx, ver)
-                    } else {
-                        None
-                    };
-                    // The `#[LanguageLevelTypeAware]` attribute is JetBrains'
-                    // authoritative, version-resolved return type.  When it is
-                    // present the accompanying `@return` docblock is legacy
-                    // text (e.g. `resource|false` left over from before the
-                    // handle→object migration) and must not be allowed to
-                    // widen the attribute type back to the old value.
-                    let return_from_lang_level = lang_level_return.is_some();
-                    let native_return_type = lang_level_return.or(raw_native_return_type);
+                    let return_description = info
+                        .as_ref()
+                        .and_then(docblock::extract_return_description_from_info);
 
-                    // Apply PHPDoc `@return` override for the function.
-                    // Also extract PHPStan conditional return types,
-                    // type assertion annotations, and `@deprecated` if present.
+                    let link_urls = info
+                        .as_ref()
+                        .map(docblock::extract_link_urls_from_info)
+                        .unwrap_or_default();
 
-                    // Parse the docblock once — used by both the
-                    // return-type / metadata extraction and the @param
-                    // merge loop below.
-                    let docblock_text = doc_ctx.and_then(|ctx| {
-                        docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, func)
-                    });
-                    let info = docblock_text.and_then(docblock::parse_docblock_for_tags);
+                    let see_refs = info
+                        .as_ref()
+                        .map(docblock::extract_see_references_from_info)
+                        .unwrap_or_default();
 
-                    let (
-                        return_type,
-                        conditional_return,
-                        type_assertions,
-                        deprecation_message,
-                        deprecated_replacement,
-                        description,
-                        return_description,
-                        link_urls,
-                        see_refs,
-                        func_template_params,
-                        func_template_param_bounds,
-                        func_template_param_defaults,
-                        func_template_bindings,
-                        throws,
-                    ) = if let Some(ctx) = doc_ctx {
-                        let parsed_doc_return = info
-                            .as_ref()
-                            .and_then(docblock::extract_return_type_from_info);
-
-                        let effective = if return_from_lang_level {
-                            native_return_type.clone()
-                        } else {
-                            docblock::resolve_effective_type_typed(
-                                native_return_type.as_ref(),
-                                parsed_doc_return.as_ref(),
-                            )
-                        };
-
-                        // If the effective return type is bare `array` (or
-                        // nullable/union containing array) and the function
-                        // has a `#[ArrayShape]` attribute, replace it with
-                        // the more specific shape type.
-                        let effective = effective.map(|ty| {
-                            super::apply_array_shape_override(ty, &func.attribute_lists, ctx)
-                        });
-
-                        let conditional = info
-                            .as_ref()
-                            .and_then(docblock::extract_conditional_return_type_from_info);
-
-                        // Extract function-level @template params and their
-                        // @param bindings for generic type substitution at
-                        // call sites.
-                        let params_full = info
-                            .as_ref()
-                            .map(docblock::extract_template_params_full_from_info)
-                            .unwrap_or_default();
-                        let tpl_params: Vec<String> =
-                            params_full.iter().map(|(n, _, _, _)| n.clone()).collect();
-                        let tpl_param_bounds: crate::atom::AtomMap<crate::php_type::PhpType> =
-                            params_full
-                                .iter()
-                                .filter_map(|(name, bound, _, _)| {
-                                    bound.as_ref().map(|b| (atom(name), b.clone()))
-                                })
-                                .collect();
-                        let tpl_param_defaults: Box<
-                            [(crate::atom::Atom, crate::php_type::PhpType)],
-                        > = params_full
-                            .iter()
-                            .filter_map(|(name, _, _, default)| {
-                                default.as_ref().map(|d| (atom(name), d.clone()))
-                            })
-                            .collect();
-                        let tpl_bindings: Vec<(crate::atom::Atom, crate::atom::Atom)> =
-                            if !tpl_params.is_empty() {
-                                info.as_ref()
-                                    .map(|i| {
-                                        docblock::extract_template_param_bindings_from_info(
-                                            i,
-                                            &tpl_params,
-                                        )
-                                        .into_iter()
-                                        .map(|(a, b)| (atom(&a), atom(&b)))
-                                        .collect()
-                                    })
-                                    .unwrap_or_default()
-                            } else {
-                                Vec::new()
-                            };
-
-                        // If no explicit conditional return type was found,
-                        // try to synthesize one from function-level @template
-                        // annotations.  For example:
-                        //   @template T
-                        //   @param class-string<T> $class
-                        //   @return T
-                        // becomes a conditional that resolves T from the
-                        // call-site argument (e.g. resolve(User::class) → User).
-                        let conditional = conditional.or_else(|| {
-                            docblock::synthesize_template_conditional_from_info(
-                                info.as_ref()?,
-                                &tpl_params,
-                                effective.as_ref(),
-                                false,
-                            )
-                        });
-
-                        let assertions = info
-                            .as_ref()
-                            .map(docblock::extract_type_assertions_from_info)
-                            .unwrap_or_default();
-
-                        let depr_info = merge_deprecation_info(
-                            info.as_ref()
-                                .and_then(docblock::extract_deprecation_message_from_info),
-                            &func.attribute_lists,
-                            Some(ctx),
-                        );
-                        let deprecation_message = depr_info.message;
-                        let deprecated_replacement = depr_info.replacement;
-
-                        let desc = info
-                            .as_ref()
-                            .and_then(crate::hover::extract_description_from_info);
-
-                        let ret_desc = info
-                            .as_ref()
-                            .and_then(docblock::extract_return_description_from_info);
-
-                        let link_urls = info
-                            .as_ref()
-                            .map(docblock::extract_link_urls_from_info)
-                            .unwrap_or_default();
-
-                        let see_refs = info
-                            .as_ref()
-                            .map(docblock::extract_see_references_from_info)
-                            .unwrap_or_default();
-
-                        let throws = info
-                            .as_ref()
-                            .map(docblock::extract_throws_tags_from_info)
-                            .unwrap_or_default();
-
-                        (
-                            effective,
-                            conditional,
-                            assertions,
-                            deprecation_message,
-                            deprecated_replacement,
-                            desc,
-                            ret_desc,
-                            link_urls,
-                            see_refs,
-                            tpl_params,
-                            tpl_param_bounds,
-                            tpl_param_defaults,
-                            tpl_bindings,
-                            throws,
-                        )
-                    } else {
-                        // No docblock context available — attribute argument
-                        // strings cannot be read without source text, so we
-                        // skip #[Deprecated] extraction here.  In practice
-                        // `doc_ctx` is always `Some` for real file parsing.
-                        (
-                            native_return_type.clone(),
-                            None,
-                            Vec::new(),
-                            None,
-                            None,
-                            None,
-                            None,
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                            crate::atom::AtomMap::<crate::php_type::PhpType>::default(),
-                            Box::default(),
-                            Vec::new(),
-                            Vec::new(),
-                        )
-                    };
+                    let throws = info
+                        .as_ref()
+                        .map(docblock::extract_throws_tags_from_info)
+                        .unwrap_or_default();
 
                     // Merge `@param` docblock types into parameter type
                     // hints and populate per-parameter descriptions.
@@ -386,8 +208,6 @@ impl Backend {
 
                     let reads_func_args = body_reads_func_args(func.body.statements.iter());
 
-                    let func_tpl_atoms: Vec<crate::atom::Atom> =
-                        func_template_params.iter().map(|s| atom(s)).collect();
                     // Merge overloaded function declarations: when a
                     // function with the same name already exists (common
                     // in phpstorm-stubs for functions like `strtr`,
@@ -418,9 +238,9 @@ impl Backend {
                             namespace: current_namespace.clone(),
                             conditional_return,
                             type_assertions,
-                            deprecation_message,
-                            deprecated_replacement,
-                            template_params: func_tpl_atoms,
+                            deprecation_message: depr_info.message,
+                            deprecated_replacement: depr_info.replacement,
+                            template_params: func_template_params,
                             template_param_bounds: func_template_param_bounds,
                             template_bindings: func_template_bindings,
                             template_param_defaults: func_template_param_defaults,
@@ -430,24 +250,23 @@ impl Backend {
                             is_pure,
                             is_impure,
                             reads_func_args,
+                            unverified_doc_types: Box::default(),
                         });
                     }
                 }
                 Statement::Namespace(namespace) => {
+                    // A `namespace { }` block with no name is the global
+                    // namespace, whatever block came before it.
                     let ns_name = namespace
                         .name
                         .as_ref()
                         .map(|ident| bytes_to_str(ident.value()).to_string())
                         .filter(|s| !s.is_empty());
 
-                    // Merge: if we already have a namespace and the inner
-                    // one is set, use the inner one; otherwise keep current.
-                    let effective_ns = ns_name.or_else(|| current_namespace.clone());
-
                     Self::extract_functions_from_statements(
                         namespace.statements().iter(),
                         functions,
-                        &effective_ns,
+                        &ns_name,
                         doc_ctx,
                     );
                 }
@@ -473,12 +292,14 @@ impl Backend {
                 Statement::If(if_stmt) => {
                     let guard_name = try_extract_function_exists_guard(if_stmt.condition);
                     let before = functions.len();
-                    Self::extract_functions_from_if_body(
-                        &if_stmt.body,
-                        functions,
-                        current_namespace,
-                        doc_ctx,
-                    );
+                    for_each_nested_statement_list(statement, |nested| {
+                        Self::extract_functions_from_statements(
+                            nested.iter(),
+                            functions,
+                            current_namespace,
+                            doc_ctx,
+                        );
+                    });
                     // Mark newly extracted functions as polyfills when
                     // inside a function_exists guard.
                     if guard_name.is_some() {
@@ -488,67 +309,6 @@ impl Backend {
                     }
                 }
                 _ => {}
-            }
-        }
-    }
-
-    /// Helper: recurse into an `if` statement body to extract function
-    /// declarations.  Handles both brace-delimited and colon-delimited
-    /// `if` bodies, including `elseif` and `else` branches.
-    fn extract_functions_from_if_body<'a>(
-        body: &'a IfBody<'a>,
-        functions: &mut Vec<FunctionInfo>,
-        current_namespace: &Option<String>,
-        doc_ctx: Option<&DocblockCtx<'a>>,
-    ) {
-        match body {
-            IfBody::Statement(body) => {
-                Self::extract_functions_from_statements(
-                    std::iter::once(body.statement),
-                    functions,
-                    current_namespace,
-                    doc_ctx,
-                );
-                for else_if in body.else_if_clauses.iter() {
-                    Self::extract_functions_from_statements(
-                        std::iter::once(else_if.statement),
-                        functions,
-                        current_namespace,
-                        doc_ctx,
-                    );
-                }
-                if let Some(else_clause) = &body.else_clause {
-                    Self::extract_functions_from_statements(
-                        std::iter::once(else_clause.statement),
-                        functions,
-                        current_namespace,
-                        doc_ctx,
-                    );
-                }
-            }
-            IfBody::ColonDelimited(body) => {
-                Self::extract_functions_from_statements(
-                    body.statements.iter(),
-                    functions,
-                    current_namespace,
-                    doc_ctx,
-                );
-                for else_if in body.else_if_clauses.iter() {
-                    Self::extract_functions_from_statements(
-                        else_if.statements.iter(),
-                        functions,
-                        current_namespace,
-                        doc_ctx,
-                    );
-                }
-                if let Some(else_clause) = &body.else_clause {
-                    Self::extract_functions_from_statements(
-                        else_clause.statements.iter(),
-                        functions,
-                        current_namespace,
-                        doc_ctx,
-                    );
-                }
             }
         }
     }
@@ -627,50 +387,25 @@ impl Backend {
                         namespace,
                     );
                 }
-                Statement::If(if_stmt) => {
-                    Self::extract_defines_from_if_body(&if_stmt.body, defines, content, namespace);
+                Statement::If(_) => {
+                    for_each_nested_statement_list(statement, |nested| {
+                        Self::extract_defines_from_statements(
+                            nested.iter(),
+                            defines,
+                            content,
+                            namespace,
+                        );
+                    });
                 }
-                Statement::Class(class) => {
-                    for member in class.members.iter() {
-                        if let ClassLikeMember::Method(method) = member
-                            && let MethodBody::Concrete(body) = &method.body
-                        {
-                            Self::extract_defines_from_statements(
-                                body.statements.iter(),
-                                defines,
-                                content,
-                                namespace,
-                            );
-                        }
-                    }
-                }
-                Statement::Trait(trait_def) => {
-                    for member in trait_def.members.iter() {
-                        if let ClassLikeMember::Method(method) = member
-                            && let MethodBody::Concrete(body) = &method.body
-                        {
-                            Self::extract_defines_from_statements(
-                                body.statements.iter(),
-                                defines,
-                                content,
-                                namespace,
-                            );
-                        }
-                    }
-                }
-                Statement::Enum(enum_def) => {
-                    for member in enum_def.members.iter() {
-                        if let ClassLikeMember::Method(method) = member
-                            && let MethodBody::Concrete(body) = &method.body
-                        {
-                            Self::extract_defines_from_statements(
-                                body.statements.iter(),
-                                defines,
-                                content,
-                                namespace,
-                            );
-                        }
-                    }
+                _ if let Some(body) = crate::parser::class_like_body(statement) => {
+                    crate::parser::for_each_concrete_method(body.members, |_, block| {
+                        Self::extract_defines_from_statements(
+                            block.statements.iter(),
+                            defines,
+                            content,
+                            namespace,
+                        );
+                    });
                 }
                 Statement::Function(func) => {
                     Self::extract_defines_from_statements(
@@ -681,66 +416,6 @@ impl Backend {
                     );
                 }
                 _ => {}
-            }
-        }
-    }
-
-    /// Helper: recurse into an `if` statement body to extract `define()`
-    /// calls.  Mirrors `extract_functions_from_if_body`.
-    fn extract_defines_from_if_body<'a>(
-        body: &'a IfBody<'a>,
-        defines: &mut Vec<(String, u32, Option<String>)>,
-        content: &str,
-        namespace: Option<&str>,
-    ) {
-        match body {
-            IfBody::Statement(body) => {
-                Self::extract_defines_from_statements(
-                    std::iter::once(body.statement),
-                    defines,
-                    content,
-                    namespace,
-                );
-                for else_if in body.else_if_clauses.iter() {
-                    Self::extract_defines_from_statements(
-                        std::iter::once(else_if.statement),
-                        defines,
-                        content,
-                        namespace,
-                    );
-                }
-                if let Some(else_clause) = &body.else_clause {
-                    Self::extract_defines_from_statements(
-                        std::iter::once(else_clause.statement),
-                        defines,
-                        content,
-                        namespace,
-                    );
-                }
-            }
-            IfBody::ColonDelimited(body) => {
-                Self::extract_defines_from_statements(
-                    body.statements.iter(),
-                    defines,
-                    content,
-                    namespace,
-                );
-                for else_if in body.else_if_clauses.iter() {
-                    Self::extract_defines_from_statements(
-                        else_if.statements.iter(),
-                        defines,
-                        content,
-                        namespace,
-                    );
-                }
-                if let Some(else_clause) = &body.else_clause {
-                    Self::extract_defines_from_statements(
-                        else_clause.statements.iter(),
-                        defines,
-                        content,
-                        namespace,
-                    );
-                }
             }
         }
     }

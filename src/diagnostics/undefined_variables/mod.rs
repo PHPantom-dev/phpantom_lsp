@@ -139,6 +139,7 @@ impl Backend {
                             call_kind,
                             enclosing_class_name,
                             file_use_map,
+                            &file_ctx.symbol_imports_at(offset).functions,
                             file_namespace,
                         )
                     };
@@ -158,98 +159,45 @@ impl Backend {
         call_kind: &ByRefCallKind<'_>,
         enclosing_class_name: Option<&str>,
         file_use_map: &std::collections::HashMap<String, String>,
+        function_imports: &std::collections::HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<Vec<usize>> {
-        match call_kind {
+        let (class_name, method_name) = match call_kind {
             ByRefCallKind::Function(name) => {
-                // Build FQN candidates: the raw name, plus the
-                // namespace-qualified name if the file has a namespace.
-                let fqn = crate::util::resolve_to_fqn(name, file_use_map, file_namespace);
-                let mut candidates: Vec<&str> = vec![*name];
-                if fqn != *name {
-                    candidates.push(&fqn);
-                }
-                let func_info = self.find_or_load_function(&candidates)?;
-                let positions: Vec<usize> = func_info
-                    .parameters
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| p.is_reference)
-                    .map(|(i, _)| i)
-                    .collect();
-                Some(positions)
-            }
-            ByRefCallKind::StaticMethod(class_name, method_name) => {
-                let cls = self.resolve_call_class(
-                    class_name,
-                    enclosing_class_name,
+                let func_info = self.resolve_function_name(
+                    name,
                     file_use_map,
+                    function_imports,
                     file_namespace,
                 )?;
-                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                    &cls,
-                    &|name| self.find_or_load_class(name),
-                    Some(&self.resolved_class_cache),
-                );
-                let method = merged.get_method(method_name)?;
-                let positions: Vec<usize> = method
-                    .parameters
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| p.is_reference)
-                    .map(|(i, _)| i)
-                    .collect();
-                Some(positions)
+                return Some(by_ref_positions(&func_info.parameters));
             }
-            ByRefCallKind::Constructor(class_name) => {
-                let cls = self.resolve_call_class(
-                    class_name,
-                    enclosing_class_name,
-                    file_use_map,
-                    file_namespace,
-                )?;
-                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                    &cls,
-                    &|name| self.find_or_load_class(name),
-                    Some(&self.resolved_class_cache),
-                );
-                let ctor = merged.get_method("__construct")?;
-                let positions: Vec<usize> = ctor
-                    .parameters
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| p.is_reference)
-                    .map(|(i, _)| i)
-                    .collect();
-                Some(positions)
-            }
-            ByRefCallKind::InstanceMethod(class_name, method_name) => {
-                let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
-                let cls = self
-                    .find_or_load_class(&fqn)
-                    .or_else(|| self.find_or_load_class(class_name))?;
-                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                    &cls,
-                    &|name| self.find_or_load_class(name),
-                    Some(&self.resolved_class_cache),
-                );
-                let method = merged.get_method(method_name)?;
-                let positions: Vec<usize> = method
-                    .parameters
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| p.is_reference)
-                    .map(|(i, _)| i)
-                    .collect();
-                Some(positions)
-            }
-        }
+            ByRefCallKind::StaticMethod(class_name, method_name)
+            | ByRefCallKind::InstanceMethod(class_name, method_name) => (*class_name, *method_name),
+            ByRefCallKind::Constructor(class_name) => (*class_name, "__construct"),
+        };
+        let cls = self.resolve_call_class(
+            class_name,
+            enclosing_class_name,
+            file_use_map,
+            file_namespace,
+        )?;
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            &cls,
+            &|name| self.find_or_load_class(name),
+            Some(&self.resolved_class_cache),
+        );
+        Some(by_ref_positions(
+            &merged.get_method(method_name)?.parameters,
+        ))
     }
 
-    /// Resolve a `Cls::method()`/`new Cls()` class name to its
-    /// [`ClassInfo`], handling the relative names `self`, `static`, and
-    /// `parent` by resolving them against the class enclosing the call
-    /// site rather than treating them as a literal class name.
+    /// Resolve the class a call names (`Cls::method()`, `new Cls()`,
+    /// `(new Cls)->method()`) to its [`ClassInfo`].
+    ///
+    /// A written name follows PHP's rule (the imports, else the current
+    /// namespace, never a global class), and the relative names `self`,
+    /// `static` and `parent` resolve against the class enclosing the call.
     fn resolve_call_class(
         &self,
         class_name: &str,
@@ -258,21 +206,31 @@ impl Backend {
         file_namespace: &Option<String>,
     ) -> Option<std::sync::Arc<crate::types::ClassInfo>> {
         if crate::class_lookup::is_class_keyword(class_name) {
-            let enclosing_name = enclosing_class_name?;
             let enclosing_fqn =
-                crate::util::resolve_to_fqn(enclosing_name, file_use_map, file_namespace);
-            let enclosing_class = self
-                .find_or_load_class(&enclosing_fqn)
-                .or_else(|| self.find_or_load_class(enclosing_name))?;
+                crate::names::resolve_to_fqn(enclosing_class_name?, file_use_map, file_namespace);
+            let enclosing_class = self.find_or_load_class(&enclosing_fqn)?;
             let fqn =
                 crate::class_lookup::resolve_class_keyword(class_name, Some(&enclosing_class))?;
             return self.find_or_load_class(&fqn);
         }
 
-        let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
-        self.find_or_load_class(&fqn)
-            .or_else(|| self.find_or_load_class(class_name))
+        self.find_or_load_class(&crate::names::resolve_to_fqn(
+            class_name,
+            file_use_map,
+            file_namespace,
+        ))
     }
+}
+
+/// The 0-based positions of `parameters` that take their argument by
+/// reference.
+fn by_ref_positions(parameters: &[crate::types::ParameterInfo]) -> Vec<usize> {
+    parameters
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.is_reference)
+        .map(|(i, _)| i)
+        .collect()
 }
 
 // ─── Internal context ───────────────────────────────────────────────────────
@@ -645,13 +603,9 @@ fn is_in_nested_frame(
     frame: &crate::scope_collector::Frame,
     frames: &[crate::scope_collector::Frame],
 ) -> bool {
-    frames.iter().any(|f| {
-        f.start > frame.start
-            && f.end < frame.end
-            && offset >= f.start
-            && offset <= f.end
-            && f.kind != FrameKind::Catch
-    })
+    frame
+        .nested_frames_at(frames, offset)
+        .any(|f| f.kind != FrameKind::Catch)
 }
 
 /// Find the index of the parent frame for `frame_idx`.

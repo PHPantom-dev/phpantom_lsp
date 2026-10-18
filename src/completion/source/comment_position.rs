@@ -42,165 +42,26 @@ pub(crate) fn is_offset_inside_docblock(content: &str, byte_offset: usize) -> bo
 /// Returns `true` if the given position is inside a `//` line comment or
 /// a `/* … */` block comment that is **not** a `/** … */` docblock.
 ///
-/// Uses a forward state-machine scan from the start of the file to
-/// correctly handle comments inside string literals (which are ignored).
+/// Uses a forward scan from the start of the file (see [`lexical_state_at`])
+/// so comment markers inside string literals are ignored.
 pub fn is_inside_non_doc_comment(content: &str, position: Position) -> bool {
     let target = position_to_byte_offset(content, position);
-    let bytes = content.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
+    matches!(
+        lexical_state_at(content.as_bytes(), target).state,
+        Lexical::LineComment | Lexical::BlockComment
+    )
+}
 
-    #[derive(PartialEq)]
-    enum State {
-        Code,
-        SingleString,
-        DoubleString,
-        LineComment,
-        BlockComment,
-        Docblock,
-        Heredoc,
-    }
-
-    let mut state = State::Code;
-    // For heredoc/nowdoc we track the closing label
-    let mut heredoc_label: Vec<u8> = Vec::new();
-
-    while i < len {
-        if i >= target {
-            return state == State::LineComment || state == State::BlockComment;
-        }
-
-        match state {
-            State::Code => {
-                if bytes[i] == b'/' && i + 1 < len && bytes[i + 1] == b'/' {
-                    state = State::LineComment;
-                    i += 2;
-                } else if bytes[i] == b'/'
-                    && i + 2 < len
-                    && bytes[i + 1] == b'*'
-                    && bytes[i + 2] == b'*'
-                    && (i + 3 >= len || bytes[i + 3] != b'*')
-                {
-                    // `/**` but not `/***` — that's a docblock
-                    state = State::Docblock;
-                    i += 3;
-                } else if bytes[i] == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
-                    state = State::BlockComment;
-                    i += 2;
-                } else if bytes[i] == b'\'' {
-                    state = State::SingleString;
-                    i += 1;
-                } else if bytes[i] == b'"' {
-                    state = State::DoubleString;
-                    i += 1;
-                } else if bytes[i] == b'<'
-                    && i + 2 < len
-                    && bytes[i + 1] == b'<'
-                    && bytes[i + 2] == b'<'
-                {
-                    // Possible heredoc / nowdoc
-                    i += 3;
-                    while i < len && bytes[i] == b' ' {
-                        i += 1;
-                    }
-                    let is_nowdoc = i < len && bytes[i] == b'\'';
-                    if is_nowdoc {
-                        i += 1;
-                    }
-                    heredoc_label.clear();
-                    while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-                        heredoc_label.push(bytes[i]);
-                        i += 1;
-                    }
-                    if !heredoc_label.is_empty() {
-                        if is_nowdoc && i < len && bytes[i] == b'\'' {
-                            i += 1;
-                        }
-                        state = State::Heredoc;
-                    }
-                } else {
-                    i += 1;
-                }
-            }
-            State::LineComment => {
-                if bytes[i] == b'\n' {
-                    state = State::Code;
-                }
-                i += 1;
-            }
-            State::BlockComment => {
-                if bytes[i] == b'*' && i + 1 < len && bytes[i + 1] == b'/' {
-                    state = State::Code;
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-            State::Docblock => {
-                if bytes[i] == b'*' && i + 1 < len && bytes[i + 1] == b'/' {
-                    state = State::Code;
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-            State::SingleString => {
-                if bytes[i] == b'\\' && i + 1 < len {
-                    i += 2;
-                } else if bytes[i] == b'\'' {
-                    state = State::Code;
-                    i += 1;
-                } else {
-                    i += 1;
-                }
-            }
-            State::DoubleString => {
-                if bytes[i] == b'\\' && i + 1 < len {
-                    i += 2;
-                } else if bytes[i] == b'"' {
-                    state = State::Code;
-                    i += 1;
-                } else {
-                    i += 1;
-                }
-            }
-            State::Heredoc => {
-                // Look for the closing label at the start of a line
-                if bytes[i] == b'\n' {
-                    i += 1;
-                    while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') {
-                        i += 1;
-                    }
-                    if i + heredoc_label.len() <= len
-                        && &bytes[i..i + heredoc_label.len()] == heredoc_label.as_slice()
-                    {
-                        let after_label = i + heredoc_label.len();
-                        if after_label >= len
-                            || bytes[after_label] == b';'
-                            || bytes[after_label] == b'\n'
-                            || bytes[after_label] == b'\r'
-                        {
-                            i = after_label;
-                            state = State::Code;
-                            continue;
-                        }
-                    }
-                    // Not the closing label — the whitespace scanned past
-                    // above is part of the heredoc body, so no rewind is
-                    // needed here.
-                } else {
-                    i += 1;
-                }
-            }
-        }
-    }
-
-    // Cursor is at or past end of file
-    state == State::LineComment || state == State::BlockComment
+/// Where the `/** … */` docblock that `byte_offset` sits in opens, from
+/// the forward scan of [`lexical_state_at`], so a `/**` inside a string
+/// literal is not taken for one.
+pub(crate) fn docblock_start_at(content: &str, byte_offset: usize) -> Option<usize> {
+    let at = lexical_state_at(content.as_bytes(), byte_offset);
+    (at.state == Lexical::Docblock).then_some(at.opened_at)
 }
 
 /// Classification of the string context at a given cursor position.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StringContext {
     /// The cursor is not inside any string literal.
     NotInString,
@@ -231,66 +92,93 @@ pub enum StringContext {
 pub fn classify_string_context(content: &str, position: Position) -> StringContext {
     let target = position_to_byte_offset(content, position);
     let bytes = content.as_bytes();
+    let at = lexical_state_at(bytes, target);
+    match at.state {
+        Lexical::SingleString | Lexical::Nowdoc => StringContext::InStringLiteral,
+        Lexical::DoubleString | Lexical::Heredoc => {
+            if at.brace_depth > 0 {
+                StringContext::BraceInterpolation
+            } else if is_simple_interpolation_site(bytes, target) {
+                StringContext::SimpleInterpolation
+            } else {
+                StringContext::InStringLiteral
+            }
+        }
+        _ => StringContext::NotInString,
+    }
+}
+
+/// What the source at an offset sits in.
+#[derive(PartialEq, Clone, Copy)]
+enum Lexical {
+    Code,
+    SingleString,
+    DoubleString,
+    LineComment,
+    BlockComment,
+    Docblock,
+    Heredoc,
+    Nowdoc,
+}
+
+/// What the forward scan of [`lexical_state_at`] finds at an offset.
+struct LexicalAt {
+    state: Lexical,
+    /// Where the string or comment the offset sits in opens.
+    opened_at: usize,
+    /// The depth of the `{$…}` interpolation braces open there: zero in
+    /// the body of a double-quoted string or heredoc proper and greater
+    /// inside a complex interpolation expression, whose own quotes do not
+    /// end the string.
+    brace_depth: u32,
+}
+
+/// The [`Lexical`] state at byte `target` of `bytes`, from a forward scan
+/// of the file up to it.
+fn lexical_state_at(bytes: &[u8], target: usize) -> LexicalAt {
     let len = bytes.len();
     let mut i = 0;
-
-    #[derive(PartialEq, Clone, Copy)]
-    enum State {
-        Code,
-        SingleString,
-        DoubleString,
-        LineComment,
-        BlockComment,
-        Docblock,
-        Heredoc,
-        Nowdoc,
-    }
-
-    let mut state = State::Code;
+    let mut state = Lexical::Code;
+    let mut opened_at = 0;
     let mut heredoc_label: Vec<u8> = Vec::new();
-    // Brace depth for `{$...}` interpolation inside double-quoted strings
-    // and heredocs. Zero means we are in the string body proper; > 0 means
-    // we are inside a `{$…}` complex interpolation expression.
     let mut brace_depth: u32 = 0;
 
     while i < len {
         if i >= target {
-            return match state {
-                State::SingleString | State::Nowdoc => StringContext::InStringLiteral,
-                State::DoubleString | State::Heredoc => {
-                    if brace_depth > 0 {
-                        StringContext::BraceInterpolation
-                    } else if is_simple_interpolation_site(bytes, target) {
-                        StringContext::SimpleInterpolation
-                    } else {
-                        StringContext::InStringLiteral
-                    }
-                }
-                _ => StringContext::NotInString,
+            return LexicalAt {
+                state,
+                opened_at,
+                brace_depth,
             };
         }
 
         match state {
-            State::Code => {
+            Lexical::Code => {
+                opened_at = i;
                 if bytes[i] == b'/' && i + 1 < len && bytes[i + 1] == b'/' {
-                    state = State::LineComment;
+                    state = Lexical::LineComment;
                     i += 2;
+                } else if bytes[i] == b'#' && bytes.get(i + 1) != Some(&b'[') {
+                    // `#[` opens an attribute rather than a comment.
+                    state = Lexical::LineComment;
+                    i += 1;
                 } else if bytes[i] == b'/'
                     && i + 2 < len
                     && bytes[i + 1] == b'*'
                     && bytes[i + 2] == b'*'
                     && (i + 3 >= len || bytes[i + 3] != b'*')
                 {
-                    state = State::Docblock;
+                    // `/**` but not `/***` — that's a docblock
+                    state = Lexical::Docblock;
                     i += 3;
                 } else if bytes[i] == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
-                    state = State::BlockComment;
+                    state = Lexical::BlockComment;
                     i += 2;
                 } else if bytes[i] == b'\'' {
-                    state = State::SingleString;
+                    state = Lexical::SingleString;
                     i += 1;
                 } else if bytes[i] == b'"' {
-                    state = State::DoubleString;
+                    state = Lexical::DoubleString;
                     brace_depth = 0;
                     i += 1;
                 } else if bytes[i] == b'<'
@@ -298,6 +186,7 @@ pub fn classify_string_context(content: &str, position: Position) -> StringConte
                     && bytes[i + 1] == b'<'
                     && bytes[i + 2] == b'<'
                 {
+                    // Possible heredoc / nowdoc
                     i += 3;
                     while i < len && bytes[i] == b' ' {
                         i += 1;
@@ -316,9 +205,9 @@ pub fn classify_string_context(content: &str, position: Position) -> StringConte
                             if i < len && bytes[i] == b'\'' {
                                 i += 1;
                             }
-                            state = State::Nowdoc;
+                            state = Lexical::Nowdoc;
                         } else {
-                            state = State::Heredoc;
+                            state = Lexical::Heredoc;
                             brace_depth = 0;
                         }
                     }
@@ -326,35 +215,35 @@ pub fn classify_string_context(content: &str, position: Position) -> StringConte
                     i += 1;
                 }
             }
-            State::LineComment => {
+            Lexical::LineComment => {
                 if bytes[i] == b'\n' {
-                    state = State::Code;
+                    state = Lexical::Code;
                 }
                 i += 1;
             }
-            State::BlockComment | State::Docblock => {
+            Lexical::BlockComment | Lexical::Docblock => {
                 if bytes[i] == b'*' && i + 1 < len && bytes[i + 1] == b'/' {
-                    state = State::Code;
+                    state = Lexical::Code;
                     i += 2;
                 } else {
                     i += 1;
                 }
             }
-            State::SingleString => {
+            Lexical::SingleString => {
                 if bytes[i] == b'\\' && i + 1 < len {
                     i += 2;
                 } else if bytes[i] == b'\'' {
-                    state = State::Code;
+                    state = Lexical::Code;
                     i += 1;
                 } else {
                     i += 1;
                 }
             }
-            State::DoubleString => {
+            Lexical::DoubleString => {
                 if bytes[i] == b'\\' && i + 1 < len {
                     i += 2;
                 } else if bytes[i] == b'"' && brace_depth == 0 {
-                    state = State::Code;
+                    state = Lexical::Code;
                     i += 1;
                 } else if bytes[i] == b'{'
                     && ((i + 1 < len && bytes[i + 1] == b'$') || brace_depth > 0)
@@ -368,14 +257,19 @@ pub fn classify_string_context(content: &str, position: Position) -> StringConte
                     i += 1;
                 }
             }
-            State::Heredoc => {
-                if bytes[i] == b'{' && ((i + 1 < len && bytes[i + 1] == b'$') || brace_depth > 0) {
+            Lexical::Heredoc | Lexical::Nowdoc => {
+                let interpolates = state == Lexical::Heredoc;
+                if interpolates
+                    && bytes[i] == b'{'
+                    && ((i + 1 < len && bytes[i + 1] == b'$') || brace_depth > 0)
+                {
                     brace_depth += 1;
                     i += 1;
-                } else if bytes[i] == b'}' && brace_depth > 0 {
+                } else if interpolates && bytes[i] == b'}' && brace_depth > 0 {
                     brace_depth -= 1;
                     i += 1;
                 } else if bytes[i] == b'\n' {
+                    // Look for the closing label at the start of a line.
                     i += 1;
                     while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') {
                         i += 1;
@@ -390,35 +284,13 @@ pub fn classify_string_context(content: &str, position: Position) -> StringConte
                             || bytes[after_label] == b'\r'
                         {
                             i = after_label;
-                            state = State::Code;
+                            state = Lexical::Code;
                             brace_depth = 0;
                             continue;
                         }
                     }
-                } else {
-                    i += 1;
-                }
-            }
-            State::Nowdoc => {
-                if bytes[i] == b'\n' {
-                    i += 1;
-                    while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') {
-                        i += 1;
-                    }
-                    if i + heredoc_label.len() <= len
-                        && &bytes[i..i + heredoc_label.len()] == heredoc_label.as_slice()
-                    {
-                        let after_label = i + heredoc_label.len();
-                        if after_label >= len
-                            || bytes[after_label] == b';'
-                            || bytes[after_label] == b'\n'
-                            || bytes[after_label] == b'\r'
-                        {
-                            i = after_label;
-                            state = State::Code;
-                            continue;
-                        }
-                    }
+                    // Not the closing label — the whitespace scanned past
+                    // above is part of the body, so no rewind is needed.
                 } else {
                     i += 1;
                 }
@@ -427,18 +299,10 @@ pub fn classify_string_context(content: &str, position: Position) -> StringConte
     }
 
     // Cursor at or past end of file
-    match state {
-        State::SingleString | State::Nowdoc => StringContext::InStringLiteral,
-        State::DoubleString | State::Heredoc => {
-            if brace_depth > 0 {
-                StringContext::BraceInterpolation
-            } else if is_simple_interpolation_site(bytes, target) {
-                StringContext::SimpleInterpolation
-            } else {
-                StringContext::InStringLiteral
-            }
-        }
-        _ => StringContext::NotInString,
+    LexicalAt {
+        state,
+        opened_at,
+        brace_depth,
     }
 }
 

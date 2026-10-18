@@ -698,6 +698,28 @@ async fn a_subdirectory_route_file_takes_the_prefix_of_the_group_loading_it() {
     .await;
 }
 
+/// A route file in a subdirectory that no route file loads is loaded by
+/// something the scan cannot follow, such as a loop over `glob()`, so its
+/// routes are known by their own names.
+#[tokio::test]
+async fn a_subdirectory_route_file_nothing_loads_is_read_on_its_own() {
+    assert_route_names(
+        &[
+            (
+                "routes/web.php",
+                "<?php\nRoute::get('/', 'home')->name('home');\nforeach (glob(__DIR__ . '/web/*.php') as $file) {\n    require $file;\n}\n",
+            ),
+            (
+                "routes/web/products.php",
+                "<?php\nRoute::get('/products', 'index')->name('products.index');\n",
+            ),
+        ],
+        &["home", "products.index"],
+        &["web.products.index"],
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn a_resource_in_a_loaded_file_composes_with_the_load_prefix() {
     assert_route_names(
@@ -812,6 +834,43 @@ Route::get('/a-also', [A::class, 'y'])->name('a');
     let mut lines: Vec<u32> = locations.iter().map(|l| l.range.start.line).collect();
     lines.sort_unstable();
     assert_eq!(lines, vec![1, 3], "{locations:?}");
+}
+
+/// The route table is kept between requests, so an edit to a file it was
+/// read from, even one outside `routes/`, has to move the definitions with
+/// it.
+#[tokio::test]
+async fn goto_definition_follows_an_edit_to_a_loaded_file_outside_the_routes_directory() {
+    let (backend, dir, uri, consumer) = workspace_calling(
+        &[
+            (
+                "routes/web.php",
+                "<?php\nRoute::name('admin.')->group(base_path('app/Custom/admin.php'));\n",
+            ),
+            (
+                "app/Custom/admin.php",
+                "<?php\nRoute::get('/dashboard', fn () => 'ok')->name('dash');\n",
+            ),
+        ],
+        &["admin.dash"],
+    )
+    .await;
+    let mut position = position_after(&consumer, "route('");
+    position.character += 1;
+    let definition_lines = || async {
+        definition_locations(
+            goto_definition_at(&backend, &uri, position.line, position.character).await,
+        )
+        .iter()
+        .map(|location| location.range.start.line)
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(definition_lines().await, vec![1]);
+
+    let edited = "<?php\n\nRoute::get('/dashboard', fn () => 'ok')->name('dash');\n";
+    std::fs::write(dir.path().join("app/Custom/admin.php"), edited).unwrap();
+    crate::common::open_php_at(&backend, &dir, "app/Custom/admin.php", edited).await;
+    assert_eq!(definition_lines().await, vec![2]);
 }
 
 // ─── Hover ──────────────────────────────────────────────────────────────────

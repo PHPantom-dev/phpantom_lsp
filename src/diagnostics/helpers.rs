@@ -10,8 +10,9 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::php_type::PhpType;
+use crate::resolution::FileLoaders;
 use crate::symbol_map::SymbolMap;
-use crate::types::{BlockClassLoaders, ClassInfo, FileContext, FunctionInfo, MethodInfo, PerBlock};
+use crate::types::{ClassInfo, FileContext, MethodInfo};
 
 /// A byte range `[start, end)` in the source.
 pub(crate) type ByteRange = (usize, usize);
@@ -40,40 +41,15 @@ pub(crate) const SUPERGLOBALS: &[&str] = &[
 /// it walks the AST.
 ///
 /// Built by [`collect_type_check`], which owns the `FileContext` and the
-/// loader closures this borrows.
+/// loaders this borrows.
 pub(crate) struct TypeCheckCtx<'a> {
     /// Classes, use-map, namespace, and resolved names for the file.
     pub(crate) file_ctx: &'a FileContext,
-    /// One loader set per `namespace` block; pick with the `*_at` methods.
-    class_loaders: &'a BlockClassLoaders<'a>,
-    function_loaders: &'a PerBlock<'a, DynFunctionLoader<'a>>,
-    constant_loaders: &'a PerBlock<'a, DynConstantLoader<'a>>,
+    /// The file's loaders, one set per `namespace` block.
+    pub(crate) loaders: &'a FileLoaders<'a>,
     /// Whether the file declares `strict_types=1`, which decides how
     /// forgiving the compatibility checks are.
     pub(crate) strict_types: bool,
-}
-
-type DynFunctionLoader<'a> = &'a (dyn Fn(&str, u32) -> Option<FunctionInfo> + 'a);
-type DynConstantLoader<'a> = &'a (dyn Fn(&str, u32) -> Option<Option<String>> + 'a);
-
-impl<'a> TypeCheckCtx<'a> {
-    /// The class loader for the `namespace` block containing `offset`.
-    pub(crate) fn class_loader_at(
-        &self,
-        offset: u32,
-    ) -> &'a (dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a) {
-        *self.class_loaders.at(offset)
-    }
-
-    /// The function loader for the `namespace` block containing `offset`.
-    pub(crate) fn function_loader_at(&self, offset: u32) -> DynFunctionLoader<'a> {
-        *self.function_loaders.at(offset)
-    }
-
-    /// The constant loader for the `namespace` block containing `offset`.
-    pub(crate) fn constant_loader_at(&self, offset: u32) -> DynConstantLoader<'a> {
-        *self.constant_loaders.at(offset)
-    }
 }
 
 /// Run a type-checking collector over one file.
@@ -101,23 +77,14 @@ pub(crate) fn collect_type_check<S>(
     // in the resolution pipeline below reuses one parsed AST.
     let _parse_guard = crate::parser::with_parse_cache(content);
 
-    let class_loaders = backend.class_loaders(&file_ctx);
-    let class_loaders = class_loaders.as_dyn();
-    let function_loaders = backend.function_loaders(&file_ctx);
-    let function_loaders = function_loaders.map(|loader| loader as DynFunctionLoader<'_>);
-    let constant_loaders = file_ctx.per_block(|use_map, namespace| {
-        backend.constant_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace)
-    });
-    let constant_loaders = constant_loaders.map(|loader| loader as DynConstantLoader<'_>);
+    let loaders = backend.file_loaders(&file_ctx);
     let strict_types = crate::parser::with_parsed_program(content, "strict_types", |program, _| {
         super::type_errors::has_strict_types(program)
     });
 
     let ctx = TypeCheckCtx {
         file_ctx: &file_ctx,
-        class_loaders: &class_loaders,
-        function_loaders: &function_loaders,
-        constant_loaders: &constant_loaders,
+        loaders: &loaders,
         strict_types,
     };
 
@@ -200,39 +167,7 @@ pub(crate) fn is_offset_in_ranges(offset: u32, ranges: &[ByteRange]) -> bool {
 
 // Re-export the canonical `resolve_to_fqn` from `crate::util` so that
 // existing `use super::helpers::resolve_to_fqn` imports keep working.
-pub(crate) use crate::util::resolve_to_fqn;
-
-/// Find the innermost class whose declaration span contains `offset`.
-///
-/// Returns a reference to the `ClassInfo` with the smallest span that
-/// encloses `offset`, including anonymous classes.  Used for
-/// `$this`/`self`/`static` resolution inside diagnostic collectors.
-///
-/// The span runs from the declaration start (`decl_start_offset`, which
-/// includes any leading attribute lists) to the closing brace.  Using
-/// the declaration start rather than the body's opening brace lets
-/// `self::CONST` references inside class-level attributes — which sit
-/// before the `class` keyword — resolve to their enclosing class.
-pub(crate) fn find_innermost_enclosing_class(
-    local_classes: &[Arc<ClassInfo>],
-    offset: u32,
-) -> Option<&ClassInfo> {
-    local_classes
-        .iter()
-        .map(|c| {
-            // A value of 0 means "not available"; fall back to the body
-            // start so synthetic classes keep their original span.
-            let start = if c.decl_start_offset != 0 {
-                c.decl_start_offset
-            } else {
-                c.start_offset
-            };
-            (c, start)
-        })
-        .filter(|(c, start)| offset >= *start && offset <= c.end_offset)
-        .min_by_key(|(c, start)| c.end_offset.saturating_sub(*start))
-        .map(|(c, _)| c.as_ref())
-}
+pub(crate) use crate::names::resolve_to_fqn;
 
 /// Map each template parameter to its bound, or `mixed` when it has none.
 ///
@@ -333,9 +268,9 @@ fn find_enclosing_method_name_in_statements<'a>(
 
     for stmt in statements.iter() {
         let found = match stmt {
-            Statement::Class(class) => find_method_name_in_members(class.members.iter(), offset),
-            Statement::Trait(tr) => find_method_name_in_members(tr.members.iter(), offset),
-            Statement::Enum(en) => find_method_name_in_members(en.members.iter(), offset),
+            _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+                find_method_name_in_members(body.members.iter(), offset)
+            }
             Statement::Namespace(ns) => {
                 return find_enclosing_method_name_in_statements(ns.statements(), offset);
             }
@@ -399,6 +334,48 @@ pub(crate) fn is_position_independent_call_expression(expr: &str) -> bool {
         return false;
     }
     !matches!(expr, "new self" | "new static" | "new parent")
+}
+
+/// The callable each call expression in a file resolves to, memoized by
+/// the expression's text for the expressions
+/// [`is_position_independent_call_expression`] accepts.
+///
+/// There is one cache per `namespace` block, since the same text can name a
+/// different target under another block's imports.
+pub(crate) struct CallTargetCache<'a> {
+    blocks: crate::types::PerBlock<
+        'a,
+        std::cell::RefCell<HashMap<String, Option<crate::types::ResolvedCallableTarget>>>,
+    >,
+}
+
+impl<'a> CallTargetCache<'a> {
+    pub(crate) fn new(file_ctx: &'a FileContext) -> Self {
+        Self {
+            blocks: file_ctx.per_block(|_, _| std::cell::RefCell::new(HashMap::new())),
+        }
+    }
+
+    /// The callable `expr` at `offset` resolves to, resolved once per
+    /// block.
+    pub(crate) fn target(
+        &self,
+        backend: &Backend,
+        expr: &str,
+        content: &str,
+        offset: u32,
+        file_ctx: &FileContext,
+    ) -> Option<crate::types::ResolvedCallableTarget> {
+        let cache = self.blocks.at(offset);
+        if let Some(cached) = cache.borrow().get(expr) {
+            return cached.clone();
+        }
+        let resolved = backend.resolve_callable_target_at_offset(expr, content, offset, file_ctx);
+        cache
+            .borrow_mut()
+            .insert(expr.to_string(), resolved.clone());
+        resolved
+    }
 }
 
 /// Build a standard diagnostic with the common fields pre-filled.

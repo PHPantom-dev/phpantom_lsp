@@ -1,5 +1,35 @@
 //! Keyword and builtin-type name classifiers.
 
+/// A pattern matching PHPStan's refinements of `int`, lowercased.
+macro_rules! int_refinement {
+    () => {
+        "positive-int" | "negative-int" | "non-positive-int" | "non-negative-int" | "non-zero-int"
+    };
+}
+pub(crate) use int_refinement;
+
+/// A pattern matching PHPStan's refinements of `string`, lowercased.
+macro_rules! string_refinement {
+    () => {
+        "non-empty-string"
+            | "numeric-string"
+            | "class-string"
+            | "interface-string"
+            | "literal-string"
+            | "callable-string"
+            | "truthy-string"
+            | "non-falsy-string"
+            | "trait-string"
+            | "enum-string"
+            | "lowercase-string"
+            | "uppercase-string"
+            | "non-empty-lowercase-string"
+            | "non-empty-uppercase-string"
+            | "non-empty-literal-string"
+    };
+}
+pub(crate) use string_refinement;
+
 /// Whether a lowercased type name is a pseudo-type that only counts as one
 /// when it is written in lowercase.
 ///
@@ -234,26 +264,8 @@ pub(crate) fn is_builtin_non_class_type(name: &str) -> bool {
             | "resource"
             | "numeric"
             | "scalar"
-            | "positive-int"
-            | "negative-int"
-            | "non-negative-int"
-            | "non-positive-int"
-            | "non-zero-int"
-            | "numeric-string"
-            | "non-empty-string"
-            | "non-falsy-string"
-            | "truthy-string"
-            | "literal-string"
-            | "non-empty-literal-string"
-            | "lowercase-string"
-            | "non-empty-lowercase-string"
-            | "uppercase-string"
-            | "non-empty-uppercase-string"
-            | "callable-string"
-            | "class-string"
-            | "interface-string"
-            | "trait-string"
-            | "enum-string"
+            | int_refinement!()
+            | string_refinement!()
             | "model-property"
             | "array-key"
             | "list"
@@ -363,37 +375,19 @@ fn is_scalar_name_lower(name: &str, lower: &str) -> bool {
             | "static"
             | "parent"
             | "$this"
-            | "class-string"
-            | "interface-string"
-            | "trait-string"
-            | "enum-string"
+            | string_refinement!()
             | "model-property"
             | "view-string"
-            | "numeric-string"
-            | "non-empty-string"
-            | "non-empty-lowercase-string"
-            | "lowercase-string"
-            | "uppercase-string"
-            | "non-empty-uppercase-string"
-            | "truthy-string"
-            | "non-falsy-string"
             | "array-key"
             | "scalar"
             | "numeric"
-            | "positive-int"
-            | "negative-int"
-            | "non-positive-int"
-            | "non-negative-int"
-            | "non-zero-int"
+            | int_refinement!()
             | "non-empty-array"
             | "non-empty-list"
             | "list"
             | "associative-array"
-            | "callable-string"
             | "callable-array"
             | "callable-object"
-            | "literal-string"
-            | "non-empty-literal-string"
             | "open-resource"
             | "closed-resource"
     )
@@ -452,13 +446,7 @@ pub(crate) fn normalize_keyword_casing(name: &str) -> String {
         | "mixed" | "object" | "array" | "callable" | "iterable" | "resource" | "self"
         | "static" | "parent"
         // PHPStan refinement types — lowercase but do NOT collapse.
-        | "positive-int" | "negative-int" | "non-positive-int" | "non-negative-int"
-        | "non-zero-int"
-        | "non-empty-string" | "numeric-string" | "class-string" | "interface-string"
-        | "literal-string" | "callable-string" | "truthy-string" | "non-falsy-string"
-        | "trait-string" | "enum-string" | "lowercase-string" | "uppercase-string"
-        | "non-empty-lowercase-string" | "non-empty-uppercase-string"
-        | "non-empty-literal-string"
+        | int_refinement!() | string_refinement!()
         | "non-empty-array" | "non-empty-list" | "non-empty-mixed" | "associative-array"
         | "closed-resource" | "open-resource" | "callable-object" | "callable-array"
         | "stringable-object"
@@ -503,25 +491,10 @@ pub(crate) fn native_scalar_name(name: &str) -> Option<&str> {
         "parent" => Some("parent"),
 
         // PHPStan int refinements → int.
-        "positive-int" | "negative-int" | "non-positive-int" | "non-negative-int"
-        | "non-zero-int" => Some("int"),
+        int_refinement!() => Some("int"),
 
         // PHPStan string refinements → string.
-        "non-empty-string"
-        | "numeric-string"
-        | "class-string"
-        | "interface-string"
-        | "literal-string"
-        | "callable-string"
-        | "truthy-string"
-        | "non-falsy-string"
-        | "trait-string"
-        | "enum-string"
-        | "lowercase-string"
-        | "uppercase-string"
-        | "non-empty-lowercase-string"
-        | "non-empty-uppercase-string"
-        | "non-empty-literal-string" => Some("string"),
+        string_refinement!() => Some("string"),
 
         // Types with no single native equivalent.
         "scalar" | "numeric" | "array-key" | "empty-scalar" | "non-empty-scalar" | "empty" => None,

@@ -270,6 +270,42 @@ class Validator {
 }
 
 #[test]
+fn guard_rewrite_leaves_closures_strings_and_comments_alone() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+class Validator {
+    public function handle($request): void
+    {
+        if (!$request) return;
+        array_map(function ($item) { return; }, $request->items);
+        /* return; */ $this->log('return;');
+        $this->process($request);
+    }
+}
+";
+    let last_line = content.lines().nth(6).unwrap().len() as u32;
+    let actions = get_code_actions(&backend, uri, content, 4, 8, 6, last_line);
+    let action = find_extract_action(&actions).expect("should offer extract for a void guard");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
+
+    assert!(
+        result.contains("if (!$request) return false;"),
+        "the guard is rewritten:\n{result}"
+    );
+    assert!(
+        result.contains("array_map(function ($item) { return; }, $request->items);"),
+        "the closure's own return is not a guard:\n{result}"
+    );
+    assert!(
+        result.contains("/* return; */ $this->log('return;');"),
+        "a comment or string that reads like a return is left alone:\n{result}"
+    );
+}
+
+#[test]
 fn uniform_false_guard_extraction() {
     let backend = create_test_backend();
     let uri = "file:///test.php";

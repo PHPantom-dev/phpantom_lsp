@@ -11,9 +11,9 @@
 //! it, types the template it names.
 
 use crate::common::{
-    LARAVEL_APP_COMPOSER, blade_undefined_variables, create_psr4_workspace, definition_locations,
-    find_action, find_references, get_code_actions_in_range, goto_definition_at, markup_hover_at,
-    messages_with_code, open_blade_template, open_php_file, position_of, workspace_path,
+    LARAVEL_APP_COMPOSER, blade_undefined_variables, create_psr4_workspace, definitions_at,
+    find_action, find_references, get_code_actions_in_range, markup_hover_at, messages_with_code,
+    open_blade_template, open_php_file, position_of, workspace_path,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -66,20 +66,6 @@ async fn open_callers_then_template(
         open_php_file(backend, caller).await;
     }
     open_blade_template(backend, template).await
-}
-
-/// The go-to-definition targets at the first occurrence of `needle` in
-/// `content`, a couple of characters into it.
-async fn definitions_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    content: &str,
-    needle: &str,
-) -> Vec<Location> {
-    let position = position_of(content, needle);
-    definition_locations(
-        goto_definition_at(backend, uri, position.line, position.character + 2).await,
-    )
 }
 
 /// The `invalid_laravel_view` messages the slow pass reports on `uri`.

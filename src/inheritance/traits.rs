@@ -10,7 +10,6 @@ use std::sync::Arc;
 use crate::atom::{Atom, atom};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MAX_TRAIT_DEPTH};
-use crate::util::short_name;
 use crate::virtual_members::laravel::{
     extends_eloquent_model, is_has_factory_trait, model_to_factory_fqn,
 };
@@ -19,9 +18,9 @@ use crate::virtual_members::{
 };
 
 use super::generics::{
-    apply_substitution_to_method, apply_substitution_to_property, fill_template_bounds,
-    method_has_bare_self, method_references_params, property_references_params,
-    replace_bare_self_in_method, right_align_offset,
+    apply_substitution_to_method, apply_substitution_to_property, bind_template_args,
+    fill_template_bounds, method_has_bare_self, method_references_params,
+    property_references_params, replace_bare_self_in_method,
 };
 use super::{MergeDedup, TraitContext};
 
@@ -62,8 +61,7 @@ pub(crate) fn merge_traits_into(
         // Build a substitution map for this trait if the using class
         // declared `@use TraitName<Type1, Type2>` and the trait has
         // `@template` parameters.
-        let mut trait_subs =
-            build_trait_substitution_map(trait_name, &trait_info, ctx.use_generics);
+        let mut trait_subs = build_trait_substitution_map(&trait_info, ctx.use_generics);
 
         // ── Convention-based HasFactory fallback ─────────────────
         // When a model uses `HasFactory` without `@use HasFactory<X>`,
@@ -344,51 +342,8 @@ pub(crate) fn merge_traits_into(
 /// trait `HasFactory` has `@template TFactory`, the returned map is
 /// `{TFactory => UserFactory}`.
 fn build_trait_substitution_map(
-    trait_name: &str,
     trait_info: &ClassInfo,
     use_generics: &[(Atom, Vec<PhpType>)],
 ) -> HashMap<String, PhpType> {
-    if trait_info.template_params.is_empty() || use_generics.is_empty() {
-        return HashMap::new();
-    }
-
-    let trait_short = short_name(trait_name);
-
-    // Find the @use entry that matches this trait.
-    let type_args = use_generics
-        .iter()
-        .find(|(name, _)| {
-            let name_short = short_name(name);
-            name_short == trait_short
-        })
-        .map(|(_, args)| args);
-
-    let type_args = match type_args {
-        Some(args) => args,
-        None => return HashMap::new(),
-    };
-
-    let mut map = HashMap::new();
-    // Right-align a short argument list to the trailing template params,
-    // matching PHPStan/Psalm convention for `@use Collection<User>`.
-    let offset = right_align_offset(
-        &trait_info.template_params,
-        &trait_info.template_param_bounds,
-        type_args.len(),
-    );
-    for (i, param_name) in trait_info.template_params.iter().enumerate() {
-        if i < offset {
-            let fallback = trait_info
-                .template_param_bounds
-                .get(param_name)
-                .cloned()
-                .unwrap_or_else(PhpType::mixed);
-            map.insert(param_name.to_string(), fallback);
-            continue;
-        }
-        if let Some(arg) = type_args.get(i - offset) {
-            map.insert(param_name.to_string(), arg.clone());
-        }
-    }
-    map
+    bind_template_args(trait_info, use_generics, &HashMap::new()).unwrap_or_default()
 }

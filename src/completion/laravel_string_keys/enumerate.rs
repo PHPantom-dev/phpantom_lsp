@@ -33,8 +33,8 @@ impl Backend {
     pub(crate) fn cached_laravel_enumeration<T: Clone>(
         &self,
         build_lock: &parking_lot::Mutex<()>,
-        read: impl Fn(&crate::LaravelStringKeyCache) -> Option<T>,
-        store: impl Fn(&mut crate::LaravelStringKeyCache, T),
+        read: impl Fn(&crate::backend::laravel::LaravelStringKeyCache) -> Option<T>,
+        store: impl Fn(&mut crate::backend::laravel::LaravelStringKeyCache, T),
         build: impl FnOnce() -> T,
     ) -> T {
         if let Some(cached) = read(&self.laravel_string_key_cache.read()) {

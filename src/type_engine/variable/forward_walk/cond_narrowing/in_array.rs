@@ -337,17 +337,8 @@ pub(crate) fn resolve_in_array_haystack_type_fw(
     // If the haystack is a simple variable, look it up in the scope.
     if let Expression::Variable(Variable::Direct(dv)) = haystack_expr {
         let var_name = bytes_to_str(dv.name).to_string();
-        let types = scope.get(&var_name);
-        if !types.is_empty() {
-            let joined = ResolvedType::types_joined(types);
-            if joined.iterable_element_type().is_some() {
-                return Some(joined);
-            }
-        }
-        // Fall back to docblock annotation.
-        let offset = haystack_expr.span().start.offset as usize;
-        return crate::docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_name)
-            .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
+        let joined = ResolvedType::types_joined(scope.get(&var_name));
+        return joined.iterable_element_type().is_some().then_some(joined);
     }
 
     // For non-variable expressions (method calls, property access, etc.),

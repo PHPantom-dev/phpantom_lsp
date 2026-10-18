@@ -1,6 +1,7 @@
-use super::class_edit_texts;
+use super::items::class_edit_texts;
+use super::ranking::class_sort_text;
 use super::*;
-use crate::types::ClassLikeKind;
+use crate::types::*;
 
 // ── detect_stub_class_kind ──────────────────────────────────────
 

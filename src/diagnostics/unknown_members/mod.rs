@@ -68,32 +68,30 @@
 //! only where a diagnostic would otherwise be reported, so a file
 //! with nothing wrong in it never pays for it.
 
+mod access;
+mod chains;
+mod member_check;
+
 use std::collections::HashMap;
 use std::sync::Arc;
-
-use super::unresolved_member_access::UNRESOLVED_MEMBER_ACCESS_CODE;
-use crate::parser::with_parse_cache;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::SymbolKind;
+use crate::parser::with_parse_cache;
+use crate::resolution::FileLoaders;
 use crate::type_engine::resolver::{
-    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
+    ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
 };
-use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
-use crate::virtual_members::resolve_class_fully_cached;
+use crate::types::ClassInfo;
 
 use super::existence_guards::{compute_existence_guards, compute_isset_empty_argument_ranges};
-use super::helpers::{
-    FileDiagnosticContext, find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
-};
-use super::member_lookup::{
-    display_class_name, has_magic_method_for_access, member_exists, member_exists_relaxed,
-    member_is_public,
-};
-use super::member_visibility::{INVALID_MEMBER_ACCESS_CODE, inaccessible_member_message};
+use super::helpers::{FileDiagnosticContext, make_diagnostic};
 use super::subject_cache::SubjectCacheKey;
+use super::unresolved_member_access::UNRESOLVED_MEMBER_ACCESS_CODE;
+
+use access::{AccessFilters, MemberAccessSite};
+use chains::BrokenChains;
 
 /// Diagnostic code used for unknown-member diagnostics so that code
 /// actions can match on it.
@@ -104,13 +102,10 @@ pub(crate) const UNKNOWN_MEMBER_CODE: &str = "unknown_member";
 /// is always a runtime crash, so the severity is `Error`.
 pub(crate) const SCALAR_MEMBER_ACCESS_CODE: &str = "scalar_member_access";
 
-// ─── Subject resolution cache ───────────────────────────────────────────────
-
 /// Result of checking whether a member exists on resolved classes.
 ///
-/// Returned by [`Backend::check_member_on_resolved_classes`] to tell
-/// the caller whether a diagnostic was emitted and whether the chain
-/// should be considered broken.
+/// Tells the caller whether a diagnostic was emitted and whether the
+/// chain should be considered broken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MemberCheckResult {
     /// No issue — member exists or access is fully suppressed (e.g. `__get`).
@@ -126,30 +121,20 @@ enum MemberCheckResult {
 /// Per-pass cache mapping subject keys to their resolution outcomes.
 type SubjectCache = HashMap<SubjectCacheKey, SubjectOutcome>;
 
-/// Check whether a subject text is rooted in `$this`, `self`, `static`,
-/// or `parent`.  This matches both bare keywords (`"$this"`, `"static"`)
-/// and chain expressions that start with one of them
-/// (`"$this->relation()"`, `"static::where('x', 'y')"`, `"self::$prop"`).
-fn subject_text_is_rooted_in_self(subject_text: &str) -> bool {
-    // Bare keyword match (most common case).
-    if matches!(subject_text, "$this" | "self" | "static" | "parent") {
-        return true;
-    }
-
-    // Chain rooted at `$this->` or `$this?->`
-    if subject_text.starts_with("$this->") || subject_text.starts_with("$this?->") {
-        return true;
-    }
-
-    // Chain rooted at `self::`, `static::`, or `parent::`
-    if subject_text.starts_with("self::")
-        || subject_text.starts_with("static::")
-        || subject_text.starts_with("parent::")
-    {
-        return true;
-    }
-
-    false
+/// What one unknown-member pass over a file reads for every access.
+struct UnknownMemberPass<'a> {
+    backend: &'a Backend,
+    ctx: &'a FileDiagnosticContext,
+    uri: &'a str,
+    content: &'a str,
+    loaders: FileLoaders<'a>,
+    /// Whether a magic method stands in for undeclared members
+    /// (`report_magic_properties`).  Read once for the whole file:
+    /// `config()` clones the config behind a lock, and the flags cannot
+    /// change mid-pass.
+    report_magic: bool,
+    /// Whether the opt-in `unresolved-member-access` diagnostic is on.
+    report_unresolved: bool,
 }
 
 impl Backend {
@@ -181,25 +166,25 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let symbol_map = &ctx.symbol_map;
-        let Some(source) = symbol_map.source(content) else {
+        let Some(source) = ctx.symbol_map.source(content) else {
             return;
         };
-        let local_classes = &ctx.file.classes;
-
-        let class_loaders = self.class_loaders(&ctx.file);
-        let function_loaders = self.function_loaders(&ctx.file);
-        let laravel_macro_this_resolvers =
-            class_loaders.map(|class_loader| self.laravel_macro_this_resolver(class_loader));
-        let resolved_cache = &self.resolved_class_cache;
-
-        // ── Compute existence guards ────────────────────────────────────
-        let existence_guards = compute_existence_guards(content);
-
-        // ── Compute isset()/empty() argument ranges ─────────────────────
-        // Member/array access inside these constructs never triggers a
-        // runtime error even when the accessed member doesn't exist.
-        let isset_empty_ranges = compute_isset_empty_argument_ranges(content);
+        let config = self.config();
+        let pass = UnknownMemberPass {
+            backend: self,
+            ctx,
+            uri,
+            content,
+            loaders: self.file_loaders(&ctx.file),
+            report_magic: config.diagnostics.report_magic_properties_enabled(),
+            report_unresolved: config.diagnostics.unresolved_member_access_enabled(),
+        };
+        let filters = AccessFilters {
+            source,
+            local_classes: &ctx.file.classes,
+            existence_guards: compute_existence_guards(content),
+            isset_empty_ranges: compute_isset_empty_argument_ranges(content),
+        };
 
         // ── Parse cache for this diagnostic pass ────────────────────────
         // The file content is immutable during a single diagnostic pass.
@@ -213,741 +198,177 @@ impl Backend {
         // ── Chain resolution cache for this diagnostic pass ─────────────
         let _chain_guard = with_chain_resolution_cache();
 
-        // ── Subject resolution cache for this diagnostic pass ───────────
         let mut subject_cache: SubjectCache = HashMap::new();
-
-        // ── Chain error propagation ─────────────────────────────────────
-        // When a member access is flagged as broken, subsequent links
-        // in the same fluent chain are suppressed because their failure
-        // is a direct consequence of the first break.  We record
-        // "broken chain prefixes" and skip any span whose subject_text
-        // starts with one of them.  Each prefix is keyed by the function
-        // scope it was flagged in: the same text in another function can
-        // be a different value, and that access has to be judged on its
-        // own.
-        let mut broken_chain_prefixes: Vec<(u32, String)> = Vec::new();
+        let mut broken_chains = BrokenChains::default();
 
         // ── Walk every symbol span ──────────────────────────────────────
-        for span in &symbol_map.spans {
+        for span in &ctx.symbol_map.spans {
             if !super::incremental::reports_site(span.start) {
                 continue;
             }
-            let (subject_text, member_name, is_static, is_method_call, docblock_ref, is_nullsafe) =
-                match &span.kind {
-                    SymbolKind::MemberAccess {
-                        subject_text,
-                        member_name,
-                        is_static,
-                        is_method_call,
-                        docblock_ref,
-                        is_array_callable,
-                        is_nullsafe,
-                    } => {
-                        // A `[Class::class, 'method']` / `[$obj, 'method']`
-                        // array literal is only a callable when it flows into
-                        // a callable-typed context (a callable parameter,
-                        // `is_callable`, or a direct invocation).  Without
-                        // type-flow analysis we cannot tell such an array
-                        // apart from a plain data pair like
-                        // `return [[Foo::class, 'name'], ...]`, so we do not
-                        // validate its second element as a method.  The span
-                        // still drives navigation, hover, and semantic tokens,
-                        // which only surface information when the member
-                        // actually resolves.
-                        if *is_array_callable {
-                            continue;
-                        }
-                        (
-                            subject_text,
-                            member_name,
-                            *is_static,
-                            *is_method_call,
-                            *docblock_ref,
-                            *is_nullsafe,
-                        )
-                    }
-                    _ => continue,
-                };
-            let class_loader = class_loaders.at(span.start);
-            let function_loader = function_loaders.at(span.start);
-            let laravel_macro_this_resolver = laravel_macro_this_resolvers.at(span.start);
-
-            // `@see` legally carries URIs, prose, and naming suggestions in
-            // addition to FQSENs, so a target that resolves to nothing is
-            // not an error.  PHPUnit coverage metadata, which shares the
-            // emitter, is still checked: it names a code unit that must
-            // exist.
-            if docblock_ref.tolerates_missing_target() {
+            let Some(access) = MemberAccessSite::of_span(span, &filters) else {
                 continue;
-            }
-
-            let subject_text = subject_text.as_str(source);
-            let is_docblock_ref = docblock_ref.is_reference();
-
-            // ── Skip the magic `::class` constant ───────────────────
-            if member_name == "class" && is_static {
-                continue;
-            }
-
-            // ── Skip members guarded by method_exists() ───────────────
-            if existence_guards.is_method_guarded(member_name, span.start) {
-                continue;
-            }
-
-            // ── Skip accesses inside isset()/empty() ──────────────────
-            // `isset($x->prop)` and `empty($x->prop)` never error or warn
-            // even when `prop` doesn't exist — that is their purpose.
-            if is_offset_in_ranges(span.start, &isset_empty_ranges) {
-                continue;
-            }
-
-            // ── Skip members on classes guarded by class_exists() ─────
-            // When the subject is a static access on a class guarded by
-            // class_exists(), suppress unknown member diagnostics too.
-            if is_static {
-                // The subject_text for static access is typically the class name.
-                let class_name = subject_text.trim();
-                if existence_guards.is_class_guarded(class_name, span.start) {
-                    continue;
-                }
-            }
-
-            let access_kind = if is_static {
-                AccessKind::DoubleColon
-            } else {
-                AccessKind::Arrow
             };
-
-            let current_class = find_innermost_enclosing_class(local_classes, span.start);
-
-            // `$this`, `self`, and `static` name whatever class the code
-            // is bound to, which is normally the one it sits in — but a
-            // closure can be bound elsewhere, and then the class it binds
-            // to is the scope PHP checks visibility against.  Only the
-            // bare keywords qualify: in a chain like `$this->rel()->x`
-            // the receiver is whatever the chain returned, not the
-            // binding.
-            let subject_binds_scope = matches!(subject_text, "$this" | "self" | "static");
-
-            // ── Suppress inside traits for self-referencing subjects ────
-            // Traits are incomplete: they expect host classes to provide
-            // members accessed via $this/self/static/parent.  Flagging
-            // these produces false positives for every trait that relies
-            // on the host class's members.
-            //
-            // This also covers chain expressions rooted at these keywords,
-            // e.g. `static::where('x', 'y')->update(...)` has subject_text
-            // `"static::where('x', 'y')"` and `$this->relation()->first()`
-            // has subject_text `"$this->relation()"`.  The root of the
-            // chain is still the trait's self-reference, so the entire
-            // chain is unsuppressable without knowing the host class.
-            if let Some(cc) = current_class
-                && cc.kind == ClassLikeKind::Trait
-                && subject_text_is_rooted_in_self(subject_text)
-            {
-                continue;
-            }
-
-            // Whether this subject could benefit from expression-level
-            // narrowing re-resolution.  Every subject rooted at a
-            // variable can: `$this->pair[0] instanceof Sub && !$this->pair[0]->flag()`
-            // refines the second occurrence with no block to key it on,
-            // and so does `$this instanceof Sub && $this->only()`.
-            let is_narrowable_subject = subject_text.starts_with('$');
 
             // ── Look up or populate the subject cache ───────────────────
             let cache_key = SubjectCacheKey::build(
-                symbol_map,
-                current_class,
-                subject_text,
-                access_kind,
-                span.start,
+                ctx,
+                access.current_class,
+                access.subject_text,
+                access.access_kind(),
+                access.start,
             );
-
+            let scope = cache_key.scope();
             let outcome = subject_cache
                 .entry(cache_key)
-                .or_insert_with(|| {
-                    let rctx = ResolutionCtx {
-                        is_in_static_method: symbol_map.is_in_static_method(span.start),
-                        ..self.resolution_ctx_at(
-                            current_class,
-                            local_classes,
-                            content,
-                            span.start,
-                            CtxLoaders::new(
-                                class_loader,
-                                function_loader,
-                                laravel_macro_this_resolver,
-                            ),
-                        )
-                    };
-                    resolve_subject_outcome(subject_text, access_kind, &rctx)
-                })
+                .or_insert_with(|| pass.resolve_subject(&access))
                 .clone();
 
             // ── Chain error propagation: suppress downstream links ──────
-            // If the subject of this access is downstream of an
-            // already-flagged broken chain, skip it entirely.  The
-            // original broken prefix propagates to all further links
-            // naturally (it is a prefix of every subsequent subject).
-            let scope = symbol_map.find_enclosing_scope(span.start);
-            if is_downstream_of_broken_chain(subject_text, scope, &broken_chain_prefixes) {
+            if broken_chains.is_downstream(access.subject_text, scope) {
                 continue;
             }
 
-            // ── Emit diagnostics based on the cached outcome ────────────
-            match outcome {
-                // `?->` short-circuits to `null` without touching the
-                // member when its subject is `null` — it never crashes,
-                // unlike every other scalar this arm flags for `->`.
-                SubjectOutcome::Scalar(ref scalar) if is_nullsafe && scalar.is_null() => {
-                    continue;
-                }
-                SubjectOutcome::Scalar(ref scalar) => {
-                    let range = match self.offset_range_to_lsp_range(
-                        uri,
-                        content,
-                        span.start as usize,
-                        span.end as usize,
-                    ) {
-                        Some(r) => r,
-                        None => continue,
-                    };
-                    let kind_label = if is_method_call { "method" } else { "property" };
-                    let message = format!(
-                        "Cannot access {} '{}' on type '{}'",
-                        kind_label, member_name, scalar,
-                    );
-                    out.push(make_diagnostic(
-                        range,
-                        DiagnosticSeverity::ERROR,
-                        SCALAR_MEMBER_ACCESS_CODE,
-                        message,
-                    ));
-                    broken_chain_prefixes.push((
-                        scope,
-                        broken_chain_prefix(subject_text, member_name, is_static, is_method_call),
-                    ));
-                }
+            // Only a member that is truly missing breaks the chain: when
+            // `__call`/`__callStatic` exists, the diagnostic is emitted
+            // but the chain continues because the magic method's return
+            // type recovers the type.
+            if pass.report(&access, &outcome, out) == MemberCheckResult::Break {
+                broken_chains.record(scope, &access);
+            }
+        }
+    }
+}
 
-                SubjectOutcome::UnresolvableClass(ref unresolved) => {
-                    // SoapClient is a SOAP proxy where any method is
-                    // valid.  Even if we cannot fully resolve the class,
-                    // suppress the diagnostic.
-                    let type_str = unresolved.to_string();
-                    if type_str == "SoapClient" || type_str == "\\SoapClient" {
-                        continue;
-                    }
-                    let range = match self.offset_range_to_lsp_range(
-                        uri,
-                        content,
-                        span.start as usize,
-                        span.end as usize,
-                    ) {
-                        Some(r) => r,
-                        None => continue,
-                    };
-                    let kind_label = if is_method_call { "method" } else { "property" };
-                    let message = format!(
+impl UnknownMemberPass<'_> {
+    fn class_loader(&self) -> &dyn Fn(&str) -> Option<Arc<ClassInfo>> {
+        self.loaders.resolved_class_loader()
+    }
+
+    fn range(&self, access: &MemberAccessSite) -> Option<Range> {
+        self.backend.offset_range_to_lsp_range(
+            self.uri,
+            self.content,
+            access.start as usize,
+            access.end as usize,
+        )
+    }
+
+    /// Resolve the access's subject at the access's own position.
+    fn resolve_subject(&self, access: &MemberAccessSite) -> SubjectOutcome {
+        let rctx = ResolutionCtx {
+            is_in_static_method: self.ctx.symbol_map.is_in_static_method(access.start),
+            ..self.loaders.resolution_ctx_at(self.content, access.start)
+        };
+        resolve_subject_outcome(access.subject_text, access.access_kind(), &rctx)
+    }
+
+    /// Push what the subject's resolution `outcome` says about `access`.
+    /// Returns `Break` when the diagnostic leaves the rest of the chain
+    /// without a type.
+    fn report(
+        &self,
+        access: &MemberAccessSite,
+        outcome: &SubjectOutcome,
+        out: &mut Vec<Diagnostic>,
+    ) -> MemberCheckResult {
+        match outcome {
+            // `?->` short-circuits to `null` without touching the
+            // member when its subject is `null` — it never crashes,
+            // unlike every other scalar this arm flags for `->`.
+            SubjectOutcome::Scalar(scalar) if access.is_nullsafe && scalar.is_null() => {
+                MemberCheckResult::Ok
+            }
+            SubjectOutcome::Scalar(scalar) => self.push_chain_break(
+                access,
+                DiagnosticSeverity::ERROR,
+                SCALAR_MEMBER_ACCESS_CODE,
+                format!(
+                    "Cannot access {} '{}' on type '{}'",
+                    access.kind_label(),
+                    access.member_name,
+                    scalar,
+                ),
+                out,
+            ),
+            SubjectOutcome::UnresolvableClass(unresolved) => {
+                // SoapClient is a SOAP proxy where any method is
+                // valid.  Even if we cannot fully resolve the class,
+                // suppress the diagnostic.
+                let type_str = unresolved.to_string();
+                if type_str == "SoapClient" || type_str == "\\SoapClient" {
+                    return MemberCheckResult::Ok;
+                }
+                self.push_chain_break(
+                    access,
+                    DiagnosticSeverity::WARNING,
+                    UNKNOWN_MEMBER_CODE,
+                    format!(
                         "Cannot verify {} '{}' — subject type '{}' could not be resolved",
-                        kind_label, member_name, unresolved,
-                    );
-                    out.push(make_diagnostic(
-                        range,
-                        DiagnosticSeverity::WARNING,
-                        UNKNOWN_MEMBER_CODE,
-                        message,
-                    ));
-                    broken_chain_prefixes.push((
-                        scope,
-                        broken_chain_prefix(subject_text, member_name, is_static, is_method_call),
-                    ));
-                }
-
-                SubjectOutcome::Mixed | SubjectOutcome::Untyped => {
-                    // When the opt-in `unresolved-member-access` diagnostic
-                    // is enabled, report every member access the subject
-                    // type cannot answer for — regardless of whether the
-                    // subject is a bare variable, a chain, an array access,
-                    // or a function call result.
-                    if self.config().diagnostics.unresolved_member_access_enabled() {
-                        let range = match self.offset_range_to_lsp_range(
-                            uri,
-                            content,
-                            span.start as usize,
-                            span.end as usize,
-                        ) {
-                            Some(r) => r,
-                            None => continue,
-                        };
-                        let subject_display = subject_text.trim();
-                        let kind_label = if is_method_call { "method" } else { "property" };
-                        // A `mixed` subject is not a resolution failure:
-                        // the type engine answered, and the answer was the
-                        // type that admits every value. Saying so points at
-                        // the annotation that is missing from the codebase
-                        // instead of implying a gap in the type engine.
-                        let message = if matches!(outcome, SubjectOutcome::Mixed) {
-                            format!(
-                                "Cannot verify {} '{}' — type of '{}' is 'mixed'",
-                                kind_label, member_name, subject_display,
-                            )
-                        } else {
-                            format!(
-                                "Cannot verify {} '{}' — type of '{}' could not be resolved",
-                                kind_label, member_name, subject_display,
-                            )
-                        };
-                        out.push(make_diagnostic(
-                            range,
-                            DiagnosticSeverity::HINT,
-                            UNRESOLVED_MEMBER_ACCESS_CODE,
-                            message,
-                        ));
-                        broken_chain_prefixes.push((
-                            scope,
-                            broken_chain_prefix(
-                                subject_text,
-                                member_name,
-                                is_static,
-                                is_method_call,
-                            ),
-                        ));
-                    }
-                }
-
-                SubjectOutcome::Resolved(ref base_classes) => {
-                    let (result, coarse_diags) = self.check_member_on_resolved_classes(
-                        uri,
-                        base_classes,
-                        member_name,
-                        is_static,
-                        is_method_call,
-                        is_docblock_ref,
-                        current_class,
-                        subject_binds_scope,
-                        class_loader,
-                        resolved_cache,
-                        content,
-                        span.start,
-                        span.end,
-                    );
-
-                    // ── Narrowing re-resolution fallback ────────────
-                    // When the member was not found on the coarsely-cached
-                    // type AND the subject is a bare variable, re-resolve
-                    // at the exact cursor position.  Expression-level
-                    // narrowing (ternary instanceof, inline && chains)
-                    // may refine the type so the member becomes visible.
-                    //
-                    // This is the rare path — most accesses find the
-                    // member on the coarse type and never reach here.
-                    let (result, diags) =
-                        if result != MemberCheckResult::Ok && is_narrowable_subject {
-                            let rctx = ResolutionCtx {
-                                is_in_static_method: symbol_map.is_in_static_method(span.start),
-                                ..self.resolution_ctx_at(
-                                    current_class,
-                                    local_classes,
-                                    content,
-                                    span.start,
-                                    CtxLoaders::new(
-                                        class_loader,
-                                        function_loader,
-                                        laravel_macro_this_resolver,
-                                    ),
-                                )
-                            };
-                            let fresh = resolve_subject_outcome(subject_text, access_kind, &rctx);
-                            if let SubjectOutcome::Resolved(ref fresh_classes) = fresh {
-                                // Use the fresh diagnostics instead of the coarse ones.
-                                self.check_member_on_resolved_classes(
-                                    uri,
-                                    fresh_classes,
-                                    member_name,
-                                    is_static,
-                                    is_method_call,
-                                    is_docblock_ref,
-                                    current_class,
-                                    subject_binds_scope,
-                                    class_loader,
-                                    resolved_cache,
-                                    content,
-                                    span.start,
-                                    span.end,
-                                )
-                            } else {
-                                // Re-resolution changed the outcome category
-                                // (e.g. became Untyped).  Keep the original
-                                // diagnostic from the coarse check.
-                                (result, coarse_diags)
-                            }
-                        } else {
-                            (result, coarse_diags)
-                        };
-                    out.extend(diags);
-
-                    // Only break the chain when the member is truly
-                    // missing (no magic method fallback).  When
-                    // `__call`/`__callStatic` exists, the diagnostic
-                    // is emitted but the chain continues because the
-                    // magic method's return type recovers the type.
-                    if result == MemberCheckResult::Break {
-                        broken_chain_prefixes.push((
-                            scope,
-                            broken_chain_prefix(
-                                subject_text,
-                                member_name,
-                                is_static,
-                                is_method_call,
-                            ),
-                        ));
-                    }
-                }
+                        access.kind_label(),
+                        access.member_name,
+                        unresolved,
+                    ),
+                    out,
+                )
             }
-        }
-    }
-
-    /// Emit an access diagnostic when the member exists but the calling
-    /// scope may not reach it.  Returns whether one was emitted.
-    ///
-    /// Called wherever the member check has settled what the classes
-    /// hold: at the two points that declare the member found, and once
-    /// more before reporting it missing, since a parent's private member
-    /// is unreachable rather than absent.
-    ///
-    /// A docblock reference is exempt — `@see Foo::$secret` documents a
-    /// member, it does not read one.
-    #[allow(clippy::too_many_arguments)]
-    fn push_inaccessible_member(
-        &self,
-        uri: &str,
-        classes: &[Arc<ClassInfo>],
-        member_name: &str,
-        is_static: bool,
-        is_method_call: bool,
-        is_docblock_ref: bool,
-        current_class: Option<&ClassInfo>,
-        subject_binds_scope: bool,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        content: &str,
-        start: u32,
-        end: u32,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> bool {
-        if is_docblock_ref {
-            return false;
-        }
-        let Some(message) = inaccessible_member_message(
-            classes,
-            member_name,
-            is_static,
-            is_method_call,
-            current_class,
-            subject_binds_scope,
-            class_loader,
-        ) else {
-            return false;
-        };
-        let Some(range) =
-            self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
-        else {
-            return false;
-        };
-        diagnostics.push(make_diagnostic(
-            range,
-            DiagnosticSeverity::ERROR,
-            INVALID_MEMBER_ACCESS_CODE,
-            message,
-        ));
-        true
-    }
-
-    /// Check whether a member exists on the resolved classes and emit
-    /// a diagnostic if it does not.
-    ///
-    /// Returns the check result (whether the access is fine, breaks the
-    /// type chain, or is recoverable via a magic-method fallback) along
-    /// with any diagnostics to emit.
-    #[allow(clippy::too_many_arguments)]
-    fn check_member_on_resolved_classes(
-        &self,
-        uri: &str,
-        base_classes: &[Arc<ClassInfo>],
-        member_name: &str,
-        is_static: bool,
-        is_method_call: bool,
-        is_docblock_ref: bool,
-        current_class: Option<&ClassInfo>,
-        subject_binds_scope: bool,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        cache: &crate::virtual_members::ResolvedClassCache,
-        content: &str,
-        start: u32,
-        end: u32,
-    ) -> (MemberCheckResult, Vec<Diagnostic>) {
-        let mut diagnostics = Vec::new();
-        let report_magic = self.config().diagnostics.report_magic_properties_enabled();
-
-        // ── Quick check on pre-resolved base classes ────────────────
-        // `resolve_target_classes` already returns fully-resolved
-        // classes in many code paths (e.g. `type_hint_to_classes_typed`
-        // calls `resolve_class_fully` and injects model-specific
-        // scope methods onto Eloquent Builders).  Check the member
-        // on these classes FIRST, before re-resolving through the
-        // cache.  The cache is keyed by bare FQN and may hold a
-        // stale entry that lacks context-specific virtual members
-        // (e.g. Builder scope methods that depend on the concrete
-        // model type).  Checking here avoids false positives when
-        // the cache and the resolver disagree.
-
-        // ── Suppress property access on __get classes ───────────────
-        // `__get` handles arbitrary property names.  Unlike __call,
-        // we suppress the diagnostic entirely because there is no
-        // meaningful return-type recovery to perform.
-        if !is_method_call
-            && base_classes
-                .iter()
-                .any(|c| has_magic_method_for_access(c, is_static, false, report_magic))
-        {
-            return (MemberCheckResult::Ok, diagnostics);
-        }
-        if base_classes.iter().any(|c| c.name == "stdClass") {
-            return (MemberCheckResult::Ok, diagnostics);
-        }
-        // This shortcut may be looking at a class that has not been
-        // merged yet, which is enough to confirm a member is reachable
-        // but not enough to judge one that is not: a magic handler or
-        // the declaration's real owner can both live further up.  So it
-        // settles only the public case and lets everything else fall
-        // through to the merged classes below.
-        if base_classes.iter().any(|c| {
-            member_is_public(c, member_name, is_static, is_method_call)
-                || (is_docblock_ref && member_exists_relaxed(c, member_name))
-        }) {
-            return (MemberCheckResult::Ok, diagnostics);
-        }
-
-        // ── Fully resolve each class (inheritance + virtual members) ─
-        // Synthetic classes like `__object_shape` already carry all
-        // their members and must NOT go through the cache (every
-        // object shape shares the same name, so the cache would
-        // return the wrong entry).
-        let resolved_classes: Vec<Arc<ClassInfo>> = base_classes
-            .iter()
-            .map(|c| {
-                if c.name == "__object_shape" {
-                    Arc::clone(c)
+            SubjectOutcome::Mixed | SubjectOutcome::Untyped => {
+                // When the opt-in `unresolved-member-access` diagnostic
+                // is enabled, report every member access the subject
+                // type cannot answer for — regardless of whether the
+                // subject is a bare variable, a chain, an array access,
+                // or a function call result.
+                if !self.report_unresolved {
+                    return MemberCheckResult::Ok;
+                }
+                let subject_display = access.subject_text.trim();
+                // A `mixed` subject is not a resolution failure:
+                // the type engine answered, and the answer was the
+                // type that admits every value. Saying so points at
+                // the annotation that is missing from the codebase
+                // instead of implying a gap in the type engine.
+                let message = if matches!(outcome, SubjectOutcome::Mixed) {
+                    format!(
+                        "Cannot verify {} '{}' — type of '{}' is 'mixed'",
+                        access.kind_label(),
+                        access.member_name,
+                        subject_display,
+                    )
                 } else {
-                    resolve_class_fully_cached(c, class_loader, cache)
-                }
-            })
-            .collect();
-
-        // ── Suppress property access on __get classes (resolved) ────
-        if !is_method_call
-            && resolved_classes
-                .iter()
-                .any(|c| has_magic_method_for_access(c, is_static, false, report_magic))
-        {
-            return (MemberCheckResult::Ok, diagnostics);
-        }
-
-        // ── Skip stdClass (universal object container) ──────────────
-        if resolved_classes.iter().any(|c| c.name == "stdClass") {
-            return (MemberCheckResult::Ok, diagnostics);
-        }
-
-        // ── Check whether the member exists on ANY branch ───────────
-        if resolved_classes.iter().any(|c| {
-            member_exists(c, member_name, is_static, is_method_call)
-                || (is_docblock_ref && member_exists_relaxed(c, member_name))
-        }) {
-            self.push_inaccessible_member(
-                uri,
-                &resolved_classes,
-                member_name,
-                is_static,
-                is_method_call,
-                is_docblock_ref,
-                current_class,
-                subject_binds_scope,
-                class_loader,
-                content,
-                start,
-                end,
-                &mut diagnostics,
-            );
-            return (MemberCheckResult::Ok, diagnostics);
-        }
-
-        // ── Suppress method calls dispatched through __call / __callStatic ──
-        // When any branch has a magic call handler, the method is
-        // dispatched to it at runtime, so the call is valid PHP — there
-        // is no fatal error and no undefined member.  This is how
-        // proxies (SoapClient), mock/fluent APIs (Mockery's higher-order
-        // messages), and dynamic query builders work.  We suppress the
-        // diagnostic entirely (mirroring how `__get` suppresses
-        // property-access diagnostics above) and return `MagicFallback`
-        // so the chain keeps resolving through the magic method's return
-        // type.  A speculative "we can't verify this" warning here is a
-        // false positive: the receiver has explicitly opted into handling
-        // arbitrary method names.
-        let has_magic_call = is_method_call
-            && (base_classes
-                .iter()
-                .any(|c| has_magic_method_for_access(c, is_static, true, report_magic))
-                || resolved_classes
-                    .iter()
-                    .any(|c| has_magic_method_for_access(c, is_static, true, report_magic)));
-        if has_magic_call {
-            return (MemberCheckResult::MagicFallback, diagnostics);
-        }
-
-        // ── A parent's private member is unreachable, not missing ──
-        // The inheritance merge drops it, so without this the access
-        // would be reported as an unknown member and the real reason
-        // — that PHP does not inherit private members — would be lost.
-        if self.push_inaccessible_member(
-            uri,
-            &resolved_classes,
-            member_name,
-            is_static,
-            is_method_call,
-            is_docblock_ref,
-            current_class,
-            subject_binds_scope,
-            class_loader,
-            content,
-            start,
-            end,
-            &mut diagnostics,
-        ) {
-            // The member is real, so its type still carries the chain.
-            return (MemberCheckResult::Ok, diagnostics);
-        }
-
-        // ── Member is unresolved on ALL branches — emit diagnostic ──
-        let range = match self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
-        {
-            Some(r) => r,
-            None => return (MemberCheckResult::Ok, diagnostics),
-        };
-
-        let kind_label = if is_method_call {
-            "Method"
-        } else if is_static {
-            // Static non-method could be a property ($prop) or constant
-            "Member"
-        } else {
-            "Property"
-        };
-
-        // Show the first resolved class name for context.  For union
-        // types we could list all of them, but keeping it short is
-        // more useful in the editor gutter.
-        let class_display = display_class_name(&resolved_classes[0]);
-
-        let message = if resolved_classes.len() > 1 {
-            format!(
-                "{} '{}' not found on any of the {} possible types ({})",
-                kind_label,
-                member_name,
-                resolved_classes.len(),
-                resolved_classes
-                    .iter()
-                    .map(|c| display_class_name(c))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            )
-        } else {
-            format!(
-                "{} '{}' not found on class '{}'",
-                kind_label, member_name, class_display,
-            )
-        };
-
-        diagnostics.push(make_diagnostic(
-            range,
-            DiagnosticSeverity::WARNING,
-            UNKNOWN_MEMBER_CODE,
-            message,
-        ));
-
-        // The member exists on no branch and no branch has a magic call
-        // handler, so the type cannot be recovered — break the chain.
-        (MemberCheckResult::Break, diagnostics)
-    }
-}
-
-// ─── Chain error propagation ────────────────────────────────────────────────
-
-/// Build the "broken chain prefix" for a flagged member access.
-///
-/// When a member access is flagged as broken (unknown member, scalar access,
-/// etc.), downstream links in the same chain should be suppressed because
-/// their failure is a consequence of the first break.
-///
-/// The prefix is constructed so that downstream `subject_text` values
-/// (produced by `expr_to_subject_text`) will start with this prefix.
-///
-/// For method calls the prefix ends with `(` — this prevents ambiguity
-/// with similarly-named methods (e.g. `callHome(` vs `callHomeLate(`).
-/// For property accesses the prefix is the bare expression; callers use
-/// [`is_downstream_of_broken_chain`] which checks for a chain-operator
-/// boundary after the prefix to avoid false matches with longer property
-/// names (e.g. `value` vs `value_extra`).
-fn broken_chain_prefix(
-    subject_text: &str,
-    member_name: &str,
-    is_static: bool,
-    is_method_call: bool,
-) -> String {
-    let normalized = subject_text.replace("?->", "->");
-    let operator = if is_static { "::" } else { "->" };
-    if is_method_call {
-        // Trailing `(` ensures "callHome(" does not match "callHomeLate(".
-        format!("{}{}{}{}", normalized, operator, member_name, "(")
-    } else {
-        format!("{}{}{}", normalized, operator, member_name)
-    }
-}
-
-/// Check whether `subject_text` is downstream of a broken chain
-/// expression previously flagged in the same function `scope`.
-///
-/// Normalises null-safe operators (`?->` → `->`) so that chains mixing
-/// `->` and `?->` are handled correctly.
-fn is_downstream_of_broken_chain(
-    subject_text: &str,
-    scope: u32,
-    broken_prefixes: &[(u32, String)],
-) -> bool {
-    if broken_prefixes.is_empty() {
-        return false;
-    }
-    let normalized = subject_text.replace("?->", "->");
-    broken_prefixes.iter().any(|(prefix_scope, prefix)| {
-        if *prefix_scope != scope {
-            return false;
-        }
-        if prefix.ends_with('(') {
-            // Method-call prefix: `starts_with` is sufficient because
-            // the trailing `(` prevents name-prefix ambiguity.
-            normalized.starts_with(prefix.as_str())
-        } else {
-            // Property prefix: the subject must equal the prefix or
-            // the prefix must be followed by a chain operator to avoid
-            // matching longer property names (e.g. `value` matching
-            // `value_extra`).
-            if normalized == *prefix {
-                return true;
+                    format!(
+                        "Cannot verify {} '{}' — type of '{}' could not be resolved",
+                        access.kind_label(),
+                        access.member_name,
+                        subject_display,
+                    )
+                };
+                self.push_chain_break(
+                    access,
+                    DiagnosticSeverity::HINT,
+                    UNRESOLVED_MEMBER_ACCESS_CODE,
+                    message,
+                    out,
+                )
             }
-            if !normalized.starts_with(prefix.as_str()) {
-                return false;
+            SubjectOutcome::Resolved(base_classes) => {
+                self.report_on_resolved(access, base_classes, out)
             }
-            let rest = &normalized[prefix.len()..];
-            rest.starts_with("->") || rest.starts_with("::") || rest.starts_with('[')
         }
-    })
+    }
+
+    /// Push a diagnostic on the access after which the chain has no type.
+    fn push_chain_break(
+        &self,
+        access: &MemberAccessSite,
+        severity: DiagnosticSeverity,
+        code: &str,
+        message: String,
+        out: &mut Vec<Diagnostic>,
+    ) -> MemberCheckResult {
+        let Some(range) = self.range(access) else {
+            return MemberCheckResult::Ok;
+        };
+        out.push(make_diagnostic(range, severity, code, message));
+        MemberCheckResult::Break
+    }
 }

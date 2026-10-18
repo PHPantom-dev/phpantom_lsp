@@ -1,5 +1,6 @@
-/// Context types and the thread-local chain resolution cache shared by
-/// [`super::resolve_target_classes`] and the functions it delegates to.
+//! Context types and the thread-local chain resolution cache shared by
+//! [`super::resolve_target_classes`] and the functions it delegates to.
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,7 +9,10 @@ use crate::Backend;
 
 use crate::php_type::PhpType;
 use crate::type_engine::variable::forward_walk::{ExprTypes, ScopeProofs};
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::*;
+
+use super::WrittenNames;
 
 // ─── Thread-local chain resolution cache ────────────────────────────────────
 //
@@ -76,15 +80,47 @@ pub(super) struct ChainKey {
     /// Tells files apart: the same text can name different classes in two
     /// files (see `SpineKeys::new`).
     pub(super) file_id: usize,
+    /// Tells apart the places in one file where the same text names
+    /// different things.
+    pub(super) names: NameScope,
     /// The subject text, as numbered by [`ChainCache::intern`].
     pub(super) chain: u32,
     pub(super) site: ChainSite,
 }
 
+/// Where the names in a chain's text are read.
+///
+/// Inside a class, `self`, `static` and `parent` name that class and its
+/// parent; everywhere, a class or function name is read through the
+/// imports and namespace of the `namespace` block it is written in.  Code
+/// in one class always sits in one block, so the class alone settles both.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum NameScope {
+    /// Inside the class with this FQN.
+    Class(crate::atom::Atom),
+    /// Outside any class, in the `namespace` block declared at this offset
+    /// (`None` before the file's first declaration).
+    Block(Option<usize>),
+}
+
+impl NameScope {
+    /// Where the names of a chain resolved through `ctx` are read.
+    pub(super) fn of(ctx: &ResolutionCtx<'_>) -> Self {
+        match ctx.current_class {
+            // The stand-in class for code outside one has no name.
+            Some(cls) if !cls.name.is_empty() => NameScope::Class(cls.fqn()),
+            _ => NameScope::Block(crate::parser::namespace_decl_at(
+                ctx.content,
+                ctx.cursor_offset as usize,
+            )),
+        }
+    }
+}
+
 /// Which occurrences of a chain text share a cache entry.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) enum ChainSite {
-    /// Every occurrence in the file.
+    /// Every occurrence whose names read the same (see [`NameScope`]).
     Anywhere,
     /// Occurrences whose local variables hold these types.
     Typed(std::rc::Rc<str>),
@@ -178,6 +214,10 @@ pub(crate) type ScopeContainsResolverFn<'a> = Option<&'a dyn Fn(&str) -> bool>;
 
 /// Optional Laravel macro callback `$this` resolver.
 pub(crate) type LaravelMacroThisResolverFn<'a> = Option<&'a dyn Fn(&str) -> Option<Arc<ClassInfo>>>;
+
+/// The `use` imports (alias → FQN) of the namespace block being resolved,
+/// when the caller has a file context to read them from.
+pub(crate) type SourceImports<'a> = Option<&'a HashMap<String, String>>;
 
 /// Bundles optional cross-file loader callbacks so they can be threaded
 /// through the resolution chain as a single argument instead of one
@@ -283,8 +323,19 @@ pub(crate) struct ResolutionCtx<'a> {
     pub content: &'a str,
     /// Byte offset of the cursor in `content`.
     pub cursor_offset: u32,
-    /// Cross-file class resolution callback.
+    /// Cross-file class resolution callback for already-resolved names.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// Cross-file class resolution callback for names as written in
+    /// source (`new Foo`, `Foo::bar()`, `@var Foo`), which resolves them
+    /// through the file's imports.  [`class_loader`](Self::class_loader)
+    /// is for already-resolved names, where a bare `Redis` is the global
+    /// class even when the file imports another `Redis`.
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// The `use` imports of the namespace block the cursor is in, which
+    /// [`resolve_code_class_name`](crate::names::resolve_code_class_name)
+    /// qualifies a written name no class answers to with.  `None` where
+    /// no file context exists.
+    pub source_imports: SourceImports<'a>,
     /// The server state the type engine consults for answers that need
     /// the whole project rather than the current file: inferring a
     /// method's return type from its body, the model configured for an
@@ -337,8 +388,51 @@ pub(crate) struct ResolutionCtx<'a> {
 /// have to outlive the context they are handed to.
 pub(crate) struct CtxLoaders<'a> {
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_class_loader`].
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_imports`].
+    pub source_imports: SourceImports<'a>,
     pub function_loader: FunctionLoaderFn<'a>,
     pub laravel_macro_this_resolver: LaravelMacroThisResolverFn<'a>,
+}
+
+impl<'a> ResolutionCtx<'a> {
+    /// How a class name written at the cursor reads.  Outside a class the
+    /// namespace is the one in force at the cursor.
+    pub(in crate::type_engine) fn written_names(&self) -> WrittenNames<'a> {
+        WrittenNames::new(
+            self.current_class,
+            self.all_classes,
+            self.content,
+            self.cursor_offset,
+            self.source_imports,
+            self.source_class_loader,
+        )
+    }
+
+    /// A forward-walker query for `var_name` at the cursor, read inside
+    /// the current class, or inside a placeholder for the cursor's
+    /// namespace outside one.
+    pub(crate) fn var_query<'q>(&'q self, var_name: &'q str) -> VarQuery<'q> {
+        VarQuery {
+            var_name,
+            cursor_offset: self.cursor_offset,
+            content: self.content,
+            current_class: self.current_class,
+            all_classes: self.all_classes,
+            class_loader: self.class_loader,
+            source_class_loader: self.source_class_loader,
+            source_imports: self.source_imports,
+            backend: self.backend,
+            loaders: Loaders::with_function(self.function_loader),
+        }
+    }
+
+    /// [`resolve_variable_types`](crate::type_engine::variable::resolution::resolve_variable_types)
+    /// for `var_name` at the cursor (see [`Self::var_query`]).
+    pub(crate) fn resolve_variable_at_cursor(&self, var_name: &str) -> Vec<ResolvedType> {
+        crate::type_engine::variable::resolution::resolve_variable_types(self.var_query(var_name))
+    }
 }
 
 impl<'a> CtxLoaders<'a> {
@@ -346,11 +440,14 @@ impl<'a> CtxLoaders<'a> {
     /// them.
     pub(crate) fn new(
         class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         function_loader: &'a dyn Fn(&str, u32) -> Option<FunctionInfo>,
         laravel_macro_this_resolver: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Self {
         Self {
             class_loader,
+            source_class_loader,
+            source_imports: None,
             function_loader: Some(function_loader),
             laravel_macro_this_resolver: Some(laravel_macro_this_resolver),
         }
@@ -360,12 +457,25 @@ impl<'a> CtxLoaders<'a> {
     /// cannot reach a macro closure body.
     pub(crate) fn without_macro_this(
         class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         function_loader: &'a dyn Fn(&str, u32) -> Option<FunctionInfo>,
     ) -> Self {
         Self {
             class_loader,
+            source_class_loader,
+            source_imports: None,
             function_loader: Some(function_loader),
             laravel_macro_this_resolver: None,
+        }
+    }
+
+    /// The `use` imports the source class loader was built from, so a
+    /// class name written in code that no class answers to is still
+    /// qualified the way PHP reads it.
+    pub(crate) fn with_imports(self, imports: &'a HashMap<String, String>) -> Self {
+        Self {
+            source_imports: Some(imports),
+            ..self
         }
     }
 }
@@ -386,6 +496,10 @@ pub(crate) struct VarResolutionCtx<'a> {
     pub content: &'a str,
     pub cursor_offset: u32,
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_class_loader`].
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_imports`].
+    pub source_imports: SourceImports<'a>,
     /// See [`ResolutionCtx::backend`].
     pub backend: Option<&'a Backend>,
     /// Cross-file loader callbacks (function loader, constant loader).
@@ -457,7 +571,7 @@ impl<'a> VarResolutionCtx<'a> {
     /// ```ignore
     /// VarResolutionCtx {
     ///     backend: Some(backend),
-    ///     ..VarResolutionCtx::new("", class, classes, content, offset, &loader)
+    ///     ..VarResolutionCtx::new("", class, classes, content, offset, &loader, &loader)
     /// }
     /// ```
     pub(crate) fn new(
@@ -467,6 +581,7 @@ impl<'a> VarResolutionCtx<'a> {
         content: &'a str,
         cursor_offset: u32,
         class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Self {
         Self {
             var_name,
@@ -475,6 +590,8 @@ impl<'a> VarResolutionCtx<'a> {
             content,
             cursor_offset,
             class_loader,
+            source_class_loader,
+            source_imports: None,
             backend: None,
             loaders: Loaders::default(),
             resolved_class_cache: None,
@@ -486,6 +603,35 @@ impl<'a> VarResolutionCtx<'a> {
             scope_proofs: None,
             expr_types: None,
         }
+    }
+
+    /// A forward-walker query for `var_name` at `cursor_offset` with this
+    /// context's file, class and loaders (none of its scope state).
+    pub(crate) fn var_query<'q>(&'q self, var_name: &'q str, cursor_offset: u32) -> VarQuery<'q> {
+        VarQuery {
+            var_name,
+            cursor_offset,
+            content: self.content,
+            current_class: Some(self.current_class),
+            all_classes: self.all_classes,
+            class_loader: self.class_loader,
+            source_class_loader: self.source_class_loader,
+            source_imports: self.source_imports,
+            backend: self.backend,
+            loaders: self.loaders,
+        }
+    }
+
+    /// How a class name written at the cursor reads.
+    pub(in crate::type_engine) fn written_names(&self) -> WrittenNames<'a> {
+        WrittenNames::new(
+            Some(self.current_class),
+            self.all_classes,
+            self.content,
+            self.cursor_offset,
+            self.source_imports,
+            self.source_class_loader,
+        )
     }
 
     /// The type the forward walker recorded for `expr` where it ran, if
@@ -507,6 +653,8 @@ impl<'a> VarResolutionCtx<'a> {
             content: self.content,
             cursor_offset: self.cursor_offset,
             class_loader: self.class_loader,
+            source_class_loader: self.source_class_loader,
+            source_imports: self.source_imports,
             backend: self.backend,
             laravel_macro_this_resolver: None,
             function_loader: self.loaders.function_loader,

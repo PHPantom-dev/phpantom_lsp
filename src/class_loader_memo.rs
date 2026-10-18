@@ -5,7 +5,7 @@
 //! The diagnostic pass asks for the same classes over and over: one
 //! `analyze` run on a large Laravel project makes ~3.7 M name → class
 //! lookups over a few thousand distinct types. Every one of them walked the
-//! multi-phase loader in `resolution.rs`, hashing the name
+//! multi-phase loader in `resolution/`, hashing the name
 //! case-insensitively for a read lock on `class_not_found_cache` and
 //! another on `fqn_class_index`. With one worker per core those two lock
 //! words were the pass's ceiling: the loader and the lock and hash code

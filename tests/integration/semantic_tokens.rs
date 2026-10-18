@@ -619,6 +619,28 @@ class Child extends Base {
 }
 
 #[test]
+fn parent_imported_from_another_namespace_takes_its_kind() {
+    let php = r#"<?php
+namespace Lib { class Base {} }
+namespace App {
+    use Lib\Base;
+    class Child extends Base {
+        public function test(): void {
+            parent::class;
+        }
+    }
+}
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    let parent = decoded
+        .iter()
+        .find(|t| t.length == 6 && t.line == 6)
+        .expect("token for the parent keyword");
+    assert_eq!(parent.token_type, TT_CLASS);
+}
+
+#[test]
 fn deprecated_class_has_modifier() {
     let php = r#"<?php
 /** @deprecated Use NewFoo instead */

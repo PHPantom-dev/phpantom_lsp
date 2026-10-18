@@ -1,7 +1,8 @@
 //! `.gitignore`-aware walks of the workspace for the passes that read
 //! project files by path rather than through the symbol index: the full
-//! workspace index, namespace rename, and the Laravel enumerations that
-//! find `config/` and `lang/` files on disk.
+//! workspace index, namespace rename, go-to-implementation, the `analyze`
+//! file list, and the Laravel enumerations that find `config/` and `lang/`
+//! files on disk.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -59,7 +60,11 @@ pub(crate) fn collect_workspace_index_files_gitignore(
     (php_files, resource_files)
 }
 
-fn visit_workspace_files_gitignore(
+/// Pass every file under `root` that the workspace walk reaches to
+/// `visit`: `.gitignore`-aware, skipping hidden entries, `[indexing]
+/// exclude` and the `vendor_dir_paths` trees, and following links through
+/// `followed`.
+pub(crate) fn visit_workspace_files_gitignore(
     root: &Path,
     vendor_dir_paths: &[PathBuf],
     filters: &Arc<IndexFilters>,

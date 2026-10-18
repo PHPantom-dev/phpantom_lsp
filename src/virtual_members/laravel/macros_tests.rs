@@ -287,6 +287,24 @@ return [
 }
 
 #[test]
+fn parse_provider_class_list_config_app_in_array_syntax() {
+    let content = r#"<?php
+return array(
+    'providers' => array(
+        App\Providers\AppServiceProvider::class,
+    ),
+    'aliases' => array(
+        'App' => Illuminate\Support\Facades\App::class,
+    ),
+);
+"#;
+    assert_eq!(
+        parse_provider_class_list(content),
+        vec!["App\\Providers\\AppServiceProvider".to_string()]
+    );
+}
+
+#[test]
 fn parse_provider_class_list_empty_without_class_const() {
     assert!(parse_provider_class_list("<?php return [];").is_empty());
 }

@@ -20,24 +20,13 @@ pub(super) fn extract_assignment_expr<'a>(
     // Emit VarDefSite for simple variable assignments: `$var = ...`
     match assign.lhs {
         Expression::Variable(Variable::Direct(dv)) => {
-            let name = {
-                let s = bytes_to_str(dv.name);
-                s.strip_prefix('$').unwrap_or(s).to_string()
-            };
+            let name = bare_variable_name(dv.name);
             let kind = if assign.operator.is_assign() {
                 VarDefKind::Assignment
             } else {
                 VarDefKind::CompoundAssignment
             };
-            ctx.var_defs.push(VarDefSite {
-                offset: dv.span.start.offset,
-                name,
-                kind,
-                scope_start,
-                effective_from: effective,
-                nesting_depth: ctx.cond_nesting_depth,
-                block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-            });
+            ctx.push_var_def(dv.span.start.offset, name, kind, scope_start, effective);
         }
         // Array destructuring: `[$a, $b] = ...`
         Expression::Array(arr) => {

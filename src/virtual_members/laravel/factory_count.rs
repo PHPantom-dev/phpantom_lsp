@@ -26,7 +26,7 @@ use mago_syntax::cst::{Argument, ArgumentList, Call, ClassLikeMemberSelector, Ex
 
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
-use crate::type_engine::conditional_resolution::split_text_args;
+use crate::text_scan::split_top_level_commas;
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::{ClassInfo, ELOQUENT_COLLECTION_FQN, FactoryCount, ResolvedType};
@@ -64,7 +64,7 @@ pub(crate) fn chain_count(receiver: &SubjectExpr) -> FactoryCount {
         match callee.as_ref() {
             SubjectExpr::MethodCall { base, method } => {
                 let args = if method == "count" {
-                    Some(split_text_args(args_text))
+                    Some(split_top_level_commas(args_text))
                 } else {
                     None
                 };
@@ -81,7 +81,7 @@ pub(crate) fn chain_count(receiver: &SubjectExpr) -> FactoryCount {
             // `UserFactory::new()`, `UserFactory::times(3)`.
             SubjectExpr::StaticMethodCall { method, .. } => {
                 let args = if method == "factory" {
-                    Some(split_text_args(args_text))
+                    Some(split_top_level_commas(args_text))
                 } else {
                     None
                 };

@@ -1604,7 +1604,7 @@ async fn test_parse_php_namespaced_enum_implicit_interface_is_not_namespace_pref
     // Simulate the resolution step that update_ast performs.
     let use_map = std::collections::HashMap::new();
     let namespace = Some("App\\Enums".to_string());
-    phpantom_lsp::Backend::resolve_parent_class_names(&mut classes, &use_map, &namespace);
+    phpantom_lsp::Backend::resolve_parent_class_names(&mut classes, &use_map, &use_map, &namespace);
 
     // After resolution the leading backslash is stripped — the canonical
     // FQN representation never has a leading `\`.  The name must NOT be

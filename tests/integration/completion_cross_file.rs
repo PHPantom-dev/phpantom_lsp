@@ -1190,7 +1190,7 @@ async fn test_cross_file_namespace_relative_resolution() {
 /// Bare `PDO::` inside `namespace Demo;` should NOT resolve to the global
 /// `\PDO` class.  PHP treats this as `Demo\PDO` which doesn't exist.
 #[tokio::test]
-async fn test_unqualified_class_in_namespace_falls_back_to_global() {
+async fn test_unqualified_class_in_namespace_does_not_fall_back_to_global() {
     let mut stubs: HashMap<&str, &str> = HashMap::new();
     stubs.insert(
         "PDO",
@@ -1236,12 +1236,6 @@ async fn test_unqualified_class_in_namespace_falls_back_to_global() {
         .await
         .unwrap();
 
-    // After FQN canonicalization, `resolve_class_name` falls back to
-    // global scope when the namespace-qualified lookup fails.  This
-    // matches user expectations (completions appear even without an
-    // explicit `use PDO;`) and is consistent with how other PHP LSPs
-    // behave.  The namespace-qualified form (`Demo\PDO`) is tried
-    // first and wins when it exists, preserving PHP semantics.
     let has_pdo_methods = match &result {
         Some(CompletionResponse::Array(items)) => items
             .iter()
@@ -1249,8 +1243,8 @@ async fn test_unqualified_class_in_namespace_falls_back_to_global() {
         _ => false,
     };
     assert!(
-        has_pdo_methods,
-        "Bare `PDO::` in namespace Demo should fall back to global \\PDO"
+        !has_pdo_methods,
+        "Bare `PDO::` in namespace Demo is `Demo\\PDO`, not the global \\PDO"
     );
 }
 
@@ -1319,6 +1313,79 @@ async fn test_fqn_class_in_namespace_resolves_globally() {
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
+}
+
+/// Instance-method completion after `(new PDO())->` / `(new \PDO())->`
+/// inside `namespace Demo`, with a global `PDO` stub and no `Demo\PDO`.
+async fn new_pdo_member_completions(class_spelling: &str) -> Vec<String> {
+    let mut stubs: HashMap<&str, &str> = HashMap::new();
+    stubs.insert(
+        "PDO",
+        "<?php\nclass PDO {\n    public function prepare(string $query) {}\n}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let line = format!("        (new {class_spelling}())->");
+    let text = format!(
+        "<?php\nnamespace Demo;\n\nclass Foo {{\n    function test() {{\n{line}\n    }}\n}}\n"
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: line.len() as u32,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    match result {
+        Some(CompletionResponse::Array(items)) => items
+            .into_iter()
+            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter_map(|i| i.filter_text)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// `new \PDO()` keeps its leading `\` through the text-based subject
+/// parser, so it reaches the global class from inside a namespace.
+#[tokio::test]
+async fn test_new_fqn_class_in_namespace_resolves_globally() {
+    let methods = new_pdo_member_completions("\\PDO").await;
+    assert!(
+        methods.iter().any(|m| m == "prepare"),
+        "`(new \\PDO())->` should show global PDO methods, got {methods:?}"
+    );
+}
+
+/// `new PDO()` inside `namespace Demo` is `Demo\PDO`, not the global PDO.
+#[tokio::test]
+async fn test_new_unqualified_class_in_namespace_does_not_fall_back_to_global() {
+    let methods = new_pdo_member_completions("PDO").await;
+    assert!(
+        methods.is_empty(),
+        "`(new PDO())->` in namespace Demo is `Demo\\PDO`, got {methods:?}"
+    );
 }
 
 /// `PDO::` with `use PDO;` in a namespace SHOULD resolve to the global PDO
@@ -1931,5 +1998,50 @@ async fn test_cross_file_static_chain_variable_in_standalone_function() {
         func_methods,
         inline_methods,
         top_methods
+    );
+}
+
+/// An unqualified `extends`/`use` name inside a namespace means the class in
+/// that namespace, so a global parent class or trait of the same name lends
+/// it no members.  Written fully qualified, they do.
+#[tokio::test]
+async fn test_unqualified_ancestor_in_namespace_does_not_fall_back_to_global() {
+    let backend = crate::common::create_test_backend();
+    let uri = Url::parse("file:///no_global_ancestor.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace {\n",
+        "    trait T { public function fromTrait(): void {} }\n",
+        "    class Base { public function fromParent(): void {} }\n",
+        "}\n",
+        "namespace App {\n",
+        "    class Child extends Base {\n",
+        "        use T;\n",
+        "        public function own(): void {\n",
+        "            $this->\n",
+        "        }\n",
+        "    }\n",
+        "    class Qualified extends \\Base {\n",
+        "        use \\T;\n",
+        "        public function own(): void {\n",
+        "            $this->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let labels = crate::common::complete_labels_at(&backend, &uri, text, 9, 19).await;
+    assert!(
+        !labels
+            .iter()
+            .any(|l| l.starts_with("fromTrait") || l.starts_with("fromParent")),
+        "`Base` and `T` in namespace App are App\\Base and App\\T, got: {labels:?}"
+    );
+
+    let labels = crate::common::complete_labels_at(&backend, &uri, text, 15, 19).await;
+    assert!(
+        labels.iter().any(|l| l.starts_with("fromTrait"))
+            && labels.iter().any(|l| l.starts_with("fromParent")),
+        "`\\Base` and `\\T` are the global classes, got: {labels:?}"
     );
 }

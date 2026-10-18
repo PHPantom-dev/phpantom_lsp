@@ -1,0 +1,62 @@
+// test: a class-string conditional return binds from any argument holding a class-string
+// feature: hover
+// expect: Defaults
+// expect_hover: $fromProperty => Defaults
+// expect_hover: $fromMethod => Defaults
+// expect_hover: $fromConstant => Defaults
+// expect_hover: $fromUnion => $fromUnion = Defaults
+// expect_hover: $fromUnion => $fromUnion = Fallback
+// expect_hover: $boundHolds => Configurable
+// expect_hover: $boundFails => mixed
+// expect_hover: $notClassString => mixed
+---
+<?php
+
+interface Configurable {}
+
+class Defaults implements Configurable {}
+
+class Fallback {}
+
+/**
+ * @template T
+ * @param class-string<T> $class
+ * @return T
+ */
+function make(string $class) {}
+
+/**
+ * @param string $id
+ * @return ($id is class-string<Configurable> ? Configurable : mixed)
+ */
+function configure($id) {}
+
+class Builder
+{
+    public const DEFAULTS = Defaults::class;
+
+    /** @var class-string<Defaults> */
+    public string $class = Defaults::class;
+
+    /** @return class-string<Defaults> */
+    public function defaultsClass(): string { return Defaults::class; }
+
+    /**
+     * @param class-string<Defaults> $class
+     * @param class-string<Defaults>|class-string<Fallback> $either
+     * @param class-string<Fallback> $fallback
+     */
+    public function build(string $class, string $either, string $fallback, Defaults $object): void
+    {
+        $fromParameter = make($class);
+        $fromProperty = make($this->class);
+        $fromMethod = make($this->defaultsClass());
+        $fromConstant = make(self::DEFAULTS);
+        $fromUnion = make($either);
+        $boundHolds = configure($class);
+        $boundFails = configure($fallback);
+        $notClassString = configure($object);
+
+        echo $fromPar<>ameter;
+    }
+}

@@ -1,167 +1,38 @@
-/// Variable type resolution — routing layer and shared helpers.
-///
-/// All variable type resolution is performed by the forward walker in
-/// [`super::forward_walk`].  This module provides the public entry
-/// points ([`resolve_variable_types`]) that callers across the crate
-/// use, a diagnostic-scope-cache fast path, and shared helper functions
-/// (template substitution, array shape merging, pass-by-reference
-/// seeding, abstract-method parameter resolution) that the forward
-/// walker delegates to.
-use std::cell::RefCell;
-use std::collections::HashSet;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+//! Variable type resolution: the routing layer and its shared helpers.
+//!
+//! All variable type resolution is performed by the forward walker in
+//! [`super::forward_walk`].  This module provides the entry points
+//! ([`resolve_variable_types`]) that callers across the crate use, and
+//! routes each query to the function, method, property hook, or top-level
+//! code the cursor is in.  The helpers the forward walker delegates to
+//! live in its submodules: the re-entry guards, answers for a cursor that
+//! sits on a declaration, `@template` bounds and `@param` docblocks, and
+//! what a call does with its arguments.
+
 use std::sync::Arc;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use crate::atom::{Atom, atom, bytes_to_str, last_segment};
-use crate::docblock;
-use crate::parser::{extract_hint_type, with_parsed_program};
-use crate::php_type::{PhpType, TypeKind, is_keyword_type};
-use crate::types::{ClassInfo, ParameterInfo, ResolvedType};
+use crate::atom::{atom, bytes_to_str};
+use crate::parser::with_parsed_program;
+use crate::php_type::{PhpType, TypeKind};
+use crate::types::{ClassInfo, ResolvedType};
 
 use crate::Backend;
-use crate::type_engine::call_resolution::OutParamCallee;
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{Loaders, SourceImports, VarResolutionCtx, WrittenNames};
 
-// ─── Re-entry guards ───────────────────────────────────────────────────────
-//
-// Variable resolution can re-enter itself while building the top-level
-// scope for `global` keyword resolution.  The cycle is:
-//
-//   resolve_variable_types → resolve_variable_in_statements
-//   → top_level_scope_for_globals → RHS resolution → resolve_variable_types
-//
-// Two guards break this cycle at different levels:
-//
-// Guard 1 (`BUILDING_TOP_LEVEL_SCOPE`): prevents re-entrant top-level
-//   scope construction for the same file.
-// Guard 2 (`RESOLVING_VARS`): prevents re-entrant resolution of the
-//   exact same variable query.
+mod arguments;
+mod cursor_declarations;
+mod guards;
+mod template_bounds;
 
-thread_local! {
-    /// Source content addresses currently building a top-level scope
-    /// via [`top_level_scope_for_globals`](super::forward_walk::top_level_scope_for_globals).
-    /// Keyed by `content.as_ptr() as usize`: re-entry within one call
-    /// tree always borrows the same slice, so pointer identity marks
-    /// exactly the cycle we want to break.  Two independent copies of
-    /// the same text are separate queries and must not block one
-    /// another, which pointer identity also gets right.
-    static BUILDING_TOP_LEVEL_SCOPE: RefCell<HashSet<usize>> =
-        RefCell::new(HashSet::new());
-
-    /// Variable resolution queries currently in progress on this
-    /// thread.  Keyed by [`VarQueryKey`] so that only the exact same
-    /// query is suppressed.
-    static RESOLVING_VARS: RefCell<HashSet<VarQueryKey>> =
-        RefCell::new(HashSet::new());
-
-    #[cfg(test)]
-    static TEST_SCOPE_CACHE_HITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
+pub(crate) use arguments::*;
+use cursor_declarations::*;
+use guards::*;
 #[cfg(test)]
-pub(crate) fn reset_test_scope_cache_hits() {
-    TEST_SCOPE_CACHE_HITS.with(|count| count.set(0));
-}
-
-#[cfg(test)]
-pub(crate) fn test_scope_cache_hits() -> usize {
-    TEST_SCOPE_CACHE_HITS.with(std::cell::Cell::get)
-}
-
-/// What identifies one "what is the type of `$var` here?" question: the
-/// source it is asked of, the hash of the un-prefixed variable name, the
-/// offset, the class the question is asked in, and the
-/// [body-inference context](crate::type_engine::call_resolution::body_inference_context)
-/// it is asked under.
-///
-/// The context is there because a body walked for its return type seeds
-/// its parameters with what the call site passed, so the same variable at
-/// the same offset answers differently for each caller.
-type VarQueryKey = ((usize, usize), u64, u32, Atom, u64);
-
-/// Build the key identifying one variable query.
-///
-/// Callers spell the same variable both with and without the `$`
-/// prefix, so the name is normalised before hashing.  It is hashed
-/// rather than interned: this runs on every variable resolution, and
-/// `atom` would take the global interner lock and allocate for the
-/// unprefixed spelling.
-fn var_query_key(
-    content: &str,
-    var_name: &str,
-    cursor_offset: u32,
-    class_name: Atom,
-) -> VarQueryKey {
-    let mut hasher = DefaultHasher::new();
-    var_name
-        .strip_prefix('$')
-        .unwrap_or(var_name)
-        .hash(&mut hasher);
-    (
-        (content.as_ptr() as usize, content.len()),
-        hasher.finish(),
-        cursor_offset,
-        class_name,
-        crate::type_engine::call_resolution::body_inference_context(),
-    )
-}
-
-/// RAII guard for [`BUILDING_TOP_LEVEL_SCOPE`].
-struct TopLevelScopeGuard {
-    key: usize,
-}
-
-impl Drop for TopLevelScopeGuard {
-    fn drop(&mut self) {
-        BUILDING_TOP_LEVEL_SCOPE.with(|set| {
-            set.borrow_mut().remove(&self.key);
-        });
-    }
-}
-
-/// Try to acquire the top-level scope build guard for `content`.
-/// Returns `Some(guard)` on success, `None` when the same file is
-/// already mid-construction (re-entry detected).
-fn try_acquire_top_level_guard(content: &str) -> Option<TopLevelScopeGuard> {
-    let key = content.as_ptr() as usize;
-    let inserted = BUILDING_TOP_LEVEL_SCOPE.with(|set| set.borrow_mut().insert(key));
-    if inserted {
-        Some(TopLevelScopeGuard { key })
-    } else {
-        None
-    }
-}
-
-/// RAII guard for [`RESOLVING_VARS`].
-struct ResolvingVarGuard {
-    key: VarQueryKey,
-}
-
-impl Drop for ResolvingVarGuard {
-    fn drop(&mut self) {
-        RESOLVING_VARS.with(|set| {
-            set.borrow_mut().remove(&self.key);
-        });
-    }
-}
-
-/// Try to acquire the variable resolution guard for `key`.
-/// Returns `Some(guard)` on success, `None` on re-entry.
-///
-/// Only the queries on the current stack (a handful) share the set, so
-/// the hashed name in the key cannot realistically collide.
-fn try_acquire_var_guard(key: VarQueryKey) -> Option<ResolvingVarGuard> {
-    let inserted = RESOLVING_VARS.with(|set| set.borrow_mut().insert(key));
-    if inserted {
-        Some(ResolvingVarGuard { key })
-    } else {
-        None
-    }
-}
+pub(crate) use guards::{reset_test_scope_cache_hits, test_scope_cache_hits};
+pub(crate) use template_bounds::*;
 
 /// Build a [`VarClassStringResolver`] closure from a [`VarResolutionCtx`].
 ///
@@ -178,12 +49,8 @@ pub(in crate::type_engine) fn build_var_resolver_from_ctx<'a>(
     move |var_name: &str| -> Vec<String> {
         super::class_string_resolution::resolve_class_string_targets(
             var_name,
-            ctx.current_class,
-            ctx.all_classes,
-            ctx.content,
             ctx.cursor_offset,
-            ctx.class_loader,
-            ctx.backend,
+            ctx,
         )
         .iter()
         .map(|c| c.fqn().to_string())
@@ -240,8 +107,66 @@ pub(super) fn enrich_builder_type_in_scope(
 
     Some(PhpType::generic(
         type_name,
-        vec![PhpType::named(atom(current_class.name.as_ref()))],
+        vec![PhpType::named(current_class.fqn())],
     ))
+}
+
+/// A question for the forward walker: the type of `var_name` at
+/// `cursor_offset` in `content`, read inside `current_class` (outside a
+/// class, inside a placeholder for the namespace there), with the loaders
+/// that resolve the names the walk meets.
+///
+/// The walk builds its own [`VarResolutionCtx`] from these, so none of a
+/// caller's forward-walk state (scope resolvers, branch narrowing, …)
+/// reaches it.  [`VarResolutionCtx::var_query`] and
+/// [`ResolutionCtx::var_query`](crate::type_engine::resolver::ResolutionCtx::var_query)
+/// project one out of the contexts that already hold the inputs.
+#[derive(Clone, Copy)]
+pub(crate) struct VarQuery<'a> {
+    pub var_name: &'a str,
+    pub cursor_offset: u32,
+    pub content: &'a str,
+    pub current_class: Option<&'a ClassInfo>,
+    pub all_classes: &'a [Arc<ClassInfo>],
+    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub source_imports: SourceImports<'a>,
+    pub backend: Option<&'a Backend>,
+    pub loaders: Loaders<'a>,
+}
+
+impl VarQuery<'_> {
+    /// The forward walker's context for this query, read inside
+    /// `current_class`.
+    fn var_ctx<'q>(&'q self, current_class: &'q ClassInfo) -> VarResolutionCtx<'q> {
+        VarResolutionCtx {
+            source_imports: self.source_imports,
+            backend: self.backend,
+            loaders: self.loaders,
+            resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
+            ..VarResolutionCtx::new(
+                self.var_name,
+                current_class,
+                self.all_classes,
+                self.content,
+                self.cursor_offset,
+                self.class_loader,
+                self.source_class_loader,
+            )
+        }
+    }
+}
+
+/// The class `query` is read inside: its own, or a placeholder for the
+/// namespace at the cursor, built in `slot`.
+fn query_class<'q>(query: &VarQuery<'q>, slot: &'q mut Option<ClassInfo>) -> &'q ClassInfo {
+    match query.current_class {
+        Some(cls) => cls,
+        None => slot.insert(crate::class_lookup::class_context_placeholder(
+            query.content,
+            query.cursor_offset,
+        )),
+    }
 }
 
 /// Resolve the type of `$variable` at `cursor_offset`.
@@ -250,17 +175,14 @@ pub(super) fn enrich_builder_type_in_scope(
 /// forward walker's pre-computed snapshots).  On cache miss, parses the
 /// file and delegates to the forward walker via
 /// [`resolve_variable_in_statements`].
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn resolve_variable_types(
-    var_name: &str,
-    current_class: &ClassInfo,
-    all_classes: &[Arc<ClassInfo>],
-    content: &str,
-    cursor_offset: u32,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    backend: Option<&Backend>,
-    loaders: Loaders<'_>,
-) -> Vec<ResolvedType> {
+pub(crate) fn resolve_variable_types(query: VarQuery<'_>) -> Vec<ResolvedType> {
+    let VarQuery {
+        var_name,
+        cursor_offset,
+        content,
+        ..
+    } = query;
+
     // ── Diagnostic scope cache fast path ─────────────────────────
     // When the diagnostic scope cache is active (populated by
     // `build_diagnostic_scopes` during a diagnostic pass), look up
@@ -285,6 +207,8 @@ pub(crate) fn resolve_variable_types(
         // the full resolution path.
     }
 
+    let mut placeholder = None;
+    let current_class = query_class(&query, &mut placeholder);
     let key = var_query_key(content, var_name, cursor_offset, current_class.name);
 
     // The walk below is shared by every name asked about at the same
@@ -306,17 +230,7 @@ pub(crate) fn resolve_variable_types(
     };
 
     with_parsed_program(content, "resolve_variable_types", |program, _content| {
-        resolve_variable_types_in_program(
-            program,
-            var_name,
-            current_class,
-            all_classes,
-            content,
-            cursor_offset,
-            class_loader,
-            backend,
-            loaders,
-        )
+        resolve_variable_in_statements(program.statements.iter(), &query.var_ctx(current_class))
     })
 }
 
@@ -327,34 +241,13 @@ pub(crate) fn resolve_variable_types(
 /// the offset to resolve at, say) and would otherwise parse the file
 /// twice. It bypasses the per-pass memo and the diagnostic scope cache,
 /// both of which key on offsets into the request's own file.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_variable_types_in_program(
     program: &Program<'_>,
-    var_name: &str,
-    current_class: &ClassInfo,
-    all_classes: &[Arc<ClassInfo>],
-    content: &str,
-    cursor_offset: u32,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    backend: Option<&Backend>,
-    loaders: Loaders<'_>,
+    query: VarQuery<'_>,
 ) -> Vec<ResolvedType> {
-    let active_cache = crate::virtual_members::active_resolved_class_cache();
-    let ctx = VarResolutionCtx {
-        backend,
-        loaders,
-        resolved_class_cache: active_cache,
-        ..VarResolutionCtx::new(
-            var_name,
-            current_class,
-            all_classes,
-            content,
-            cursor_offset,
-            class_loader,
-        )
-    };
-
-    resolve_variable_in_statements(program.statements.iter(), &ctx)
+    let mut placeholder = None;
+    let current_class = query_class(&query, &mut placeholder);
+    resolve_variable_in_statements(program.statements.iter(), &query.var_ctx(current_class))
 }
 
 /// Resolve the type of a variable at `cursor_offset` as a [`PhpType`].
@@ -375,327 +268,60 @@ pub(crate) fn resolve_variable_types_in_program(
 ///
 /// Consumers: hover, go-to-type-definition, find-references (variable
 /// subject resolution), deprecated diagnostics, code actions.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn resolve_variable_php_type(
-    var_name: &str,
-    content: &str,
-    cursor_offset: u32,
-    current_class: Option<&ClassInfo>,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    backend: Option<&Backend>,
-    loaders: Loaders<'_>,
-) -> Option<PhpType> {
-    // Ensure the variable name is $-prefixed for docblock lookups.
+pub(crate) fn resolve_variable_php_type(query: VarQuery<'_>) -> Option<PhpType> {
+    let VarQuery {
+        var_name,
+        cursor_offset,
+        content,
+        class_loader,
+        source_class_loader,
+        ..
+    } = query;
     let prefixed = if var_name.starts_with('$') {
         var_name.to_owned()
     } else {
         format!("${}", var_name)
     };
 
-    // 1. Inline @var override (skip for self-assignment RHS).
-    let var_override: Option<PhpType> = if let Some(var_type) =
-        docblock::find_var_raw_type_in_source(content, cursor_offset as usize, &prefixed)
-        && !is_cursor_in_self_assignment_rhs(content, cursor_offset as usize, &prefixed)
-    {
-        Some(crate::util::resolve_php_type_names(&var_type, class_loader))
-    } else {
-        None
+    let written_names = || {
+        WrittenNames::new(
+            query.current_class,
+            query.all_classes,
+            content,
+            cursor_offset,
+            query.source_imports,
+            source_class_loader,
+        )
     };
 
-    // 2. Forward walker resolution.
-    let dummy_class;
-    let effective_class = match current_class {
-        Some(cc) => cc,
-        None => {
-            dummy_class = crate::class_lookup::class_context_placeholder(content, cursor_offset);
-            &dummy_class
-        }
-    };
+    // 1. Forward walker resolution.
+    let mut placeholder = None;
+    let effective_class = query_class(&query, &mut placeholder);
 
-    let resolved = resolve_variable_types(
-        &prefixed,
-        effective_class,
-        all_classes,
-        content,
-        cursor_offset,
-        class_loader,
-        backend,
-        loaders,
-    );
+    let resolved = resolve_variable_types(VarQuery {
+        var_name: &prefixed,
+        current_class: Some(effective_class),
+        ..query
+    });
 
     if !resolved.is_empty() {
         return Some(ResolvedType::types_joined(&resolved));
     }
 
-    // 3. Parameter definition site fallback.
+    // 2. Parameter definition site fallback.
     //    When the cursor is on a parameter declaration (inside the
     //    parameter list, not the body), the forward walker won't find
     //    it because it only processes body statements.  Parse the file
     //    and check if the cursor is on a parameter with a type hint.
     let param_type = with_parsed_program(content, "resolve_var_param_site", |program, _| {
         let stmts: Vec<&Statement> = program.statements.iter().collect();
-        find_param_type_at_cursor(&stmts, &prefixed, cursor_offset, content)
+        find_param_at_cursor(&stmts, &prefixed, cursor_offset, content)
+            .and_then(|site| {
+                site.settled_type(effective_class, content, class_loader, source_class_loader)
+            })
             .or_else(|| find_catch_var_type_at_cursor(&stmts, &prefixed, cursor_offset))
     });
-    if param_type.is_some() {
-        return param_type;
-    }
-
-    // Fall back to the @var override.
-    var_override
-}
-
-/// Check whether `cursor_offset` falls inside the RHS of an assignment
-/// like `$var = $var->…` on the same line.  Used to avoid applying an
-/// inline `@var` cast to the RHS reference.
-fn is_cursor_in_self_assignment_rhs(content: &str, cursor_offset: usize, var_name: &str) -> bool {
-    let before = match content.get(..cursor_offset) {
-        Some(b) => b,
-        None => return false,
-    };
-    let line_start = before.rfind('\n').map_or(0, |pos| pos + 1);
-
-    let after = match content.get(cursor_offset..) {
-        Some(a) => a,
-        None => return false,
-    };
-    let line_end = after
-        .find('\n')
-        .map_or(content.len(), |pos| cursor_offset + pos);
-
-    let line = match content.get(line_start..line_end) {
-        Some(l) => l,
-        None => return false,
-    };
-
-    let needle = format!("{} = ", var_name);
-    if let Some(assign_pos) = line.find(&needle) {
-        let rhs_start_in_line = assign_pos + needle.len();
-        let cursor_in_line = cursor_offset - line_start;
-        let rhs = &line[rhs_start_in_line..];
-        if cursor_in_line >= rhs_start_in_line && rhs.contains(var_name) {
-            return true;
-        }
-    }
-    false
-}
-
-/// Check if the cursor is on a parameter definition and return its type.
-///
-/// Walks namespaces, classes, and functions to find a parameter list
-/// that contains `cursor_offset` with a parameter matching `var_name`.
-fn find_param_type_at_cursor(
-    stmts: &[&Statement<'_>],
-    var_name: &str,
-    cursor_offset: u32,
-    content: &str,
-) -> Option<PhpType> {
-    use mago_span::HasSpan;
-
-    for stmt in stmts {
-        match stmt {
-            Statement::Namespace(ns) => {
-                let inner: Vec<&Statement> = ns.statements().iter().collect();
-                if let Some(t) = find_param_type_at_cursor(&inner, var_name, cursor_offset, content)
-                {
-                    return Some(t);
-                }
-            }
-            Statement::Class(class) => {
-                for member in class.members.iter() {
-                    if let ClassLikeMember::Method(method) = member
-                        && let Some(t) = check_param_list(
-                            &method.parameter_list,
-                            var_name,
-                            cursor_offset,
-                            content,
-                            method.span().start.offset as usize,
-                        )
-                    {
-                        return Some(t);
-                    }
-                }
-            }
-            Statement::Trait(trait_def) => {
-                for member in trait_def.members.iter() {
-                    if let ClassLikeMember::Method(method) = member
-                        && let Some(t) = check_param_list(
-                            &method.parameter_list,
-                            var_name,
-                            cursor_offset,
-                            content,
-                            method.span().start.offset as usize,
-                        )
-                    {
-                        return Some(t);
-                    }
-                }
-            }
-            Statement::Enum(enum_def) => {
-                for member in enum_def.members.iter() {
-                    if let ClassLikeMember::Method(method) = member
-                        && let Some(t) = check_param_list(
-                            &method.parameter_list,
-                            var_name,
-                            cursor_offset,
-                            content,
-                            method.span().start.offset as usize,
-                        )
-                    {
-                        return Some(t);
-                    }
-                }
-            }
-            Statement::Interface(iface) => {
-                for member in iface.members.iter() {
-                    if let ClassLikeMember::Method(method) = member
-                        && let Some(t) = check_param_list(
-                            &method.parameter_list,
-                            var_name,
-                            cursor_offset,
-                            content,
-                            method.span().start.offset as usize,
-                        )
-                    {
-                        return Some(t);
-                    }
-                }
-            }
-            Statement::Function(func) => {
-                if let Some(t) = check_param_list(
-                    &func.parameter_list,
-                    var_name,
-                    cursor_offset,
-                    content,
-                    func.span().start.offset as usize,
-                ) {
-                    return Some(t);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// Check if a parameter list contains the cursor and has a matching
-/// parameter with a type hint.
-fn check_param_list(
-    param_list: &FunctionLikeParameterList<'_>,
-    var_name: &str,
-    cursor_offset: u32,
-    content: &str,
-    method_start_offset: usize,
-) -> Option<PhpType> {
-    use mago_span::HasSpan;
-
-    let span = param_list.span();
-    if cursor_offset < span.start.offset || cursor_offset > span.end.offset {
-        return None;
-    }
-
-    for param in param_list.parameters.iter() {
-        let pname = bytes_to_str(param.variable.name);
-        if pname != var_name {
-            continue;
-        }
-
-        let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
-
-        let docblock_type = declared_param_docblock_type(content, method_start_offset, pname);
-
-        let effective =
-            docblock::resolve_effective_type_typed(native_type.as_ref(), docblock_type.as_ref());
-
-        if effective.is_some() {
-            return effective;
-        }
-        return native_type;
-    }
-    None
-}
-
-/// Check if the cursor is on a catch variable binding and return its type.
-fn find_catch_var_type_at_cursor(
-    stmts: &[&Statement<'_>],
-    var_name: &str,
-    cursor_offset: u32,
-) -> Option<PhpType> {
-    use mago_span::HasSpan;
-
-    for stmt in stmts {
-        let stmt_span = stmt.span();
-        if cursor_offset < stmt_span.start.offset || cursor_offset > stmt_span.end.offset {
-            continue;
-        }
-        match stmt {
-            Statement::Try(try_stmt) => {
-                for catch in try_stmt.catch_clauses.iter() {
-                    if let Some(ref var) = catch.variable
-                        && bytes_to_str(var.name) == var_name
-                    {
-                        let var_start = var.span.start.offset;
-                        let var_end = var.span.end.offset;
-                        if cursor_offset >= var_start && cursor_offset <= var_end {
-                            return Some(extract_hint_type(&catch.hint));
-                        }
-                    }
-                }
-                // Recurse into try/catch/finally bodies.
-                let try_stmts: Vec<&Statement> = try_stmt.block.statements.iter().collect();
-                if let Some(t) = find_catch_var_type_at_cursor(&try_stmts, var_name, cursor_offset)
-                {
-                    return Some(t);
-                }
-                for catch in try_stmt.catch_clauses.iter() {
-                    let catch_stmts: Vec<&Statement> = catch.block.statements.iter().collect();
-                    if let Some(t) =
-                        find_catch_var_type_at_cursor(&catch_stmts, var_name, cursor_offset)
-                    {
-                        return Some(t);
-                    }
-                }
-                if let Some(ref finally) = try_stmt.finally_clause {
-                    let fin_stmts: Vec<&Statement> = finally.block.statements.iter().collect();
-                    if let Some(t) =
-                        find_catch_var_type_at_cursor(&fin_stmts, var_name, cursor_offset)
-                    {
-                        return Some(t);
-                    }
-                }
-            }
-            Statement::Namespace(ns) => {
-                let inner: Vec<&Statement> = ns.statements().iter().collect();
-                if let Some(t) = find_catch_var_type_at_cursor(&inner, var_name, cursor_offset) {
-                    return Some(t);
-                }
-            }
-            Statement::Class(class) => {
-                for member in class.members.iter() {
-                    if let ClassLikeMember::Method(method) = member
-                        && let MethodBody::Concrete(body) = &method.body
-                    {
-                        let body_stmts: Vec<&Statement> = body.statements.iter().collect();
-                        if let Some(t) =
-                            find_catch_var_type_at_cursor(&body_stmts, var_name, cursor_offset)
-                        {
-                            return Some(t);
-                        }
-                    }
-                }
-            }
-            Statement::Function(func) => {
-                let body_stmts: Vec<&Statement> = func.body.statements.iter().collect();
-                if let Some(t) = find_catch_var_type_at_cursor(&body_stmts, var_name, cursor_offset)
-                {
-                    return Some(t);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
+    param_type.map(|written| written_names().resolve_type(&written))
 }
 
 /// Walk a sequence of top-level statements to find the class or
@@ -723,19 +349,8 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
         // second top-level walk on the same file content.
         if let Some(_tl_guard) = try_acquire_top_level_guard(ctx.content) {
             let tl_fw_ctx = super::forward_walk::ForwardWalkCtx {
-                current_class: ctx.current_class,
-                all_classes: ctx.all_classes,
-                content: ctx.content,
                 cursor_offset: u32::MAX,
-                class_loader: ctx.class_loader,
-                backend: ctx.backend,
-                loaders: ctx.loaders,
-                resolved_class_cache: ctx.resolved_class_cache,
-                enclosing_return_type: None,
-                top_level_scope: None,
-                in_loop: false,
-                template_markers: None,
-                cursor_scope: None,
+                ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
             };
             let tl_scope =
                 super::forward_walk::top_level_scope_for_globals(stmts.iter().copied(), &tl_fw_ctx);
@@ -766,10 +381,8 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
 
     for &stmt in &stmts {
         match stmt {
-            Statement::Class(class) => {
-                let start = class.left_brace.start.offset;
-                let end = class.right_brace.end.offset;
-                if ctx.cursor_offset < start || ctx.cursor_offset > end {
+            _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+                if !body.contains(ctx.cursor_offset) {
                     continue;
                 }
                 // The cursor is inside this class body.  PHP method
@@ -778,31 +391,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
                 // the member scan found (even if empty, e.g. after
                 // `unset($var)`), and never fall through to the
                 // top-level walk.
-                return resolve_variable_in_members(class.members.iter(), ctx);
-            }
-            Statement::Interface(iface) => {
-                let start = iface.left_brace.start.offset;
-                let end = iface.right_brace.end.offset;
-                if ctx.cursor_offset < start || ctx.cursor_offset > end {
-                    continue;
-                }
-                return resolve_variable_in_members(iface.members.iter(), ctx);
-            }
-            Statement::Enum(enum_def) => {
-                let start = enum_def.left_brace.start.offset;
-                let end = enum_def.right_brace.end.offset;
-                if ctx.cursor_offset < start || ctx.cursor_offset > end {
-                    continue;
-                }
-                return resolve_variable_in_members(enum_def.members.iter(), ctx);
-            }
-            Statement::Trait(trait_def) => {
-                let start = trait_def.left_brace.start.offset;
-                let end = trait_def.right_brace.end.offset;
-                if ctx.cursor_offset < start || ctx.cursor_offset > end {
-                    continue;
-                }
-                return resolve_variable_in_members(trait_def.members.iter(), ctx);
+                return resolve_variable_in_members(body.members.iter(), ctx);
             }
             Statement::Namespace(ns) => {
                 // Only recurse into namespace blocks that contain the
@@ -850,11 +439,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
         // or `$x = new class { … };`).  If the cursor falls inside one,
         // resolve variables from its member methods just like we do for
         // named classes above.
-        let stmt_span = stmt.span();
-        if ctx.cursor_offset >= stmt_span.start.offset
-            && ctx.cursor_offset <= stmt_span.end.offset
-            && let Some(anon) = find_anonymous_class_containing_cursor(stmt, ctx.cursor_offset)
-        {
+        if let Some(anon) = anonymous_class_body_at(stmt, ctx.cursor_offset) {
             return resolve_variable_in_members(anon.members.iter(), ctx);
         }
     }
@@ -877,21 +462,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
         // Fallback: top_level_scope was not pre-computed (should not
         // happen in normal flow, but be defensive).  Run a
         // position-aware forward walk.
-        let fw_ctx = super::forward_walk::ForwardWalkCtx {
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            cursor_offset: ctx.cursor_offset,
-            class_loader: ctx.class_loader,
-            backend: ctx.backend,
-            loaders: ctx.loaders,
-            resolved_class_cache: ctx.resolved_class_cache,
-            enclosing_return_type: None,
-            top_level_scope: None,
-            in_loop: false,
-            template_markers: None,
-            cursor_scope: None,
-        };
+        let fw_ctx = super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx);
         if let Some(fw_results) =
             super::forward_walk::resolve_in_top_level(ctx.var_name, stmts.iter().copied(), &fw_ctx)
         {
@@ -900,227 +471,6 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
     }
 
     vec![]
-}
-
-/// Recursively walk a statement's expression tree looking for an
-/// `AnonymousClass` whose body (between `{` and `}`) contains the
-/// given cursor offset.  Returns a reference to the first matching
-/// anonymous class node, or `None`.
-fn find_anonymous_class_containing_cursor<'a>(
-    stmt: &'a Statement<'a>,
-    cursor_offset: u32,
-) -> Option<&'a AnonymousClass<'a>> {
-    /// Walk an expression tree for an anonymous class containing the cursor.
-    fn walk_expr<'a>(expr: &'a Expression<'a>, cursor: u32) -> Option<&'a AnonymousClass<'a>> {
-        let sp = expr.span();
-        if cursor < sp.start.offset || cursor > sp.end.offset {
-            return None;
-        }
-        match expr {
-            Expression::AnonymousClass(anon) => {
-                if cursor >= anon.left_brace.start.offset && cursor <= anon.right_brace.end.offset {
-                    return Some(anon);
-                }
-                None
-            }
-            Expression::Parenthesized(p) => walk_expr(p.expression, cursor),
-            Expression::Assignment(a) => {
-                walk_expr(a.lhs, cursor).or_else(|| walk_expr(a.rhs, cursor))
-            }
-            Expression::Binary(b) => walk_expr(b.lhs, cursor).or_else(|| walk_expr(b.rhs, cursor)),
-            Expression::Conditional(c) => walk_expr(c.condition, cursor)
-                .or_else(|| c.then.and_then(|e| walk_expr(e, cursor)))
-                .or_else(|| walk_expr(c.r#else, cursor)),
-            Expression::Call(call) => match call {
-                Call::Function(fc) => walk_args(&fc.argument_list.arguments, cursor),
-                Call::Method(mc) => walk_expr(mc.object, cursor)
-                    .or_else(|| walk_args(&mc.argument_list.arguments, cursor)),
-                Call::NullSafeMethod(mc) => walk_expr(mc.object, cursor)
-                    .or_else(|| walk_args(&mc.argument_list.arguments, cursor)),
-                Call::StaticMethod(sc) => walk_expr(sc.class, cursor)
-                    .or_else(|| walk_args(&sc.argument_list.arguments, cursor)),
-            },
-            Expression::Array(arr) => {
-                for elem in arr.elements.iter() {
-                    let found = match elem {
-                        ArrayElement::KeyValue(kv) => {
-                            walk_expr(kv.key, cursor).or_else(|| walk_expr(kv.value, cursor))
-                        }
-                        ArrayElement::Value(v) => walk_expr(v.value, cursor),
-                        ArrayElement::Variadic(v) => walk_expr(v.value, cursor),
-                        _ => None,
-                    };
-                    if found.is_some() {
-                        return found;
-                    }
-                }
-                None
-            }
-            Expression::LegacyArray(arr) => {
-                for elem in arr.elements.iter() {
-                    let found = match elem {
-                        ArrayElement::KeyValue(kv) => {
-                            walk_expr(kv.key, cursor).or_else(|| walk_expr(kv.value, cursor))
-                        }
-                        ArrayElement::Value(v) => walk_expr(v.value, cursor),
-                        ArrayElement::Variadic(v) => walk_expr(v.value, cursor),
-                        _ => None,
-                    };
-                    if found.is_some() {
-                        return found;
-                    }
-                }
-                None
-            }
-            Expression::Closure(closure) => {
-                // The anonymous class could be inside a closure body.
-                for inner in closure.body.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor) {
-                        return Some(anon);
-                    }
-                }
-                None
-            }
-            Expression::ArrowFunction(arrow) => walk_expr(arrow.expression, cursor),
-            Expression::Instantiation(inst) => {
-                if let Some(ref args) = inst.argument_list {
-                    walk_args(&args.arguments, cursor)
-                } else {
-                    None
-                }
-            }
-            Expression::UnaryPrefix(u) => walk_expr(u.operand, cursor),
-            Expression::UnaryPostfix(u) => walk_expr(u.operand, cursor),
-            Expression::Throw(t) => walk_expr(t.exception, cursor),
-            Expression::Clone(c) => walk_expr(c.object, cursor),
-            Expression::Match(m) => {
-                if let Some(found) = walk_expr(m.expression, cursor) {
-                    return Some(found);
-                }
-                for arm in m.arms.iter() {
-                    if let Some(found) = walk_expr(arm.expression(), cursor) {
-                        return Some(found);
-                    }
-                }
-                None
-            }
-            _ => None,
-        }
-    }
-
-    /// Walk a list of call arguments.
-    fn walk_args<'a>(
-        arguments: &'a mago_syntax::cst::sequence::TokenSeparatedSequence<'a, Argument<'a>>,
-        cursor: u32,
-    ) -> Option<&'a AnonymousClass<'a>> {
-        for arg in arguments.iter() {
-            let arg_expr = match arg {
-                Argument::Positional(pos) => pos.value,
-                Argument::Named(named) => named.value,
-            };
-            if let Some(found) = walk_expr(arg_expr, cursor) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
-    match stmt {
-        Statement::Expression(expr_stmt) => walk_expr(expr_stmt.expression, cursor_offset),
-        Statement::Return(ret) => ret.value.as_ref().and_then(|v| walk_expr(v, cursor_offset)),
-        Statement::Block(block) => {
-            for inner in block.statements.iter() {
-                if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset) {
-                    return Some(anon);
-                }
-            }
-            None
-        }
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => {
-                find_anonymous_class_containing_cursor(body.statement, cursor_offset)
-            }
-            IfBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset)
-                    {
-                        return Some(anon);
-                    }
-                }
-                None
-            }
-        },
-        Statement::Foreach(foreach) => match &foreach.body {
-            ForeachBody::Statement(inner) => {
-                find_anonymous_class_containing_cursor(inner, cursor_offset)
-            }
-            ForeachBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset)
-                    {
-                        return Some(anon);
-                    }
-                }
-                None
-            }
-        },
-        Statement::While(while_stmt) => match &while_stmt.body {
-            WhileBody::Statement(inner) => {
-                find_anonymous_class_containing_cursor(inner, cursor_offset)
-            }
-            WhileBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset)
-                    {
-                        return Some(anon);
-                    }
-                }
-                None
-            }
-        },
-        Statement::For(for_stmt) => match &for_stmt.body {
-            ForBody::Statement(inner) => {
-                find_anonymous_class_containing_cursor(inner, cursor_offset)
-            }
-            ForBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset)
-                    {
-                        return Some(anon);
-                    }
-                }
-                None
-            }
-        },
-        Statement::DoWhile(dw) => {
-            find_anonymous_class_containing_cursor(dw.statement, cursor_offset)
-        }
-        Statement::Try(try_stmt) => {
-            for inner in try_stmt.block.statements.iter() {
-                if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset) {
-                    return Some(anon);
-                }
-            }
-            for catch in try_stmt.catch_clauses.iter() {
-                for inner in catch.block.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset)
-                    {
-                        return Some(anon);
-                    }
-                }
-            }
-            if let Some(finally) = &try_stmt.finally_clause {
-                for inner in finally.block.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset)
-                    {
-                        return Some(anon);
-                    }
-                }
-            }
-            None
-        }
-        _ => None,
-    }
 }
 
 /// Try to resolve the target variable inside a `Function` declaration.
@@ -1138,30 +488,11 @@ fn try_resolve_in_function(
     if ctx.cursor_offset < body_start || ctx.cursor_offset > body_end {
         return None;
     }
-    // Extract the enclosing function's @return type for generator
-    // yield inference inside the body.  Use body_start + 1 (just
-    // past the opening `{`) so the backward brace scan in
-    // find_enclosing_return_type immediately finds the function's
-    // own `{` and does NOT get confused by intermediate `{`/`}`
-    // from nested control-flow.
-    let enclosing_ret =
-        crate::docblock::find_enclosing_return_type(ctx.content, (body_start + 1) as usize);
 
     // ── Forward walker (sole resolver) ──
     let fw_ctx = super::forward_walk::ForwardWalkCtx {
-        current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        content: ctx.content,
-        cursor_offset: ctx.cursor_offset,
-        class_loader: ctx.class_loader,
-        backend: ctx.backend,
-        loaders: ctx.loaders,
-        resolved_class_cache: ctx.resolved_class_cache,
-        enclosing_return_type: enclosing_ret,
         top_level_scope: ctx.top_level_scope.clone(),
-        in_loop: false,
-        template_markers: None,
-        cursor_scope: None,
+        ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
     };
     Some(
         super::forward_walk::resolve_in_function_body(ctx.var_name, func, &fw_ctx)
@@ -1187,59 +518,9 @@ fn try_resolve_in_nested_function(
     }
     match stmt {
         Statement::Function(func) => try_resolve_in_function(func, ctx),
-        Statement::Block(block) => {
-            for inner in block.statements.iter() {
-                if let Some(results) = try_resolve_in_nested_function(inner, ctx) {
-                    return Some(results);
-                }
-            }
-            None
-        }
-        Statement::If(if_stmt) => {
-            match &if_stmt.body {
-                IfBody::Statement(body) => {
-                    if let Some(results) = try_resolve_in_nested_function(body.statement, ctx) {
-                        return Some(results);
-                    }
-                    for else_if in body.else_if_clauses.iter() {
-                        if let Some(results) =
-                            try_resolve_in_nested_function(else_if.statement, ctx)
-                        {
-                            return Some(results);
-                        }
-                    }
-                    if let Some(else_clause) = &body.else_clause
-                        && let Some(results) =
-                            try_resolve_in_nested_function(else_clause.statement, ctx)
-                    {
-                        return Some(results);
-                    }
-                }
-                IfBody::ColonDelimited(body) => {
-                    for inner in body.statements.iter() {
-                        if let Some(results) = try_resolve_in_nested_function(inner, ctx) {
-                            return Some(results);
-                        }
-                    }
-                    for else_if in body.else_if_clauses.iter() {
-                        for inner in else_if.statements.iter() {
-                            if let Some(results) = try_resolve_in_nested_function(inner, ctx) {
-                                return Some(results);
-                            }
-                        }
-                    }
-                    if let Some(else_clause) = &body.else_clause {
-                        for inner in else_clause.statements.iter() {
-                            if let Some(results) = try_resolve_in_nested_function(inner, ctx) {
-                                return Some(results);
-                            }
-                        }
-                    }
-                }
-            }
-            None
-        }
-        _ => None,
+        _ => crate::parser::find_map_nested_statement(stmt, |inner| {
+            try_resolve_in_nested_function(inner, ctx)
+        }),
     }
 }
 
@@ -1286,48 +567,16 @@ fn resolve_variable_in_members<'b>(
                 let blk_start = block.left_brace.start.offset;
                 let blk_end = block.right_brace.end.offset;
                 if ctx.cursor_offset >= blk_start && ctx.cursor_offset <= blk_end {
-                    let has_scope_attr = method.attribute_lists.iter().any(|al| {
-                        al.attributes
-                            .iter()
-                            .any(|a| last_segment(a.name.value()) == b"Scope")
-                    });
-
-                    // Extract the enclosing method's @return type for
-                    // generator yield inference inside the body.
-                    // Use blk_start + 1 (just past the opening `{`)
-                    // so the brace scan in find_enclosing_return_type
-                    // immediately finds the method's own `{` and does
-                    // NOT get confused by intermediate `{`/`}` from
-                    // nested control-flow.
-                    let enclosing_ret = crate::docblock::find_enclosing_return_type(
-                        ctx.content,
-                        (blk_start + 1) as usize,
-                    );
-
                     let fw_ctx = super::forward_walk::ForwardWalkCtx {
-                        current_class: ctx.current_class,
-                        all_classes: ctx.all_classes,
-                        content: ctx.content,
-                        cursor_offset: ctx.cursor_offset,
-                        class_loader: ctx.class_loader,
-                        backend: ctx.backend,
-                        loaders: ctx.loaders,
-                        resolved_class_cache: ctx.resolved_class_cache,
-                        enclosing_return_type: enclosing_ret,
                         top_level_scope: ctx.top_level_scope.clone(),
-                        in_loop: false,
-                        template_markers: None,
-                        cursor_scope: None,
+                        ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
                     };
-                    let method_name_str = bytes_to_str(method.name.value).to_string();
-                    let is_static = method.modifiers.contains_static();
                     return super::forward_walk::resolve_in_method_body(
                         ctx.var_name,
                         method.parameter_list.parameters.iter(),
                         block.statements.iter(),
                         method.span().start.offset,
-                        Some((&method_name_str, has_scope_attr)),
-                        is_static,
+                        super::forward_walk::BodyOwner::method(method),
                         &fw_ctx,
                     )
                     .unwrap_or_default();
@@ -1374,19 +623,8 @@ fn resolve_variable_in_property_hooks(
         }
 
         let fw_ctx = super::forward_walk::ForwardWalkCtx {
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            cursor_offset: ctx.cursor_offset,
-            class_loader: ctx.class_loader,
-            backend: ctx.backend,
-            loaders: ctx.loaders,
-            resolved_class_cache: ctx.resolved_class_cache,
-            enclosing_return_type: None,
             top_level_scope: ctx.top_level_scope.clone(),
-            in_loop: false,
-            template_markers: None,
-            cursor_scope: None,
+            ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
         };
 
         let mut scope = super::forward_walk::seed_property_hook_scope(property_hint, hook, &fw_ctx);
@@ -1415,13 +653,7 @@ fn resolve_abstract_method_param(
     method: &Method<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let has_scope_attr = method.attribute_lists.iter().any(|al| {
-        al.attributes
-            .iter()
-            .any(|a| last_segment(a.name.value()) == b"Scope")
-    });
-
-    let method_name_str = bytes_to_str(method.name.value).to_string();
+    let owner = super::forward_walk::BodyOwner::method(method);
 
     for param in method.parameter_list.parameters.iter() {
         let pname = bytes_to_str(param.variable.name);
@@ -1430,31 +662,20 @@ fn resolve_abstract_method_param(
         }
 
         let fw_ctx = super::forward_walk::ForwardWalkCtx {
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            cursor_offset: ctx.cursor_offset,
-            class_loader: ctx.class_loader,
-            backend: ctx.backend,
-            loaders: ctx.loaders,
-            resolved_class_cache: ctx.resolved_class_cache,
-            enclosing_return_type: None,
             top_level_scope: ctx.top_level_scope.clone(),
-            in_loop: false,
-            template_markers: None,
-            cursor_scope: None,
+            ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
         };
 
         let trait_prototype =
-            super::forward_walk::trait_prototype_method(Some(&method_name_str), &fw_ctx);
+            super::forward_walk::trait_prototype_method(owner.method_name, &fw_ctx);
 
         return super::forward_walk::resolve_param_type(
             pname,
             param,
             &super::forward_walk::EnclosingMethod {
                 span_start: method.span().start.offset,
-                name: Some(&method_name_str),
-                has_scope_attr,
+                name: owner.method_name,
+                has_scope_attr: owner.has_scope_attr,
                 trait_prototype: trait_prototype.as_ref(),
             },
             &fw_ctx,
@@ -1464,713 +685,23 @@ fn resolve_abstract_method_param(
     vec![]
 }
 
-/// Mark the method/function-level template parameters a type names with
-/// the upper bounds their `@template T of Bound` annotations give them.
-///
-/// This handles the general case where a parameter type IS a template
-/// parameter (e.g. `@param T $query` where `@template T of Builder`).
-/// A bare `T` is an unresolvable named type, so member access on `$query`
-/// would fail with "subject type 'T' could not be resolved".  Each bounded
-/// `T` becomes a [`TemplateParam`](crate::php_type::TypeKind::TemplateParam)
-/// instead, which is still displayed and substituted as `T` but resolves
-/// as its bound, wherever the value travels.
-///
-/// Works on any `PhpType` structure — bare names, unions, intersections,
-/// nullable wrappers, generics, etc. — via `PhpType::substitute`.
-pub(super) fn substitute_template_param_bounds(
-    ty: PhpType,
-    content: &str,
-    method_start_offset: usize,
-) -> PhpType {
-    // Quick check: only act when the type contains at least one bare
-    // identifier that could be a template parameter.  This avoids the
-    // docblock parse for the common case where the type is a concrete
-    // class name or scalar.
-    if !type_may_contain_template_param(&ty) {
-        return ty;
-    }
-
-    let before = &content[..method_start_offset];
-    let docblock = extract_preceding_docblock(before);
-
-    let Some(docblock) = docblock else {
-        return ty;
-    };
-
-    let bounds = docblock::extract_template_params_with_bounds(docblock);
-    if bounds.is_empty() {
-        return ty;
-    }
-
-    let subs = bounded_template_markers(bounds);
-    if subs.is_empty() {
-        return ty;
-    }
-
-    ty.substitute(&subs)
-}
-
-/// The markers [`bounded_template_markers`] builds for the declaration
-/// starting at `decl_start`, or `None` when it declares no bounded template.
-pub(crate) fn declaration_template_markers(
-    content: &str,
-    decl_start: usize,
-) -> Option<std::sync::Arc<std::collections::HashMap<String, PhpType>>> {
-    let docblock = extract_preceding_docblock(content.get(..decl_start)?)?;
-    if !docblock.contains("template") {
-        return None;
-    }
-    let markers = bounded_template_markers(docblock::extract_template_params_with_bounds(docblock));
-    (!markers.is_empty()).then(|| std::sync::Arc::new(markers))
-}
-
-/// The [`TemplateParam`](crate::php_type::TypeKind::TemplateParam) each
-/// bounded template in `bounds` stands for, keyed by its name.
-///
-/// A bound naming another of the declaration's templates (`@template U of
-/// T`) reads through to that template's own bound, so `U` still resolves
-/// to a class.
-fn bounded_template_markers(
-    bounds: Vec<(String, Option<PhpType>)>,
-) -> std::collections::HashMap<String, PhpType> {
-    let mut subs: std::collections::HashMap<String, PhpType> = bounds
-        .into_iter()
-        .filter_map(|(name, bound)| {
-            let bound = bound?;
-            let marker = PhpType::template_param(crate::atom::atom(&name), bound);
-            Some((name, marker))
-        })
-        .collect();
-    let chained: Vec<(String, PhpType)> = subs
-        .iter()
-        .filter_map(|(name, marker)| {
-            let (tpl, bound) = marker.as_template_param()?;
-            let substituted = bound.substitute(&subs);
-            (substituted != *bound)
-                .then(|| (name.clone(), PhpType::template_param(tpl, substituted)))
-        })
-        .collect();
-    subs.extend(chained);
-    subs
-}
-
-/// Whether `ty` names one of the `@template` parameters the declaration
-/// starting at `method_start_offset` introduces.
-pub(super) fn references_method_template(
-    ty: &PhpType,
-    content: &str,
-    method_start_offset: usize,
-) -> bool {
-    if !type_may_contain_template_param(ty) {
-        return false;
-    }
-    extract_preceding_docblock(&content[..method_start_offset]).is_some_and(|docblock| {
-        ty.references_any_template_param(&docblock::extract_template_params(docblock))
-    })
-}
-
-/// Check whether a `PhpType` tree may contain a bare template parameter
-/// name — i.e. a `Named` variant whose value is not a well-known scalar
-/// or pseudo-type.  This is a cheap pre-filter so that we only parse the
-/// docblock when there is a realistic chance of finding a substitution.
-fn type_may_contain_template_param(ty: &PhpType) -> bool {
-    match ty.kind() {
-        TypeKind::Named(name) => {
-            // Well-known scalars/pseudo-types are never template params.
-            !is_keyword_type(name)
-        }
-        TypeKind::Union(members) | TypeKind::Intersection(members) => {
-            members.iter().any(type_may_contain_template_param)
-        }
-        TypeKind::Nullable(inner) => type_may_contain_template_param(inner),
-        TypeKind::Generic(g) => {
-            !crate::php_type::is_keyword_type(&g.name)
-                || g.args.iter().any(type_may_contain_template_param)
-        }
-        _ => false,
-    }
-}
-
-/// Mark method-level template parameters inside `class-string<T>` types
-/// with their upper bounds from `@template T of Bound` annotations.
-///
-/// This enables `$class::` static member access resolution when the
-/// parameter is typed as `class-string<T>` and `T` is bounded by a
-/// concrete class.  Without this substitution, `T` remains an
-/// unresolvable named type and `$class::` yields no completions.
-pub(super) fn substitute_class_string_template_bounds(
-    ty: PhpType,
-    content: &str,
-    method_start_offset: usize,
-) -> PhpType {
-    // Only act on class-string<T> where the inner type is a simple name
-    // (i.e. a potential template parameter).
-    let inner_name = match &ty.kind() {
-        TypeKind::ClassString(Some(inner)) => match inner.kind() {
-            TypeKind::Named(name) => Some(*name),
-            _ => None,
-        },
-        _ => None,
-    };
-
-    let Some(tpl_name) = inner_name else {
-        return ty;
-    };
-
-    // Extract the method's docblock to find template parameter bounds.
-    // The docblock sits immediately before the method declaration, so
-    // we search backward from the method's start offset.
-    let before = &content[..method_start_offset];
-    let docblock = extract_preceding_docblock(before);
-
-    let Some(docblock) = docblock else {
-        return ty;
-    };
-
-    let bounds = docblock::extract_template_params_with_bounds(docblock);
-    match bounded_template_markers(bounds).remove(tpl_name.as_str()) {
-        Some(marker) => PhpType::class_string(Some(marker)),
-        None => ty,
-    }
-}
-
-/// The `@param` type the declaration starting at `decl_start` gives
-/// `pname`.
-///
-/// The declaration's own docblock is read first, through the tag parser,
-/// so a vendor tag (`@phpstan-param`, `@psalm-param`) takes precedence
-/// over a plain `@param` for the same parameter the way it does in the
-/// signature.  The backward source scan is the fallback for the shapes
-/// that parser does not see, such as a docblock sharing its line with the
-/// code of a closure.
-pub(crate) fn declared_param_docblock_type(
-    content: &str,
-    decl_start: usize,
-    pname: &str,
-) -> Option<PhpType> {
-    let before = content.get(..decl_start)?;
-    extract_preceding_docblock(before)
-        .and_then(|doc| docblock::extract_param_raw_type(doc, pname))
-        .or_else(|| {
-            // The scan is confined to the declaration's own preamble.  Its
-            // brace counting cannot see a method whose body sits on one
-            // line, so left to itself it would walk on into that method's
-            // docblock and hand its `@param $filter` to this declaration's
-            // unrelated `$filter`.
-            let preamble = &before[declaration_preamble_start(before)..];
-            docblock::find_iterable_raw_type_in_source(preamble, preamble.len(), pname)
-        })
-}
-
-/// Where the text that can document a declaration starting at the end of
-/// `before` begins: just past the last line of code above it that ends a
-/// statement, opens a block, or closes one.
-///
-/// Comment lines are crossed, and so is a closure's own statement when it
-/// runs over several lines (`register(`, `'name',`), which is what lets a
-/// docblock above the statement document the closure.
-fn declaration_preamble_start(before: &str) -> usize {
-    // The text of the declaration's own line before it is always kept: it
-    // is indentation, or the statement a closure is part of.
-    let Some(mut line_end) = before.rfind('\n') else {
-        return 0;
-    };
-    loop {
-        let line_start = before[..line_end].rfind('\n').map_or(0, |i| i + 1);
-        let line = before[line_start..line_end].trim();
-        let is_comment = line.starts_with('*')
-            || line.starts_with("/*")
-            || line.starts_with("//")
-            || line.starts_with('#');
-        if !is_comment && (line.ends_with(';') || line.ends_with('{') || line.ends_with('}')) {
-            return line_end + 1;
-        }
-        if line_start == 0 {
-            return 0;
-        }
-        line_end = line_start - 1;
-    }
-}
-
-/// Extract the docblock comment immediately preceding a given offset.
-///
-/// Scans backward from `before` (the source text up to the method start)
-/// to find the closest `/** ... */` block.  Returns `None` when no
-/// docblock is found or when there is non-whitespace between the
-/// docblock and the method declaration.
-fn extract_preceding_docblock(before: &str) -> Option<&str> {
-    let trimmed = before.trim_end();
-    if !trimmed.ends_with("*/") {
-        return None;
-    }
-    let close_pos = trimmed.len();
-    let open_pos = trimmed.rfind("/**")?;
-    Some(&trimmed[open_pos..close_pos])
-}
-
-/// Extract the "native" return-type string from the RHS of an assignment
-/// expression, without resolving it to `ClassInfo`.
-///
-/// This is used by [`try_inline_var_override`] to feed
-/// [`docblock::resolve_effective_type`] with the same kind of parsed
-/// `PhpType` that `@return` override checking uses.
-///
-/// Returns `None` when the native type cannot be determined (the
-/// caller should treat this as "unknown", which lets the docblock type
-/// win unconditionally).
-pub(crate) fn extract_native_type_from_rhs<'b>(
-    rhs: &'b Expression<'b>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<PhpType> {
-    match rhs {
-        // `new ClassName(…)` → the class name.
-        Expression::Instantiation(inst) => match inst.class {
-            Expression::Identifier(ident) => {
-                let name = bytes_to_str(ident.value()).to_string();
-                let fqn = crate::util::resolve_source_class_name(
-                    &name,
-                    ctx.current_class.file_namespace.as_deref(),
-                    ctx.all_classes,
-                    ctx.class_loader,
-                );
-                Some(PhpType::named(atom(&fqn)))
-            }
-            Expression::Self_(_) => Some(PhpType::named(atom(ctx.current_class.name.as_ref()))),
-            Expression::Static(_) => Some(PhpType::named(atom(ctx.current_class.name.as_ref()))),
-            _ => None,
-        },
-        // Function / method calls → look up the return type.
-        Expression::Call(call) => match call {
-            Call::Function(func_call) => {
-                let func_name = match func_call.function {
-                    Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-                    _ => None,
-                };
-                let func_name_offset = func_call.function.span().start.offset;
-                func_name.and_then(|name| {
-                    ctx.function_loader()
-                        .and_then(|fl| fl(&name, func_name_offset))
-                        .and_then(|fi| fi.return_type.clone())
-                })
-            }
-            Call::Method(method_call) => {
-                if let Expression::Variable(Variable::Direct(dv)) = method_call.object
-                    && dv.name == b"$this"
-                    && let ClassLikeMemberSelector::Identifier(ident) = &method_call.method
-                {
-                    let method_name = bytes_to_str(ident.value).to_string();
-                    ctx.all_classes
-                        .iter()
-                        .find(|c| c.name == ctx.current_class.name)
-                        .and_then(|cls| {
-                            cls.get_method(&method_name)
-                                .and_then(|m| m.return_type.clone())
-                        })
-                } else {
-                    None
-                }
-            }
-            Call::StaticMethod(static_call) => {
-                let class_name = match static_call.class {
-                    Expression::Self_(_) | Expression::Static(_) => {
-                        Some(ctx.current_class.name.to_string())
-                    }
-                    Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-                    _ => None,
-                };
-                if let Some(cls_name) = class_name
-                    && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
-                {
-                    let method_name = bytes_to_str(ident.value).to_string();
-                    let owner = ctx
-                        .all_classes
-                        .iter()
-                        .find(|c| c.name == cls_name)
-                        .cloned()
-                        .or_else(|| (ctx.class_loader)(&cls_name));
-                    owner.and_then(|o| {
-                        o.get_method(&method_name)
-                            .and_then(|m| m.return_type.clone())
-                    })
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        },
-        // First-class callable syntax, closure literals, and arrow
-        // functions always produce a Closure. When we can infer the
-        // body return type, preserve it in a typed `Closure(): T`.
-        Expression::PartialApplication(_)
-        | Expression::Closure(_)
-        | Expression::ArrowFunction(_) => {
-            Some(super::rhs_resolution::infer_closure_literal_type(rhs, ctx))
-        }
-        _ => None,
-    }
-}
-
-// ── Array function type preservation helpers ─────────────────────────
-
-/// Extract the nth positional argument expression (0-based).
-pub(in crate::type_engine) fn nth_arg_expr<'b>(
-    args: &'b ArgumentList<'b>,
-    n: usize,
-) -> Option<&'b Expression<'b>> {
-    args.arguments.iter().nth(n).map(|arg| match arg {
-        Argument::Positional(pos) => pos.value,
-        Argument::Named(named) => named.value,
-    })
-}
-
-/// The types the forward walker knows for `$var_name` at `offset`,
-/// through whichever of its two scope channels is live.
-///
-/// Argument-type resolution reaches for this before its backward
-/// `@var`/`@param` text scan, because the two answer different
-/// questions: the scan describes the variable at its *annotation*, while
-/// the walker's scope describes it at the point of *use*, carrying
-/// whatever the guards in between proved.  `array_slice($cached, …)`
-/// inside `if ($cached !== null)` has to slice the non-null half, not the
-/// `null|list<…>` written above the assignment.
-///
-/// The two channels are the same information reaching different
-/// consumers: `scope_var_resolver` is the in-progress `ScopeState` the
-/// walker threads down its own call tree, and the diagnostic scope cache
-/// is the per-statement recording of it a diagnostic pass leaves behind
-/// for the consumers the walker does not drive directly (the return-type
-/// check among them).  Both are O(1)/O(log N) lookups.
-pub(in crate::type_engine) fn walker_scope_types(
-    var_name: &str,
-    offset: u32,
-    scope_var_resolver: crate::type_engine::resolver::ScopeVarResolverFn<'_>,
-) -> Vec<ResolvedType> {
-    let prefixed = if var_name.starts_with('$') {
-        var_name.to_string()
-    } else {
-        format!("${}", var_name)
-    };
-    if let Some(resolver) = scope_var_resolver {
-        let from_scope = resolver(&prefixed);
-        if !from_scope.is_empty() {
-            return from_scope;
-        }
-    }
-    if super::forward_walk::is_diagnostic_scope_active()
-        && !super::forward_walk::is_building_scopes()
-        && let Some(types) = super::forward_walk::lookup_diagnostic_scope(&prefixed, offset)
-    {
-        return types;
-    }
-    Vec::new()
-}
-
-/// Resolve the raw iterable type of an argument expression.
-///
-/// Handles `$variable` (via the walker's scope, then docblock scanning)
-/// and delegates to `resolve_expression_type` for method calls, property
-/// access, etc.
-pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
-    arg_expr: &'b Expression<'b>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<PhpType> {
-    if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
-        let var_text = bytes_to_str(dv.name).to_string();
-        let offset = arg_expr.span().start.offset as usize;
-        let from_docblock =
-            docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
-                .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
-
-        // The scope the forward walker recorded for this position, from
-        // whichever of its two channels is live.  Both are map reads,
-        // cheap enough to consult alongside the annotation.
-        let from_walker = walker_scope_types(&var_text, offset as u32, ctx.scope_var_resolver);
-
-        // Neither channel had it, so the only thing left below is a full
-        // re-resolution of the variable, and an annotation that already
-        // answered is taken as-is.
-        if from_walker.is_empty()
-            && ctx.scope_var_resolver.is_none()
-            && let Some(annotated) = from_docblock
-        {
-            return Some(annotated);
-        }
-
-        // Resolve the variable's type to extract the raw iterable type.
-        // This handles cases like `$users = $this->getUsers();
-        // array_pop($users)` where `$users` has no `@var` annotation but was
-        // assigned from a method returning `list<User>`.
-        //
-        // Only reached when the walker's scope came up empty, and only
-        // without a scope_var_resolver: falling through to
-        // resolve_variable_types while the forward walker is active would
-        // re-enter it, causing infinite recursion on patterns like
-        // `$a['k'] = f($a['k'])`.
-        let resolved = if !from_walker.is_empty() || ctx.scope_var_resolver.is_some() {
-            from_walker
-        } else {
-            resolve_variable_types(
-                &var_text,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.content,
-                offset as u32,
-                ctx.class_loader,
-                ctx.backend,
-                ctx.loaders,
-            )
-        };
-        let from_scope = (!resolved.is_empty())
-            .then(|| crate::types::ResolvedType::types_joined(&resolved))
-            // `skip_scalar` stays off: a `list<int>` carries an element type
-            // every bit as usable as a `list<User>`, and asking whether the
-            // element is non-scalar drops every scalar-element array back to
-            // the annotation the walker has since narrowed.
-            .filter(|joined| joined.extract_value_type(false).is_some());
-
-        match (from_docblock, from_scope) {
-            // The annotation is where the walker's own type came from, so
-            // when the two disagree the walker has narrowed it since
-            // (`assert($a !== [])` proving `non-empty-array`, or an
-            // `is_array()` guard ruling out the `string` arm) and its answer
-            // is the one that describes the value at this call.  Anything
-            // wider than the annotation is the walker having lost the
-            // generics on the way through, and the annotation still stands.
-            (Some(annotated), Some(scoped)) if scoped.is_subtype_of(&annotated) => {
-                return Some(scoped);
-            }
-            (Some(annotated), _) => return Some(annotated),
-            (None, Some(scoped)) => return Some(scoped),
-            (None, None) => {}
-        }
-    }
-    // Fall back to the unified pipeline (method calls, etc.)
-    super::foreach_resolution::resolve_expression_type(arg_expr, ctx)
-}
-
-/// Check whether a call expression passes the target variable to a
-/// pass-by-reference parameter with a type hint, and if so, push the
-/// resolved type into `results`.
-///
-/// For example, given `function foo(Baz &$bar): void {}` and the call
-/// `foo($bar)`, this function detects that `$bar` is passed to a `&`
-/// parameter typed as `Baz` and resolves `$bar` to `Baz`.
-///
-/// Handles standalone function calls, instance method calls, static
-/// method calls, and constructor calls.
-pub(super) fn try_apply_pass_by_reference_type(
-    expr: &Expression<'_>,
-    ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ResolvedType>,
-    conditional: bool,
-) {
-    let (argument_list, parameters, callee) = match expr {
-        Expression::Call(Call::Function(func_call)) => {
-            let func_name = match func_call.function {
-                Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
-                _ => return,
-            };
-            let func_name_offset = func_call.function.span().start.offset;
-            let fl = match ctx.function_loader() {
-                Some(fl) => fl,
-                None => return,
-            };
-            let func_info = match fl(&func_name, func_name_offset) {
-                Some(fi) => fi,
-                None => return,
-            };
-            // Borrow the argument list and clone the parameters so we
-            // can iterate them together.
-            let parameters = func_info.parameters.clone();
-            (
-                &func_call.argument_list,
-                parameters,
-                OutParamCallee::Function(Box::new(func_info)),
-            )
-        }
-        Expression::Call(Call::Method(method_call)) => {
-            match try_resolve_method_params(method_call.object, &method_call.method, ctx) {
-                Some((params, callee)) => (&method_call.argument_list, params, callee),
-                None => return,
-            }
-        }
-        Expression::Call(Call::NullSafeMethod(method_call)) => {
-            match try_resolve_method_params(method_call.object, &method_call.method, ctx) {
-                Some((params, callee)) => (&method_call.argument_list, params, callee),
-                None => return,
-            }
-        }
-        Expression::Call(Call::StaticMethod(static_call)) => {
-            match try_resolve_static_method_params(static_call, ctx) {
-                Some((params, arg_list, callee)) => (arg_list, params, callee),
-                None => return,
-            }
-        }
-        Expression::Instantiation(inst) => match try_resolve_constructor_params(inst, ctx) {
-            Some((params, arg_list, callee)) => (arg_list, params, callee),
-            None => return,
-        },
-        _ => return,
-    };
-
-    // Bind arguments to parameters following PHP's rules so that named
-    // arguments consult the parameter they actually target, not the one at
-    // their ordinal position in the call.
-    let bound = crate::call_args::bind_args_to_params(&parameters, argument_list);
-
-    for (param_index, (param, arg_expr)) in parameters.iter().zip(bound.iter()).enumerate() {
-        let arg_expr = match arg_expr {
-            Some(expr) => *expr,
-            None => continue,
-        };
-
-        // Check if this argument is our target variable.
-        let is_our_var = match arg_expr {
-            Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name) == ctx.var_name,
-            _ => false,
-        };
-        if !is_our_var {
-            continue;
-        }
-
-        // Check if the corresponding parameter is pass-by-reference
-        // with a type hint.
-        if param.is_reference
-            && let Some(out_hint) = crate::type_engine::call_resolution::effective_out_type(
-                param,
-                param_index,
-                &callee,
-                ctx.backend,
-            )
-        {
-            // A PHPStan conditional out type (`@param-out ($arg is null ?
-            // A&I : A) $arg`) is call-site-agnostic up to this point; only
-            // this call's own arguments say which branch it actually takes.
-            let var_resolver = build_var_resolver_from_ctx(ctx);
-            let out_hint = crate::type_engine::call_resolution::resolve_out_type_for_call(
-                out_hint,
-                &parameters,
-                &callee,
-                argument_list,
-                ctx.content,
-                &ctx.as_resolution_ctx(),
-                Some(&var_resolver),
-            );
-            let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                &out_hint,
-                &ctx.current_class.name,
-                ctx.all_classes,
-                ctx.class_loader,
-            );
-            if !resolved.is_empty() {
-                if !conditional {
-                    results.clear();
-                }
-                ResolvedType::extend_unique(
-                    results,
-                    ResolvedType::from_classes_with_hint(resolved, out_hint),
-                );
-            }
-        }
-    }
-}
-
-/// Resolve parameters for an instance method call.
-///
-/// Currently only handles `$this->method()` where the current class
-/// is known.  General variable receiver resolution is deferred to the
-/// forward-walking scope model to avoid re-entrant variable resolution.
-fn try_resolve_method_params(
-    object: &Expression<'_>,
-    method: &ClassLikeMemberSelector<'_>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<(crate::types::SharedVec<ParameterInfo>, OutParamCallee)> {
-    let method_name = match method {
-        ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
-        _ => return None,
-    };
-
-    // Only handle `$this->method()` — we know the current class.
-    match object {
-        Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {}
-        _ => return None,
-    }
-
-    let method_info = ctx.current_class.get_method(method_name)?;
-    // The callee wants the class shared, and the file's own classes and
-    // the resolved-class cache already hold it that way; copying the whole
-    // `ClassInfo` here would repeat for every local in scope on every call
-    // statement (see `forward_walk/by_ref.rs`).
-    let current_fqn = ctx.current_class.fqn();
-    let owner = ctx
-        .all_classes
-        .iter()
-        .find(|c| c.fqn() == current_fqn)
-        .cloned()
-        .or_else(|| (ctx.class_loader)(&current_fqn))
-        .unwrap_or_else(|| Arc::new(ctx.current_class.clone()));
-    Some((
-        method_info.parameters.clone(),
-        OutParamCallee::Method(owner, atom(method_name)),
-    ))
-}
-
-/// Resolve parameters for a static method call.
-fn try_resolve_static_method_params<'a>(
-    static_call: &'a StaticMethodCall<'a>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<(
-    crate::types::SharedVec<ParameterInfo>,
-    &'a ArgumentList<'a>,
-    OutParamCallee,
-)> {
-    let method_name = match &static_call.method {
-        ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
-        _ => return None,
-    };
-
-    let class_name = crate::class_lookup::class_expression_name(
-        static_call.class,
-        ctx.current_class,
-        ctx.all_classes,
-        ctx.class_loader,
-    )?;
-
-    let cls = (ctx.class_loader)(&class_name)?;
-    let method_info = cls.get_method(method_name)?;
-    Some((
-        method_info.parameters.clone(),
-        &static_call.argument_list,
-        OutParamCallee::Method(cls, atom(method_name)),
-    ))
-}
-
-/// Resolve parameters for a constructor call (`new Cls(...)`).
-fn try_resolve_constructor_params<'a>(
-    inst: &'a Instantiation<'a>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<(
-    crate::types::SharedVec<ParameterInfo>,
-    &'a ArgumentList<'a>,
-    OutParamCallee,
-)> {
-    let class_name = crate::class_lookup::class_expression_name(
-        inst.class,
-        ctx.current_class,
-        ctx.all_classes,
-        ctx.class_loader,
-    )?;
-
-    let args = inst.argument_list.as_ref()?;
-    let cls = (ctx.class_loader)(&class_name)?;
-    let ctor = cls.get_method("__construct")?;
-    Some((
-        ctor.parameters.clone(),
-        args,
-        OutParamCallee::Method(cls, atom("__construct")),
-    ))
-}
-
 #[cfg(test)]
 #[path = "resolution_tests.rs"]
 mod tests;
+
+/// The innermost anonymous class in `stmt` whose body (between `{` and
+/// `}`) holds `cursor_offset`.
+fn anonymous_class_body_at<'a>(
+    stmt: &'a Statement<'a>,
+    cursor_offset: u32,
+) -> Option<&'a AnonymousClass<'a>> {
+    crate::parser::innermost_node_at(Node::Statement(stmt), cursor_offset, |node| match node {
+        Node::AnonymousClass(anon)
+            if cursor_offset >= anon.left_brace.start.offset
+                && cursor_offset <= anon.right_brace.end.offset =>
+        {
+            Some(anon)
+        }
+        _ => None,
+    })
+}

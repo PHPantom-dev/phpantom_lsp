@@ -17,9 +17,9 @@ use crate::phar;
 /// Files claimed per work-stealing block when scanning a phar archive.
 const PHAR_SCAN_BLOCK_FILES: usize = 32;
 
-/// A class found inside a phar: its FQN, the `archive.phar!inner.php`
-/// sentinel path, and the `phar://` URI to open it with.
-type PharClass = (String, PathBuf, String);
+/// A class found inside a phar: its FQN and the `phar://` URI of the
+/// entry declaring it.
+type PharClass = (String, String);
 
 /// A block of phar classes, tagged with the block index it was claimed
 /// under so results can be merged back in manifest order.
@@ -165,6 +165,8 @@ impl Backend {
                 }
             }
 
+            self.symbols.prune_orphaned_origins();
+
             // Refresh the cached package roots for path-based lookups.
             *self.workspace.vendor_package_origin_roots.write() = vendor_package_roots;
 
@@ -181,7 +183,6 @@ impl Backend {
         // rescanned; keeping them would promote a copy of a class that the
         // update may have moved or removed.
         self.symbols.duplicate_classes.write().clear();
-        self.symbols.method_store.write().clear();
         self.symbols.gti_index.write().clear();
         self.symbols.gti_parents_index.write().clear();
         self.clear_not_found_caches();
@@ -338,13 +339,11 @@ impl Backend {
     /// [`phar_archives`](crate::Backend::phar_archives).  Each `.php`
     /// file inside the archive is scanned with the lightweight
     /// [`find_classes`](classmap_scanner::find_classes) byte scanner,
-    /// and discovered classes are registered in:
-    ///
-    /// - `fqn_uri_index` — with a sentinel path like
-    ///   `/path/to/phpstan.phar!src/Type/Type.php` (the `!` separator
-    ///   tells [`parse_and_cache_file`](crate::Backend::parse_and_cache_file)
-    ///   to extract content from the phar instead of reading from disk)
-    ///   and a `phar://` URI for completions and workspace symbols
+    /// and discovered classes are registered in `fqn_uri_index` under a
+    /// URI like `phar:///path/to/phpstan.phar/src/Type/Type.php`, the
+    /// same URI a parse of the entry caches its classes under.
+    /// [`parse_and_cache_uri`](crate::Backend::parse_and_cache_uri)
+    /// reads such a URI back out of the archive.
     fn scan_phar_archive(&self, phar_path: &Path) {
         // Avoid scanning the same phar twice.
         if self.phar_archives.read().contains_key(phar_path) {
@@ -411,18 +410,9 @@ impl Backend {
                                         continue;
                                     };
                                     for fqn in classmap_scanner::find_classes(content) {
-                                        // Sentinel path: "archive.phar!internal/path.php"
-                                        let sentinel = PathBuf::from(format!(
-                                            "{}!{}",
-                                            phar_path.display(),
-                                            internal_path
-                                        ));
-                                        let phar_uri = format!(
-                                            "phar://{}/{}",
-                                            phar_path.display(),
-                                            internal_path
-                                        );
-                                        local.push((fqn, sentinel, phar_uri));
+                                        let phar_uri =
+                                            crate::util::phar_entry_uri(phar_path, internal_path);
+                                        local.push((fqn, phar_uri));
                                     }
                                 }
                                 if !local.is_empty() {
@@ -446,24 +436,21 @@ impl Backend {
         };
         scanned.sort_unstable_by_key(|(b, _)| *b);
 
-        let mut classmap_entries: Vec<(String, PathBuf)> = Vec::new();
-        let mut fqn_uri_entries: Vec<(String, String)> = Vec::new();
-        for (_, batch) in scanned {
-            for (fqn, sentinel, phar_uri) in batch {
-                classmap_entries.push((fqn.clone(), sentinel));
-                fqn_uri_entries.push((fqn, phar_uri));
-            }
-        }
+        // The archive must be in place before its classes are published:
+        // a lookup that finds a class in the index but cannot read its
+        // source caches the class as not found.
+        self.phar_archives
+            .write()
+            .insert(phar_path.to_owned(), archive);
 
-        let class_count = classmap_entries.len();
-
+        let mut class_count = 0;
         {
             let mut idx = self.symbols.fqn_uri_index.write();
-            for (fqn, path) in classmap_entries {
-                idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
-            }
-            for (fqn, uri) in fqn_uri_entries {
-                idx.or_insert_with(fqn, || uri);
+            for (_, batch) in scanned {
+                for (fqn, uri) in batch {
+                    class_count += 1;
+                    idx.or_insert_with(fqn, || uri);
+                }
             }
         }
 
@@ -480,11 +467,6 @@ impl Backend {
             php_files.len(),
             class_count,
         );
-
-        // Store the parsed archive for lazy content extraction.
-        self.phar_archives
-            .write()
-            .insert(phar_path.to_owned(), archive);
     }
 
     /// Build a workspace scan by self-scanning a Composer project's
@@ -587,40 +569,7 @@ impl Backend {
             ..Default::default()
         };
 
-        // Origins ride alongside the winning path: only record one for a
-        // vendor entry when it actually wins the merge (i.e. the project
-        // scan didn't already provide this FQN), so a symbol's recorded
-        // origin always matches the file it resolves to.
-        for (fqcn, path) in vendor_scan.classmap {
-            if let std::collections::hash_map::Entry::Vacant(e) =
-                result.classmap.entry(fqcn.clone())
-            {
-                e.insert(path);
-                if let Some(&origin) = vendor_scan.class_origins.get(&fqcn) {
-                    result.class_origins.insert(fqcn, origin);
-                }
-            }
-        }
-        for (fqn, path) in vendor_scan.function_index {
-            if let std::collections::hash_map::Entry::Vacant(e) =
-                result.function_index.entry(fqn.clone())
-            {
-                e.insert(path);
-                if let Some(&origin) = vendor_scan.function_origins.get(&fqn) {
-                    result.function_origins.insert(fqn, origin);
-                }
-            }
-        }
-        for (name, path) in vendor_scan.constant_index {
-            if let std::collections::hash_map::Entry::Vacant(e) =
-                result.constant_index.entry(name.clone())
-            {
-                e.insert(path);
-                if let Some(&origin) = vendor_scan.constant_origins.get(&name) {
-                    result.constant_origins.insert(name, origin);
-                }
-            }
-        }
+        result.absorb_missing(vendor_scan);
 
         result
     }

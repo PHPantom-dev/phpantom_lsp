@@ -5,16 +5,136 @@
 //! preview: enum cases for enums and public member signatures for
 //! traits.
 
+use std::sync::Arc;
+
 use tower_lsp::lsp_types::Hover;
 
 use crate::Backend;
 use crate::docblock::extract_template_params_full;
+use crate::symbol_map::{ClassRefContext, SelfStaticParentKind};
 use crate::types::*;
 use crate::util::short_name;
 
+use super::HoverSite;
 use super::formatting::*;
 
 impl Backend {
+    /// Hover for a class name the symbol map found; on `new ClassName`,
+    /// the constructor's.
+    pub(super) fn hover_class_symbol(
+        &self,
+        site: &HoverSite,
+        name: &str,
+        is_fqn: bool,
+        context: ClassRefContext,
+    ) -> Option<Hover> {
+        let HoverSite {
+            uri,
+            content,
+            offset: cursor_offset,
+            loaders,
+            ..
+        } = *site;
+        let class_loader = loaders.class_loader_at(cursor_offset);
+        let resolved_class_loader = loaders.resolved_class_loader();
+        // A fully qualified reference (`\stdClass`, stored without
+        // its backslash) must not go through the file's imports
+        // and namespace again.
+        let class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = if is_fqn {
+            &resolved_class_loader
+        } else {
+            &class_loader
+        };
+        // On `new ClassName`, show the __construct method hover
+        // instead of the class hover.
+        if context == crate::symbol_map::ClassRefContext::New
+            && let Some(cls) = class_loader(name)
+        {
+            let merged = crate::virtual_members::resolve_class_fully_cached(
+                &cls,
+                &resolved_class_loader,
+                &self.resolved_class_cache,
+            );
+            if let Some(constructor) = merged.get_method_ci("__construct") {
+                return Some(self.hover_for_method(
+                    constructor,
+                    &merged,
+                    &resolved_class_loader,
+                    uri,
+                    content,
+                ));
+            }
+        }
+
+        self.hover_class_reference(name, uri, content, class_loader, cursor_offset)
+    }
+
+    /// Hover for `self`, `static`, `parent` or `$this`: the class the
+    /// keyword stands for at the cursor.
+    pub(super) fn hover_self_static_parent(
+        &self,
+        site: &HoverSite,
+        ssp_kind: SelfStaticParentKind,
+    ) -> Option<Hover> {
+        let HoverSite {
+            uri,
+            content,
+            offset: cursor_offset,
+            loaders,
+            ..
+        } = *site;
+        let current_class = site.current_class();
+        let resolved_class_loader = loaders.resolved_class_loader();
+        let is_this = ssp_kind == SelfStaticParentKind::This;
+
+        let resolved = match ssp_kind {
+            SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => current_class.cloned(),
+            SelfStaticParentKind::This => self
+                .resolve_closure_this_override(uri, content, cursor_offset)
+                .map(Arc::unwrap_or_clone)
+                .or_else(|| current_class.cloned()),
+            SelfStaticParentKind::Parent => current_class
+                .and_then(|cc| cc.parent_class.as_ref())
+                .and_then(|parent_name| {
+                    resolved_class_loader(parent_name).map(Arc::unwrap_or_clone)
+                }),
+        };
+        if let Some(cls) = resolved {
+            let mut lines = Vec::new();
+
+            if let Some(desc) = extract_docblock_description(cls.class_docblock.as_deref()) {
+                lines.push(desc);
+            }
+
+            if let Some(ref msg) = cls.deprecation_message {
+                lines.push(format_deprecation_line(msg));
+            }
+
+            let ns_line = namespace_line(cls.file_namespace.as_deref());
+            if is_this {
+                lines.push(format!(
+                    "```php\n<?php\n{}$this = {}\n```",
+                    ns_line, cls.name
+                ));
+            } else {
+                let keyword_str = match ssp_kind {
+                    SelfStaticParentKind::Self_ => "self",
+                    SelfStaticParentKind::Static => "static",
+                    SelfStaticParentKind::Parent => "parent",
+                    SelfStaticParentKind::This => unreachable!(),
+                };
+                lines.push(format!(
+                    "```php\n<?php\n{}{} = {}\n```",
+                    ns_line, keyword_str, cls.name
+                ));
+            }
+
+            Some(make_hover(lines.join("\n\n")))
+        } else {
+            None
+        }
+    }
+
     /// Produce hover information for a class reference.
     pub(super) fn hover_class_reference(
         &self,
@@ -208,20 +328,7 @@ fn build_trait_summary_body(cls: &ClassInfo) -> String {
         if constant.visibility != Visibility::Public {
             continue;
         }
-        let type_hint = constant
-            .type_hint
-            .as_ref()
-            .map(|t| format!(": {}", t))
-            .unwrap_or_default();
-        let value_suffix = constant
-            .value
-            .as_ref()
-            .map(|v| format!(" = {}", v))
-            .unwrap_or_default();
-        member_lines.push(format!(
-            "    const {}{}{};",
-            constant.name, type_hint, value_suffix
-        ));
+        member_lines.push(format!("    {}", constant_declaration(constant)));
     }
 
     for prop in &cls.properties {

@@ -79,6 +79,34 @@ async fn inserts_plain_method_name() {
     assert_ne!(handle.insert_text_format, Some(InsertTextFormat::SNIPPET));
 }
 
+/// `[$handler, '|']` offers the methods of the class the variable holds,
+/// read through a function's return type.
+#[tokio::test]
+async fn completes_variable_callable_from_function_return() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///variable_callable.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Handler {\n",
+        "    public function onSave(): void {}\n",
+        "}\n",
+        "function makeHandler(): Handler { return new Handler(); }\n",
+        "$handler = makeHandler();\n",
+        "$route = [$handler, ''];\n",
+    );
+    let line = text.lines().position(|l| l.contains("$route")).unwrap() as u32;
+    let col = text
+        .lines()
+        .nth(line as usize)
+        .unwrap()
+        .find("'']")
+        .unwrap() as u32
+        + 1;
+
+    let labels = method_labels(&complete_at(&backend, &uri, text, line, col).await);
+    assert!(labels.contains(&"onSave".to_string()), "got {labels:?}");
+}
+
 /// A partial prefix filters the offered methods.
 #[tokio::test]
 async fn filters_by_prefix() {
@@ -190,4 +218,44 @@ async fn completes_class_const_callable_cross_file() {
         labels.contains(&"middleware".to_string()),
         "inherited method should be offered, got {labels:?}"
     );
+}
+
+/// `[\Node::class, '|']` is the global class even when the file imports
+/// another `Node`, and `[Node::class, '|']` is the imported one.
+#[tokio::test]
+async fn class_callable_follows_imports_and_leading_backslash() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///callable_imports.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace {\n",
+        "    class Node { public static function globalOnly(): void {} }\n",
+        "}\n",
+        "namespace Lib {\n",
+        "    class Node { public static function libOnly(): void {} }\n",
+        "}\n",
+        "namespace App {\n",
+        "    use Lib\\Node;\n",
+        "    $global = [\\Node::class, ''];\n",
+        "    $imported = [Node::class, ''];\n",
+        "}\n",
+    );
+    for (marker, expected, unexpected) in [
+        ("$global", "globalOnly", "libOnly"),
+        ("$imported", "libOnly", "globalOnly"),
+    ] {
+        let line = text.lines().position(|l| l.contains(marker)).unwrap() as u32;
+        let col = text
+            .lines()
+            .nth(line as usize)
+            .unwrap()
+            .find("'']")
+            .unwrap() as u32
+            + 1;
+        let labels = method_labels(&complete_at(&backend, &uri, text, line, col).await);
+        assert!(
+            labels.contains(&expected.to_string()) && !labels.contains(&unexpected.to_string()),
+            "{marker}: got {labels:?}"
+        );
+    }
 }

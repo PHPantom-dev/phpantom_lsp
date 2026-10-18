@@ -1,46 +1,47 @@
-/// Forward-walking scope model for variable type resolution.
-///
-/// This module implements a single top-to-bottom pass through a function
-/// or method body, maintaining a mutable type map (`ScopeState`) that
-/// records each variable's type as assignments are encountered.  When the
-/// walk reaches the cursor position it stops and the caller reads the
-/// target variable's type from the map — an O(1) `HashMap` lookup with
-/// zero recursion.
-///
-/// # Architecture
-///
-/// A backward scanner that resolves one variable at a time from the
-/// cursor, recursively resolving each RHS variable reference, costs
-/// O(depth × file_size) per lookup.  The forward walker replaces that
-/// recursion with a single forward pass:
-///
-/// 1. Seed `ScopeState` with parameter types.
-/// 2. Walk statements top-to-bottom.  At each assignment `$a = expr`,
-///    evaluate `expr` by reading other variables from the scope (O(1)
-///    map lookups) and store the result under `$a`.
-/// 3. At the cursor, read the target variable from the scope.
-///
-/// There is no recursion on variable resolution, no depth limit, and
-/// every variable resolved during the walk is available to subsequent
-/// statements for free.
-///
-/// # Consumers
-///
-/// - **Per-request lookups** (completion, hover, go-to-definition,
-///   signature help): the walker is called with `cursor_offset` set to
-///   the request position and only the target variable's type is read.
-/// - **Diagnostics**: [`build_diagnostic_scopes`] walks every
-///   function/method body in the file once (`cursor_offset = u32::MAX`)
-///   and records scope snapshots at each statement boundary in a
-///   thread-local [`DIAGNOSTIC_SCOPE`] cache.  When
-///   `resolve_variable_types` is called for a diagnostic span, it
-///   checks the cache first via [`lookup_diagnostic_scope`] and returns
-///   the pre-computed types in O(log N) time instead of re-walking the
-///   body for every span.
-/// - **Member-reference searches**, which ask about an access or two in
-///   a candidate file rather than all of them, populate the same cache
-///   through [`build_diagnostic_scopes_for_offsets`], which walks only
-///   the bodies holding the offsets it is given.
+//! Forward-walking scope model for variable type resolution.
+//!
+//! This module implements a single top-to-bottom pass through a function
+//! or method body, maintaining a mutable type map (`ScopeState`) that
+//! records each variable's type as assignments are encountered.  When the
+//! walk reaches the cursor position it stops and the caller reads the
+//! target variable's type from the map — an O(1) `HashMap` lookup with
+//! zero recursion.
+//!
+//! # Architecture
+//!
+//! A backward scanner that resolves one variable at a time from the
+//! cursor, recursively resolving each RHS variable reference, costs
+//! O(depth × file_size) per lookup.  The forward walker replaces that
+//! recursion with a single forward pass:
+//!
+//! 1. Seed `ScopeState` with parameter types.
+//! 2. Walk statements top-to-bottom.  At each assignment `$a = expr`,
+//!    evaluate `expr` by reading other variables from the scope (O(1)
+//!    map lookups) and store the result under `$a`.
+//! 3. At the cursor, read the target variable from the scope.
+//!
+//! There is no recursion on variable resolution, no depth limit, and
+//! every variable resolved during the walk is available to subsequent
+//! statements for free.
+//!
+//! # Consumers
+//!
+//! - **Per-request lookups** (completion, hover, go-to-definition,
+//!   signature help): the walker is called with `cursor_offset` set to
+//!   the request position and only the target variable's type is read.
+//! - **Diagnostics**: [`build_diagnostic_scopes`] walks every
+//!   function/method body in the file once (`cursor_offset = u32::MAX`)
+//!   and records scope snapshots at each statement boundary in a
+//!   thread-local [`DIAGNOSTIC_SCOPE`] cache.  When
+//!   `resolve_variable_types` is called for a diagnostic span, it
+//!   checks the cache first via [`lookup_diagnostic_scope`] and returns
+//!   the pre-computed types in O(log N) time instead of re-walking the
+//!   body for every span.
+//! - **Member-reference searches**, which ask about an access or two in
+//!   a candidate file rather than all of them, populate the same cache
+//!   through [`build_diagnostic_scopes_for_offsets`], which walks only
+//!   the bodies holding the offsets it is given.
+
 use std::cell::{Cell, RefCell};
 
 use mago_span::HasSpan;
@@ -49,10 +50,15 @@ use mago_syntax::cst::*;
 use crate::types::ResolvedType;
 
 mod array_assignment;
+mod assert_narrowing;
 mod assignment;
 mod assignment_deps;
 mod by_ref;
+mod by_ref_builtins;
+mod by_ref_later_writes;
 mod callable_inference;
+mod closure_params;
+mod closure_walk;
 mod closures;
 mod cond_narrowing;
 mod condition;
@@ -70,6 +76,7 @@ mod readonly_properties;
 mod receiver_mutation;
 mod relation_callbacks;
 mod scope_state;
+mod statements;
 mod static_locals;
 mod throw_points;
 mod var_docblocks;
@@ -77,10 +84,15 @@ mod walk_ctx;
 mod while_for;
 
 pub(crate) use array_assignment::*;
+pub(crate) use assert_narrowing::*;
 pub(crate) use assignment::*;
 pub(crate) use assignment_deps::*;
 pub(crate) use by_ref::*;
+pub(crate) use by_ref_builtins::*;
+pub(crate) use by_ref_later_writes::*;
 pub(crate) use callable_inference::*;
+pub(crate) use closure_params::*;
+pub(crate) use closure_walk::*;
 pub(crate) use closures::*;
 pub(crate) use cond_narrowing::*;
 pub(crate) use condition::*;
@@ -97,6 +109,7 @@ pub(crate) use reachability::*;
 pub(crate) use receiver_mutation::*;
 pub(crate) use relation_callbacks::*;
 pub(crate) use scope_state::*;
+pub(crate) use statements::*;
 pub(crate) use throw_points::*;
 pub(crate) use var_docblocks::*;
 pub(crate) use walk_ctx::*;
@@ -120,6 +133,7 @@ pub(crate) fn walk_body_forward<'b>(
     // missing assignments made inside the branch and causing false-
     // positive diagnostics.
     let record_snapshots = is_diagnostic_scope_active();
+    let mut cursor_seen = false;
 
     for stmt in statements {
         // Stop when we have passed the cursor.  We use `>` rather than
@@ -131,6 +145,7 @@ pub(crate) fn walk_body_forward<'b>(
         if stmt.span().start.offset > ctx.cursor_offset {
             break;
         }
+        cursor_seen |= stmt.span().end.offset >= ctx.cursor_offset;
 
         // Check whether the cursor is inside a closure/arrow function
         // within this statement.  If so, we need to resolve within
@@ -190,6 +205,14 @@ pub(crate) fn walk_body_forward<'b>(
             walk_closures_in_statement(stmt, closure_scope, scope, ctx);
             record_scope_snapshot(stmt_span.end.offset, scope);
         }
+    }
+
+    // No statement here reaches the cursor, so the code at the cursor may
+    // be a statement the parser dropped.  A body that ends before the
+    // cursor reads the same docblocks, but the body around the cursor
+    // reads them last, so what it sets is what the cursor sees.
+    if !cursor_seen && ctx.cursor_offset != u32::MAX {
+        apply_var_docblocks_above_unparsed_cursor(scope, ctx);
     }
 }
 
@@ -279,31 +302,12 @@ pub(crate) fn resolve_in_method_body<'b>(
     parameters: impl Iterator<Item = &'b FunctionLikeParameter<'b>>,
     body_statements: impl Iterator<Item = &'b Statement<'b>>,
     method_span_start: u32,
-    method_ctx: Option<(&str, bool)>,
-    is_static: bool,
+    owner: BodyOwner<'_>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     let ctx = &ctx.for_declaration(method_span_start);
     let body: Vec<&Statement<'_>> = body_statements.collect();
     let scope = walked_scope(ctx, (method_span_start, statements_end(&body)), || {
-        let mut scope = ScopeState::new();
-
-        let method_name = method_ctx.map(|(n, _)| n);
-        if !is_static {
-            seed_this(&mut scope, ctx);
-            readonly_properties::seed_constructor_readonly_properties(&mut scope, method_name, ctx);
-        }
-
-        let has_scope_attr = method_ctx.is_some_and(|(_, s)| s);
-        seed_params(
-            &mut scope,
-            parameters,
-            method_span_start,
-            method_name,
-            has_scope_attr,
-            ctx,
-        );
-
         // Suspend snapshot recording: this is a transient lookup, not the
         // authoritative scope build, so it must not write into an active
         // diagnostic scope cache.  This body's `return`s likewise belong
@@ -311,67 +315,24 @@ pub(crate) fn resolve_in_method_body<'b>(
         // captures further out.
         let _suspend = suspend_snapshot_recording();
         let _barrier = suspend_return_edges();
-        static_locals::seed_static_locals(&mut scope, &body, ctx);
+        let mut scope = seed_body_scope(parameters, &body, method_span_start, owner, ctx);
         walk_body_forward(body.iter().copied(), &mut scope, ctx);
         scope
     });
 
-    // Return `Some(types)` when the variable exists in scope (even if
-    // the type list is empty — that means "unknown/narrowed-away"),
-    // and `None` when the variable was never seen by the forward walker.
-    if scope.contains(var_name) {
-        let types = scope.get(var_name).to_vec();
-        // When the variable is in scope but has no resolved types and
-        // the enclosing function returns a Generator, try reverse
-        // inference from yield statements.
-        if types.is_empty()
-            && let Some(inferred) = try_generator_yield_inference(var_name, ctx)
-        {
-            return Some(inferred);
-        }
-        Some(types)
-    } else {
-        // Variable was never assigned.  Try generator yield reverse
-        // inference: if the variable appears as `yield $var` and the
-        // enclosing function returns Generator<TKey, TValue>, infer
-        // the variable's type as TValue.
-        if let Some(inferred) = try_generator_yield_inference(var_name, ctx) {
-            return Some(inferred);
-        }
-        None
+    // `Some(types)` when the variable exists in scope (an empty list means
+    // "unknown/narrowed-away"), `None` when the walk never saw it.  Either
+    // way, a variable the enclosing generator yields takes the yielded
+    // type when the walk gave it none.
+    let types = scope
+        .contains(var_name)
+        .then(|| scope.get(var_name).to_vec());
+    if types.as_ref().is_none_or(Vec::is_empty)
+        && let Some(inferred) = try_generator_yield_inference(var_name, &body, ctx)
+    {
+        return Some(inferred);
     }
-}
-
-/// Detect whether a method has a `#[Scope]` attribute by scanning the
-/// source text around the method span.  The attribute list precedes or
-/// is part of the method node, so we search a window around the offset.
-fn detect_scope_attribute_from_source(content: &str, method_offset: usize) -> bool {
-    // Search backwards from the method offset for `#[Scope]` or
-    // `#[\...\Scope]` in the preceding ~500 characters.
-    let mut search_start = method_offset.saturating_sub(500);
-    while search_start < content.len() && !content.is_char_boundary(search_start) {
-        search_start += 1;
-    }
-    let mut search_end = content.len().min(method_offset + 200);
-    while search_end > search_start && !content.is_char_boundary(search_end) {
-        search_end -= 1;
-    }
-    let region = &content[search_start..search_end];
-    // Find occurrences of `#[` and check if any contain `Scope`.
-    let mut pos = 0;
-    while let Some(bracket_pos) = region[pos..].find("#[") {
-        let abs = pos + bracket_pos;
-        if let Some(end) = region[abs..].find(']') {
-            let attr_text = &region[abs..abs + end + 1];
-            if attr_text.contains("Scope") {
-                return true;
-            }
-            pos = abs + end + 1;
-        } else {
-            break;
-        }
-    }
-    false
+    types
 }
 
 /// Resolve the target variable from a standalone function body using
@@ -381,47 +342,14 @@ pub(crate) fn resolve_in_function_body<'b>(
     func: &'b Function<'b>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    let ctx = &ctx.for_declaration(func.span().start.offset);
-    let func_span = func.span();
-    let scope = walked_scope(ctx, (func_span.start.offset, func_span.end.offset), || {
-        let mut scope = ScopeState::new();
-
-        seed_params(
-            &mut scope,
-            func.parameter_list.parameters.iter(),
-            func.span().start.offset,
-            None,
-            false, // standalone functions are never scope methods
-            ctx,
-        );
-
-        // Suspend snapshot recording (see `resolve_in_method_body`): this
-        // transient lookup must not pollute an active diagnostic scope
-        // cache.
-        let _suspend = suspend_snapshot_recording();
-        let _barrier = suspend_return_edges();
-        let body: Vec<&Statement<'_>> = func.body.statements.iter().collect();
-        static_locals::seed_static_locals(&mut scope, &body, ctx);
-        walk_body_forward(body.iter().copied(), &mut scope, ctx);
-        scope
-    });
-
-    // Return `Some` when the variable exists in scope (even with
-    // empty types), `None` when it was never seen.
-    if scope.contains(var_name) {
-        let types = scope.get(var_name).to_vec();
-        if types.is_empty()
-            && let Some(inferred) = try_generator_yield_inference(var_name, ctx)
-        {
-            return Some(inferred);
-        }
-        Some(types)
-    } else {
-        if let Some(inferred) = try_generator_yield_inference(var_name, ctx) {
-            return Some(inferred);
-        }
-        None
-    }
+    resolve_in_method_body(
+        var_name,
+        func.parameter_list.parameters.iter(),
+        func.body.statements.iter(),
+        func.span().start.offset,
+        BodyOwner::FUNCTION,
+        ctx,
+    )
 }
 
 /// Resolve the target variable from top-level code (outside any
@@ -429,40 +357,17 @@ pub(crate) fn resolve_in_function_body<'b>(
 ///
 /// Seeds superglobals, then walks all top-level statements forward to
 /// the cursor, skipping class/function/interface/enum/trait declarations
-/// (which have their own isolated scopes).
+/// (which have their own isolated scopes).  `None` when the walk never
+/// saw the variable.
 pub(crate) fn resolve_in_top_level<'b>(
     var_name: &str,
     statements: impl Iterator<Item = &'b Statement<'b>>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    let statements: Vec<&Statement<'_>> = statements.collect();
-    let span = (
-        statements.first().map_or(0, |s| s.span().start.offset),
-        statements_end(&statements),
-    );
-    let scope = walked_scope(ctx, span, || {
-        let mut scope = ScopeState::new();
-
-        seed_superglobals(&mut scope);
-
-        // Suspend snapshot recording (see `resolve_in_method_body`): this
-        // transient lookup must not pollute an active diagnostic scope
-        // cache.  Its statements can even belong to another file
-        // (return-type inference of a called function), whose offsets
-        // would otherwise collide with the outer file's.
-        let _suspend = suspend_snapshot_recording();
-        let _barrier = suspend_return_edges();
-        walk_body_forward(statements.iter().copied(), &mut scope, ctx);
-        scope
-    });
-
-    // Return `Some` when the variable exists in scope (even with
-    // empty types), `None` when it was never seen.
-    if scope.contains(var_name) {
-        Some(scope.get(var_name).to_vec())
-    } else {
-        None
-    }
+    let scope = top_level_scope_for_globals(statements, ctx);
+    scope
+        .contains(var_name)
+        .then(|| scope.get(var_name).to_vec())
 }
 
 /// Walk top-level statements to build a scope of variable types for
@@ -482,8 +387,10 @@ pub(crate) fn top_level_scope_for_globals<'b>(
         let mut scope = ScopeState::new();
         seed_superglobals(&mut scope);
         // Suspend snapshot recording (see `resolve_in_method_body`): this
-        // transient `global`-resolution walk must not pollute an active
-        // diagnostic scope cache.
+        // transient lookup must not pollute an active diagnostic scope
+        // cache.  Its statements can even belong to another file
+        // (return-type inference of a called function), whose offsets
+        // would otherwise collide with the outer file's.
         let _suspend = suspend_snapshot_recording();
         let _barrier = suspend_return_edges();
         walk_body_forward(statements.iter().copied(), &mut scope, ctx);
@@ -494,78 +401,24 @@ pub(crate) fn top_level_scope_for_globals<'b>(
 // ─── Generator yield reverse inference ──────────────────────────────────────
 
 /// When the enclosing function/method returns a `Generator<TKey, TValue>`,
-/// scan the source text for `yield $varName` and infer the variable's type
-/// as `TValue`.  This handles the pattern where a variable is yielded but
-/// never explicitly assigned — its type comes from the Generator's return
-/// type annotation.
+/// a variable the body yields as a value (`yield $var`, `yield $key =>
+/// $var`) is a `TValue`.  This handles the pattern where a variable is
+/// yielded but never explicitly assigned — its type comes from the
+/// Generator's return type annotation.
 fn try_generator_yield_inference(
     var_name: &str,
+    body: &[&Statement<'_>],
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     let return_type = ctx.enclosing_return_type.as_ref()?;
     let value_type = return_type.extract_value_type(false)?;
-
-    let cursor = ctx.cursor_offset as usize;
-    let content = ctx.content;
-
-    // Find the enclosing function body boundaries by scanning backward
-    // for the opening `{`.
-    let search_before = content.get(..cursor).unwrap_or("");
-    let mut brace_depth = 0i32;
-    let mut body_start = None;
-    for (i, ch) in search_before.char_indices().rev() {
-        match ch {
-            '}' => brace_depth += 1,
-            '{' => {
-                brace_depth -= 1;
-                if brace_depth < 0 {
-                    body_start = Some(i + 1);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let start = body_start?;
-
-    // Find the matching closing `}`.
-    let after_open = content.get(start..).unwrap_or("");
-    let mut depth = 0i32;
-    let mut body_end = content.len();
-    for (i, ch) in after_open.char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth < 0 {
-                    body_end = start + i;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let body = content.get(start..body_end).unwrap_or("");
-
-    // Look for `yield $varName` or `=> $varName` in yield context.
-    let yield_pattern = format!("yield {}", var_name);
-    let has_yield = body.contains(&yield_pattern);
-
-    let yield_pair_needle = format!("=> {}", var_name);
-    let has_yield_pair = body.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed.contains("yield ") && trimmed.contains(&yield_pair_needle)
-    });
-
-    if !has_yield && !has_yield_pair {
+    if !body_yields_variable(body, var_name) {
         return None;
     }
 
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         value_type,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -573,4 +426,20 @@ fn try_generator_yield_inference(
         return None;
     }
     Some(ResolvedType::from_classes(classes))
+}
+
+/// Whether `body` yields the variable `var_name` as a value, outside the
+/// closures and declarations nested in it, which yield for themselves.
+fn body_yields_variable(body: &[&Statement<'_>], var_name: &str) -> bool {
+    let mut found = false;
+    crate::parser::for_each_own_yield(body.iter().copied(), |yield_expr| {
+        let value = match yield_expr {
+            Yield::Value(value) => value.value,
+            Yield::Pair(pair) => Some(pair.value),
+            Yield::From(_) => None,
+        };
+        found |= matches!(value, Some(Expression::Variable(Variable::Direct(variable)))
+            if crate::atom::bytes_to_str(variable.name) == var_name);
+    });
+    found
 }

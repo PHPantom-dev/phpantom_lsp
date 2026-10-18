@@ -203,18 +203,12 @@ impl Backend {
         content: &str,
     ) -> Vec<String> {
         match self.resolve_subject_type_at(subject_text, is_static, ctx, access_offset, content) {
-            Some(php_type) => {
-                self.class_names_to_fqns(php_type.top_level_class_names(), ctx, access_offset)
-            }
+            Some(php_type) => Self::class_names_to_fqns(php_type.top_level_class_names()),
             None => self.resolve_static_laravel_builder_subject_to_fqns(
                 subject_text,
                 ctx.use_map_at(access_offset),
                 ctx.namespace_at(access_offset),
-                &self.class_loader_with(
-                    &ctx.classes,
-                    ctx.use_map_at(access_offset),
-                    ctx.namespace_at(access_offset),
-                ),
+                &self.resolved_class_loader_with(&ctx.classes),
             ),
         }
     }
@@ -232,14 +226,20 @@ impl Backend {
         let use_map = ctx.use_map_at(access_offset);
         let namespace = ctx.namespace_at(access_offset);
         let class_loader = self.class_loader_with(&ctx.classes, use_map, namespace);
-        let function_loader =
-            self.function_loader_with(ctx.resolved_names.as_deref(), use_map, namespace);
+        let resolved_class_loader = self.resolved_class_loader_with(&ctx.classes);
+        let function_loader = self.function_loader_with(
+            ctx.resolved_names.as_deref(),
+            use_map,
+            &ctx.symbol_imports_at(access_offset).functions,
+            namespace,
+        );
         let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
             local_classes: &ctx.classes,
             use_map,
             namespace,
             content,
-            class_loader: &class_loader,
+            class_loader: &resolved_class_loader,
+            source_class_loader: &class_loader,
             backend: Some(self),
             function_loader: &function_loader,
         };
@@ -251,32 +251,11 @@ impl Backend {
         )
     }
 
-    /// Normalize class names a resolved type carries into FQNs.
-    ///
-    /// A type may carry short names (`BlogAuthor` instead of
-    /// `App\Models\BlogAuthor`), which are resolved through the file's
-    /// use-map and namespace so they match the FQNs in a hierarchy set.
-    pub(super) fn class_names_to_fqns(
-        &self,
-        names: Vec<String>,
-        ctx: &crate::types::FileContext,
-        access_offset: u32,
-    ) -> Vec<String> {
-        names
-            .into_iter()
-            .map(|n| {
-                let normalized = normalize_fqn(&n);
-                if normalized.contains('\\') {
-                    normalized
-                } else {
-                    normalize_fqn(&Self::resolve_to_fqn(
-                        &normalized,
-                        ctx.use_map_at(access_offset),
-                        ctx.namespace_at(access_offset),
-                    ))
-                }
-            })
-            .collect()
+    /// Normalize the class names a resolved type carries.  They are
+    /// already FQNs, a bare one included (a global class), so they are
+    /// not read through the file's imports again.
+    pub(super) fn class_names_to_fqns(names: Vec<String>) -> Vec<String> {
+        names.iter().map(|n| normalize_fqn(n)).collect()
     }
 
     fn resolve_static_laravel_builder_subject_to_fqns(
@@ -625,26 +604,30 @@ impl Backend {
         }
     }
 
-    fn collect_macro_declaring_targets(
+    /// The classes among `seed_fqns` and their ancestors that a Laravel macro
+    /// named `member_name` is registered on, or `None` when there are none.
+    pub(super) fn collect_macro_declaring_targets(
         &self,
         seed_fqns: &[String],
         member_name: &str,
     ) -> Option<Vec<String>> {
-        let index = self.laravel_macros.read();
-        let mut targets = Vec::new();
+        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let mut candidates = HashSet::new();
         for seed in seed_fqns {
-            let mut ancestors = HashSet::new();
-            let normalized = normalize_fqn(seed).to_string();
-            ancestors.insert(normalized.clone());
-            let class_loader =
-                |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
-            self.collect_ancestors(&normalized, &class_loader, &mut ancestors);
-            for candidate in ancestors {
-                if index.has_macro(&candidate, member_name) && !targets.contains(&candidate) {
-                    targets.push(candidate);
-                }
+            let normalized = normalize_fqn(seed);
+            if candidates.insert(normalized.clone()) {
+                self.collect_ancestors(&normalized, &class_loader, &mut candidates);
             }
         }
+        // Read only once the walk is done: loading a class reads the macro
+        // index too, and a reader queues behind a waiting writer, so a
+        // rebuild arriving mid-walk would wait on a guard held here while
+        // the walk waited on the rebuild.
+        let index = self.laravel_macros.read();
+        let targets: Vec<String> = candidates
+            .into_iter()
+            .filter(|candidate| index.has_macro(candidate, member_name))
+            .collect();
         (!targets.is_empty()).then_some(targets)
     }
 

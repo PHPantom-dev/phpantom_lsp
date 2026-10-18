@@ -11,8 +11,8 @@
 
 use crate::common::{
     LARAVEL_APP_COMPOSER, complete_labels_at_opened, create_initialized_psr4_workspace,
-    create_psr4_workspace, definition_locations, goto_definition_at, markup_hover_at,
-    messages_with_code, open_blade_template, position_after, position_of,
+    create_psr4_workspace, definitions_at, hover_on, messages_with_code, open_blade_template,
+    position_after,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -113,31 +113,6 @@ async fn workspace(
         create_initialized_psr4_workspace(composer, &all, "app/Demo.php").await;
     drop(all);
     (backend, dir, uri, content)
-}
-
-/// The go-to-definition targets a couple of characters into the first
-/// occurrence of `needle` in `content`.
-async fn definitions_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    content: &str,
-    needle: &str,
-) -> Vec<Location> {
-    let position = position_of(content, needle);
-    definition_locations(
-        goto_definition_at(backend, uri, position.line, position.character + 2).await,
-    )
-}
-
-/// The hover a couple of characters into the first occurrence of `needle`.
-async fn hover_on(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    content: &str,
-    needle: &str,
-) -> String {
-    let position = position_of(content, needle);
-    markup_hover_at(backend, uri, position.line, position.character + 2).await
 }
 
 /// The `invalid_laravel_trans` messages the slow pass reports on `uri`.

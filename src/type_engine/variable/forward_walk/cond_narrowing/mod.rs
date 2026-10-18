@@ -8,7 +8,7 @@ use mago_syntax::cst::argument::Argument;
 use crate::atom::{Atom, atom, bytes_to_str};
 use crate::parser::unwrap_parens;
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
-use crate::type_engine::resolver::VarResolutionCtx;
+use crate::type_engine::resolver::{VarResolutionCtx, WrittenNames};
 use crate::type_engine::types::narrowing;
 use crate::types::{MethodInfo, PropertyInfo, ResolvedType};
 

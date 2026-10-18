@@ -650,7 +650,7 @@ existing name heuristic stays as the cheap path that needs no type
 resolution at all.
 
 **Where to look:** `receiver_is_user_like` in
-`symbol_map/extraction/laravel.rs` and its completion-side twin (a
+`symbol_map/extraction/laravel/gates.rs` and its completion-side twin (a
 local check in `completion/laravel_string_keys/context.rs`); `ViewReceiverSite` in
 `symbol_map/mod.rs` for the confirm-later shape.
 

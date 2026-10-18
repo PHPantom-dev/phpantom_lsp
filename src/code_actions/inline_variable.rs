@@ -17,12 +17,12 @@
 //!    parentheses to preserve precedence.
 
 use mago_span::HasSpan;
-use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::code_actions::cursor_context::plain_assignment_at;
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::{AccessKind, ScopeMap};
@@ -49,264 +49,22 @@ struct AssignmentInfo {
     has_side_effects: bool,
 }
 
-/// Walk the AST to find a simple assignment statement at the cursor offset.
-///
-/// Returns `None` if the cursor is not on a simple `$var = expr;` statement.
-fn find_assignment_at_cursor(
-    statements: &[Statement<'_>],
-    cursor: u32,
-    content: &str,
-) -> Option<AssignmentInfo> {
-    for stmt in statements {
-        if let Some(info) = find_assignment_in_statement(stmt, cursor, content) {
-            return Some(info);
-        }
-    }
-    None
-}
-
-/// Find the assignment at `cursor` inside whichever of a class-like's
-/// methods contains it.
-///
-/// `own_span` gates the walk to class-likes the cursor is actually
-/// inside, since a class declared later in the same file is otherwise
-/// still visited and its (non-matching) methods scanned for nothing.
-fn find_assignment_in_class_like<'a>(
-    own_span: mago_span::Span,
-    members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
-    cursor: u32,
-    content: &str,
-) -> Option<AssignmentInfo> {
-    if cursor < own_span.start.offset || cursor > own_span.end.offset {
-        return None;
-    }
-    let block = crate::util::find_enclosing_method_block_in_members(members, cursor)?;
-    for s in block.statements.iter() {
-        if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-            return Some(info);
-        }
-    }
-    None
-}
-
-fn find_assignment_in_statement(
-    stmt: &Statement<'_>,
-    cursor: u32,
-    content: &str,
-) -> Option<AssignmentInfo> {
-    let stmt_span = stmt.span();
-    if cursor < stmt_span.start.offset || cursor > stmt_span.end.offset {
-        return None;
-    }
-
-    match stmt {
-        Statement::Expression(expr_stmt) => {
-            if let Expression::Assignment(assignment) = expr_stmt.expression {
-                // Only simple assignments (not compound like `+=`).
-                if !assignment.operator.is_assign() {
-                    return None;
-                }
-                // LHS must be a simple direct variable (not `$this->foo`, not `$$var`).
-                let var = match assignment.lhs {
-                    Expression::Variable(Variable::Direct(dv)) => dv,
-                    _ => return None,
-                };
-
-                let var_name = bytes_to_str(var.name).to_string();
-                if var_name == "$this" {
-                    return None;
-                }
-
-                let var_offset = var.span().start.offset;
-
-                let rhs_span = assignment.rhs.span();
-                let rhs_start = rhs_span.start.offset as usize;
-                let rhs_end = rhs_span.end.offset as usize;
-
-                let stmt_start = stmt_span.start.offset as usize;
-                let stmt_end = stmt_span.end.offset as usize;
-
-                let needs_parens = expression_needs_parens(assignment.rhs);
-                let has_side_effects = expression_has_side_effects(assignment.rhs);
-
-                // Sanity check: RHS text must be extractable.
-                if rhs_end > content.len() || rhs_start > rhs_end {
-                    return None;
-                }
-
-                return Some(AssignmentInfo {
-                    var_name,
-                    var_offset,
-                    rhs_start,
-                    rhs_end,
-                    stmt_start,
-                    stmt_end,
-                    needs_parens,
-                    has_side_effects,
-                });
-            }
-            None
-        }
-        // Recurse into function/method bodies, blocks, if/else, loops, etc.
-        Statement::Function(func) => {
-            let body_span = func.body.span();
-            if cursor >= body_span.start.offset && cursor <= body_span.end.offset {
-                for s in func.body.statements.iter() {
-                    if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                        return Some(info);
-                    }
-                }
-            }
-            None
-        }
-        Statement::Class(class) => {
-            find_assignment_in_class_like(class.span(), class.members.iter(), cursor, content)
-        }
-        Statement::Trait(tr) => {
-            find_assignment_in_class_like(tr.span(), tr.members.iter(), cursor, content)
-        }
-        Statement::Enum(en) => {
-            find_assignment_in_class_like(en.span(), en.members.iter(), cursor, content)
-        }
-        Statement::Interface(_) => None,
-        Statement::Block(block) => {
-            for s in block.statements.iter() {
-                if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                    return Some(info);
-                }
-            }
-            None
-        }
-        Statement::If(if_stmt) => find_assignment_in_if_body(if_stmt, cursor, content),
-        Statement::While(w) => match &w.body {
-            WhileBody::Statement(s) => find_assignment_in_statement(s, cursor, content),
-            WhileBody::ColonDelimited(body) => {
-                for s in body.statements.iter() {
-                    if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                        return Some(info);
-                    }
-                }
-                None
-            }
-        },
-        Statement::DoWhile(dw) => find_assignment_in_statement(dw.statement, cursor, content),
-        Statement::For(f) => match &f.body {
-            ForBody::Statement(s) => find_assignment_in_statement(s, cursor, content),
-            ForBody::ColonDelimited(body) => {
-                for s in body.statements.iter() {
-                    if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                        return Some(info);
-                    }
-                }
-                None
-            }
-        },
-        Statement::Foreach(fe) => match &fe.body {
-            ForeachBody::Statement(s) => find_assignment_in_statement(s, cursor, content),
-            ForeachBody::ColonDelimited(body) => {
-                for s in body.statements.iter() {
-                    if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                        return Some(info);
-                    }
-                }
-                None
-            }
-        },
-        Statement::Switch(sw) => {
-            for case in sw.body.cases().iter() {
-                let stmts = match case {
-                    SwitchCase::Expression(c) => &c.statements,
-                    SwitchCase::Default(c) => &c.statements,
-                };
-                for s in stmts.iter() {
-                    if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                        return Some(info);
-                    }
-                }
-            }
-            None
-        }
-        Statement::Try(t) => {
-            for s in t.block.statements.iter() {
-                if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                    return Some(info);
-                }
-            }
-            for catch in t.catch_clauses.iter() {
-                for s in catch.block.statements.iter() {
-                    if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                        return Some(info);
-                    }
-                }
-            }
-            if let Some(ref finally) = t.finally_clause {
-                for s in finally.block.statements.iter() {
-                    if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                        return Some(info);
-                    }
-                }
-            }
-            None
-        }
-        Statement::Namespace(ns) => {
-            for s in ns.statements().iter() {
-                if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                    return Some(info);
-                }
-            }
-            None
-        }
-        _ => None,
-    }
-}
-
-fn find_assignment_in_if_body(
-    if_stmt: &If<'_>,
-    cursor: u32,
-    content: &str,
-) -> Option<AssignmentInfo> {
-    match &if_stmt.body {
-        IfBody::Statement(body) => {
-            if let Some(info) = find_assignment_in_statement(body.statement, cursor, content) {
-                return Some(info);
-            }
-            for clause in body.else_if_clauses.iter() {
-                if let Some(info) = find_assignment_in_statement(clause.statement, cursor, content)
-                {
-                    return Some(info);
-                }
-            }
-            if let Some(ref else_clause) = body.else_clause
-                && let Some(info) =
-                    find_assignment_in_statement(else_clause.statement, cursor, content)
-            {
-                return Some(info);
-            }
-            None
-        }
-        IfBody::ColonDelimited(body) => {
-            for s in body.statements.iter() {
-                if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                    return Some(info);
-                }
-            }
-            for clause in body.else_if_clauses.iter() {
-                for s in clause.statements.iter() {
-                    if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                        return Some(info);
-                    }
-                }
-            }
-            if let Some(ref else_clause) = body.else_clause {
-                for s in else_clause.statements.iter() {
-                    if let Some(info) = find_assignment_in_statement(s, cursor, content) {
-                        return Some(info);
-                    }
-                }
-            }
-            None
-        }
-    }
+/// The `$var = expr;` statement under the cursor; see
+/// [`plain_assignment_at`].
+fn find_assignment_at_cursor(program: &Program<'_>, cursor: u32) -> Option<AssignmentInfo> {
+    let assignment = plain_assignment_at(program, cursor)?;
+    let statement = assignment.statement.span();
+    let value = assignment.value.span();
+    Some(AssignmentInfo {
+        var_name: bytes_to_str(assignment.variable.name).to_string(),
+        var_offset: assignment.variable.span().start.offset,
+        rhs_start: value.start.offset as usize,
+        rhs_end: value.end.offset as usize,
+        stmt_start: statement.start.offset as usize,
+        stmt_end: statement.end.offset as usize,
+        needs_parens: expression_needs_parens(assignment.value),
+        has_side_effects: expression_has_side_effects(assignment.value),
+    })
 }
 
 /// Check whether an expression needs parentheses when substituted into a
@@ -351,13 +109,9 @@ fn expression_has_side_effects(expr: &Expression<'_>) -> bool {
         Expression::Yield(_) => true,
         // Throw — side-effectful.
         Expression::Throw(_) => true,
-        // Assignment in the RHS is side-effectful.
-        Expression::Assignment(a) => {
-            // The assignment itself is a side effect; the RHS need not be
-            // inspected separately.
-            let _ = a;
-            true
-        }
+        // Assignment in the RHS is side-effectful; the RHS need not be
+        // inspected separately.
+        Expression::Assignment(_) => true,
         // Language constructs with side effects.
         Expression::Construct(construct) => matches!(
             construct,
@@ -461,8 +215,8 @@ fn build_scope_map(content: &str, offset: u32) -> ScopeMap {
 
 // ─── Line deletion helpers ──────────────────────────────────────────────────
 
-/// Check whether inlining the given assignment is safe, based on scope
-/// analysis.
+/// The offsets of the reads that inlining the assignment replaces, or
+/// `None` when inlining it is not safe.
 ///
 /// A simple assignment `$var = expr;` completely overwrites the variable,
 /// so earlier writes and read-writes (e.g. `$arr[] = …` building up an
@@ -473,43 +227,25 @@ fn build_scope_map(content: &str, offset: u32) -> ScopeMap {
 /// - There must be no writes or read-writes after the assignment (which
 ///   would mean the variable is reassigned or mutated later).
 /// - When the RHS has side effects, there must be at most one read.
-fn is_inline_safe(info: &AssignmentInfo, content: &str, cursor_offset: u32) -> bool {
+fn reads_to_inline(info: &AssignmentInfo, content: &str, cursor_offset: u32) -> Option<Vec<u32>> {
     let scope_map = build_scope_map(content, cursor_offset);
-    let occurrences = scope_map.all_occurrences(&info.var_name, info.var_offset);
-
-    if occurrences.is_empty() {
-        return false;
+    let mut reads = Vec::new();
+    for (offset, kind) in scope_map.all_occurrences(&info.var_name, info.var_offset) {
+        // The RHS may read the variable (e.g. `$x = foo($x)`), but that
+        // read consumes the *old* value and is part of the statement being
+        // deleted, so it must not count as a post-assignment read.
+        if (offset as usize) < info.stmt_end {
+            continue;
+        }
+        match kind {
+            AccessKind::Read => reads.push(offset),
+            AccessKind::Write | AccessKind::ReadWrite => return None,
+        }
     }
-
-    // Only consider occurrences after the assignment statement.
-    // The RHS may read the variable (e.g. `$x = foo($x)`), but that
-    // read consumes the *old* value and is part of the statement being
-    // deleted, so it must not count as a post-assignment read.
-    let after_stmt = occurrences
-        .iter()
-        .filter(|(offset, _)| (*offset as usize) >= info.stmt_end);
-
-    let read_count = after_stmt
-        .clone()
-        .filter(|(_, kind)| matches!(kind, AccessKind::Read))
-        .count();
-    let write_count = after_stmt
-        .clone()
-        .filter(|(_, kind)| matches!(kind, AccessKind::Write))
-        .count();
-    let read_write_count = after_stmt
-        .filter(|(_, kind)| matches!(kind, AccessKind::ReadWrite))
-        .count();
-
-    if read_count == 0 || write_count > 0 || read_write_count > 0 {
-        return false;
+    if reads.is_empty() || (info.has_side_effects && reads.len() > 1) {
+        return None;
     }
-
-    if info.has_side_effects && read_count > 1 {
-        return false;
-    }
-
-    true
+    Some(reads)
 }
 
 /// Compute the byte range for deleting an entire statement line.
@@ -569,8 +305,8 @@ impl Backend {
         let cursor_offset = position_to_byte_offset(content, params.range.start) as u32;
 
         // ── 1. Find the assignment at the cursor ────────────────────
-        let info = with_parsed_program(content, "inline_variable", |program, content| {
-            find_assignment_at_cursor(program.statements.as_slice(), cursor_offset, content)
+        let info = with_parsed_program(content, "inline_variable", |program, _| {
+            find_assignment_at_cursor(program, cursor_offset)
         });
 
         let info = match info {
@@ -582,7 +318,7 @@ impl Backend {
         // Run the same checks that Phase 2 uses so the action is only
         // offered when it can actually be applied.  The parse is cached
         // by `with_parsed_program`, so there is no extra parse cost.
-        if !is_inline_safe(&info, content, cursor_offset) {
+        if reads_to_inline(&info, content, cursor_offset).is_none() {
             return;
         }
 
@@ -620,42 +356,12 @@ impl Backend {
         let cursor_offset = position_to_byte_offset(content, data.range.start) as u32;
 
         // ── 1. Find the assignment at the cursor ────────────────────
-        let info = with_parsed_program(content, "inline_variable", |program, content| {
-            find_assignment_at_cursor(program.statements.as_slice(), cursor_offset, content)
+        let info = with_parsed_program(content, "inline_variable", |program, _| {
+            find_assignment_at_cursor(program, cursor_offset)
         })?;
 
         // ── 2. Build scope map and check safety ─────────────────────
-        let scope_map = build_scope_map(content, cursor_offset);
-        let occurrences = scope_map.all_occurrences(&info.var_name, info.var_offset);
-
-        if occurrences.is_empty() {
-            return None;
-        }
-
-        // Only consider occurrences after the assignment statement.
-        let after_stmt = occurrences
-            .iter()
-            .filter(|(offset, _)| (*offset as usize) >= info.stmt_end);
-
-        let read_count = after_stmt
-            .clone()
-            .filter(|(_, kind)| matches!(kind, AccessKind::Read))
-            .count();
-        let write_count = after_stmt
-            .clone()
-            .filter(|(_, kind)| matches!(kind, AccessKind::Write))
-            .count();
-        let read_write_count = after_stmt
-            .filter(|(_, kind)| matches!(kind, AccessKind::ReadWrite))
-            .count();
-
-        if read_count == 0 || write_count > 0 || read_write_count > 0 {
-            return None;
-        }
-
-        if info.has_side_effects && read_count > 1 {
-            return None;
-        }
+        let reads = reads_to_inline(&info, content, cursor_offset)?;
 
         // ── 3. Extract the RHS text ─────────────────────────────────
         let rhs_text = &content[info.rhs_start..info.rhs_end];
@@ -687,20 +393,10 @@ impl Backend {
             rhs_text.to_string()
         };
 
-        for (offset, kind) in &occurrences {
-            if !matches!(kind, AccessKind::Read) {
-                continue;
-            }
-            // Only replace reads after the assignment statement.
-            // Reads within the RHS (e.g. `$badges` in
-            // `$badges = self::computeBadges($model, $badges)`)
-            // must not be touched.
-            if (*offset as usize) < info.stmt_end {
-                continue;
-            }
+        for offset in reads {
             if let Some(edit) = crate::code_actions::occurrence_replacement_edit(
                 content,
-                *offset as usize,
+                offset as usize,
                 &info.var_name,
                 &replacement,
             ) {

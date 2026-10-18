@@ -1,31 +1,32 @@
-/// LSP server trait implementation.
-///
-/// This module contains the `impl LanguageServer for Backend` block,
-/// which handles all LSP protocol messages (initialize, didOpen, didChange,
-/// didClose, completion, diagnostic, etc.).
-///
-/// **Diagnostic delivery.** Two native delivery models are supported and are
-/// selected automatically from the client's capabilities. The server treats
-/// pull diagnostics as the preferred modern path and uses push only as a
-/// fallback for older clients; it deliberately does not send the same native
-/// diagnostics through both channels for the same client.
-///
-/// - **Pull model** (preferred) — when the client advertises
-///   `textDocument.diagnostic` support, the server registers a
-///   `diagnostic_provider` capability.  The editor requests diagnostics
-///   via `textDocument/diagnostic` for visible files and
-///   `workspace/diagnostic` for all open files.  Cross-file invalidation
-///   (e.g. a class signature change) sends `workspace/diagnostic/refresh`
-///   so the editor re-pulls only the files it cares about.  The
-///   background workspace pass over unopened files is deferred until the
-///   client's first `workspace/diagnostic` request, since its results
-///   are only deliverable through workspace pull responses.
-///
-/// - **Push model** (fallback) — for clients without pull support, the
-///   server pushes diagnostics via `textDocument/publishDiagnostics`
-///   from a debounced background worker.  Each `did_change` bumps a
-///   version counter; the worker waits for a quiet period before
-///   publishing.
+//! LSP server trait implementation.
+//!
+//! This module contains the `impl LanguageServer for Backend` block,
+//! which handles all LSP protocol messages (initialize, didOpen, didChange,
+//! didClose, completion, diagnostic, etc.).
+//!
+//! **Diagnostic delivery.** Two native delivery models are supported and are
+//! selected automatically from the client's capabilities. The server treats
+//! pull diagnostics as the preferred modern path and uses push only as a
+//! fallback for older clients; it deliberately does not send the same native
+//! diagnostics through both channels for the same client.
+//!
+//! - **Pull model** (preferred) — when the client advertises
+//!   `textDocument.diagnostic` support, the server registers a
+//!   `diagnostic_provider` capability.  The editor requests diagnostics
+//!   via `textDocument/diagnostic` for visible files and
+//!   `workspace/diagnostic` for all open files.  Cross-file invalidation
+//!   (e.g. a class signature change) sends `workspace/diagnostic/refresh`
+//!   so the editor re-pulls only the files it cares about.  The
+//!   background workspace pass over unopened files is deferred until the
+//!   client's first `workspace/diagnostic` request, since its results
+//!   are only deliverable through workspace pull responses.
+//!
+//! - **Push model** (fallback) — for clients without pull support, the
+//!   server pushes diagnostics via `textDocument/publishDiagnostics`
+//!   from a debounced background worker.  Each `did_change` bumps a
+//!   version counter; the worker waits for a quiet period before
+//!   publishing.
+
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 

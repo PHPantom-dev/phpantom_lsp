@@ -5,6 +5,7 @@
 use std::ops::Range;
 
 use super::{After, Event, Frame, Kind, Options, Region, RegionKind};
+use crate::text_position::line_ending;
 
 /// A frame on the stack, with what it contributes to the depth.
 #[derive(Debug)]
@@ -548,11 +549,7 @@ pub(super) fn finish_file(out: &mut String, original: &str, options: &Options) {
     if original.is_empty() {
         return;
     }
-    let newline = if original.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
+    let newline = line_ending(original);
     if options.trim_final_newlines {
         let trimmed = out.trim_end_matches(['\n', '\r']).len();
         if trimmed < out.len() {

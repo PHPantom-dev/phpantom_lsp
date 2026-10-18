@@ -37,9 +37,9 @@ namespace PsalmTest_mixin_annotation_1 {
 // Test: wrapCustomIterator
 namespace PsalmTest_mixin_annotation_2 {
     /**
-     * @implements Iterator<1, 2>
+     * @implements \Iterator<1, 2>
      */
-    class Subject implements Iterator {
+    class Subject implements \Iterator {
         /**
          * the index method exists
          *
@@ -67,7 +67,7 @@ namespace PsalmTest_mixin_annotation_2 {
         public function rewind() {}
     }
 
-    $iter = new IteratorIterator(new Subject());
+    $iter = new \IteratorIterator(new Subject());
     $b = $iter->index(0);
 
     assertType('bool', $b);

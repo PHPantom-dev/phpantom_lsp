@@ -1,0 +1,19 @@
+// test: a static call on a variable holding a class name string resolves the class it names
+// feature: hover
+// expect: array{Stamp}
+---
+<?php
+
+namespace App;
+
+class Stamp {
+    public static function make(): Stamp {
+        return new Stamp();
+    }
+}
+
+function demo(): void {
+    $class = 'App\Stamp';
+    $stamps = [$class::make()];
+    echo $sta<>mps;
+}

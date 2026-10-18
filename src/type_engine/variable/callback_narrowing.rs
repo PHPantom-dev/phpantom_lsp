@@ -15,6 +15,7 @@ use mago_syntax::parser::parse_file_content;
 
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::php_type::PhpType;
+use crate::type_engine::resolver::WrittenNames;
 use crate::type_engine::types::narrowing::{
     GuardClassLoader, narrow_type_by_condition, narrow_type_by_guard_name,
 };
@@ -30,6 +31,7 @@ pub(in crate::type_engine) fn narrow_callback_param(
     param_index: usize,
     subject: &PhpType,
     class_loader: GuardClassLoader<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<PhpType> {
     // `array_filter($a, 'is_string', ARRAY_FILTER_USE_KEY)` asserts
     // exactly what the guard it names does, about the single argument it
@@ -43,7 +45,7 @@ pub(in crate::type_engine) fn narrow_callback_param(
     }
 
     let (param_name, body) = callback_param_and_body(callback, param_index)?;
-    narrow_type_by_condition(body, &param_name, subject, class_loader)
+    narrow_type_by_condition(body, &param_name, subject, class_loader, names)
 }
 
 /// [`narrow_callback_param`] over a callback written as source text.
@@ -52,6 +54,7 @@ pub(in crate::type_engine) fn narrow_callback_param_text(
     param_index: usize,
     subject: &PhpType,
     class_loader: GuardClassLoader<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<PhpType> {
     let trimmed = callback.trim();
     // Only an inline function or a named guard says anything; anything
@@ -70,7 +73,7 @@ pub(in crate::type_engine) fn narrow_callback_param_text(
         Statement::Expression(stmt) => Some(stmt.expression),
         _ => None,
     })?;
-    narrow_callback_param(expr, param_index, subject, class_loader)
+    narrow_callback_param(expr, param_index, subject, class_loader, names)
 }
 
 /// The name of the callback's `param_index`th parameter and the
@@ -120,8 +123,14 @@ mod tests {
     }
 
     fn narrow(callback: &str, param_index: usize) -> Option<String> {
-        narrow_callback_param_text(callback, param_index, &array_key(), None)
-            .map(|ty| ty.to_string())
+        narrow_callback_param_text(
+            callback,
+            param_index,
+            &array_key(),
+            None,
+            &WrittenNames::verbatim(),
+        )
+        .map(|ty| ty.to_string())
     }
 
     #[test]
@@ -181,7 +190,8 @@ mod tests {
     fn a_null_comparison_narrows_the_parameter_it_tests() {
         let nullable = PhpType::nullable(PhpType::string());
         let narrow = |callback: &str| {
-            narrow_callback_param_text(callback, 0, &nullable, None).map(|ty| ty.to_string())
+            narrow_callback_param_text(callback, 0, &nullable, None, &WrittenNames::verbatim())
+                .map(|ty| ty.to_string())
         };
         assert_eq!(narrow("fn ($v) => $v !== null").as_deref(), Some("string"));
         assert_eq!(narrow("fn ($v) => $v != null").as_deref(), Some("string"));

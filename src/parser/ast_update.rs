@@ -1,25 +1,21 @@
-/// AST update orchestration and name resolution.
-///
-/// This module contains the `update_ast` method that performs a full
-/// parse of a PHP file and updates all the backend maps (uri_classes_index,
-/// use_map, namespace_map, global_functions, global_defines, fqn_uri_index,
-/// symbol_maps) in a single pass.  It also contains the name resolution
-/// helpers (`resolve_parent_class_names`, `resolve_name`) used to convert
-/// short class names to fully-qualified names.
+//! AST update orchestration.
+//!
+//! This module contains the `update_ast` method that parses a PHP file
+//! into an [`AstIndexUpdate`], which [`super::ast_publish`] then publishes
+//! to all the backend maps (uri_classes_index, use_map, namespace_map,
+//! global_functions, global_defines, fqn_uri_index, symbol_maps) in a
+//! single pass.  The names the parsed declarations spell are qualified by
+//! [`super::name_resolution`].
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::ParseErrorEntry;
-use crate::atom::{Atom, atom, bytes_to_str};
+use crate::atom::{atom, bytes_to_str};
 use crate::blade::call_site_inference::BladeScope;
-use crate::ci_map::CiMap;
 use crate::names::OwnedResolvedNames;
-use crate::php_type::PhpType;
-use crate::symbol_map::{LaravelStringDependency, SymbolMap, extract_symbol_map_for_index};
-use crate::types::{
-    ClassInfo, DefineInfo, DocblockMembers, FunctionInfo, MethodInfo, NamespaceSpan, TypeAliasDef,
-};
+use crate::symbol_map::{SymbolMap, extract_symbol_map_for_index};
+use crate::types::{ClassInfo, DefineInfo, FunctionInfo, NamespaceSpan};
 
 use mago_allocator::LocalArena;
 
@@ -69,27 +65,28 @@ pub(crate) enum AstIndexParseResult {
 }
 
 pub(crate) struct AstIndexUpdate {
-    uri: String,
-    parse_errors: Vec<ParseErrorEntry>,
-    classes: Vec<ClassInfo>,
-    use_map: HashMap<String, String>,
-    resolved_names: Arc<OwnedResolvedNames>,
+    pub(super) uri: String,
+    pub(super) parse_errors: Vec<ParseErrorEntry>,
+    pub(super) classes: Vec<ClassInfo>,
+    pub(super) use_map: HashMap<String, String>,
+    pub(super) symbol_imports: crate::types::SymbolImports,
+    pub(super) resolved_names: Arc<OwnedResolvedNames>,
     /// What a Pest test file binds to itself (see [`crate::pest::file_uses`]).
-    pest_uses: Option<Arc<[String]>>,
-    namespace_spans: Vec<NamespaceSpan>,
-    functions: Vec<FunctionInfo>,
-    defines: Vec<(String, DefineInfo)>,
-    symbol_map: Arc<SymbolMap>,
+    pub(super) pest_uses: Option<Arc<[String]>>,
+    pub(super) namespace_spans: Vec<NamespaceSpan>,
+    pub(super) functions: Vec<FunctionInfo>,
+    pub(super) defines: Vec<(String, DefineInfo)>,
+    pub(super) symbol_map: Arc<SymbolMap>,
     /// The lowering a template was parsed as, published together with
     /// `symbol_map` because the map's offsets index its virtual PHP.
-    blade: Option<BladeLowering>,
+    pub(super) blade: Option<BladeLowering>,
 }
 
 /// A Blade template lowered to the virtual PHP everything else reads it as,
 /// with the source map that carries positions back to the template.
 pub(crate) struct BladeLowering {
-    virtual_php: Arc<String>,
-    source_map: crate::blade::source_map::BladeSourceMap,
+    pub(super) virtual_php: Arc<String>,
+    pub(super) source_map: crate::blade::source_map::BladeSourceMap,
     /// The scope this lowering was seeded from, so a batch that outlives a
     /// newer scope written by call-site re-inference can be told apart from
     /// one still describing the current scope (see
@@ -97,201 +94,7 @@ pub(crate) struct BladeLowering {
     scope: BladeScope,
 }
 
-fn class_info_fqn(class: &ClassInfo) -> String {
-    match &class.file_namespace {
-        Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, class.name),
-        _ => class.name.to_string(),
-    }
-}
-
-/// The declaration of `fqn` that `uri` contributed, whether or not it is
-/// the one currently serving lookups.
-fn declared_function<'a>(
-    fmap: &'a CiMap<(String, FunctionInfo)>,
-    dupes: &'a CiMap<BTreeMap<String, FunctionInfo>>,
-    fqn: &str,
-    uri: &str,
-) -> Option<&'a FunctionInfo> {
-    if let Some(decls) = dupes.get(fqn) {
-        return decls.get(uri);
-    }
-    fmap.get(fqn)
-        .filter(|(owner, _)| owner == uri)
-        .map(|(_, info)| info)
-}
-
-/// Mirror the lowest-sorting declaration of `fqn` into the lookup map,
-/// dropping the name entirely once nothing declares it.
-fn publish_winning_function(
-    fmap: &mut CiMap<(String, FunctionInfo)>,
-    dupes: &mut CiMap<BTreeMap<String, FunctionInfo>>,
-    fqn: &str,
-) {
-    let Some(decls) = dupes.get(fqn) else { return };
-    match decls.iter().next() {
-        Some((uri, info)) => {
-            let winner = (uri.clone(), info.clone());
-            fmap.insert(fqn.to_string(), winner);
-        }
-        None => {
-            fmap.remove(fqn);
-        }
-    }
-    // One declarant left is not a duplicate; the lookup map alone
-    // describes it, so stop paying for the second entry.
-    if dupes.get(fqn).is_some_and(|d| d.len() <= 1) {
-        dupes.remove(fqn);
-    }
-}
-
-/// Record that `uri` declares `fqn`.
-///
-/// The lowest-sorting URI wins, so a name two files declare resolves to
-/// the same one of them however the indexing workers were scheduled.
-fn declare_function(
-    fmap: &mut CiMap<(String, FunctionInfo)>,
-    dupes: &mut CiMap<BTreeMap<String, FunctionInfo>>,
-    fqn: String,
-    uri: &str,
-    info: FunctionInfo,
-) {
-    if let Some(decls) = dupes.get_mut(&fqn) {
-        decls.insert(uri.to_string(), info);
-        publish_winning_function(fmap, dupes, &fqn);
-        return;
-    }
-    match fmap.get(fqn.as_str()) {
-        // A second file declares a name another one already holds, which
-        // is how a package ships a native helper alongside a
-        // `function_exists`-guarded polyfill.  Start tracking both.
-        Some((existing_uri, existing_info)) if existing_uri != uri => {
-            let mut decls = BTreeMap::new();
-            decls.insert(existing_uri.clone(), existing_info.clone());
-            decls.insert(uri.to_string(), info);
-            dupes.insert(fqn.clone(), decls);
-            publish_winning_function(fmap, dupes, &fqn);
-        }
-        _ => {
-            fmap.insert(fqn, (uri.to_string(), info));
-        }
-    }
-}
-
-/// Drop `uri`'s declaration of `fqn`, handing the name to the next-lowest
-/// file that still declares it.
-fn withdraw_function(
-    fmap: &mut CiMap<(String, FunctionInfo)>,
-    dupes: &mut CiMap<BTreeMap<String, FunctionInfo>>,
-    fqn: &str,
-    uri: &str,
-) {
-    if let Some(decls) = dupes.get_mut(fqn) {
-        decls.remove(uri);
-        publish_winning_function(fmap, dupes, fqn);
-        return;
-    }
-    if fmap.get(fqn).is_some_and(|(owner, _)| owner == uri) {
-        fmap.remove(fqn);
-    }
-}
-
 impl Backend {
-    /// Whether the workspace declares the symbol that keeps a dormant Laravel
-    /// span from meaning what Laravel would make of it.
-    fn laravel_string_dependency_exists(&self, dependency: LaravelStringDependency) -> bool {
-        match dependency {
-            LaravelStringDependency::Function(name) => self.has_indexed_function(name.as_str()),
-            LaravelStringDependency::Class(name) => self.has_indexed_class(name.as_str()),
-        }
-    }
-
-    /// Clone and reconcile only published maps whose dormant Laravel spans
-    /// depend on one of `affected`. Passing `None` is reserved for rare
-    /// workspace purges where several declaration indexes changed together.
-    fn refreshed_laravel_candidate_maps(
-        &self,
-        affected: Option<&HashSet<LaravelStringDependency>>,
-        excluded_uris: &HashSet<&str>,
-    ) -> Vec<(String, Arc<SymbolMap>)> {
-        let candidates: Vec<(String, Arc<SymbolMap>)> = self
-            .symbol_maps
-            .read()
-            .iter()
-            .filter(|(uri, _)| !excluded_uris.contains(uri.as_str()))
-            .filter(|(_, map)| map.has_conditional_laravel_dependency(affected))
-            .map(|(uri, map)| (uri.clone(), Arc::clone(map)))
-            .collect();
-        let mut dependency_presence = HashMap::new();
-        candidates
-            .into_iter()
-            .filter_map(|(uri, map)| {
-                let mut dependency_exists = |dependency| {
-                    *dependency_presence
-                        .entry(dependency)
-                        .or_insert_with(|| self.laravel_string_dependency_exists(dependency))
-                };
-                if !map.conditional_laravel_spans_need_refresh(affected, &mut dependency_exists) {
-                    return None;
-                }
-                let mut refreshed = map.as_ref().clone();
-                let changed =
-                    refreshed.refresh_conditional_laravel_spans(affected, dependency_exists);
-                debug_assert!(changed);
-                Some((uri, Arc::new(refreshed)))
-            })
-            .collect()
-    }
-
-    /// Publish refreshed conditional maps and keep their reference-index
-    /// entries in the same generation. Used after discovery-index rebuilds;
-    /// normal AST batches fold refreshed maps into their existing reindex.
-    pub(crate) fn refresh_all_published_laravel_candidates(&self) -> bool {
-        let refreshed = self.refreshed_laravel_candidate_maps(None, &HashSet::new());
-        if refreshed.is_empty() {
-            return false;
-        }
-        self.reindex_references_for_symbol_maps_batch(refreshed.clone());
-        self.refresh_laravel_config_writes(
-            refreshed
-                .iter()
-                .map(|(uri, map)| (uri.as_str(), map.as_ref())),
-        );
-        let mut symbol_maps = self.symbol_maps.write();
-        for (uri, map) in refreshed {
-            symbol_maps.insert(uri, map);
-        }
-        drop(symbol_maps);
-        // The refreshed maps decide which string keys those files check.
-        self.diag.epoch.note_change();
-        true
-    }
-
-    /// Drop every function declaration contributed by `uris`, handing each
-    /// name to the next-lowest file that still declares it.
-    ///
-    /// Used by the file-watcher purge, where a deleted file must not take a
-    /// name another file also declares down with it.
-    pub(crate) fn withdraw_functions_for_uris(&self, uris: &std::collections::HashSet<String>) {
-        let mut fmap = self.symbols.global_functions.write();
-        let mut dupes = self.symbols.duplicate_functions.write();
-
-        let affected: Vec<String> = dupes
-            .iter()
-            .filter(|(_, decls)| decls.keys().any(|u| uris.contains(u)))
-            .map(|(fqn, _)| fqn.to_string())
-            .collect();
-        for fqn in affected {
-            if let Some(decls) = dupes.get_mut(&fqn) {
-                decls.retain(|u, _| !uris.contains(u));
-            }
-            publish_winning_function(&mut fmap, &mut dupes, &fqn);
-        }
-
-        // Whatever the promotions above did not re-point still belongs to a
-        // purged file.
-        fmap.retain(|_, (u, _)| !uris.contains(u));
-    }
-
     /// Update the uri_classes_index, use_map, and namespace_map for a given file URI
     /// by parsing its content.
     ///
@@ -299,10 +102,6 @@ impl Backend {
     /// changed (or a class was added/removed), meaning other open files
     /// that reference those classes may have stale diagnostics.
     pub fn update_ast(&self, uri: &str, content: &str) -> bool {
-        // Invalidate thread-local mixin cache so stale ClassInfo is not
-        // served after a file changes.
-        crate::virtual_members::phpdoc::bump_mixin_generation();
-
         let blade = self.lower_blade_template(uri, content);
         let content_to_parse = blade.as_ref().map_or_else(
             || Arc::new(content.to_string()),
@@ -394,6 +193,7 @@ impl Backend {
     fn extract_blade_wrapper_method_use_statements(
         statement: &Statement<'_>,
         use_map: &mut HashMap<String, String>,
+        symbol_imports: &mut crate::types::SymbolImports,
     ) {
         use mago_syntax::cst::class_like::member::ClassLikeMember;
         use mago_syntax::cst::class_like::method::MethodBody;
@@ -409,7 +209,11 @@ impl Backend {
                 && bytes_to_str(method.name.value) == crate::blade::WRAPPER_FUNCTION
                 && let MethodBody::Concrete(block) = &method.body
             {
-                Self::extract_use_statements_from_statements(block.statements.iter(), use_map);
+                Self::extract_use_statements_from_statements(
+                    block.statements.iter(),
+                    use_map,
+                    Some(&mut *symbol_imports),
+                );
             }
         }
     }
@@ -632,195 +436,8 @@ impl Backend {
                 namespace: None,
             };
 
-            // Extract all three in a single parse pass.
-            //
-            // `classes_with_ns` tracks each extracted class together with the
-            // namespace block it was declared in (its namespace, and its index
-            // in `namespace_spans`, or `None` outside any block).  This is
-            // critical for files that contain multiple `namespace { }` blocks,
-            // each declaring classes under a different namespace with its own
-            // imports.  The per-class namespace is used later when building
-            // the `fqn_uri_index`, and the block when resolving parent/trait
-            // names.
-            let mut classes_with_ns: Vec<(ClassInfo, Option<String>, Option<usize>)> = Vec::new();
-            let mut use_map = HashMap::new();
-            let mut namespace: Option<String> = None;
-            let mut namespace_spans: Vec<NamespaceSpan> = Vec::new();
-
-            for statement in program.statements.iter() {
-                match statement {
-                    Statement::Use(use_stmt) => {
-                        Self::extract_use_items(&use_stmt.items, &mut use_map);
-                    }
-                    Statement::Namespace(ns) => {
-                        let block_ns: Option<String> = ns
-                            .name
-                            .as_ref()
-                            .map(|ident| bytes_to_str(ident.value()).to_string())
-                            .filter(|n| !n.is_empty());
-
-                        // The file-level namespace is the FIRST non-empty one.
-                        if namespace.is_none() {
-                            namespace = block_ns.clone();
-                        }
-
-                        // Collect classes from this namespace block, tagging
-                        // each with the block's namespace.
-                        let mut block_classes = Vec::new();
-                        let mut block_use_map = HashMap::new();
-                        for inner in ns.statements().iter() {
-                            match inner {
-                                Statement::Use(use_stmt) => {
-                                    Self::extract_use_items(&use_stmt.items, &mut block_use_map);
-                                }
-                                inner if Self::is_classlike_extraction_candidate(inner) => {
-                                    Self::extract_classes_from_statements(
-                                        std::iter::once(inner),
-                                        &mut block_classes,
-                                        Some(&doc_ctx),
-                                    );
-                                }
-                                Statement::Namespace(inner_ns) => {
-                                    // Nested namespaces (rare but valid)
-                                    Self::extract_use_statements_from_statements(
-                                        inner_ns.statements().iter(),
-                                        &mut block_use_map,
-                                    );
-                                    Self::extract_classes_from_statements(
-                                        inner_ns.statements().iter(),
-                                        &mut block_classes,
-                                        Some(&doc_ctx),
-                                    );
-                                }
-                                _ => {
-                                    // Walk other statements (expression statements,
-                                    // control flow, etc.) for anonymous classes.
-                                    Self::find_anonymous_classes_in_statement(
-                                        inner,
-                                        &mut block_classes,
-                                        Some(&doc_ctx),
-                                    );
-                                }
-                            }
-                        }
-
-                        let block_index = namespace_spans.len();
-                        for cls in block_classes {
-                            classes_with_ns.push((cls, block_ns.clone(), Some(block_index)));
-                        }
-
-                        let ns_span = ns.span();
-                        namespace_spans.push(NamespaceSpan {
-                            namespace: block_ns,
-                            start: ns_span.start.offset,
-                            end: ns_span.end.offset,
-                            use_map: block_use_map,
-                        });
-                    }
-                    statement if Self::is_classlike_extraction_candidate(statement) => {
-                        // A template whose `$this` is bound wraps its body
-                        // in a method rather than a function, which buries
-                        // the template's own imports just the same (see the
-                        // wrapper-function arm below).
-                        Self::extract_blade_wrapper_method_use_statements(statement, &mut use_map);
-                        let mut top_classes = Vec::new();
-                        Self::extract_classes_from_statements(
-                            std::iter::once(statement),
-                            &mut top_classes,
-                            Some(&doc_ctx),
-                        );
-                        for cls in top_classes {
-                            classes_with_ns.push((cls, None, None));
-                        }
-                    }
-                    // Laravel compiles a template's `@php` and `<?php`
-                    // regions into the top level of the generated view
-                    // file, so a `use` written in one imports for the whole
-                    // template. Wrapping the body in a function to make it
-                    // analysable buries those imports in a function body,
-                    // where the file's use-map would never see them.
-                    Statement::Function(func)
-                        if bytes_to_str(func.name.value) == crate::blade::WRAPPER_FUNCTION =>
-                    {
-                        Self::extract_use_statements_from_statements(
-                            func.body.statements.iter(),
-                            &mut use_map,
-                        );
-                    }
-                    _ => {
-                        // Walk other top-level statements (expression statements,
-                        // function declarations, etc.) for anonymous classes.
-                        let mut anon_classes = Vec::new();
-                        Self::find_anonymous_classes_in_statement(
-                            statement,
-                            &mut anon_classes,
-                            Some(&doc_ctx),
-                        );
-                        for cls in anon_classes {
-                            classes_with_ns.push((cls, None, None));
-                        }
-                    }
-                }
-            }
-
-            // The file-wide table holds every block's imports.  A file with
-            // one block keeps them only there (see `NamespaceSpan::use_map`).
-            let multi_block = namespace_spans.len() > 1;
-            for span in &mut namespace_spans {
-                if multi_block {
-                    use_map.extend(
-                        span.use_map
-                            .iter()
-                            .map(|(alias, fqn)| (alias.clone(), fqn.clone())),
-                    );
-                } else {
-                    use_map.extend(std::mem::take(&mut span.use_map));
-                }
-            }
-
-            // A class-like declared in two branches of a conditional yields
-            // one entry per branch; keep the first so resolution is
-            // deterministic (see `dedup_class_likes_first_wins`).
-            Self::dedup_class_likes_first_wins(&mut classes_with_ns, |(cls, ns, _)| (cls, ns));
-
-            // Extract standalone functions (including those inside if-guards
-            // like `if (! function_exists('...'))`) using the shared helper
-            // which recurses into if/block statements.
-            let mut functions = Vec::new();
-            // Update doc_ctx with the use-map and namespace in force where
-            // each function is declared so that parameter default values
-            // (e.g. `Application::class`) can be resolved to FQNs during
-            // extraction.
-            let func_doc_ctx = DocblockCtx {
-                trivias: doc_ctx.trivias,
-                content: doc_ctx.content,
-                php_version: doc_ctx.php_version,
-                use_map: use_map.clone(),
-                namespace: namespace.clone(),
-            };
-            let mut block_index = 0;
-            for statement in program.statements.iter() {
-                let block = match statement {
-                    Statement::Namespace(_) if multi_block => {
-                        block_index += 1;
-                        Some(&namespace_spans[block_index - 1])
-                    }
-                    _ => None,
-                };
-                let block_doc_ctx = block.map(|span| DocblockCtx {
-                    trivias: doc_ctx.trivias,
-                    content: doc_ctx.content,
-                    php_version: doc_ctx.php_version,
-                    use_map: span.use_map.clone(),
-                    namespace: span.namespace.clone(),
-                });
-                Self::extract_functions_from_statements(
-                    std::iter::once(statement),
-                    &mut functions,
-                    &namespace,
-                    Some(block_doc_ctx.as_ref().unwrap_or(&func_doc_ctx)),
-                );
-            }
+            let mut decls = Self::collect_file_declarations(program, &doc_ctx);
+            let mut functions = Self::extract_file_functions(program, &decls, &doc_ctx);
 
             // Drop the declarations the Blade lowering wrote itself: the
             // wrapper holding the template body and the prologue's marker
@@ -848,82 +465,18 @@ impl Backend {
                 for func in &mut functions {
                     crate::stub_patches::apply_function_stub_patches(func);
                 }
-                for (cls, _, _) in &mut classes_with_ns {
+                for (cls, _, _) in &mut decls.classes_with_ns {
                     crate::stub_patches::apply_class_stub_patches(cls);
                 }
             }
 
-            if !functions.is_empty() {
-                // Resolve class-like names in function return types and
-                // parameter type hints to FQNs so that cross-file consumers
-                // can resolve them without the declaring file's use map.
-                // This mirrors the resolution done for class method return
-                // types and parameter hints in `resolve_parent_class_names`.
-                for func in &mut functions {
-                    let skip_names: Vec<String> =
-                        func.template_params.iter().map(|a| a.to_string()).collect();
-                    // Use the function's own namespace (not the file-level one)
-                    // so that multi-namespace files resolve return types
-                    // against the correct namespace block.
-                    let func_ns = func.namespace.clone().or_else(|| namespace.clone());
-                    let func_use_map = if multi_block {
-                        namespace_spans
-                            .iter()
-                            .find(|span| {
-                                func.name_offset >= span.start && func.name_offset <= span.end
-                            })
-                            .map_or(&use_map, |span| &span.use_map)
-                    } else {
-                        &use_map
-                    };
-                    let resolver = Self::build_type_resolver(func_use_map, &func_ns, &skip_names);
-
-                    if let Some(ref ret) = func.return_type {
-                        let resolved = ret.resolve_names(&resolver);
-                        if resolved != *ret {
-                            func.return_type = Some(resolved);
-                        }
-                    }
-                    if let Some(ref ret) = func.native_return_type {
-                        let resolved = ret.resolve_names(&resolver);
-                        if resolved != *ret {
-                            func.native_return_type = Some(resolved);
-                        }
-                    }
-                    if let Some(ref cond) = func.conditional_return {
-                        let resolved = cond.resolve_names(&resolver);
-                        if resolved != *cond {
-                            func.conditional_return = Some(resolved);
-                        }
-                    }
-                    for param in func.parameters.make_mut() {
-                        if let Some(ref hint) = param.type_hint {
-                            let resolved = hint.resolve_names(&resolver);
-                            if resolved != *hint {
-                                param.type_hint = Some(resolved);
-                            }
-                        }
-                        // `@param-closure-this` names a class the same way
-                        // the rest of the docblock does, so it is resolved
-                        // against the declaring file's imports here.  The
-                        // call site, which is where the closure's `$this` is
-                        // read, has no access to this file's use-map.
-                        if let Some(ref this_type) = param.closure_this_type {
-                            let resolved = this_type.resolve_names(&resolver);
-                            if resolved != *this_type {
-                                param.closure_this_type = Some(resolved);
-                            }
-                        }
-                    }
-                    // Resolve exception class names in @throws tags.
-                    for throw in &mut func.throws {
-                        let resolved = throw.resolve_names(&resolver);
-                        if resolved != *throw {
-                            *throw = resolved;
-                        }
-                    }
-                }
-            }
+            Self::qualify_function_names(
+                &mut functions,
+                &decls.namespace_spans,
+                &decls.use_map,
+                &decls.symbol_imports.constants,
+                &decls.namespace,
+            );
 
             // Extract define() constants from the already-parsed AST and
             // store them in the global_defines map so they appear in
@@ -954,20 +507,21 @@ impl Backend {
             // names so that cross-file inheritance resolution can find parent
             // classes via PSR-4.
             Self::resolve_parent_class_names_by_block(
-                &mut classes_with_ns,
-                &namespace_spans,
-                &use_map,
-                &namespace,
+                &mut decls.classes_with_ns,
+                &decls.namespace_spans,
+                &decls.use_map,
+                &decls.symbol_imports.constants,
+                &decls.namespace,
             );
 
             // Separate the classes from their namespace tags for storage,
             // stamping each ClassInfo with its namespace so that
             // `find_class_in_uri_classes_index` can distinguish classes with the same
             // short name in different namespace blocks.
-            let classes: Vec<ClassInfo> = classes_with_ns
-                .iter()
-                .map(|(c, ns, _)| {
-                    let mut cls = c.clone();
+            let classes: Vec<ClassInfo> = decls
+                .classes_with_ns
+                .into_iter()
+                .map(|(mut cls, ns, _)| {
                     cls.file_namespace = ns.as_deref().map(atom);
                     cls.cache_fqn_in_uri(uri);
                     // Keyed by FQN, so this has to wait until the class
@@ -992,12 +546,14 @@ impl Backend {
             // For files without any explicit namespace blocks, synthesize a
             // single span covering the entire file with the detected namespace
             // (which will be None for files without namespace declarations).
+            let mut namespace_spans = decls.namespace_spans;
             if namespace_spans.is_empty() {
                 namespace_spans.push(NamespaceSpan {
-                    namespace: namespace.clone(),
+                    namespace: decls.namespace,
                     start: 0,
                     end: content.len() as u32,
                     use_map: HashMap::new(),
+                    symbol_imports: Default::default(),
                 });
             }
 
@@ -1005,7 +561,8 @@ impl Backend {
                 uri: uri.to_string(),
                 parse_errors,
                 classes,
-                use_map,
+                use_map: decls.use_map,
+                symbol_imports: decls.symbol_imports,
                 resolved_names: Arc::new(owned_resolved),
                 pest_uses,
                 namespace_spans,
@@ -1017,1310 +574,257 @@ impl Backend {
         })
     }
 
-    pub(crate) fn apply_ast_index_updates_batch(&self, updates: Vec<AstIndexUpdate>) -> bool {
-        if updates.is_empty() {
-            return false;
-        }
-
-        // Held until every index below is written, so that a slow pass
-        // running alongside never keeps a result read partly before this
-        // publication and partly after it.
-        let _publication = self
-            .diag
-            .epoch
-            .begin_publication(updates.iter().map(|update| update.uri.as_str()));
-
-        struct PreparedAstIndexUpdate {
-            uri: String,
-            parse_errors: Vec<ParseErrorEntry>,
-            old_classes: Vec<ClassInfo>,
-            old_fqns: Vec<String>,
-            new_fqns: Vec<String>,
-            /// The anonymous classes this file declared on its *previous*
-            /// parse, which `old_fqns` deliberately leaves out because they
-            /// never reach the declaration index.  They do occupy the
-            /// resolved-class cache, so they still have to be evicted from it.
-            /// Empty on a first parse, where nothing can be cached yet.
-            old_anon_fqns: Vec<String>,
-            classes: Vec<Arc<ClassInfo>>,
-            use_map: HashMap<String, String>,
-            resolved_names: Arc<OwnedResolvedNames>,
-            pest_uses: Option<Arc<[String]>>,
-            namespace_spans: Vec<NamespaceSpan>,
-            functions: Vec<FunctionInfo>,
-            defines: Vec<(String, DefineInfo)>,
-            symbol_map: Arc<SymbolMap>,
-            blade: Option<BladeLowering>,
-            old_function_fqns: Vec<String>,
-            old_define_names: Vec<String>,
-            new_function_fqns: Vec<String>,
-            new_define_names: Vec<String>,
-        }
-
-        let old_classes_by_update: Vec<Vec<ClassInfo>> = {
-            let uri_classes = self.symbols.uri_classes_index.read();
-            updates
-                .iter()
-                .map(|update| {
-                    uri_classes
-                        .get(&update.uri)
-                        .map(|classes| {
-                            classes
-                                .iter()
-                                .map(|class| ClassInfo::clone(class))
-                                .collect()
-                        })
-                        .unwrap_or_default()
-                })
-                .collect()
-        };
-
-        // Recall the standalone functions and defines each file contributed
-        // on its previous parse so that symbols an edit deleted or renamed
-        // can be evicted from the global maps.  Without this, deleting or
-        // renaming a `function foo()` or `define('X', …)` leaves the old
-        // entry behind for the whole session (stale completion, hover, and
-        // go-to-definition).
-        let old_globals_by_update: Vec<(Vec<String>, Vec<String>)> = {
-            let uri_globals = self.symbols.uri_globals_index.read();
-            updates
-                .iter()
-                .map(|update| uri_globals.get(&update.uri).cloned().unwrap_or_default())
-                .collect()
-        };
-
-        let mut prepared = Vec::with_capacity(updates.len());
-        let mut all_old_fqns = Vec::new();
-        let mut all_new_fqns = Vec::new();
-        let mut all_classes = Vec::new();
-
-        for ((update, old_classes), (old_function_fqns, old_define_names)) in updates
-            .into_iter()
-            .zip(old_classes_by_update)
-            .zip(old_globals_by_update)
-        {
-            let old_fqns: Vec<String> = old_classes
-                .iter()
-                .filter(|class| !class.name.starts_with("__anonymous@"))
-                .map(class_info_fqn)
-                .collect();
-            let classes: Vec<Arc<ClassInfo>> = update.classes.into_iter().map(Arc::new).collect();
-            let new_fqns: Vec<String> = classes
-                .iter()
-                .filter(|class| !class.name.starts_with("__anonymous@"))
-                .map(|class| class.fqn().to_string())
-                .collect();
-            let old_anon_fqns: Vec<String> = old_classes
-                .iter()
-                .filter(|class| class.name.starts_with("__anonymous@"))
-                .map(|class| class.fqn().to_string())
-                .collect();
-
-            all_old_fqns.extend(old_fqns.iter().cloned());
-            all_new_fqns.extend(new_fqns.iter().cloned());
-            all_classes.extend(classes.iter().cloned());
-
-            prepared.push(PreparedAstIndexUpdate {
-                uri: update.uri,
-                parse_errors: update.parse_errors,
-                old_classes,
-                old_fqns,
-                new_fqns,
-                old_anon_fqns,
-                classes,
-                use_map: update.use_map,
-                resolved_names: update.resolved_names,
-                pest_uses: update.pest_uses,
-                namespace_spans: update.namespace_spans,
-                functions: update.functions,
-                defines: update.defines,
-                symbol_map: update.symbol_map,
-                blade: update.blade,
-                old_function_fqns,
-                old_define_names,
-                new_function_fqns: Vec::new(),
-                new_define_names: Vec::new(),
-            });
-        }
-
-        all_old_fqns.sort();
-        all_old_fqns.dedup();
-        all_new_fqns.sort();
-        all_new_fqns.dedup();
-
-        {
-            let mut parse_errors = self.parse_errors.write();
-            for update in &mut prepared {
-                parse_errors.insert(update.uri.clone(), std::mem::take(&mut update.parse_errors));
-            }
-        }
-
-        // Names this batch took over from a file that previously won them.
-        // Their entries in the fqn-keyed derived indexes below belong to the
-        // old owner and have to be cleared; every other name this batch
-        // declares either had no owner (nothing to clear) or kept the one it
-        // had.  Collecting them keeps first-parse indexing off the per-fqn
-        // full-map scan that eviction costs.
-        let mut reowned_fqns: Vec<String> = Vec::new();
-
-        self.symbols.with_class_declarations(|decls| {
-            // Withdraw the declarations this parse no longer makes.  A name
-            // another file also declares is handed to that file rather than
-            // disappearing with this one; `all_old_fqns` mixes together
-            // every URI's prior declarations, so dropping by fqn alone would
-            // also delete a different file's still-valid entry whenever a
-            // losing duplicate gets reparsed on its own.
-            for update in &prepared {
-                for old_fqn in &update.old_fqns {
-                    if update.new_fqns.contains(old_fqn) {
-                        continue;
-                    }
-                    decls.withdraw(old_fqn, &update.uri);
+    /// Walk the file's statements once for its class-likes and imports,
+    /// block by block.
+    fn collect_file_declarations<'a>(
+        program: &'a Program<'a>,
+        doc_ctx: &DocblockCtx<'a>,
+    ) -> FileDeclarations {
+        let mut decls = FileDeclarations::default();
+        for statement in program.statements.iter() {
+            match statement {
+                Statement::Use(use_stmt) => {
+                    Self::extract_use_items(
+                        &use_stmt.items,
+                        &mut decls.use_map,
+                        Some(&mut decls.symbol_imports),
+                    );
                 }
-            }
-
-            // A package may declare the same class in more than one file
-            // behind a `class_exists` guard — Carbon ships an empty
-            // `DatePeriodBase` alongside one that carries the pre-8.2
-            // properties.  Both get declared, and the lowest-sorting URI
-            // wins, instead of whichever parse worker happened to finish
-            // last deciding the members the name resolves to (and the
-            // diagnostics that follow) anew on every run.
-            for update in &prepared {
-                for class in &update.classes {
-                    if class.name.starts_with("__anonymous@") {
-                        continue;
-                    }
-                    let fqn = class.fqn();
-                    if decls.declare(&fqn, &update.uri, class).reowned {
-                        reowned_fqns.push(fqn.to_string());
+                Statement::Namespace(ns) => Self::collect_namespace_block(ns, doc_ctx, &mut decls),
+                statement if Self::is_classlike_extraction_candidate(statement) => {
+                    // A template whose `$this` is bound wraps its body
+                    // in a method rather than a function, which buries
+                    // the template's own imports just the same (see the
+                    // wrapper-function arm below).
+                    Self::extract_blade_wrapper_method_use_statements(
+                        statement,
+                        &mut decls.use_map,
+                        &mut decls.symbol_imports,
+                    );
+                    let mut top_classes = Vec::new();
+                    Self::extract_classes_from_statements(
+                        std::iter::once(statement),
+                        &mut top_classes,
+                        Some(doc_ctx),
+                    );
+                    for cls in top_classes {
+                        decls.classes_with_ns.push((cls, None, None));
                     }
                 }
-            }
-        });
-        {
-            let nf_cache = self.symbols.class_not_found_cache.read();
-            if !nf_cache.is_empty() {
-                drop(nf_cache);
-                let mut nf_cache = self.symbols.class_not_found_cache.write();
-                for fqn in &all_new_fqns {
-                    nf_cache.remove(fqn);
+                // Laravel compiles a template's `@php` and `<?php`
+                // regions into the top level of the generated view
+                // file, so a `use` written in one imports for the whole
+                // template. Wrapping the body in a function to make it
+                // analysable buries those imports in a function body,
+                // where the file's use-map would never see them.
+                Statement::Function(func)
+                    if bytes_to_str(func.name.value) == crate::blade::WRAPPER_FUNCTION =>
+                {
+                    Self::extract_use_statements_from_statements(
+                        func.body.statements.iter(),
+                        &mut decls.use_map,
+                        Some(&mut decls.symbol_imports),
+                    );
                 }
-            }
-        }
-
-        // Retire memoised lookups: this parse repointed every FQN the file
-        // declares, dropped the ones it no longer does, and un-cached their
-        // negatives.  It has to come after all three, or a lookup that read
-        // the new generation could still see a negative about to be cleared
-        // and memoise it as fresh.
-        self.symbols.note_class_lookup_change();
-
-        // Only touch a file's function entries when this parse contributes
-        // functions or the previous parse did (so removals can be evicted).
-        // The common case — a class file with no standalone functions that
-        // never had any — skips the snapshot scan below entirely.
-        let mut any_function_changed = false;
-        // The names behind `any_function_changed`, for the caches that can
-        // be invalidated by dependency rather than wholesale.
-        let mut changed_names: Vec<crate::atom::Atom> = Vec::new();
-        {
-            let mut fmap = self.symbols.global_functions.write();
-            let mut dupes = self.symbols.duplicate_functions.write();
-            for update in &mut prepared {
-                if update.functions.is_empty() && update.old_function_fqns.is_empty() {
-                    continue;
-                }
-
-                // Snapshot the functions this file contributed last parse,
-                // so we can detect signature changes and trigger cross-file
-                // diagnostic invalidation.  Reading the recorded name list
-                // rather than scanning the whole map by URI also finds the
-                // declarations this file was outvoted on.
-                let old_functions: Vec<(String, FunctionInfo)> = update
-                    .old_function_fqns
-                    .iter()
-                    .filter_map(|fqn| {
-                        declared_function(&fmap, &dupes, fqn, &update.uri)
-                            .map(|info| (fqn.clone(), info.clone()))
-                    })
-                    .collect();
-
-                // Withdraw this file's previous declarations so that
-                // renamed/deleted functions don't linger.  A name another
-                // file also declares survives on that file's declaration.
-                for (old_fqn, _) in &old_functions {
-                    withdraw_function(&mut fmap, &mut dupes, old_fqn, &update.uri);
-                }
-
-                for func_info in std::mem::take(&mut update.functions) {
-                    let fqn = if let Some(ref ns) = func_info.namespace {
-                        format!("{}\\{}", ns, func_info.name)
-                    } else {
-                        func_info.name.to_string()
-                    };
-
-                    // Skip a declaration the embedded stubs already own, so
-                    // the stub's signature, return type, generics and
-                    // deprecation status are what hover, completion and
-                    // diagnostics see.
-                    //
-                    // Two shapes reach here.  A polyfill — Laravel and
-                    // friends wrap helpers such as `str_contains` in
-                    // `if (! function_exists('…'))` — is dead code on a PHP
-                    // version that ships the native function.  An
-                    // *unguarded* redeclaration of a global function the
-                    // stubs know is dead code on every version, because PHP
-                    // fatals on redeclaring an internal function: the file
-                    // is a signature stub written for tooling
-                    // (`phpstan/php-8-stubs` ships one PHP file per
-                    // builtin), and letting its bare `array` return type
-                    // win would strip `array_keys()` of the `@template TKey`
-                    // the whole key-type inference rests on.
-                    //
-                    // An unguarded declaration only loses out in the global
-                    // namespace, where a name the stubs carry is
-                    // necessarily a PHP internal.  A namespaced collision
-                    // (`Brotli\compress`) can be a real implementation, so
-                    // there it still takes a `function_exists` guard to
-                    // stand down.
-                    if (func_info.is_polyfill || !fqn.contains('\\'))
-                        && self.stub_function_index.read().contains_key(fqn.as_str())
-                    {
-                        continue;
-                    }
-
-                    // Check whether this function's signature changed
-                    // compared to the previous parse.  A change (or a new
-                    // function) means other open files that call it may
-                    // have stale diagnostics.
-                    //
-                    // **First-parse fast path**: when `old_functions` is
-                    // empty the file has never been parsed before.  New
-                    // functions appearing on first parse are not changes
-                    // — they mirror the class first-parse fast path.
-                    if !old_functions.is_empty() {
-                        let changed = match old_functions
-                            .iter()
-                            .find(|(f, _)| f.eq_ignore_ascii_case(&fqn))
-                        {
-                            Some((_, old_info)) => !old_info.signature_eq(&func_info),
-                            // New function — may affect callers.
-                            None => true,
-                        };
-                        if changed {
-                            any_function_changed = true;
-                            changed_names.push(crate::resolution_deps::dep_key(&fqn));
-                        }
-                    }
-
-                    // Insert under the FQN only.  For namespaced functions
-                    // the FQN is `Namespace\name`; for global functions it
-                    // is just the bare name.  `resolve_function_name` already
-                    // builds namespace-qualified candidates, so a short-name
-                    // fallback entry is unnecessary and would cause collisions
-                    // when two namespaces define the same short name.
-                    update.new_function_fqns.push(fqn.clone());
-                    declare_function(&mut fmap, &mut dupes, fqn, &update.uri, func_info);
-                }
-
-                // A function was removed from this file — callers may
-                // now reference an unknown function.
-                for (old_fqn, _) in &old_functions {
-                    if !update
-                        .new_function_fqns
-                        .iter()
-                        .any(|fqn| fqn.eq_ignore_ascii_case(old_fqn))
-                    {
-                        any_function_changed = true;
-                        changed_names.push(crate::resolution_deps::dep_key(old_fqn));
+                _ => {
+                    // Walk other top-level statements (expression statements,
+                    // function declarations, etc.) for anonymous classes.
+                    let mut anon_classes = Vec::new();
+                    Self::find_anonymous_classes_in_statement(
+                        statement,
+                        &mut anon_classes,
+                        Some(doc_ctx),
+                    );
+                    for cls in anon_classes {
+                        decls.classes_with_ns.push((cls, None, None));
                     }
                 }
             }
         }
+        decls.fold_block_imports();
 
-        // A name that failed to resolve before this file declared it must
-        // resolve from now on, so its recorded miss is retired — the same
-        // un-caching the class declarations above get.
-        {
-            let nf_cache = self.symbols.function_not_found_cache.read();
-            if !nf_cache.is_empty() {
-                drop(nf_cache);
-                let mut nf_cache = self.symbols.function_not_found_cache.write();
-                for update in &prepared {
-                    for fqn in &update.new_function_fqns {
-                        nf_cache.remove(fqn);
-                    }
-                }
-            }
+        // A class-like declared in two branches of a conditional yields
+        // one entry per branch; keep the first so resolution is
+        // deterministic (see `dedup_class_likes_first_wins`).
+        Self::dedup_class_likes_first_wins(&mut decls.classes_with_ns, |(cls, ns, _)| (cls, ns));
+        decls
+    }
+
+    /// Collect the class-likes and imports of one `namespace` block,
+    /// tagging each class with the block's namespace.
+    fn collect_namespace_block<'a>(
+        ns: &'a Namespace<'a>,
+        doc_ctx: &DocblockCtx<'a>,
+        decls: &mut FileDeclarations,
+    ) {
+        let block_ns: Option<String> = ns
+            .name
+            .as_ref()
+            .map(|ident| bytes_to_str(ident.value()).to_string())
+            .filter(|n| !n.is_empty());
+
+        // The file-level namespace is the FIRST non-empty one.
+        if decls.namespace.is_none() {
+            decls.namespace = block_ns.clone();
         }
 
-        {
-            let mut dmap = self.symbols.global_defines.write();
-            for update in &mut prepared {
-                if update.defines.is_empty() && update.old_define_names.is_empty() {
-                    continue;
+        let mut block_classes = Vec::new();
+        let mut block_use_map = HashMap::new();
+        let mut block_symbol_imports = crate::types::SymbolImports::default();
+        for inner in ns.statements().iter() {
+            match inner {
+                Statement::Use(use_stmt) => {
+                    Self::extract_use_items(
+                        &use_stmt.items,
+                        &mut block_use_map,
+                        Some(&mut block_symbol_imports),
+                    );
                 }
-
-                for (name, define) in std::mem::take(&mut update.defines) {
-                    // Overwrite rather than `or_insert_with` so edits to an
-                    // existing `define`/`const` propagate: changing the value
-                    // updates hover, and inserting lines above it updates the
-                    // go-to-definition offset.
-                    update.new_define_names.push(name.clone());
-                    dmap.insert(name, define);
+                inner if Self::is_classlike_extraction_candidate(inner) => {
+                    Self::extract_classes_from_statements(
+                        std::iter::once(inner),
+                        &mut block_classes,
+                        Some(doc_ctx),
+                    );
                 }
-
-                // Evict names this file used to contribute but no longer
-                // does, guarding on the stored URI so a constant redefined
-                // in another file is not clobbered.
-                for old_name in &update.old_define_names {
-                    if update.new_define_names.contains(old_name) {
-                        continue;
-                    }
-                    if dmap.get(old_name).is_some_and(|d| d.file_uri == update.uri) {
-                        dmap.remove(old_name);
-                    }
+                Statement::Namespace(inner_ns) => {
+                    // Nested namespaces (rare but valid)
+                    Self::extract_use_statements_from_statements(
+                        inner_ns.statements().iter(),
+                        &mut block_use_map,
+                        Some(&mut block_symbol_imports),
+                    );
+                    Self::extract_classes_from_statements(
+                        inner_ns.statements().iter(),
+                        &mut block_classes,
+                        Some(doc_ctx),
+                    );
                 }
-            }
-        }
-
-        // Record what each file contributed so the next parse can evict
-        // whatever it removes.  Drop the entry entirely when the file has
-        // no globals, to avoid accumulating empty records for class files.
-        {
-            let mut globals_index = self.symbols.uri_globals_index.write();
-            for update in &prepared {
-                if update.new_function_fqns.is_empty() && update.new_define_names.is_empty() {
-                    globals_index.remove(&update.uri);
-                } else {
-                    globals_index.insert(
-                        update.uri.clone(),
-                        (
-                            update.new_function_fqns.clone(),
-                            update.new_define_names.clone(),
-                        ),
+                _ => {
+                    // Walk other statements (expression statements,
+                    // control flow, etc.) for anonymous classes.
+                    Self::find_anonymous_classes_in_statement(
+                        inner,
+                        &mut block_classes,
+                        Some(doc_ctx),
                     );
                 }
             }
         }
 
-        // These two indexes are keyed by fqn, so they have to be refilled
-        // from whichever declaration won the tie-break above rather than
-        // from this batch's classes.  When a batch reparses (or drops) the
-        // losing copy of a duplicated name, the winner is not in
-        // `all_classes`, and populating from the batch would leave
-        // go-to-implementation disagreeing with the class index about which
-        // declaration the name refers to.
-        let evict_fqns = if reowned_fqns.is_empty() {
-            all_old_fqns.clone()
-        } else {
-            let mut fqns = all_old_fqns.clone();
-            fqns.append(&mut reowned_fqns);
-            fqns.sort();
-            fqns.dedup();
-            fqns
-        };
-
-        let winning_classes: Vec<Arc<ClassInfo>> = {
-            let fqn_idx = self.symbols.fqn_class_index.read();
-            all_new_fqns
-                .iter()
-                .chain(
-                    evict_fqns
-                        .iter()
-                        .filter(|fqn| all_new_fqns.binary_search(fqn).is_err()),
-                )
-                .filter_map(|fqn| fqn_idx.get(fqn).map(Arc::clone))
-                .chain(
-                    all_classes
-                        .iter()
-                        .filter(|class| class.name.starts_with("__anonymous@"))
-                        .map(Arc::clone),
-                )
-                .collect()
-        };
-
-        self.evict_methods_for_fqns(&evict_fqns);
-        self.evict_gti_for_fqns(&evict_fqns);
-        self.populate_method_store(&winning_classes);
-        self.populate_gti_index(&winning_classes);
-
-        // Selectively invalidate the resolved-class cache with
-        // signature-level granularity.  Full indexing usually hits the
-        // first-parse fast path (`old_fqns` is empty), so this stays cheap
-        // during background indexing while preserving edit-time semantics.
-        let mut any_signature_changed = false;
-        let mut evicted_fqns = Vec::new();
-        {
-            let mut cache = self.resolved_class_cache.write();
-            for update in &prepared {
-                // An anonymous class keeps its FQN across an edit that leaves
-                // its opening brace where it was, so a cache entry from the
-                // previous parse would keep answering for a body that has
-                // since changed.  Comparing signatures is not worth it here:
-                // the name is already offset-specific, so an edit that reaches
-                // one at all has almost certainly changed it.
-                for fqn in &update.old_anon_fqns {
-                    changed_names.push(crate::resolution_deps::dep_key(fqn));
-                    evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
-                    any_signature_changed = true;
-                }
-
-                if update.old_fqns.is_empty() {
-                    continue;
-                }
-
-                for fqn in &update.old_fqns {
-                    let old_cls = update
-                        .old_classes
-                        .iter()
-                        .find(|class| class_info_fqn(class) == *fqn);
-                    let new_cls = update
-                        .classes
-                        .iter()
-                        .find(|class| class.fqn().as_str() == fqn);
-
-                    match (old_cls, new_cls) {
-                        (Some(old), Some(new)) if old.signature_eq(new) => {}
-                        _ => {
-                            changed_names.push(crate::resolution_deps::dep_key(fqn));
-                            evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
-                            any_signature_changed = true;
-                        }
-                    }
-                }
-
-                for fqn in &update.new_fqns {
-                    if !update.old_fqns.contains(fqn) {
-                        changed_names.push(crate::resolution_deps::dep_key(fqn));
-                        evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
-                        any_signature_changed = true;
-                    }
-                }
-            }
-        }
-        evicted_fqns.sort();
-        evicted_fqns.dedup();
-        // A class whose own resolution was cached read its parents, traits,
-        // and mixins from that cache rather than loading them, so it records
-        // no dependency on the one that just changed.  The eviction above
-        // already walked the cache's reverse-dependency graph to find every
-        // such class; carrying its result into the changed set is what makes
-        // the dependency-keyed invalidation below sound for inheritance.
-        changed_names.extend(
-            evicted_fqns
-                .iter()
-                .map(|fqn| crate::resolution_deps::dep_key(fqn)),
-        );
-        changed_names.sort_unstable();
-        changed_names.dedup();
-
-        {
-            let mut uri_classes = self.symbols.uri_classes_index.write();
-            let mut parsed_uris = self.parsed_uris.write();
-            for update in &mut prepared {
-                uri_classes.insert(update.uri.clone(), std::mem::take(&mut update.classes));
-                parsed_uris.insert(update.uri.clone());
-            }
+        let block_index = decls.namespace_spans.len();
+        for cls in block_classes {
+            decls
+                .classes_with_ns
+                .push((cls, block_ns.clone(), Some(block_index)));
         }
 
-        {
-            let mut imports = self.file_imports.write();
-            let mut resolved_names = self.resolved_names.write();
-            let mut pest_uses = self.file_pest_uses.write();
-            let mut namespaces = self.file_namespaces.write();
-            for update in &mut prepared {
-                imports.insert(update.uri.clone(), std::mem::take(&mut update.use_map));
-                resolved_names.insert(update.uri.clone(), Arc::clone(&update.resolved_names));
-                match update.pest_uses.take() {
-                    Some(uses) => pest_uses.insert(update.uri.clone(), uses),
-                    None => pest_uses.remove(&update.uri),
-                };
-                namespaces.insert(
-                    update.uri.clone(),
-                    std::mem::take(&mut update.namespace_spans),
-                );
-            }
-        }
+        let ns_span = ns.span();
+        decls.namespace_spans.push(NamespaceSpan {
+            namespace: block_ns,
+            start: ns_span.start.offset,
+            end: ns_span.end.offset,
+            use_map: block_use_map,
+            symbol_imports: block_symbol_imports,
+        });
+    }
 
-        if !evicted_fqns.is_empty() {
-            let sorted = {
-                let uri_classes = self.symbols.uri_classes_index.read();
-                let iter = uri_classes
-                    .values()
-                    .flat_map(|classes| classes.iter())
-                    .filter(|class| evicted_fqns.contains(&class.fqn().to_string()))
-                    .map(|class| (class.fqn().to_string(), class.as_ref()));
-                crate::toposort::toposort_classes(iter)
+    /// Extract standalone functions (including those inside if-guards
+    /// like `if (! function_exists('...'))`) using the shared helper which
+    /// recurses into if/block statements.
+    fn extract_file_functions<'a>(
+        program: &'a Program<'a>,
+        decls: &FileDeclarations,
+        doc_ctx: &DocblockCtx<'a>,
+    ) -> Vec<FunctionInfo> {
+        let mut functions = Vec::new();
+        // Give the docblock context the use-map and namespace in force
+        // where each function is declared so that parameter default values
+        // (e.g. `Application::class`) can be resolved to FQNs during
+        // extraction.
+        let doc_ctx_with =
+            |use_map: &HashMap<String, String>, namespace: &Option<String>| DocblockCtx {
+                trivias: doc_ctx.trivias,
+                content: doc_ctx.content,
+                php_version: doc_ctx.php_version,
+                use_map: use_map.clone(),
+                namespace: namespace.clone(),
             };
-
-            let class_loader =
-                |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
-            crate::virtual_members::populate_from_sorted(
-                &sorted,
-                &self.resolved_class_cache,
-                &class_loader,
+        let func_doc_ctx = doc_ctx_with(&decls.use_map, &decls.namespace);
+        let multi_block = decls.namespace_spans.len() > 1;
+        let mut block_index = 0;
+        for statement in program.statements.iter() {
+            let block = match statement {
+                Statement::Namespace(_) if multi_block => {
+                    block_index += 1;
+                    Some(&decls.namespace_spans[block_index - 1])
+                }
+                _ => None,
+            };
+            let block_doc_ctx = block.map(|span| doc_ctx_with(&span.use_map, &span.namespace));
+            Self::extract_functions_from_statements(
+                std::iter::once(statement),
+                &mut functions,
+                &decls.namespace,
+                Some(block_doc_ctx.as_ref().unwrap_or(&func_doc_ctx)),
             );
         }
+        functions
+    }
+}
 
-        let structural_changed = any_signature_changed || any_function_changed;
+/// The class-likes and imports a file declares, gathered in one walk of
+/// its top level.
+#[derive(Default)]
+struct FileDeclarations {
+    /// Each extracted class together with the namespace block it was
+    /// declared in (its namespace, and its index in `namespace_spans`, or
+    /// `None` outside any block).  This is critical for files that contain
+    /// multiple `namespace { }` blocks, each declaring classes under a
+    /// different namespace with its own imports.  The per-class namespace
+    /// is used later when building the `fqn_uri_index`, and the block when
+    /// resolving parent/trait names.
+    classes_with_ns: Vec<(ClassInfo, Option<String>, Option<usize>)>,
+    use_map: HashMap<String, String>,
+    symbol_imports: crate::types::SymbolImports,
+    /// The file-level namespace: the first non-empty one.
+    namespace: Option<String>,
+    namespace_spans: Vec<NamespaceSpan>,
+}
 
-        if structural_changed {
-            self.member_completion_cache.lock().clear();
-            // Exact member targets in other files may depend on the return or
-            // property type that changed here, but only in the files whose
-            // resolution consulted one of the names this parse changed.  A
-            // signature keystroke in a controller would otherwise throw away
-            // the receiver layer for every candidate file in the workspace
-            // and make the next search rebuild all of it.  The edited file
-            // itself is evicted by reference reindexing below.
-            self.retain_resolved_member_files(&changed_names);
-            // For the same reason an access in a file nothing touched can
-            // start belonging to a different declaration, which the
-            // per-file invalidation the reindex does cannot see.
-            if !self.member_ref_counts.is_empty() {
-                self.member_ref_counts.invalidate_locations_all();
-            }
-            // A receiver's type is settled against the classes of the whole
-            // workspace, so a signature change anywhere can turn a call that
-            // was not a render into one, or the other way round.
-            self.typed_receiver_view_spans_cache.write().clear();
-            self.morph_column_spans_cache.write().clear();
-        } else {
-            for update in &prepared {
-                self.evict_typed_receiver_view_spans(&update.uri);
-                self.evict_morph_column_spans(&update.uri);
-            }
-        }
-
-        // The batch declarations are now visible. Activate its prospective
-        // Laravel spans against that final state, not the incomplete index
-        // that happened to exist while parallel workers parsed the files.
-        {
-            let mut dependency_presence = HashMap::new();
-            for update in &mut prepared {
-                Arc::make_mut(&mut update.symbol_map).refresh_conditional_laravel_spans(
-                    None,
-                    |dependency| {
-                        *dependency_presence
-                            .entry(dependency)
-                            .or_insert_with(|| self.laravel_string_dependency_exists(dependency))
-                    },
+impl FileDeclarations {
+    /// The file-wide table holds every block's imports.  A file with one
+    /// block keeps them only there (see `NamespaceSpan::use_map`).
+    fn fold_block_imports(&mut self) {
+        let multi_block = self.namespace_spans.len() > 1;
+        for span in &mut self.namespace_spans {
+            if multi_block {
+                self.use_map.extend(
+                    span.use_map
+                        .iter()
+                        .map(|(alias, fqn)| (alias.clone(), fqn.clone())),
                 );
+                let block = &span.symbol_imports;
+                self.symbol_imports
+                    .functions
+                    .extend(block.functions.iter().map(|(a, f)| (a.clone(), f.clone())));
+                self.symbol_imports
+                    .constants
+                    .extend(block.constants.iter().map(|(a, f)| (a.clone(), f.clone())));
+            } else {
+                self.use_map.extend(std::mem::take(&mut span.use_map));
+                let block = std::mem::take(&mut span.symbol_imports);
+                self.symbol_imports.functions.extend(block.functions);
+                self.symbol_imports.constants.extend(block.constants);
             }
-        }
-
-        // Only declaration names that can gate a candidate trigger a scan of
-        // the published maps. Function signatures and ordinary class edits
-        // therefore retain the existing O(batch) publication cost.
-        let mut affected_laravel_dependencies = HashSet::new();
-        for fqn in all_old_fqns.iter().chain(&all_new_fqns) {
-            if let Some(dependency) = LaravelStringDependency::root_facade(fqn) {
-                affected_laravel_dependencies.insert(dependency);
-            }
-        }
-        for update in &prepared {
-            for fqn in update
-                .old_function_fqns
-                .iter()
-                .chain(&update.new_function_fqns)
-            {
-                if let Some(dependency) = LaravelStringDependency::namespaced_auth(fqn) {
-                    affected_laravel_dependencies.insert(dependency);
-                }
-            }
-        }
-        let prepared_uris: HashSet<&str> =
-            prepared.iter().map(|update| update.uri.as_str()).collect();
-        let refreshed_existing = if affected_laravel_dependencies.is_empty() {
-            Vec::new()
-        } else {
-            self.refreshed_laravel_candidate_maps(
-                Some(&affected_laravel_dependencies),
-                &prepared_uris,
-            )
-        };
-        let changed = structural_changed || !refreshed_existing.is_empty();
-
-        let mut reference_items: Vec<(String, Arc<SymbolMap>)> = prepared
-            .iter()
-            .map(|update| (update.uri.clone(), Arc::clone(&update.symbol_map)))
-            .collect();
-        reference_items.extend(refreshed_existing.iter().cloned());
-        self.reindex_references_for_symbol_maps_batch(reference_items);
-
-        // Runtime writes follow every published map, including unedited
-        // files whose facade alias was shadowed or restored by this batch.
-        self.refresh_laravel_config_writes(
-            prepared
-                .iter()
-                .map(|update| (update.uri.as_str(), update.symbol_map.as_ref()))
-                .chain(
-                    refreshed_existing
-                        .iter()
-                        .map(|(uri, map)| (uri.as_str(), map.as_ref())),
-                ),
-        );
-
-        // A template's lowering and its symbol map go out under one hold of
-        // the publish lock, so that of two parses of the same template racing
-        // each other, one publishes all three maps before the other starts.
-        let has_blade = prepared.iter().any(|update| update.blade.is_some());
-        let _blade_publish_guard = has_blade.then(|| self.blade_publish_lock.lock());
-        if has_blade {
-            let mut virtual_content = self.blade_virtual_content.write();
-            let mut source_maps = self.blade_source_maps.write();
-            for update in &mut prepared {
-                if let Some(blade) = update.blade.take() {
-                    virtual_content.insert(update.uri.clone(), blade.virtual_php);
-                    source_maps.insert(update.uri.clone(), blade.source_map);
-                }
-            }
-        }
-        {
-            let mut symbol_maps = self.symbol_maps.write();
-            for (uri, map) in refreshed_existing {
-                symbol_maps.insert(uri, map);
-            }
-            for update in prepared {
-                symbol_maps.insert(update.uri, update.symbol_map);
-            }
-        }
-
-        changed
-    }
-
-    /// [`resolve_parent_class_names`](Self::resolve_parent_class_names)
-    /// for every class of a file, each against the `namespace` block that
-    /// declared it.
-    ///
-    /// `classes` pairs each class with its namespace and the index of its
-    /// block in `blocks` (`None` outside any block).  PHP scopes both the
-    /// namespace and the `use` imports to a block, so in a file with several
-    /// blocks each block's classes are resolved with that block's own
-    /// imports.  A file with at most one block resolves everything against
-    /// the file-wide `use_map` and `namespace` in one pass.
-    pub(crate) fn resolve_parent_class_names_by_block(
-        classes: &mut [(ClassInfo, Option<String>, Option<usize>)],
-        blocks: &[NamespaceSpan],
-        use_map: &HashMap<String, String>,
-        namespace: &Option<String>,
-    ) {
-        let multi_block = blocks.len() > 1;
-        let mut groups: Vec<Option<usize>> = Vec::new();
-        for (_, _, block) in classes.iter() {
-            let key = if multi_block { *block } else { None };
-            if !groups.contains(&key) {
-                groups.push(key);
-            }
-        }
-        for group in groups {
-            let indices: Vec<usize> = (0..classes.len())
-                .filter(|&i| !multi_block || classes[i].2 == group)
-                .collect();
-            let mut members: Vec<ClassInfo> = indices
-                .iter()
-                .map(|&i| std::mem::take(&mut classes[i].0))
-                .collect();
-            match group.and_then(|b| blocks.get(b)) {
-                Some(block) => {
-                    Self::resolve_parent_class_names(&mut members, &block.use_map, &block.namespace)
-                }
-                None if multi_block => {
-                    Self::resolve_parent_class_names(&mut members, use_map, &None)
-                }
-                None => Self::resolve_parent_class_names(&mut members, use_map, namespace),
-            }
-            for (cls, &i) in members.into_iter().zip(&indices) {
-                classes[i].0 = cls;
-            }
-        }
-    }
-
-    /// Resolve `parent_class` short names in a list of `ClassInfo` to
-    /// fully-qualified names using the file's `use_map` and `namespace`.
-    ///
-    /// Rules (matching PHP name resolution):
-    ///   1. Already fully-qualified (`\Foo\Bar`) → strip leading `\`
-    ///   2. Qualified (`Foo\Bar`) → if first segment is in use_map, expand it;
-    ///      otherwise prepend current namespace
-    ///   3. Unqualified (`Bar`) → check use_map; otherwise prepend namespace
-    ///   4. No namespace and not in use_map → keep as-is
-    pub fn resolve_parent_class_names(
-        classes: &mut [ClassInfo],
-        use_map: &HashMap<String, String>,
-        namespace: &Option<String>,
-    ) {
-        // Collect type alias names from ALL classes in the file up-front.
-        // A type alias defined on one class can be referenced from methods
-        // in a different class in the same file, so we must skip all of
-        // them to avoid mangling alias names into FQN form.
-        let all_alias_names: Vec<Atom> = classes
-            .iter()
-            .flat_map(|c| c.type_aliases.keys().copied())
-            .collect();
-
-        for class in classes.iter_mut() {
-            if let Some(ref parent) = class.parent_class {
-                let resolved = Self::resolve_name(parent, use_map, namespace);
-                class.parent_class = Some(atom(&resolved));
-            }
-            class.used_traits = class
-                .used_traits
-                .iter()
-                .map(|t| atom(&Self::resolve_name(t, use_map, namespace)))
-                .collect();
-
-            class.interfaces = class
-                .interfaces
-                .iter()
-                .map(|i| atom(&Self::resolve_name(i, use_map, namespace)))
-                .collect();
-
-            // Resolve the `@phpstan-require-extends` base class to its
-            // fully-qualified name so it is loadable cross-file.
-            if let Some(ref required) = class.require_extends {
-                class.require_extends =
-                    Some(atom(&Self::resolve_name(required, use_map, namespace)));
-            }
-
-            class.require_implements = class
-                .require_implements
-                .iter()
-                .map(|i| atom(&Self::resolve_name(i, use_map, namespace)))
-                .collect();
-
-            // Resolve trait names in `insteadof` precedence adaptations
-            for prec in &mut class.trait_precedences {
-                prec.trait_name = atom(&Self::resolve_name(&prec.trait_name, use_map, namespace));
-                prec.insteadof = prec
-                    .insteadof
-                    .iter()
-                    .map(|t| atom(&Self::resolve_name(t, use_map, namespace)))
-                    .collect();
-            }
-
-            // Resolve trait names in `as` alias adaptations
-            for alias in &mut class.trait_aliases {
-                if let Some(ref t) = alias.trait_name {
-                    alias.trait_name = Some(atom(&Self::resolve_name(t, use_map, namespace)));
-                }
-            }
-
-            // Resolve mixin names to fully-qualified names.
-            // Skip names that match a template parameter — these are
-            // not class names but placeholders that will be substituted
-            // with concrete types when the generic class is instantiated
-            // (e.g. `@template TWraps` + `@mixin TWraps`).
-            class.mixins = class
-                .mixins
-                .iter()
-                .map(|m| {
-                    if class.template_params.contains(m) {
-                        *m
-                    } else {
-                        atom(&Self::resolve_name(m, use_map, namespace))
-                    }
-                })
-                .collect();
-
-            if let Some(laravel) = class.laravel.as_deref_mut() {
-                let resolver =
-                    |name: &str| -> String { Self::resolve_name(name, use_map, namespace) };
-
-                // Resolve custom collection class name to FQN.
-                if let Some(collection) = laravel.custom_collection.take() {
-                    laravel.custom_collection = Some(collection.resolve_names(&resolver));
-                }
-                if let Some(factory) = laravel.custom_factory.take() {
-                    laravel.custom_factory = Some(factory.resolve_names(&resolver));
-                }
-
-                // Resolve custom builder class name to FQN.
-                if let Some(builder) = laravel.custom_builder.take() {
-                    laravel.custom_builder = Some(builder.resolve_names(&resolver));
-                }
-
-                // Resolve a Laravel factory's explicitly configured model
-                // class to an FQN. Class-constant initializers follow the
-                // file's imports and namespace; literal class strings were
-                // marked absolute while being extracted and therefore remain
-                // unchanged.
-                if let Some(model) = laravel.factory_model.take() {
-                    laravel.factory_model = Some(model.resolve_names(&resolver));
-                }
-            }
-
-            // Resolve a facade's `getFacadeAccessor()` class reference to an
-            // FQN so the concrete class it forwards to is loadable from any
-            // file, not just the one that imported it.
-            if let Some(crate::types::FacadeAccessor::Class(written)) =
-                class.laravel().and_then(|l| l.facade_accessor)
-            {
-                let resolved = atom(&Self::resolve_name(&written, use_map, namespace));
-                class.laravel_mut().facade_accessor =
-                    Some(crate::types::FacadeAccessor::Class(resolved));
-            }
-            // Resolve the `#[UsePolicy]` class name to an FQN so the policy is
-            // loadable cross-file.
-            if let Some(policy) = class.laravel().and_then(|l| l.policy_class.clone()) {
-                class.laravel_mut().policy_class =
-                    Some(Self::resolve_name(&policy, use_map, namespace));
-            }
-
-            // Resolve custom pivot class names (`->using(X::class)`) to FQNs so
-            // that hover shows the fully-qualified pivot class and it is
-            // loadable cross-file.
-            if class
-                .laravel()
-                .is_some_and(|l| l.belongs_to_many_pivots.iter().any(|p| p.using.is_some()))
-            {
-                for pivot in class.laravel_mut().belongs_to_many_pivots.iter_mut() {
-                    if let Some(using) = &pivot.using {
-                        pivot.using = Some(Self::resolve_name(using, use_map, namespace));
-                    }
-                }
-            }
-
-            // Resolve cast class names to FQN so that custom cast
-            // classes like `DecimalCast` (imported via `use`) are
-            // loadable cross-file when `cast_type_to_php_type` calls
-            // the class loader.
-            if let Some(laravel) = class.laravel.as_deref_mut() {
-                let resolve = |name: &str| Self::resolve_name(name, use_map, namespace);
-                let sources = laravel.cast_sources.as_deref_mut().into_iter();
-                for (_, cast_type) in laravel
-                    .casts_definitions
-                    .iter_mut()
-                    .chain(sources.flat_map(|s| s.property.iter_mut().chain(s.method.iter_mut())))
-                {
-                    // Built-in strings (`boolean`, `datetime:Y-m-d`) are left
-                    // alone. Class names, including the enum or collection a
-                    // framework cast's `of()` / `using()` names, are resolved
-                    // against this file's imports. A name that already
-                    // contains `\` is not passed through `resolve_name`,
-                    // which would prepend the file's namespace onto it.
-                    *cast_type =
-                        crate::virtual_members::laravel::qualify_cast_type(cast_type, resolve);
-                }
-            }
-
-            // Resolve type arguments in @extends, @implements, and @use
-            // generics so that after generic substitution, return types
-            // and property types are fully-qualified and can be resolved
-            // across files via PSR-4.
-            //
-            // Template params of the current class must be skipped so
-            // that forwarded params (e.g. `@use BuildsQueries<TModel>`
-            // where TModel is a class-level template) remain as bare
-            // names and match substitution map keys later.
-            //
-            // Type alias names are skipped too: they are expanded below,
-            // once every class's names have been qualified.
-            let tpl_params: Vec<String> = class
-                .template_params
-                .iter()
-                .map(|a| a.to_string())
-                .collect();
-            let generic_arg_skip: Vec<String> = tpl_params
-                .iter()
-                .cloned()
-                .chain(all_alias_names.iter().map(|a| a.to_string()))
-                .collect();
-            Self::resolve_generics_type_args(
-                &mut class.extends_generics,
-                use_map,
-                namespace,
-                &generic_arg_skip,
-            );
-            Self::resolve_generics_type_args(
-                &mut class.implements_generics,
-                use_map,
-                namespace,
-                &generic_arg_skip,
-            );
-            Self::resolve_generics_type_args(
-                &mut class.use_generics,
-                use_map,
-                namespace,
-                &generic_arg_skip,
-            );
-            Self::resolve_generics_type_args(
-                &mut class.mixin_generics,
-                use_map,
-                namespace,
-                &generic_arg_skip,
-            );
-
-            // Resolve template parameter bounds (`@template T of Bound`)
-            // so that short names like `PDependNode` become FQNs like
-            // `PDepend\Source\AST\ASTNode`.  Without this, mixin
-            // resolution that falls back to bounds gets unresolvable
-            // short names.
-            {
-                let bound_resolver = Self::build_type_resolver(use_map, namespace, &tpl_params);
-                for bound in class.template_param_bounds.values_mut() {
-                    let resolved = bound.resolve_names(&bound_resolver);
-                    if resolved != *bound {
-                        *bound = resolved;
-                    }
-                }
-            }
-
-            // Resolve class-like names in method return types and property
-            // type hints so that cross-file resolution works correctly.
-            // For example, if a method returns `Country` and the file has
-            // `use Acme\Core\Enums\Country`, the return type becomes
-            // the FQN `Acme\Core\Enums\Country`.
-            //
-            // Template params and type alias names are excluded to avoid
-            // mangling generic types and locally-defined type aliases.
-            // We collect alias names from ALL classes in the file because
-            // a type alias defined on one class may be referenced from a
-            // method in a different class in the same file.
-            let template_params = &class.template_params;
-            let skip_names: Vec<String> = template_params
-                .iter()
-                .map(|a| a.to_string())
-                .chain(all_alias_names.iter().map(|a| a.to_string()))
-                .collect();
-            let resolver = Self::build_type_resolver(use_map, namespace, &skip_names);
-
-            // Also resolve class-like names inside type alias definitions
-            // so that `@phpstan-type ActiveUser User` where `User` is
-            // imported via `use App\Models\User` becomes `App\Models\User`.
-            for def in class.type_aliases.values_mut() {
-                match def {
-                    TypeAliasDef::Import { source_class, .. } => {
-                        // Imported alias — resolve the source class name.
-                        let resolved_class = Self::resolve_name(source_class, use_map, namespace);
-                        if resolved_class != *source_class {
-                            *source_class = resolved_class;
-                        }
-                    }
-                    TypeAliasDef::Local(php_type) => {
-                        // Local alias — resolve class names within the type.
-                        let resolved = php_type.resolve_names(&resolver);
-                        *php_type = resolved;
-                    }
-                }
-            }
-
-            for method in class.methods.make_mut() {
-                let method = Arc::make_mut(method);
-                // Build a per-method skip list that includes both class-level
-                // and method-level template params so that names like `T` in
-                // `@return Collection<T>` are not namespace-resolved.
-                //
-                // When the method has its own template params, build a
-                // per-method resolver that skips them in addition to the
-                // class-level skip names.  Otherwise reuse the class-level
-                // resolver.
-                let method_skip: Vec<String>;
-                let method_resolver: &dyn Fn(&str) -> String =
-                    if method.template_params().is_empty() {
-                        &resolver
-                    } else {
-                        method_skip = skip_names
-                            .iter()
-                            .cloned()
-                            .chain(method.template_params().iter().map(|a| a.to_string()))
-                            .collect();
-                        // SAFETY: `method_skip` lives until end of this
-                        // `for method` iteration, so the closure is valid.
-                        &Self::build_type_resolver(use_map, namespace, &method_skip)
-                    };
-
-                if let Some(ref ret) = method.return_type {
-                    let resolved = ret.resolve_names(method_resolver);
-                    if resolved != *ret {
-                        method.return_type = Some(resolved);
-                    }
-                }
-                for param in method.parameters.make_mut() {
-                    let native_was_effective = param.native_type_hint == param.type_hint;
-                    if let Some(ref hint) = param.type_hint {
-                        let resolved = hint.resolve_names(method_resolver);
-                        if resolved != *hint {
-                            param.type_hint = Some(resolved);
-                        }
-                    }
-                    if native_was_effective {
-                        param.native_type_hint = param.type_hint.clone();
-                    } else if let Some(ref native) = param.native_type_hint {
-                        let resolved = native.resolve_names(method_resolver);
-                        if resolved != *native {
-                            param.native_type_hint = Some(resolved);
-                        }
-                    }
-                    // `@param-closure-this` names a class the same way the
-                    // rest of the docblock does, so it is resolved against
-                    // the declaring file's imports here.  The call site,
-                    // which is where the closure's `$this` is read, has no
-                    // access to this file's use-map.
-                    if let Some(ref this_type) = param.closure_this_type {
-                        let resolved = this_type.resolve_names(method_resolver);
-                        if resolved != *this_type {
-                            param.closure_this_type = Some(resolved);
-                        }
-                    }
-                }
-                let Some(extras) = method.extras.as_deref_mut() else {
-                    continue;
-                };
-                let resolve = |ty: &mut PhpType| {
-                    let resolved = ty.resolve_names(method_resolver);
-                    if resolved != *ty {
-                        *ty = resolved;
-                    }
-                };
-                if let Some(cond) = extras.conditional_return.as_mut() {
-                    resolve(cond);
-                }
-                // Resolve exception class names in @throws tags.
-                extras.throws.iter_mut().for_each(resolve);
-                // `@psalm-if-this-is` and `@psalm-this-out` are matched
-                // against the receiver's type, and the method's own
-                // `@template T of Bound` bounds are matched against the
-                // concrete types filling them.  Both sides of those
-                // comparisons have to be spelled the same way, and the
-                // receiver arrives fully qualified.
-                if let Some(pattern) = extras.if_this_is.as_mut() {
-                    resolve(pattern);
-                }
-                if let Some(self_out) = extras.self_out.as_mut() {
-                    resolve(self_out);
-                }
-                extras.template_param_bounds.values_mut().for_each(resolve);
-            }
-            for prop in class.properties.make_mut() {
-                let Some(hint) = prop.type_hint.as_ref() else {
-                    continue;
-                };
-                let resolved = hint.resolve_names(&resolver);
-                if resolved != *hint {
-                    Arc::make_mut(prop).type_hint = Some(resolved);
-                }
-            }
-
-            // Resolve type names inside `@property` / `@property-read` /
-            // `@property-write` and `@method` tags.  Their type strings use
-            // short names relative to the declaring file's imports, and a
-            // cross-file consumer has no access to this file's use-map.
-            if let Some(doc) = class.doc_members.as_ref()
-                && let Some(resolved) =
-                    Self::resolve_doc_member_types(doc, use_map, namespace, &skip_names, &resolver)
-            {
-                class.doc_members = Some(resolved);
-            }
-        }
-
-        // A member signature is read from every file that uses the class,
-        // where the alias names it would no longer be in scope.
-        if !all_alias_names.is_empty() {
-            crate::type_engine::types::aliases::expand_local_type_aliases(classes);
-        }
-    }
-
-    /// Resolve short class names in the `@property` and `@method` tags that
-    /// were parsed out of a class-level docblock.
-    ///
-    /// The tag types are written against the declaring file's imports, so
-    /// they are qualified here while that use-map is still in scope.  A
-    /// consumer in another file only ever sees the resolved form.
-    ///
-    /// Returns `None` when nothing changed, so the common case keeps
-    /// sharing the existing `Arc` rather than rebuilding it.
-    fn resolve_doc_member_types(
-        doc: &Arc<DocblockMembers>,
-        use_map: &HashMap<String, String>,
-        namespace: &Option<String>,
-        skip_names: &[String],
-        resolver: &dyn Fn(&str) -> String,
-    ) -> Option<Arc<DocblockMembers>> {
-        let mut changed = false;
-
-        let properties: Vec<(Atom, Option<PhpType>)> = doc
-            .properties
-            .iter()
-            .map(|(name, ty)| {
-                let resolved = ty.as_ref().map(|t| {
-                    let r = t.resolve_names(resolver);
-                    if r != *t {
-                        changed = true;
-                    }
-                    r
-                });
-                (*name, resolved)
-            })
-            .collect();
-
-        let methods: Vec<Arc<MethodInfo>> = doc
-            .methods
-            .iter()
-            .map(|m| {
-                // `@method foo<T>(T $x): T` declares its own template
-                // params, which must not be namespace-qualified.
-                let method_skip: Vec<String>;
-                let owned_resolver;
-                let method_resolver: &dyn Fn(&str) -> String = if m.template_params().is_empty() {
-                    resolver
-                } else {
-                    method_skip = skip_names
-                        .iter()
-                        .cloned()
-                        .chain(m.template_params().iter().map(|a| a.to_string()))
-                        .collect();
-                    owned_resolver = Self::build_type_resolver(use_map, namespace, &method_skip);
-                    &owned_resolver
-                };
-
-                let mut resolved = (**m).clone();
-                let mut method_changed = false;
-
-                if let Some(ref ret) = resolved.return_type {
-                    let r = ret.resolve_names(method_resolver);
-                    if r != *ret {
-                        resolved.return_type = Some(r);
-                        method_changed = true;
-                    }
-                }
-                for param in resolved.parameters.make_mut() {
-                    if let Some(ref hint) = param.type_hint {
-                        let r = hint.resolve_names(method_resolver);
-                        if r != *hint {
-                            param.native_type_hint = Some(r.clone());
-                            param.type_hint = Some(r);
-                            method_changed = true;
-                        }
-                    }
-                }
-                if let Some(extras) = resolved.extras.as_deref_mut() {
-                    for bound in extras.template_param_bounds.values_mut() {
-                        let r = bound.resolve_names(method_resolver);
-                        if r != *bound {
-                            *bound = r;
-                            method_changed = true;
-                        }
-                    }
-                }
-
-                if method_changed {
-                    changed = true;
-                    Arc::new(resolved)
-                } else {
-                    Arc::clone(m)
-                }
-            })
-            .collect();
-
-        changed.then(|| {
-            Arc::new(DocblockMembers {
-                methods,
-                properties,
-            })
-        })
-    }
-
-    /// Resolve type arguments in a generics list (e.g. `@extends`, `@implements`,
-    /// `@use`) to fully-qualified names.
-    ///
-    /// Each entry is `(ClassName, [TypeArg1, TypeArg2, …])`.  The class name
-    /// itself is resolved (e.g. `HasFactory` → `App\Concerns\HasFactory`),
-    /// and each type argument that looks like a class name (i.e. not a scalar
-    /// like `int`, `string`, etc.) is also resolved.
-    ///
-    /// `skip_names` contains template parameter names that must NOT be
-    /// resolved.  Without this, a forwarded template param like `TModel`
-    /// in `@use BuildsQueries<TModel>` would be namespace-qualified to
-    /// e.g. `Illuminate\Database\Eloquent\TModel`, preventing it from
-    /// matching substitution map keys during generic resolution.
-    fn resolve_generics_type_args(
-        generics: &mut [(Atom, Vec<PhpType>)],
-        use_map: &HashMap<String, String>,
-        namespace: &Option<String>,
-        skip_names: &[String],
-    ) {
-        let resolver = Self::build_type_resolver(use_map, namespace, skip_names);
-        for (class_name, type_args) in generics.iter_mut() {
-            // Resolve the base class/trait/interface name
-            let resolved: String = Self::resolve_name(class_name, use_map, namespace);
-            *class_name = atom(&resolved);
-
-            // Resolve each type argument (now PhpType) via resolve_names
-            for arg in type_args.iter_mut() {
-                let resolved = arg.resolve_names(&resolver);
-                if resolved != *arg {
-                    *arg = resolved;
-                }
-            }
-        }
-    }
-
-    /// Build a resolver closure that resolves class-like names to FQNs,
-    /// skipping template parameters, type aliases, and keyword types.
-    ///
-    /// The returned closure is suitable for passing to
-    /// `PhpType::resolve_names()`.  `is_keyword_type` inside `resolve_names`
-    /// already handles scalar and keyword types; this closure additionally
-    /// skips names in `skip_names` (template params and type alias names).
-    fn build_type_resolver<'a>(
-        use_map: &'a HashMap<String, String>,
-        namespace: &'a Option<String>,
-        skip_names: &'a [String],
-    ) -> impl Fn(&str) -> String + 'a {
-        move |name: &str| {
-            if skip_names.iter().any(|s| s == name) {
-                return name.to_string();
-            }
-            Self::resolve_name(name, use_map, namespace)
-        }
-    }
-
-    /// Resolve a class name to its fully-qualified form given a use_map and
-    /// namespace context.
-    ///
-    /// The returned name is **always without a leading `\`**.  This is the
-    /// canonical FQN representation used throughout the codebase.  For
-    /// example, `\RuntimeException` is returned as `RuntimeException`, and
-    /// `\App\Models\User` as `App\Models\User`.
-    fn resolve_name(
-        name: &str,
-        use_map: &HashMap<String, String>,
-        namespace: &Option<String>,
-    ) -> String {
-        // 1. Already fully-qualified — strip the leading `\`.
-        if let Some(stripped) = name.strip_prefix('\\') {
-            return stripped.to_string();
-        }
-
-        // 2/3. Check if the (first segment of the) name is in the use_map
-        if let Some(pos) = name.find('\\') {
-            // Qualified name — check first segment
-            let first = &name[..pos];
-            let rest = &name[pos..]; // includes leading '\'
-            if let Some(fqn) = use_map.get(first) {
-                return format!("{}{}", fqn, rest);
-            }
-        } else {
-            // Unqualified name — check directly
-            if let Some(fqn) = use_map.get(name) {
-                return fqn.clone();
-            }
-        }
-
-        // 4. Prepend current namespace if available.
-        if let Some(ns) = namespace {
-            format!("{}\\{}", ns, name)
-        } else {
-            name.to_string()
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
     use crate::Backend;
 
@@ -2677,88 +1181,6 @@ mod tests {
         }));
     }
 
-    /// Changing a function's parameter type should cause `update_ast` to
-    /// return `true` (signature changed), triggering cross-file
-    /// diagnostic invalidation.  This is the exact scenario from
-    /// GitHub issue #123.
-    #[test]
-    fn update_ast_detects_function_param_type_change() {
-        let backend = Backend::new_test();
-        let uri = "file:///test2.php";
-
-        let v1 = "<?php\nfunction bar(null $x) {\n    return $x;\n}\n";
-        let changed = backend.update_ast(uri, v1);
-        // First parse — no old functions to compare against.
-        assert!(!changed, "First parse should not report a change");
-
-        let v2 = "<?php\nfunction bar(string $x) {\n    return $x;\n}\n";
-        let changed = backend.update_ast(uri, v2);
-        assert!(
-            changed,
-            "Changing parameter type null→string must be detected"
-        );
-    }
-
-    /// Changing a function's return type should be detected.
-    #[test]
-    fn update_ast_detects_function_return_type_change() {
-        let backend = Backend::new_test();
-        let uri = "file:///helpers.php";
-
-        let v1 = "<?php\nfunction helper(): int {\n    return 42;\n}\n";
-        backend.update_ast(uri, v1);
-
-        let v2 = "<?php\nfunction helper(): string {\n    return 'hello';\n}\n";
-        let changed = backend.update_ast(uri, v2);
-        assert!(changed, "Changing return type int→string must be detected");
-    }
-
-    /// Changing only the function body (not the signature) should NOT
-    /// trigger cross-file invalidation.
-    #[test]
-    fn update_ast_ignores_function_body_change() {
-        let backend = Backend::new_test();
-        let uri = "file:///helpers.php";
-
-        let v1 = "<?php\nfunction helper(int $x): int {\n    return $x + 1;\n}\n";
-        backend.update_ast(uri, v1);
-
-        let v2 = "<?php\nfunction helper(int $x): int {\n    return $x + 2;\n}\n";
-        let changed = backend.update_ast(uri, v2);
-        assert!(
-            !changed,
-            "Body-only change should not report a signature change"
-        );
-    }
-
-    /// Adding a new function should be detected as a change.
-    #[test]
-    fn update_ast_detects_new_function() {
-        let backend = Backend::new_test();
-        let uri = "file:///helpers.php";
-
-        let v1 = "<?php\nfunction foo(): void {}\n";
-        backend.update_ast(uri, v1);
-
-        let v2 = "<?php\nfunction foo(): void {}\nfunction bar(): void {}\n";
-        let changed = backend.update_ast(uri, v2);
-        assert!(changed, "Adding a new function must be detected");
-    }
-
-    /// Removing a function should be detected as a change.
-    #[test]
-    fn update_ast_detects_removed_function() {
-        let backend = Backend::new_test();
-        let uri = "file:///helpers.php";
-
-        let v1 = "<?php\nfunction foo(): void {}\nfunction bar(): void {}\n";
-        backend.update_ast(uri, v1);
-
-        let v2 = "<?php\nfunction foo(): void {}\n";
-        let changed = backend.update_ast(uri, v2);
-        assert!(changed, "Removing a function must be detected");
-    }
-
     /// Two parses of one template can race: an index worker lowers it with
     /// the scope it had, while call-site inference re-parses it with a
     /// larger one.  Whichever lands last, the virtual PHP, the source map
@@ -2843,69 +1265,6 @@ mod tests {
             fresh_virtual_php,
             "a batch built from a scope the template has moved past must not \
              overwrite the lowering built from the current scope"
-        );
-    }
-
-    /// Adding a parameter to a function should be detected.
-    #[test]
-    fn update_ast_detects_added_parameter() {
-        let backend = Backend::new_test();
-        let uri = "file:///helpers.php";
-
-        let v1 = "<?php\nfunction greet(string $name): string {\n    return $name;\n}\n";
-        backend.update_ast(uri, v1);
-
-        let v2 = "<?php\nfunction greet(string $name, string $greeting = 'Hello'): string {\n    return \"$greeting $name\";\n}\n";
-        let changed = backend.update_ast(uri, v2);
-        assert!(changed, "Adding a parameter must be detected");
-    }
-
-    /// Verify that stale function entries are cleaned up when a file
-    /// is re-parsed without the function.
-    #[test]
-    fn update_ast_cleans_up_stale_functions() {
-        let backend = Backend::new_test();
-        let uri = "file:///helpers.php";
-
-        let v1 = "<?php\nfunction old_helper(): void {}\n";
-        backend.update_ast(uri, v1);
-        assert!(
-            backend
-                .symbols
-                .global_functions
-                .read()
-                .get("old_helper")
-                .is_some(),
-            "Function should be registered after first parse"
-        );
-
-        let v2 = "<?php\n// function removed\n";
-        backend.update_ast(uri, v2);
-        assert!(
-            backend
-                .symbols
-                .global_functions
-                .read()
-                .get("old_helper")
-                .is_none(),
-            "Stale function should be removed after re-parse"
-        );
-    }
-
-    /// Class signature changes should still be detected (regression guard).
-    #[test]
-    fn update_ast_still_detects_class_signature_change() {
-        let backend = Backend::new_test();
-        let uri = "file:///MyClass.php";
-
-        let v1 = "<?php\nclass MyClass {\n    public function foo(): int { return 1; }\n}\n";
-        backend.update_ast(uri, v1);
-
-        let v2 = "<?php\nclass MyClass {\n    public function foo(): string { return 'a'; }\n}\n";
-        let changed = backend.update_ast(uri, v2);
-        assert!(
-            changed,
-            "Class method return type change must still be detected"
         );
     }
 
@@ -3063,8 +1422,8 @@ class User extends Model {
     /// When a class name is declared in two files, the fqn-keyed derived
     /// indexes must describe the same declaration the class index resolved
     /// the name to.  Re-parsing the losing copy used to clear the winner's
-    /// method-store and reverse-inheritance entries without putting them
-    /// back, so go-to-implementation stopped listing the class.
+    /// reverse-inheritance entries without putting them back, so
+    /// go-to-implementation stopped listing the class.
     #[test]
     fn duplicate_class_derived_indexes_follow_the_winner() {
         let backend = Backend::new_test();
@@ -3082,14 +1441,6 @@ class User extends Model {
             "<?php namespace Vendor; class Variant { /* edited */ }",
         );
 
-        assert!(
-            backend
-                .symbols
-                .method_store
-                .read()
-                .contains_key(&("Vendor\\Variant".to_string(), "rich".to_string())),
-            "the winner's method must survive a re-parse of the losing copy"
-        );
         assert!(
             backend
                 .symbols
@@ -3113,14 +1464,6 @@ class User extends Model {
             "<?php namespace Vendor; class Fresh extends Base { public function hello() {} }",
         );
 
-        assert!(
-            backend
-                .symbols
-                .method_store
-                .read()
-                .contains_key(&("Vendor\\Fresh".to_string(), "hello".to_string())),
-            "a first-parse class must populate the method store"
-        );
         assert!(
             backend
                 .symbols
@@ -3152,16 +1495,6 @@ class User extends Model {
         backend.update_ast(
             "file:///a_rich.php",
             "<?php namespace Vendor; class Renamed extends Rich { public function rich() {} }",
-        );
-
-        let store = backend.symbols.method_store.read();
-        assert!(
-            store.contains_key(&("Vendor\\Variant".to_string(), "bare".to_string())),
-            "the promoted declaration's members must be indexed"
-        );
-        assert!(
-            !store.contains_key(&("Vendor\\Variant".to_string(), "rich".to_string())),
-            "the withdrawn declaration's members must be gone"
         );
 
         let gti = backend.symbols.gti_index.read();

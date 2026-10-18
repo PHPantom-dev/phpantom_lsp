@@ -107,6 +107,7 @@ mod generate_constructor;
 mod generate_getter_setter;
 mod generate_property_hooks;
 pub(crate) mod implement_methods;
+mod import_all_classes;
 mod import_class;
 mod inline_variable;
 mod insert_translation_key;
@@ -115,14 +116,15 @@ mod naming;
 pub(crate) mod phpstan;
 mod promote_constructor_param;
 mod remove_unused_import;
-pub(crate) use remove_unused_import::{
-    build_line_deletion_edit, build_use_directive_deletion_edit, range_touches_use_import,
-};
 mod replace_deprecated;
 mod replace_fqcn;
 mod simplify_null;
 mod sort_use_statements;
 mod update_docblock;
+mod use_line_deletion;
+pub(crate) use use_line_deletion::{
+    build_line_deletion_edit, build_use_directive_deletion_edit, range_touches_use_import,
+};
 
 mod docblock_edit;
 mod helpers;
@@ -133,12 +135,16 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 
-pub(crate) use docblock_edit::{DocblockAbove, find_docblock_above_line};
+pub(crate) use docblock_edit::{
+    DocblockAbove, FunctionDocblock, find_docblock_above_line, find_function_keyword_line,
+    function_docblock_at, function_docblock_at_line,
+};
 pub(crate) use helpers::{
     CodeActionData, create_file_edit, detect_indent_from_members, document_changes_edit,
-    find_identical_occurrences, indent_of_line_at, indent_unit, make_code_action_data,
-    multi_file_edit, occurrence_replacement_edit, single_edit, single_file_edit,
-    sort_edits_by_position,
+    extract_wants_all_occurrences, indent_of_line_at, indent_unit, make_code_action_data,
+    multi_file_edit, occurrence_replacement_edit, push_extract_actions, replace_spans_edits,
+    rewrite_action, selected_byte_range, selection_and_identical_occurrences, single_edit,
+    single_file_edit, sort_edits_by_position,
 };
 
 /// When the request range starts in whitespace, return a copy of `params`

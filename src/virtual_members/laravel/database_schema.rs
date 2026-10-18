@@ -492,7 +492,7 @@ fn collect_configured_migration_files(
 ///
 /// It starts at the workspace root and has to cross the whole project, so
 /// it uses the `ignore` crate for the same reason the other workspace
-/// walkers do (`collect_php_files`, `collect_php_files_gitignore`):
+/// walkers do (`classmap_scanner::collect_php_files_gitignore`):
 /// generated and vendored trees are skipped rather than crawled, and
 /// directory symlinks are not followed, so a link that points back at an
 /// ancestor cannot spin the walk forever.  Entries that cannot be read

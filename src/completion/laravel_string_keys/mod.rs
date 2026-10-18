@@ -73,7 +73,7 @@ impl Backend {
             crate::text_position::offset_to_position(content, span.end as usize),
         );
         let items = self
-            .string_key_candidates(&LaravelStringKind::MorphAlias, None, prefix)
+            .string_key_candidates(&LaravelStringKind::MorphAlias, prefix)
             .iter()
             .filter(|alias| alias.starts_with(prefix))
             .map(|alias| CompletionItem {
@@ -100,17 +100,15 @@ impl Backend {
     /// valid, which ordinary class completion already offers, and the set of
     /// keys is open besides — a list of them would read as the whole answer
     /// when it is not.
-    fn string_key_candidates(
-        &self,
-        kind: &LaravelStringKind,
-        config_sub_prefix: Option<&str>,
-        typed_prefix: &str,
-    ) -> Arc<[String]> {
+    fn string_key_candidates(&self, kind: &LaravelStringKind, typed_prefix: &str) -> Arc<[String]> {
         match kind {
             LaravelStringKind::Route => self.cached_route_names(),
             LaravelStringKind::Config => self.cached_config_keys(),
             LaravelStringKind::ConfigResource(resource) => {
-                let prefix = config_sub_prefix.expect("config resources always have a prefix");
+                // `#[Database('mysql')]` completes the keys under
+                // `database.connections.` with that prefix stripped.
+                let prefix =
+                    crate::symbol_map::laravel_resources::descriptor(*resource).config_prefix;
                 // Runtime writes can contain the half-typed name under the
                 // cursor, so offer only names declared by config files.
                 let keys = self.cached_config_keys();
@@ -217,7 +215,7 @@ impl Backend {
 
         // The candidate lists are shared with every other consumer, so only
         // the names the typed prefix keeps are copied out of them.
-        let candidates = self.string_key_candidates(&ctx.kind, ctx.config_sub_prefix, ctx.prefix);
+        let candidates = self.string_key_candidates(&ctx.kind, ctx.prefix);
         let prefix = ctx.prefix.as_bytes();
         let names: Vec<String> = candidates
             .iter()

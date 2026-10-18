@@ -291,6 +291,65 @@ async fn test_macro_registration_references_include_unresolved_chain_call() {
     );
 }
 
+/// Loading a class reads the macro index, and a reader queues behind a
+/// waiting writer, so a search holding the index across its ancestor walk
+/// would deadlock against a rebuild arriving mid-walk.  Holding the stub
+/// index stops the walk inside the load of `\Countable`, and the macro index
+/// must be free there.
+#[test]
+fn macro_targets_leave_the_macro_index_free_while_loading_ancestors() {
+    let backend = Backend::new_test_with_stubs(std::collections::HashMap::from([(
+        "Countable",
+        "<?php interface Countable {}",
+    )]));
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "Widget::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    backend.update_ast(
+        "file:///Widget.php",
+        concat!(
+            "<?php\n",
+            "namespace App\\Support;\n",
+            "class Widget implements \\Countable {}\n",
+        ),
+    );
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let stubs = backend.stub_index.write();
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let walker = {
+        let backend = backend.clone_for_blocking();
+        std::thread::spawn(move || {
+            started_tx.send(()).expect("report start");
+            backend.collect_macro_declaring_targets(&["App\\Support\\Widget".to_string()], "shine")
+        })
+    };
+    started_rx.recv().expect("walker thread started");
+    // Time to reach the stub lookup, which cannot finish while `stubs` is held.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert!(
+        !walker.is_finished(),
+        "the walk should be waiting to load `\\Countable`"
+    );
+    assert!(
+        backend
+            .laravel_macros
+            .try_write_for(std::time::Duration::from_secs(5))
+            .is_some(),
+        "the macro index must not be held while the walk loads a class"
+    );
+    drop(stubs);
+
+    assert_eq!(
+        walker.join().expect("walker thread"),
+        Some(vec!["App\\Support\\Widget".to_string()])
+    );
+}
+
 #[test]
 fn workspace_indexing_batch_merges_disk_files() {
     use crate::reference_index::ReferenceIndexKey;

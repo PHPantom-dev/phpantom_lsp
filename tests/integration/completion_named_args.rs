@@ -217,6 +217,37 @@ async fn test_named_args_skip_positional() {
     );
 }
 
+/// An array or `match` argument holds commas and brackets of its own,
+/// which neither end the call nor count as more arguments.
+#[tokio::test]
+async fn test_named_args_after_array_and_match_arguments() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///na_nested.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Svc {\n",
+        "    public function setup(array $hosts, string $mode, bool $ssl): void {}\n",
+        "    public function test($k) {\n",
+        "        $this->setup(['a', 'b'], match ($k) { 1 => 'x', default => 'y' }, \n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 74).await;
+    let tags = filter_texts(&items);
+
+    assert!(
+        !tags.contains(&"hosts") && !tags.contains(&"mode"),
+        "Should NOT suggest the two parameters already passed. Got: {:?}",
+        tags
+    );
+    assert!(
+        tags.contains(&"ssl"),
+        "Should suggest 'ssl'. Got: {:?}",
+        tags
+    );
+}
+
 // ─── Prefix filtering ──────────────────────────────────────────────────────
 
 /// Typing a partial prefix should filter the suggestions.

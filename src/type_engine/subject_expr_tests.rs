@@ -390,10 +390,12 @@ fn parse_new_expression_no_parens() {
 
 #[test]
 fn parse_new_expression_fqn() {
+    // The leading `\` marks an explicit global reference, so it survives
+    // for the resolver to honour.
     assert_eq!(
         SubjectExpr::parse("(new \\App\\Builder())"),
         SubjectExpr::NewExpr {
-            class_name: "App\\Builder".to_string(),
+            class_name: "\\App\\Builder".to_string(),
         }
     );
 }
@@ -1118,6 +1120,80 @@ fn parse_call_on_parenthesized_new() {
                 method: "all".to_string(),
             }),
             args_text: String::new(),
+        }
+    );
+}
+
+// ── Quotes and nested brackets ──────────────────────────────────────
+
+#[test]
+fn parse_arrow_inside_a_string_key_is_not_a_property_access() {
+    assert_eq!(
+        SubjectExpr::parse("$a['k->v']"),
+        SubjectExpr::ArrayAccess {
+            base: Box::new(SubjectExpr::Variable("$a".to_string())),
+            segments: vec![BracketSegment::StringKey("k->v".to_string())],
+        }
+    );
+}
+
+#[test]
+fn parse_closing_bracket_inside_a_string_key() {
+    assert_eq!(
+        SubjectExpr::parse("$data['a]b']"),
+        SubjectExpr::ArrayAccess {
+            base: Box::new(SubjectExpr::Variable("$data".to_string())),
+            segments: vec![BracketSegment::StringKey("a]b".to_string())],
+        }
+    );
+}
+
+#[test]
+fn parse_nested_bracket_index_keeps_the_segments_after_it() {
+    assert_eq!(
+        SubjectExpr::parse("$a[$b['x']]['y']"),
+        SubjectExpr::ArrayAccess {
+            base: Box::new(SubjectExpr::Variable("$a".to_string())),
+            segments: vec![
+                BracketSegment::ElementAccess,
+                BracketSegment::StringKey("y".to_string()),
+            ],
+        }
+    );
+}
+
+#[test]
+fn parse_inline_array_element_with_a_comma_in_a_string() {
+    assert_eq!(
+        SubjectExpr::parse("['a,b', 'c'][0]"),
+        SubjectExpr::InlineArray {
+            elements: vec!["'a,b'".to_string(), "'c'".to_string()],
+            index_segments: vec![BracketSegment::IntKey("0".to_string())],
+        }
+    );
+}
+
+#[test]
+fn parse_call_whose_argument_is_a_parenthesis_in_a_string() {
+    assert_eq!(
+        SubjectExpr::parse("foo(')')"),
+        SubjectExpr::CallExpr {
+            callee: Box::new(SubjectExpr::FunctionCall("foo".to_string())),
+            args_text: "')'".to_string(),
+        }
+    );
+}
+
+#[test]
+fn parse_call_array_access_with_brackets_in_a_string_argument() {
+    assert_eq!(
+        SubjectExpr::parse("get(')[')[0]"),
+        SubjectExpr::ArrayAccess {
+            base: Box::new(SubjectExpr::CallExpr {
+                callee: Box::new(SubjectExpr::FunctionCall("get".to_string())),
+                args_text: "')['".to_string(),
+            }),
+            segments: vec![BracketSegment::IntKey("0".to_string())],
         }
     );
 }

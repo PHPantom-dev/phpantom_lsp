@@ -1,12 +1,51 @@
-//! Global constant lookup for hover.
+//! Global constant hover and lookup.
 //!
 //! Resolves a global constant's value through the parsed defines, the
 //! autoload constant index, known autoload files, and finally the
 //! embedded PHP stubs, lazily parsing files as needed.
 
+use tower_lsp::lsp_types::Hover;
+
 use crate::Backend;
 
+use super::HoverSite;
+use super::formatting::make_hover;
+
 impl Backend {
+    /// Hover for a global constant reference: its value when known.
+    pub(super) fn hover_constant_reference(
+        &self,
+        site: &HoverSite,
+        symbol_start: u32,
+        name: &str,
+    ) -> Option<Hover> {
+        let ctx = site.ctx;
+        // The name is resolved against the file the same way the
+        // type engine resolves it, so a namespaced constant is
+        // found through whichever spelling the reference used.
+        let lookup = self.resolve_constant_name_at(
+            name,
+            ctx.resolved_names.as_deref(),
+            symbol_start,
+            &ctx.use_map,
+            &ctx.symbol_imports.constants,
+            &ctx.namespace,
+        );
+
+        // `lookup` is `Some(Some(val))` when the constant
+        // exists with a known value, `Some(None)` when it
+        // exists but the value is unknown, and `None` when
+        // the constant was not found at all.
+        match lookup {
+            Some(Some(val)) => Some(make_hover(format!(
+                "```php\n<?php\nconst {} = {};\n```",
+                name, val
+            ))),
+            Some(None) => Some(make_hover(format!("```php\n<?php\nconst {};\n```", name))),
+            None => None,
+        }
+    }
+
     /// Look up a global constant by name, returning its value if found.
     ///
     /// Searches in order:

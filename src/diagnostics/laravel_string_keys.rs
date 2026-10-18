@@ -34,6 +34,312 @@ enum CheckedStringKind {
     GateAbility,
 }
 
+impl CheckedStringKind {
+    /// The kind to judge a key of `kind` as, or `None` for the kinds this
+    /// pass leaves alone.
+    fn of(kind: &crate::symbol_map::LaravelStringKind) -> Option<Self> {
+        use crate::symbol_map::LaravelStringKind;
+
+        Some(match kind {
+            LaravelStringKind::Route => Self::Route,
+            LaravelStringKind::Config => Self::Config,
+            LaravelStringKind::ConfigResource(resource) => Self::ConfigResource(*resource),
+            LaravelStringKind::View => Self::View,
+            LaravelStringKind::Trans => Self::Trans,
+            LaravelStringKind::Command => Self::Command,
+            LaravelStringKind::MorphAlias => Self::MorphAlias,
+            LaravelStringKind::GateAbility => Self::GateAbility,
+            // A section or stack name is judged against the templates that
+            // render the one it is written in, which the Blade pass has and
+            // this one does not.  And anything at all can be bound at
+            // runtime, so an unrecognised container key proves nothing —
+            // nor does an environment variable absent from `.env`, since
+            // the environment a process runs with is not on disk.
+            LaravelStringKind::Section
+            | LaravelStringKind::Stack
+            | LaravelStringKind::ContainerBinding
+            | LaravelStringKind::Env => return None,
+        })
+    }
+}
+
+/// A key the pass judges: its kind, the key, and its byte range.
+type CheckedKeySpan<'a> = (CheckedStringKind, &'a str, u32, u32);
+
+/// What a key check concluded: `None` when the key cannot be judged, else
+/// whether the project declares it, with the label and diagnostic code an
+/// undeclared one is reported under.
+type Verdict = Option<(bool, &'static str, &'static str)>;
+
+/// What the project declares for the kinds of key one file names, read
+/// once per pass and only for those kinds.  The enumerations are shared
+/// with every other consumer, so they are read in place rather than copied
+/// into a set per pass.  A kind that cannot be judged gets an empty (or
+/// `None`) answer, which every check below reads as "skip".
+struct DeclaredKeys<'a> {
+    backend: &'a Backend,
+    /// `None` unless the project registers routes of its own.
+    routes: Option<Arc<crate::virtual_members::laravel::RouteDiscovery>>,
+    config_keys: Arc<[String]>,
+    /// The config resources (guards, disks, …) whose subtree the declared
+    /// config keys cover.
+    config_resource_mask: u8,
+    view_names: Arc<[String]>,
+    trans_keys: Arc<[String]>,
+    commands_indexed: bool,
+    morph_map_enforced: bool,
+    gate_abilities: Arc<[String]>,
+}
+
+impl<'a> DeclaredKeys<'a> {
+    /// Enumerate what the project declares for the kinds in `spans`.
+    ///
+    /// Must not run under the `symbol_maps` read lock: the enumerations
+    /// call `user_file_symbol_maps()` → `ensure_workspace_indexed()` →
+    /// `parse_files_parallel()` → `update_ast()`, which acquires a WRITE
+    /// lock on `symbol_maps`.
+    fn enumerate(backend: &'a Backend, spans: &[CheckedKeySpan]) -> Self {
+        let names = |wanted: fn(CheckedStringKind) -> bool| spans.iter().any(|span| wanted(span.0));
+        let has_route = names(|kind| kind == CheckedStringKind::Route);
+        let has_config_resource =
+            names(|kind| matches!(kind, CheckedStringKind::ConfigResource(_)));
+        let has_config = has_config_resource || names(|kind| kind == CheckedStringKind::Config);
+        let has_view = names(|kind| kind == CheckedStringKind::View);
+        let has_trans = names(|kind| kind == CheckedStringKind::Trans);
+        let has_command = names(|kind| kind == CheckedStringKind::Command);
+        let has_morph_alias = names(|kind| kind == CheckedStringKind::MorphAlias);
+        let has_gate_ability = names(|kind| kind == CheckedStringKind::GateAbility);
+
+        // A package with no routes of its own, whose names are registered
+        // by the host application, cannot be judged: the valid set is
+        // unknown, not empty.  Installed packages register routes of their
+        // own, so the question is whether *this project* contributed any,
+        // not whether the set is empty.
+        let routes = has_route
+            .then(|| backend.cached_routes())
+            .filter(|discovery| discovery.routes.iter().any(|route| !route.from_vendor));
+
+        // A library is installed into an application that declares the
+        // configuration it reads, and that application is a file we never
+        // see, so none of its keys can be judged.  Only an application owns
+        // the whole of its configuration.
+        let has_config = has_config && backend.is_application_project();
+        if has_config {
+            // Runtime writes can live in unopened files. Index them before
+            // judging reads, outside the config-enumeration build locks. A
+            // completed index is reused as is: watched-file notifications
+            // keep it current, and a refresh walk per diagnostic pass would
+            // put a workspace scan on every keystroke.
+            backend.ensure_workspace_index_ready_for_request();
+        }
+        let config_keys: Arc<[String]> = if has_config {
+            backend.cached_config_keys()
+        } else {
+            Arc::default()
+        };
+        let config_resource_mask = if has_config_resource {
+            config_keys.iter().fold(0, |mask, key| {
+                crate::symbol_map::laravel_resources::resource_from_config_key(key)
+                    .map_or(mask, |(resource, _)| mask | resource.bit())
+            })
+        } else {
+            0
+        };
+
+        let view_names: Arc<[String]> = if has_view {
+            backend.cached_view_names()
+        } else {
+            Arc::default()
+        };
+
+        // An application whose strings live in a database still has `vendor/`'s
+        // own `lang/` files on disk, so the enumerated set is non-empty while
+        // covering none of the application's own keys.  Once a provider has
+        // rebound the translator away from Laravel's file loader, what is valid
+        // is unknowable.
+        let trans_keys: Arc<[String]> = if has_trans
+            && !backend
+                .laravel_provider_resources
+                .read()
+                .custom_translation_loader
+        {
+            backend.cached_trans_keys()
+        } else {
+            Arc::default()
+        };
+
+        // When no commands were indexed at all, skip command diagnostics
+        // entirely.  The scan is heuristic (it relies on the `*Command`
+        // naming convention), so an empty index likely means discovery
+        // failed rather than that every referenced command is invalid.
+        let commands_indexed = has_command && !backend.laravel_commands.read().is_empty();
+
+        // A morph alias is only checkable when the project calls
+        // `Relation::enforceMorphMap()` / `requireMorphMap()`.  Without that,
+        // an unmapped model still morphs under its class name, so the set of
+        // valid `*_type` values is open and an unknown alias proves nothing.
+        let morph_map_enforced = has_morph_alias && backend.laravel_morph_map.read().is_enforced();
+
+        // Abilities are only checkable when the project defines some: an
+        // empty set means gate discovery found nothing (a project that
+        // authorizes entirely through runtime-registered callbacks, or one
+        // that is not really using Laravel's gate), not that every ability
+        // referenced is wrong.
+        //
+        // A `Gate::before()` callback, or a package that answers checks from a
+        // permission table, grants abilities that appear nowhere in source.  A
+        // single unrelated `Gate::define()` call is enough to make the
+        // enumerated set non-empty, so emptiness alone does not catch this: the
+        // ability space is open and the whole check has to stand down —
+        // including the walk of every policy class that would enumerate it.
+        let gate_abilities: Arc<[String]> =
+            if has_gate_ability && !backend.laravel_gates.read().ability_space_is_open() {
+                backend.cached_gate_abilities()
+            } else {
+                Arc::default()
+            };
+
+        Self {
+            backend,
+            routes,
+            config_keys,
+            config_resource_mask,
+            view_names,
+            trans_keys,
+            commands_indexed,
+            morph_map_enforced,
+            gate_abilities,
+        }
+    }
+
+    fn judge(&self, kind: CheckedStringKind, key: &str) -> Verdict {
+        match kind {
+            CheckedStringKind::Route => self.judge_route(key),
+            CheckedStringKind::Config => self.judge_config_key(key),
+            CheckedStringKind::ConfigResource(resource) => {
+                self.judge_config_resource(resource, key)
+            }
+            CheckedStringKind::View => Some((
+                self.view_names
+                    .binary_search_by(|name| name.as_str().cmp(key))
+                    .is_ok(),
+                "view",
+                "invalid_laravel_view",
+            )),
+            CheckedStringKind::Trans => {
+                // When no translation files are found at all, skip trans
+                // diagnostics entirely.  This avoids false positives in
+                // non-Laravel projects (WordPress, GetText) that also use
+                // `__()` or `trans()` as function names.
+                if self.trans_keys.is_empty() {
+                    return None;
+                }
+                Some((
+                    names_key_or_group(&self.trans_keys, key),
+                    "translation key",
+                    "invalid_laravel_trans",
+                ))
+            }
+            CheckedStringKind::Command => self.commands_indexed.then(|| {
+                (
+                    self.backend.laravel_commands.read().contains_name(key),
+                    "command",
+                    "invalid_laravel_command",
+                )
+            }),
+            CheckedStringKind::MorphAlias => self.morph_map_enforced.then(|| {
+                (
+                    self.backend.laravel_morph_map.read().has_alias(key),
+                    "morph type",
+                    "invalid_laravel_morph_alias",
+                )
+            }),
+            // An ability is reported with its own message, see
+            // `Backend::gate_ability_problem`.
+            CheckedStringKind::GateAbility => None,
+        }
+    }
+
+    fn judge_route(&self, key: &str) -> Verdict {
+        let discovery = self.routes.as_ref()?;
+        // A group whose `->name()` argument was not a string literal
+        // (e.g. Filament's `Route::name($panelId . '.')` has children we
+        // cannot enumerate statically.  Any route that falls under such a
+        // prefix is unjudgeable, and so is any route ending in one of the
+        // names such a group registers, even when it recorded no known
+        // prefix at all (e.g. a group with no enclosing literal group whose
+        // own name is entirely a variable).
+        if discovery
+            .open_prefixes
+            .iter()
+            .any(|prefix| key.starts_with(prefix))
+            || discovery
+                .open_suffixes
+                .iter()
+                .any(|suffix| key.ends_with(suffix))
+        {
+            return None;
+        }
+        // A `Route::is('admin.*')` check names a pattern rather than one
+        // route, and matches whatever the project has under it.
+        let valid = if key.contains('*') {
+            discovery
+                .names
+                .iter()
+                .any(|name| crate::virtual_members::laravel::route_name_matches(key, name))
+        } else {
+            discovery
+                .names
+                .binary_search_by(|name| name.as_str().cmp(key))
+                .is_ok()
+        };
+        Some((valid, "route", "invalid_laravel_route"))
+    }
+
+    fn judge_config_key(&self, key: &str) -> Verdict {
+        // Only judge a key whose config file we actually read.  An unknown
+        // root means the file never reached us, so the key cannot be wrong
+        // as far as we can tell, while a typo inside a file we did read is
+        // still caught.  A runtime write is deliberately not a root of its
+        // own: the keys one file writes say nothing about what the rest of
+        // that namespace holds, least of all when the writes that
+        // established it were spelled dynamically.
+        let root = key.split('.').next().unwrap_or(key);
+        if !names_key_or_group(&self.config_keys, root) {
+            return None;
+        }
+        // Config keys may be partial prefixes (e.g. `config('app')`) which
+        // are valid even without a direct match.  A key that
+        // `Config::set()` or the array form of the `config()` helper
+        // establishes is as real as one a `config/` file declares; a test
+        // that configures a disk in `setUp()` before exercising it is the
+        // common shape.
+        let valid = names_key_or_group(&self.config_keys, key)
+            || self.backend.runtime_config_key_covers(key);
+        Some((valid, "config key", "invalid_laravel_config"))
+    }
+
+    fn judge_config_resource(
+        &self,
+        resource: crate::symbol_map::LaravelConfigResource,
+        key: &str,
+    ) -> Verdict {
+        if crate::symbol_map::laravel_resources::is_implicit_resource_name(resource, key) {
+            return None;
+        }
+        // An undiscovered subtree is an unknown vocabulary, not proof that
+        // every runtime-provided name is invalid.
+        if self.config_resource_mask & resource.bit() == 0 {
+            return None;
+        }
+        let descriptor = crate::symbol_map::laravel_resources::descriptor(resource);
+        let config_key = crate::symbol_map::laravel_resources::config_key(resource, key);
+        let valid = self.config_keys.binary_search(&config_key).is_ok()
+            || self.backend.runtime_config_key_covers(&config_key);
+        Some((valid, descriptor.label, descriptor.diagnostic_code))
+    }
+}
+
 impl Backend {
     /// Emit a warning for each `$this->argument('x')` / `$this->option('x')`
     /// whose name is not a parameter of the enclosing command's `$signature`.
@@ -120,356 +426,83 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        use crate::symbol_map::{LaravelStringKind, SymbolKind};
+        use crate::symbol_map::SymbolKind;
 
-        // Extract the LaravelStringKey spans we need and determine which
-        // kinds are present, then DROP the read lock before calling
-        // enumeration functions.  Those functions call
-        // `user_file_symbol_maps()` → `ensure_workspace_indexed()` →
-        // `parse_files_parallel()` → `update_ast()` which acquires a
-        // WRITE lock on `symbol_maps`.  Holding a read lock here while
-        // that write is attempted would deadlock.
-        let mut has_route = false;
-        let mut has_config = false;
-        let mut has_config_resource = false;
-        let mut has_view = false;
-        let mut has_trans = false;
-        let mut has_command = false;
-        let mut has_morph_alias = false;
-        let mut has_gate_ability = false;
+        // Extract the LaravelStringKey spans we need, then DROP the read
+        // lock before enumerating declarations (see
+        // `DeclaredKeys::enumerate`): holding it while that takes the
+        // write lock would deadlock.
         let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
             return;
         };
         let extra = self.typed_receiver_view_spans_for(uri, &symbol_map);
         let morph_columns = self.morph_column_spans_for(uri, &symbol_map);
-        let key_spans: Vec<(CheckedStringKind, &str, u32, u32)> = symbol_map
+        let key_spans: Vec<CheckedKeySpan> = symbol_map
             .spans
             .iter()
             .chain(extra.iter())
             .chain(morph_columns.iter())
             .filter(|span| super::incremental::reports_site(span.start))
             .filter_map(|span| {
-                if let SymbolKind::LaravelStringKey {
+                let SymbolKind::LaravelStringKey {
                     kind,
                     key,
                     is_write,
                     is_optional,
                 } = &span.kind
-                {
-                    // A write declares the key it names, so there is
-                    // nothing to check it against, and an optional key
-                    // is one the call is written to do without: an
-                    // `@includeFirst` candidate that names nothing is
-                    // why the directive takes a list at all.
-                    if *is_write || *is_optional {
-                        return None;
-                    }
-                    let checked = match kind {
-                        LaravelStringKind::Route => {
-                            has_route = true;
-                            CheckedStringKind::Route
-                        }
-                        LaravelStringKind::Config => {
-                            has_config = true;
-                            CheckedStringKind::Config
-                        }
-                        LaravelStringKind::ConfigResource(resource) => {
-                            has_config = true;
-                            has_config_resource = true;
-                            CheckedStringKind::ConfigResource(*resource)
-                        }
-                        LaravelStringKind::View => {
-                            has_view = true;
-                            CheckedStringKind::View
-                        }
-                        LaravelStringKind::Trans => {
-                            has_trans = true;
-                            CheckedStringKind::Trans
-                        }
-                        LaravelStringKind::Command => {
-                            has_command = true;
-                            CheckedStringKind::Command
-                        }
-                        LaravelStringKind::MorphAlias => {
-                            has_morph_alias = true;
-                            CheckedStringKind::MorphAlias
-                        }
-                        LaravelStringKind::GateAbility => {
-                            has_gate_ability = true;
-                            CheckedStringKind::GateAbility
-                        }
-                        // A section or stack name is judged against the
-                        // templates that render the one it is written
-                        // in, which the Blade pass below has and this
-                        // one does not.  And anything at all can be bound
-                        // at runtime, so an unrecognised container key
-                        // proves nothing — nor does an environment
-                        // variable absent from `.env`, since the
-                        // environment a process runs with is not on disk.
-                        LaravelStringKind::Section
-                        | LaravelStringKind::Stack
-                        | LaravelStringKind::ContainerBinding
-                        | LaravelStringKind::Env => return None,
-                    };
-                    Some((checked, key.as_str(), span.start, span.end))
-                } else {
-                    None
+                else {
+                    return None;
+                };
+                // A write declares the key it names, so there is nothing
+                // to check it against, and an optional key is one the call
+                // is written to do without: an `@includeFirst` candidate
+                // that names nothing is why the directive takes a list at
+                // all.
+                if *is_write || *is_optional {
+                    return None;
                 }
+                Some((
+                    CheckedStringKind::of(kind)?,
+                    key.as_str(),
+                    span.start,
+                    span.end,
+                ))
             })
             .collect();
-
-        if !has_route
-            && !has_config
-            && !has_view
-            && !has_trans
-            && !has_command
-            && !has_morph_alias
-            && !has_gate_ability
-        {
+        if key_spans.is_empty() {
             return;
         }
 
-        // Enumerate valid keys once per kind (lazy), using the cached
-        // enumerations.  Safe to call now that the `symbol_maps` read
-        // lock has been released.  The enumerations are shared with every
-        // other consumer, so they are read in place rather than copied
-        // into a set per pass.
-        let routes = has_route.then(|| self.cached_routes());
-        // A package with no routes of its own, whose names are registered
-        // by the host application, cannot be judged: the valid set is
-        // unknown, not empty.  Installed packages register routes of their
-        // own, so the question is whether *this project* contributed any,
-        // not whether the set is empty.
-        let project_registers_routes = routes
-            .as_ref()
-            .is_some_and(|discovery| discovery.routes.iter().any(|route| !route.from_vendor));
-        // A library is installed into an application that declares the
-        // configuration it reads, and that application is a file we never
-        // see, so none of its keys can be judged.  Only an application owns
-        // the whole of its configuration.
-        let has_config = has_config && self.is_application_project();
-        if has_config {
-            // Runtime writes can live in unopened files. Index them before
-            // judging reads, outside the config-enumeration build locks. A
-            // completed index is reused as is: watched-file notifications
-            // keep it current, and a refresh walk per diagnostic pass would
-            // put a workspace scan on every keystroke.
-            self.ensure_workspace_index_ready_for_request();
-        }
-        let declared_config_keys: Arc<[String]> = if has_config {
-            self.cached_config_keys()
-        } else {
-            Arc::default()
+        let declared = DeclaredKeys::enumerate(self, &key_spans);
+        let range = |start: u32, end: u32| {
+            self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
         };
-        let config_resource_mask = if has_config_resource {
-            declared_config_keys.iter().fold(0, |mask, key| {
-                crate::symbol_map::laravel_resources::resource_from_config_key(key)
-                    .map_or(mask, |(resource, _)| mask | resource.bit())
-            })
-        } else {
-            0
-        };
-        let view_keys: Arc<[String]> = if has_view {
-            self.cached_view_names()
-        } else {
-            Arc::default()
-        };
-        let trans_keys: Arc<[String]> = if has_trans {
-            self.cached_trans_keys()
-        } else {
-            Arc::default()
-        };
-        // An application whose strings live in a database still has `vendor/`'s
-        // own `lang/` files on disk, so the enumerated set is non-empty while
-        // covering none of the application's own keys.  Once a provider has
-        // rebound the translator away from Laravel's file loader, what is valid
-        // is unknowable.
-        let trans_source_is_unknowable = has_trans
-            && self
-                .laravel_provider_resources
-                .read()
-                .custom_translation_loader;
-        // When no commands were indexed at all, skip command diagnostics
-        // entirely.  The scan is heuristic (it relies on the `*Command`
-        // naming convention), so an empty index likely means discovery
-        // failed rather than that every referenced command is invalid.
-        let commands_indexed = has_command && !self.laravel_commands.read().is_empty();
-        // A morph alias is only checkable when the project calls
-        // `Relation::enforceMorphMap()` / `requireMorphMap()`.  Without that,
-        // an unmapped model still morphs under its class name, so the set of
-        // valid `*_type` values is open and an unknown alias proves nothing.
-        let morph_map_enforced = has_morph_alias && self.laravel_morph_map.read().is_enforced();
-
-        // Abilities are only checkable when the project defines some: an
-        // empty set means gate discovery found nothing (a project that
-        // authorizes entirely through runtime-registered callbacks, or one
-        // that is not really using Laravel's gate), not that every ability
-        // referenced is wrong.
-        //
-        // A `Gate::before()` callback, or a package that answers checks from a
-        // permission table, grants abilities that appear nowhere in source.  A
-        // single unrelated `Gate::define()` call is enough to make the
-        // enumerated set non-empty, so emptiness alone does not catch this: the
-        // ability space is open and the whole check has to stand down —
-        // including the walk of every policy class that would enumerate it.
-        let gate_ability_space_is_open =
-            has_gate_ability && self.laravel_gates.read().ability_space_is_open();
-        let gate_abilities: Arc<[String]> = if has_gate_ability && !gate_ability_space_is_open {
-            self.cached_gate_abilities()
-        } else {
-            Arc::default()
-        };
-
         for &(kind, key, start, end) in &key_spans {
-            let (valid, label, code) = match kind {
-                // An ability is judged against the model the check names, so
-                // it reports which model rather than the shared
-                // "Unknown <kind>: '<key>'" message the others share.
-                CheckedStringKind::GateAbility => {
-                    if !gate_ability_space_is_open
-                        && !gate_abilities.is_empty()
-                        && let Some(message) =
-                            self.gate_ability_problem(uri, content, key, start, &gate_abilities)
-                        && let Some(range) = self.offset_range_to_lsp_range(
-                            uri,
-                            content,
-                            start as usize,
-                            end as usize,
-                        )
-                    {
-                        out.push(helpers::make_diagnostic(
-                            range,
-                            DiagnosticSeverity::WARNING,
-                            "invalid_laravel_ability",
-                            message,
-                        ));
-                    }
-                    continue;
-                }
-                CheckedStringKind::Route => {
-                    let Some(discovery) = &routes else {
-                        continue;
-                    };
-                    if !project_registers_routes {
-                        continue;
-                    }
-                    // A group whose `->name()` argument was not a string
-                    // literal (e.g. Filament's `Route::name($panelId . '.')`
-                    // has children we cannot enumerate statically.  Any route
-                    // that falls under such a prefix is unjudgeable, and so
-                    // is any route ending in one of the names such a group
-                    // registers, even when it recorded no known prefix at all
-                    // (e.g. a group with no enclosing literal group whose own
-                    // name is entirely a variable).
-                    if discovery
-                        .open_prefixes
-                        .iter()
-                        .any(|prefix| key.starts_with(prefix))
-                        || discovery
-                            .open_suffixes
-                            .iter()
-                            .any(|suffix| key.ends_with(suffix))
-                    {
-                        continue;
-                    }
-                    // A `Route::is('admin.*')` check names a pattern rather
-                    // than one route, and matches whatever the project has
-                    // under it.
-                    let valid = if key.contains('*') {
-                        discovery.names.iter().any(|name| {
-                            crate::virtual_members::laravel::route_name_matches(key, name)
-                        })
-                    } else {
-                        discovery
-                            .names
-                            .binary_search_by(|name| name.as_str().cmp(key))
-                            .is_ok()
-                    };
-                    (valid, "route", "invalid_laravel_route")
-                }
-                CheckedStringKind::Config => {
-                    // Only judge a key whose config file we actually read.
-                    // An unknown root means the file never reached us, so
-                    // the key cannot be wrong as far as we can tell, while
-                    // a typo inside a file we did read is still caught.  A
-                    // runtime write is deliberately not a root of its own:
-                    // the keys one file writes say nothing about what the
-                    // rest of that namespace holds, least of all when the
-                    // writes that established it were spelled dynamically.
-                    let root = key.split('.').next().unwrap_or(key);
-                    if !names_key_or_group(&declared_config_keys, root) {
-                        continue;
-                    }
-                    // Config keys may be partial prefixes (e.g. `config('app')`)
-                    // which are valid even without a direct match.  A key that
-                    // `Config::set()` or the array form of the `config()`
-                    // helper establishes is as real as one a `config/` file
-                    // declares; a test that configures a disk in `setUp()`
-                    // before exercising it is the common shape.
-                    let valid = names_key_or_group(&declared_config_keys, key)
-                        || self.runtime_config_key_covers(key);
-                    (valid, "config key", "invalid_laravel_config")
-                }
-                CheckedStringKind::ConfigResource(resource) => {
-                    let descriptor = crate::symbol_map::laravel_resources::descriptor(resource);
-                    if crate::symbol_map::laravel_resources::is_implicit_resource_name(
-                        resource, key,
-                    ) {
-                        continue;
-                    }
-                    // An undiscovered subtree is an unknown vocabulary, not
-                    // proof that every runtime-provided name is invalid.
-                    if config_resource_mask & resource.bit() == 0 {
-                        continue;
-                    }
-                    let config_key =
-                        crate::symbol_map::laravel_resources::config_key(resource, key);
-                    let valid = declared_config_keys.binary_search(&config_key).is_ok()
-                        || self.runtime_config_key_covers(&config_key);
-                    (valid, descriptor.label, descriptor.diagnostic_code)
-                }
-                CheckedStringKind::View => (
-                    view_keys
-                        .binary_search_by(|name| name.as_str().cmp(key))
-                        .is_ok(),
-                    "view",
-                    "invalid_laravel_view",
-                ),
-                CheckedStringKind::Trans => {
-                    // When no translation files are found at all, skip trans
-                    // diagnostics entirely.  This avoids false positives in
-                    // non-Laravel projects (WordPress, GetText) that also use
-                    // `__()` or `trans()` as function names.
-                    if trans_keys.is_empty() || trans_source_is_unknowable {
-                        continue;
-                    }
-                    let valid = names_key_or_group(&trans_keys, key);
-                    (valid, "translation key", "invalid_laravel_trans")
-                }
-                CheckedStringKind::Command => {
-                    if !commands_indexed {
-                        continue;
-                    }
-                    (
-                        self.laravel_commands.read().contains_name(key),
-                        "command",
-                        "invalid_laravel_command",
+            // An ability is judged against the model the check names, so
+            // it reports which model rather than the shared
+            // "Unknown <kind>: '<key>'" message the others share.
+            if kind == CheckedStringKind::GateAbility {
+                if !declared.gate_abilities.is_empty()
+                    && let Some(message) = self.gate_ability_problem(
+                        uri,
+                        content,
+                        key,
+                        start,
+                        &declared.gate_abilities,
                     )
+                    && let Some(range) = range(start, end)
+                {
+                    out.push(helpers::make_diagnostic(
+                        range,
+                        DiagnosticSeverity::WARNING,
+                        "invalid_laravel_ability",
+                        message,
+                    ));
                 }
-                CheckedStringKind::MorphAlias => {
-                    if !morph_map_enforced {
-                        continue;
-                    }
-                    (
-                        self.laravel_morph_map.read().has_alias(key),
-                        "morph type",
-                        "invalid_laravel_morph_alias",
-                    )
-                }
-            };
-            if !valid
-                && let Some(range) =
-                    self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
+                continue;
+            }
+            if let Some((false, label, code)) = declared.judge(kind, key)
+                && let Some(range) = range(start, end)
             {
                 out.push(helpers::make_diagnostic(
                     range,
@@ -555,13 +588,15 @@ impl Backend {
 
         let ctx = self.file_context_at(uri, span_start);
         let class_loader = self.class_loader(&ctx);
+        let resolved_class_loader = self.resolved_class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
         let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
             local_classes: &ctx.classes,
             use_map: &ctx.use_map,
             namespace: &ctx.namespace,
             content,
-            class_loader: &class_loader,
+            class_loader: &resolved_class_loader,
+            source_class_loader: &class_loader,
             backend: Some(self),
             function_loader: &function_loader,
         };
@@ -574,10 +609,7 @@ impl Backend {
         .top_level_class_names()
         .into_iter()
         .next()?;
-        // The resolved type carries the name as written, so run it back
-        // through the loader to canonicalize a short name against the file's
-        // imports before looking up the model's policy.
-        Some(class_loader(&name)?.fqn().to_string())
+        Some(resolved_class_loader(&name)?.fqn().to_string())
     }
 
     /// Whether `literal` names no template this project ships, as a

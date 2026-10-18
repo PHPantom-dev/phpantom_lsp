@@ -171,6 +171,59 @@ async fn test_goto_definition_new_parent_same_file() {
 }
 
 #[tokio::test]
+async fn test_goto_definition_parent_imported_from_another_namespace() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Lib {\n",
+        "    class Manager {}\n",
+        "}\n",
+        "namespace App {\n",
+        "    use Lib\\Manager;\n",
+        "    class SessionManager extends Manager {\n",
+        "        protected function callCustomCreator(): void {\n",
+        "            new parent();\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "parent" in `new parent()` on line 8
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 8,
+                character: 17,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    match result {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(location.range.start.line, 2, "class Manager is on line 2");
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
 async fn test_goto_definition_new_parent_cross_file_psr4() {
     let (backend, _dir) = create_psr4_workspace(
         r#"{

@@ -29,7 +29,7 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::text_position::position_to_byte_offset;
 
 impl Backend {
     /// Collect "Convert to string interpolation" code actions for the
@@ -63,23 +63,14 @@ impl Backend {
             None => return,
         };
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
-            title: "Convert to string interpolation".to_string(),
-            kind: Some(CodeActionKind::new("refactor.rewrite")),
-            diagnostics: None,
-            edit: Some(crate::code_actions::single_edit(
-                doc_uri,
-                Range {
-                    start: offset_to_position(content, start as usize),
-                    end: offset_to_position(content, end as usize),
-                },
-                replacement,
-            )),
-            command: None,
-            is_preferred: Some(false),
-            disabled: None,
-            data: None,
-        }));
+        out.push(crate::code_actions::rewrite_action(
+            "Convert to string interpolation".to_string(),
+            doc_uri,
+            content,
+            (start as usize, end as usize),
+            replacement,
+            false,
+        ));
     }
 }
 

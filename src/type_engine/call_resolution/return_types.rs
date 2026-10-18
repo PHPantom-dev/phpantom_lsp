@@ -1,9 +1,14 @@
 //! Call return-type resolution: the primary entry point that resolves a
 //! structured call expression + argument text to zero or more `ClassInfo`
-//! values, plus the literal/expression-to-type conversions it depends on.
+//! values.  The per-callee arms live in [`call_arms`], the typing of
+//! `ClassName::MEMBER` reads in [`class_constants`], literal and operator
+//! text in [`literals`] and [`operands`], and the Laravel refinements in
+//! [`laravel`].
 
 mod call_arms;
+mod class_constants;
 mod laravel;
+mod literals;
 mod operands;
 
 use crate::atom::atom;
@@ -12,34 +17,35 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::class_lookup::find_class_by_name;
-use crate::class_lookup::{is_self_or_static, resolve_class_keyword};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::type_engine::variable::array_func_rules::{
     array_func_element_type, array_func_raw_type,
 };
-use crate::types::ClassLikeKind;
 use crate::types::*;
 
+use crate::text_scan::split_top_level_commas;
 use crate::type_engine::conditional_resolution::{
     TemplateContext, ThisContext, VarClassStringResolver, receiver_type_for_condition,
-    resolve_conditional_with_text_args, resolve_conditional_with_text_args_and_defaults,
-    resolve_conditional_without_args, resolve_conditional_without_args_and_defaults,
-    split_text_args,
+    resolve_conditional_with_text_args_and_defaults, resolve_conditional_without_args,
+    resolve_conditional_without_args_and_defaults,
 };
 use crate::type_engine::resolver::ResolutionCtx;
 
 use super::arg_type_resolution::TextArrayFuncArgs;
 use super::target_cache::try_infer_body_return_type;
 
+pub(crate) use class_constants::{
+    class_constant_type, enum_case_property_literal, folded_global_constant_type,
+    resolve_static_access_type,
+};
 use laravel::{
     replace_support_carbon_return, resolve_auth_user_at_call, resolve_request_accessor_at_call,
     resolve_validated_shape_at_call,
 };
+pub(crate) use literals::literal_arg_type;
+pub(super) use literals::{resolve_literal_type, resolve_operator_type};
 pub(super) use operands::resolve_cast_type;
-use operands::{
-    contains_top_level_concat, join_operand_types, split_top_level_coalesce, split_top_level_elvis,
-};
 
 /// Bundled parameters for [`Backend::resolve_method_return_types_with_args`].
 ///
@@ -49,7 +55,7 @@ use operands::{
 pub(crate) struct MethodReturnCtx<'a> {
     /// All classes known in the current file.
     pub all_classes: &'a [Arc<ClassInfo>],
-    /// Cross-file class resolution callback.
+    /// Cross-file class resolution callback for already-resolved names.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// Server state for project-wide answers.  See
     /// [`ResolutionCtx::backend`].
@@ -65,6 +71,9 @@ pub(crate) struct MethodReturnCtx<'a> {
     /// appears), as opposed to the class that owns the method being called.
     /// Used to resolve `self`/`static`/`parent` in conditional return types.
     pub calling_class_name: Option<&'a str>,
+    /// Resolves a class a call-site argument names as written; see
+    /// [`ConditionalClassContext::written_class`](crate::type_engine::conditional_resolution::ConditionalClassContext::written_class).
+    pub written_class: Option<&'a dyn Fn(&str) -> String>,
     /// Whether the call is a static method call (`Class::method()`).
     ///
     /// When `true`, the magic-method fallback checks `__callStatic`
@@ -93,6 +102,7 @@ impl<'a> MethodReturnCtx<'a> {
         ctx: &'a ResolutionCtx<'a>,
         template_subs: &'a HashMap<String, PhpType>,
         var_resolver: &'a dyn Fn(&str) -> Vec<String>,
+        written_class: &'a dyn Fn(&str) -> String,
         is_static: bool,
     ) -> Self {
         Self {
@@ -102,7 +112,8 @@ impl<'a> MethodReturnCtx<'a> {
             template_subs,
             var_resolver: Some(var_resolver),
             cache: ctx.resolved_class_cache,
-            calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
+            calling_class_name: ctx.current_class.map(|c| c.fqn().as_str()),
+            written_class: Some(written_class),
             is_static,
             call_args: None,
         }
@@ -122,22 +133,37 @@ pub(super) fn build_var_resolver<'a>(
     ctx: &'a ResolutionCtx<'a>,
 ) -> impl Fn(&str) -> Vec<String> + 'a {
     move |var_name: &str| -> Vec<String> {
-        if let Some(cc) = ctx.current_class {
-            crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
+        let placeholder;
+        let current_class = match ctx.current_class {
+            Some(cc) => cc,
+            None => {
+                placeholder =
+                    crate::class_lookup::class_context_placeholder(ctx.content, ctx.cursor_offset);
+                &placeholder
+            }
+        };
+        let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
+            source_imports: ctx.source_imports,
+            backend: ctx.backend,
+            scope_var_resolver: ctx.scope_var_resolver,
+            ..crate::type_engine::resolver::VarResolutionCtx::new(
                 var_name,
-                cc,
+                current_class,
                 ctx.all_classes,
                 ctx.content,
                 ctx.cursor_offset,
                 ctx.class_loader,
-                ctx.backend,
+                ctx.source_class_loader,
             )
-            .iter()
-            .map(|c| c.fqn().to_string())
-            .collect()
-        } else {
-            vec![]
-        }
+        };
+        crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
+            var_name,
+            ctx.cursor_offset,
+            &var_ctx,
+        )
+        .iter()
+        .map(|c| c.fqn().to_string())
+        .collect()
     }
 }
 
@@ -158,7 +184,7 @@ fn resolve_conditional_return_hint(
     text_args: &str,
     var_resolver: VarClassStringResolver<'_>,
     template_subs: &HashMap<String, PhpType>,
-    calling_class_name: Option<&str>,
+    call_site: crate::type_engine::conditional_resolution::ConditionalClassContext<'_>,
     owner: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
@@ -190,8 +216,8 @@ fn resolve_conditional_return_hint(
             text_args,
             var_resolver,
             crate::type_engine::conditional_resolution::ConditionalClassContext {
-                calling: calling_class_name,
                 declaring: Some(declaring_fqn.as_str()),
+                ..call_site
             },
             class_loader,
             &tpl,
@@ -267,6 +293,20 @@ impl Backend {
             ctx,
             return_type_hint_out,
         )
+    }
+
+    /// The return type hint
+    /// [`Self::resolve_call_return_types_expr_with_hint`] captures for a
+    /// call, for a caller that wants the type itself (an array to index
+    /// into, a scalar) rather than the classes it names.
+    pub(crate) fn resolve_call_return_type_hint(
+        callee: &SubjectExpr,
+        text_args: &str,
+        ctx: &ResolutionCtx<'_>,
+    ) -> Option<PhpType> {
+        let mut hint = None;
+        Self::resolve_call_return_types_on_receiver(callee, text_args, None, ctx, Some(&mut hint));
+        hint
     }
 
     /// [`resolve_call_return_types_expr_with_hint`] with the receiver of an
@@ -411,6 +451,7 @@ impl Backend {
                 crate::type_engine::conditional_resolution::ConditionalClassContext {
                     calling: mr_ctx.calling_class_name,
                     declaring: Some(class_info.fqn().as_str()),
+                    written_class: mr_ctx.written_class,
                 },
                 class_loader,
                 &tpl,
@@ -425,9 +466,13 @@ impl Backend {
                 text_args,
                 var_resolver,
                 template_subs,
-                mr_ctx.calling_class_name,
+                crate::type_engine::conditional_resolution::ConditionalClassContext {
+                    calling: mr_ctx.calling_class_name,
+                    declaring: None,
+                    written_class: mr_ctx.written_class,
+                },
                 class_info,
-                mr_ctx.class_loader,
+                class_loader,
             ) {
                 let classes: Vec<Arc<ClassInfo>> =
                     crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
@@ -965,403 +1010,6 @@ pub(super) fn resolve_chain_declared_return(
         {
             return Some(ret.clone());
         }
-    }
-
-    None
-}
-
-/// Resolve a `ClassName::Member` expression to a type.
-///
-/// Handles enum cases (`MyEnum::Case` → `MyEnum`) and class constants
-/// (`Foo::BAR` → the constant's type hint, or the type inferred from
-/// the constant's initializer value for untyped constants).  Of the
-/// expressions that continue past the member with `->`, only a case's
-/// `->value` / `->name` is answered.
-pub(crate) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
-    if text.contains("->") {
-        return resolve_enum_case_property_text(text, ctx);
-    }
-    let (class_part, _member) = text.split_once("::")?;
-
-    // Only accept identifier-like class names (no `$var::`, no whitespace).
-    if class_part.is_empty()
-        || class_part.starts_with('$')
-        || !class_part
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
-    {
-        return None;
-    }
-
-    // Resolve `self` / `static` / `parent` to the actual class name.
-    let class_name = if is_self_or_static(class_part) {
-        ctx.current_class?.name.to_string()
-    } else if let Some(resolved) = resolve_class_keyword(class_part, ctx.current_class) {
-        resolved
-    } else {
-        class_part.to_string()
-    };
-
-    let cls = (ctx.class_loader)(&class_name)?;
-
-    // Enum cases resolve to the enum type itself.  A constant declared on
-    // the enum is read like any other class constant below.
-    if cls.kind == ClassLikeKind::Enum
-        && cls
-            .constants
-            .iter()
-            .find(|c| c.name == _member)
-            .is_none_or(|c| c.is_enum_case)
-    {
-        return Some(PhpType::named(cls.fqn()));
-    }
-
-    // Class constants: use the declared type hint when available,
-    // otherwise infer a type from the initializer value.
-    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-        &cls,
-        ctx.class_loader,
-        ctx.resolved_class_cache,
-    );
-    class_constant_type(&merged, _member, ctx)
-}
-
-/// The literal a `->name` or `->value` read on a named enum case holds:
-/// the case's own name, or the value it is backed by.
-///
-/// `None` when `enum_cls` is not an enum, `case` is not one of its cases,
-/// or `property` is neither of the two.
-pub(crate) fn enum_case_property_literal(
-    enum_cls: &ClassInfo,
-    case: &str,
-    property: &str,
-) -> Option<PhpType> {
-    if enum_cls.kind != ClassLikeKind::Enum {
-        return None;
-    }
-    let constant = enum_cls
-        .constants
-        .iter()
-        .find(|c| c.is_enum_case && c.name == case)?;
-    match property {
-        "name" => Some(PhpType::literal_string_raw(format!("'{case}'"))),
-        "value" => crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(
-            constant.enum_value.as_deref()?,
-        ),
-        _ => None,
-    }
-}
-
-/// [`enum_case_property_literal`] for an expression given as text,
-/// `Enum::CASE->value` or `Enum::CASE->name`.
-fn resolve_enum_case_property_text(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
-    let is_name = |s: &str| {
-        !s.is_empty()
-            && s.chars()
-                .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
-    };
-    let (object, property) = text.split_once("->")?;
-    let (class_part, case) = object.split_once("::")?;
-    if !is_name(class_part) || !is_name(case) || !is_name(property) {
-        return None;
-    }
-    let class_name = if is_self_or_static(class_part) {
-        ctx.current_class?.name.to_string()
-    } else {
-        resolve_class_keyword(class_part, ctx.current_class)
-            .unwrap_or_else(|| class_part.to_string())
-    };
-    let cls = (ctx.class_loader)(&class_name)?;
-    enum_case_property_literal(&cls, case, property)
-}
-
-/// The type a class constant holds, read from its initializer where that
-/// can be folded and from its declared type otherwise.
-///
-/// `merged` is the class the constant is looked up on, with inherited
-/// members merged in.
-pub(crate) fn class_constant_type(
-    merged: &ClassInfo,
-    member: &str,
-    ctx: &ResolutionCtx<'_>,
-) -> Option<PhpType> {
-    let constant = merged.constants.iter().find(|c| c.name == member)?;
-    // Infer the value type from the initializer so template params bind
-    // to the constant's value (e.g. `int`) rather than the owning class.
-    //
-    // A declared type (PHP 8.3's `const int NAME = …`) says what the
-    // constant may hold, not what it does hold, so the initialiser is
-    // still the sharper answer and is read first. It only stands in for
-    // the declaration when it refines it.
-    //
-    // Reading the initialiser can come back here (`const A = [self::A];`,
-    // or two constants naming each other), so the whole read is claimed
-    // under a key of its own; `folded_class_constant_type` claims the
-    // plain `Class::NAME` one for its own fold.
-    if let Some(ref val) = constant.value
-        && let Some(_guard) = crate::type_engine::types::const_fold::FoldGuard::acquire(&format!(
-            "{}::{} initializer",
-            merged.fqn(),
-            member
-        ))
-    {
-        let resolve = |text: &str| {
-            Backend::resolve_arg_text_to_type(&qualify_class_keyword(text, merged), ctx)
-        };
-        let inferred =
-            crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value_resolved(
-                val, &resolve,
-            )
-            .or_else(|| folded_class_constant_type(merged, member, val, ctx))
-            // An initialiser that is itself `Class::Case` holds that case's
-            // own enum type, which the folding above skips (an enum case is
-            // not a literal).
-            .or_else(|| resolve_static_access_type(&qualify_class_keyword(val, merged), ctx));
-        // The initialiser is one fixed value whichever class the constant
-        // is read through, so a declared `static` (legal on an enum's
-        // constant) is checked as the class it is declared on.
-        if let Some(ty) = inferred.filter(|ty| {
-            constant
-                .type_hint
-                .as_ref()
-                .is_none_or(|hint| ty.is_subtype_of(&hint.replace_self_bound(&merged.fqn(), None)))
-        }) {
-            return Some(ty);
-        }
-    }
-    constant.type_hint.clone()
-}
-
-/// The literal value an untyped class constant holds, folded from an
-/// initialiser that names other constants (`const FLAGS = JSON_THROW_ON_ERROR;`,
-/// `const COMBO = A | B;`).
-///
-/// `class` is the class the constant was looked up on, with its inherited
-/// members merged in, so `self::` inside the initialiser is read against a
-/// class that has the constant it names.
-pub(crate) fn folded_class_constant_type(
-    class: &ClassInfo,
-    const_name: &str,
-    value: &str,
-    ctx: &ResolutionCtx<'_>,
-) -> Option<PhpType> {
-    let resolve =
-        |text: &str| Backend::resolve_arg_text_to_type(&qualify_class_keyword(text, class), ctx);
-    let key = format!("{}::{}", class.fqn(), const_name);
-    crate::type_engine::types::const_fold::folded_constant_type(&key, value, &resolve)
-}
-
-/// The literal value a global constant holds, folded from an initialiser that
-/// names other constants (`const FLAGS = JSON_THROW_ON_ERROR;`, `define('MASK',
-/// A | B)`).
-pub(crate) fn folded_global_constant_type(
-    name: &str,
-    value: &str,
-    ctx: &ResolutionCtx<'_>,
-) -> Option<PhpType> {
-    let resolve = |text: &str| Backend::resolve_arg_text_to_type(text, ctx);
-    crate::type_engine::types::const_fold::folded_constant_type(name, value, &resolve)
-}
-
-/// `text` with a leading `self::`/`static::`/`parent::` replaced by the class
-/// it names, so a term read out of a constant's initialiser resolves against
-/// the class that declared it rather than the one being read from.
-pub(crate) fn qualify_class_keyword<'t>(
-    text: &'t str,
-    class: &ClassInfo,
-) -> std::borrow::Cow<'t, str> {
-    let (keyword, rest) = match text.split_once("::") {
-        Some(parts) => parts,
-        None => return std::borrow::Cow::Borrowed(text),
-    };
-    let qualifier = if is_self_or_static(keyword) {
-        class.fqn().to_string()
-    } else if let Some(parent) = class
-        .parent_class
-        .filter(|_| keyword.eq_ignore_ascii_case("parent"))
-    {
-        parent.to_string()
-    } else {
-        return std::borrow::Cow::Borrowed(text);
-    };
-    std::borrow::Cow::Owned(format!("{qualifier}::{rest}"))
-}
-
-/// Resolve `self`/`static`/`parent` in a return-type hint to concrete
-/// class names, so downstream consumers see real FQNs rather than
-/// keywords, then apply the Eloquent-collection patch every hint gets.
-///
-/// `parent` always resolves to `owner`'s parent (or is left as-is when it
-/// has none). `self`/`static` is what genuinely differs between the
-/// instance and static call paths, so `replace_self` decides that part:
-/// the instance path prefers the receiver's own generic type
-/// (`Builder<User>`) so a fluent chain keeps its bound template argument,
-/// while a static call replaces only the bare name.
-fn resolve_hint_keywords(
-    hint: PhpType,
-    owner: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    replace_self: impl FnOnce(PhpType) -> PhpType,
-) -> PhpType {
-    let resolved = if hint.is_parent_ref() {
-        owner
-            .parent_class
-            .as_ref()
-            .map(|p| PhpType::named(atom(p.as_ref())))
-            .unwrap_or(hint)
-    } else if hint.contains_self_ref() {
-        replace_self(hint)
-    } else {
-        hint
-    };
-    crate::virtual_members::laravel::replace_eloquent_collections_in_type(&resolved, class_loader)
-        .unwrap_or(resolved)
-}
-
-/// The type an operator expression produces, for the operators whose
-/// answer can be read from the source text without a full parse.
-///
-/// Concatenation (`$a . $b`) always yields `string`, whatever its operands
-/// are. The elvis operator (`$body ?: ''`) yields the union of both sides —
-/// resolved recursively through [`Backend::resolve_arg_text_to_type`], the
-/// same way assigning the expression to a variable first would resolve
-/// through the AST-based `resolve_conditional_chain`.
-///
-/// A full three-part ternary (`$a ? $b : $c`) is left unanswered here, and
-/// so is arithmetic (`+`, `-`, `*`, …) unless every operand resolves to an
-/// integer and no operator can turn the result into a float: arithmetic's
-/// result otherwise depends on whether its operands are int or float (and
-/// `+` alone can mean array union).
-pub(super) fn resolve_operator_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
-    if contains_top_level_concat(text) {
-        return Some(PhpType::named(atom("string")));
-    }
-    // A bitwise or integer expression over constants is the value PHP
-    // computes for it (`JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR` is one mask,
-    // not two flags).
-    // Only an expression that actually has an operator folds: a single term
-    // would ask this very resolver about the same text again.
-    if crate::type_engine::types::const_fold::has_top_level_int_operator(text) {
-        let resolve = |term: &str| Backend::resolve_arg_text_to_type(term, ctx);
-        if let Some(value) =
-            crate::type_engine::types::const_fold::fold_int_expression(text, &resolve)
-        {
-            return Some(PhpType::literal_int(value.to_string()));
-        }
-        // An expression over integers whose values are unknown (`$n - 1`)
-        // is still an `int`, as long as no operator can turn it into a float.
-        if crate::type_engine::types::const_fold::is_int_expression(text, &resolve) {
-            return Some(PhpType::int());
-        }
-    }
-    // `??` binds looser than `?:`, so it is split first: the left operand of
-    // `$a ?? $b ?: $c` is `$a` and the right is the whole ternary.  The
-    // coalesce only yields its left operand when that operand is not null,
-    // so the `null` arm cannot survive into the result.
-    if let Some((left, right)) = split_top_level_coalesce(text) {
-        // A left operand that is only ever null contributes nothing, which
-        // `non_null_type` reports as `None` — the same answer an unresolvable
-        // operand gives, and the right operand carries the result either way.
-        let left_ty = Backend::resolve_arg_text_to_type(left, ctx).and_then(|ty| {
-            if ty.is_null() {
-                None
-            } else {
-                Some(ty.non_null_type().unwrap_or(ty))
-            }
-        });
-        let right_ty = Backend::resolve_arg_text_to_type(right, ctx);
-        return join_operand_types(left_ty, right_ty);
-    }
-
-    if let Some((left, right)) = split_top_level_elvis(text) {
-        let left_ty = Backend::resolve_arg_text_to_type(left, ctx);
-        let right_ty = Backend::resolve_arg_text_to_type(right, ctx);
-        return join_operand_types(left_ty, right_ty);
-    }
-    None
-}
-
-/// The literal type of a string or integer literal argument, or `None` for
-/// anything else.
-///
-/// [`resolve_literal_type`] widens both to their base type, which is what
-/// most argument checks want. A template bound straight from the argument
-/// (`@param T $a` with `id('hello')`) keeps the value instead, the way the
-/// forward walker types `$a = 'hello'`. A double-quoted string that
-/// interpolates is only known to be a string.
-pub(crate) fn literal_arg_type(text: &str) -> Option<PhpType> {
-    let quoted = |q: char| text.len() >= 2 && text.starts_with(q) && text.ends_with(q);
-    if quoted('\'') || (quoted('"') && !text.contains('$')) {
-        return Some(PhpType::literal_string_raw(text));
-    }
-    let numeric = text.strip_prefix('-').unwrap_or(text);
-    let is_octal = numeric.len() > 1 && numeric.starts_with('0');
-    if is_octal || numeric.is_empty() || !numeric.bytes().all(|b| b.is_ascii_digit() || b == b'_') {
-        return None;
-    }
-    let digits: String = text.chars().filter(|&c| c != '_').collect();
-    let value = digits.parse::<i64>().ok()?;
-    Some(PhpType::literal_int(value.to_string()))
-}
-
-/// Resolve a literal expression to its PHP type.
-///
-/// Returns `Some(PhpType)` for string literals (`"…"`, `'…'`), integer
-/// literals (`42`, `-1`), float literals (`3.14`), boolean literals
-/// (`true`, `false`), `null`, and array literals (`[…]`).
-pub(super) fn resolve_literal_type(text: &str) -> Option<PhpType> {
-    // Closure / arrow function literals: fn(...), function(...), and the
-    // `static`-prefixed forms of both.
-    if crate::completion::source::helpers::is_closure_like_text(text) {
-        return Some(PhpType::named(atom("Closure")));
-    }
-
-    // String literals: "…" or '…'
-    if (text.starts_with('"') && text.ends_with('"'))
-        || (text.starts_with('\'') && text.ends_with('\''))
-    {
-        return Some(PhpType::named(atom("string")));
-    }
-
-    // null
-    if text.eq_ignore_ascii_case("null") {
-        return Some(PhpType::null());
-    }
-
-    // Boolean literals — preserve true/false as distinct types so that
-    // template argument inference keeps the precise type (e.g. `C<false>`
-    // instead of widening to `C<bool>`).
-    if text.eq_ignore_ascii_case("true") {
-        return Some(PhpType::true_());
-    }
-    if text.eq_ignore_ascii_case("false") {
-        return Some(PhpType::false_());
-    }
-
-    // Array literals: [...] or array(...)
-    if (text.starts_with('[') && text.ends_with(']'))
-        || (text.starts_with("array(") && text.ends_with(')'))
-    {
-        return Some(PhpType::named(atom("array")));
-    }
-
-    // Numeric literals — try int first, then float.
-    // Strip an optional leading minus for negative literals.
-    let numeric = text.strip_prefix('-').unwrap_or(text);
-    if !numeric.is_empty()
-        && numeric.bytes().all(|b| b.is_ascii_digit() || b == b'_')
-        && numeric.bytes().any(|b| b.is_ascii_digit())
-    {
-        return Some(PhpType::named(atom("int")));
-    }
-    if !numeric.is_empty()
-        && numeric
-            .bytes()
-            .all(|b| b.is_ascii_digit() || b == b'.' || b == b'_')
-        && numeric.bytes().filter(|&b| b == b'.').count() == 1
-        && numeric.bytes().any(|b| b.is_ascii_digit())
-    {
-        return Some(PhpType::named(atom("float")));
     }
 
     None

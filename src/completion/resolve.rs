@@ -37,7 +37,7 @@ use crate::types::*;
 /// resolve handler.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct CompletionItemData {
-    /// The owning class name (short name as stored in `ClassInfo::name`).
+    /// The owning class's FQN.
     ///
     /// For non-member kinds (`"function"`, `"class"`, `"global_constant"`)
     /// this is an empty string.
@@ -159,7 +159,7 @@ impl Backend {
         ctx: &FileContext,
         content: &str,
     ) {
-        let class_loader = self.class_loader(ctx);
+        let class_loader = self.resolved_class_loader(ctx);
 
         // Collect all class names (primary + extras for union members).
         let mut all_class_names = vec![data.class_name.clone()];
@@ -179,8 +179,12 @@ impl Backend {
         let mut seen_declaring: Vec<String> = Vec::new();
 
         for class_name in &all_class_names {
-            let class_info: Option<Arc<ClassInfo>> = class_loader(class_name)
-                .or_else(|| ctx.classes.iter().find(|c| c.name == *class_name).cloned());
+            let class_info: Option<Arc<ClassInfo>> = class_loader(class_name).or_else(|| {
+                ctx.classes
+                    .iter()
+                    .find(|c| c.fqn() == class_name.as_str())
+                    .cloned()
+            });
 
             let Some(class_info) = class_info else {
                 continue;
@@ -203,7 +207,7 @@ impl Backend {
                             &class_loader,
                         );
                         (
-                            declaring.name.to_string(),
+                            declaring.fqn().to_string(),
                             self.hover_for_method(m, &declaring, &class_loader, &data.uri, content),
                         )
                     })
@@ -221,7 +225,7 @@ impl Backend {
                             &class_loader,
                         );
                         (
-                            declaring.name.to_string(),
+                            declaring.fqn().to_string(),
                             self.hover_for_property(p, &declaring, &class_loader),
                         )
                     })
@@ -236,7 +240,7 @@ impl Backend {
                             &class_loader,
                         );
                         (
-                            declaring.name.to_string(),
+                            declaring.fqn().to_string(),
                             self.hover_for_constant(c, &declaring, &class_loader),
                         )
                     })
@@ -287,7 +291,7 @@ impl Backend {
         ctx: &FileContext,
         content: &str,
     ) {
-        let class_loader = self.class_loader(ctx);
+        let class_loader = self.resolved_class_loader(ctx);
         if let Some(cls) = class_loader(&data.member_name) {
             let hover = self.hover_for_class_info(&cls, &data.uri, content);
             if let Some(md) = extract_hover_markdown(hover) {

@@ -99,7 +99,7 @@ impl Backend {
         let no_inherited = HashSet::new();
 
         let file_ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&file_ctx);
+        let class_loader = self.resolved_class_loader(&file_ctx);
 
         let mut contracts: HashMap<String, Option<TemplateContract>> = HashMap::new();
         let mut accepted: HashMap<String, AcceptedNames> = HashMap::new();
@@ -271,7 +271,12 @@ impl Backend {
         let Some(actual) = self.blade_scope_var_type(file_ctx, content, name_range.0, name) else {
             return;
         };
-        if is_type_compatible(&actual, declared, &self.class_loader(file_ctx), true) {
+        if is_type_compatible(
+            &actual,
+            declared,
+            &self.resolved_class_loader(file_ctx),
+            true,
+        ) {
             return;
         }
         let Some(range) = self.offset_range_to_lsp_range(

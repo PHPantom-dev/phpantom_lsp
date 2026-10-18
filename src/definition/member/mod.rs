@@ -24,9 +24,12 @@
 //!   - [`file_lookup`] — file loading (`find_class_file_content`,
 //!     `reload_raw_class`) and member position lookup
 //!     (`find_member_position`)
+//!   - [`laravel`] — Eloquent attribute entries, scopes, timestamp
+//!     constants, Builder and facade forwarding, and macro sites
 
 mod declaring;
 mod file_lookup;
+mod laravel;
 mod shape_keys;
 
 use std::sync::Arc;
@@ -34,15 +37,12 @@ use tower_lsp::lsp_types::*;
 
 use super::point_location;
 use crate::Backend;
-use crate::class_lookup::find_class_at_offset;
 use crate::text_position::position_to_offset;
-use crate::type_engine::resolver::CtxLoaders;
 use crate::types::ResolvedType;
 use crate::types::*;
 use crate::virtual_members::ResolvedClassCache;
 use crate::virtual_members::laravel::{
-    ELOQUENT_BUILDER_FQN, accessor_method_candidates, count_property_to_relationship_method,
-    custom_builder_fqn, extends_eloquent_model, facade_concrete_class,
+    accessor_method_candidates, count_property_to_relationship_method, extends_eloquent_model,
     is_accessor_or_mutator_method, where_property_method_to_column,
 };
 
@@ -95,6 +95,17 @@ pub(super) enum MemberAccessHint {
     Unknown,
 }
 
+/// The request-wide inputs every phase of a member definition lookup
+/// shares.
+struct MemberLookup<'a> {
+    uri: &'a str,
+    content: &'a str,
+    cursor_offset: u32,
+    member_name: &'a str,
+    access_hint: MemberAccessHint,
+    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+}
+
 impl Backend {
     // ─── Member Definition Resolution ───────────────────────────────────────
 
@@ -134,44 +145,32 @@ impl Backend {
         position: Position,
         mctx: &MemberDefinitionCtx<'_>,
     ) -> Option<Location> {
-        let member_name = mctx.member_name;
-        let subject = mctx.subject;
-        let access_kind = mctx.access_kind;
-        let access_hint = mctx.access_hint;
-        // 2. Gather context needed for class resolution.
         let cursor_offset = position_to_offset(content, position);
         let ctx = self.file_context_at(uri, cursor_offset);
+        let loaders = self.file_loaders(&ctx);
+        let class_loader = loaders.resolved_class_loader();
 
-        let current_class = find_class_at_offset(&ctx.classes, cursor_offset).cloned();
+        // When a variable is assigned different types in conditional
+        // branches (e.g. if/else), the subject has several candidates.
+        let candidates =
+            ResolvedType::into_arced_classes(crate::type_engine::resolver::resolve_target_classes(
+                mctx.subject,
+                mctx.access_kind,
+                &loaders.resolution_ctx_at(content, cursor_offset),
+            ));
+        let first = candidates.first()?;
 
-        let class_loader = self.class_loader(&ctx);
-        let function_loader = self.function_loader(&ctx);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
-
-        // 3. Resolve the subject to all candidate classes.
-        //    When a variable is assigned different types in conditional
-        //    branches (e.g. if/else), multiple candidates are returned.
-        let rctx = self.resolution_ctx_at(
-            current_class.as_ref(),
-            &ctx.classes,
+        let lookup = MemberLookup {
+            uri,
             content,
             cursor_offset,
-            CtxLoaders::new(
-                &class_loader,
-                &function_loader,
-                &laravel_macro_this_resolver,
-            ),
-        );
-        let candidates = ResolvedType::into_arced_classes(
-            crate::type_engine::resolver::resolve_target_classes(subject, access_kind, &rctx),
-        );
+            member_name: mctx.member_name,
+            access_hint: mctx.access_hint,
+            class_loader,
+        };
 
-        if candidates.is_empty() {
-            return None;
-        }
-
-        // 4. Try each candidate class and pick the first one where the
-        //    member actually exists (directly or via inheritance).
+        // Pick the first candidate where the member actually exists
+        // (directly or via inheritance).
         for target_class in &candidates {
             // Candidates from resolve_target_classes may be fully-resolved
             // (merged) classes that include virtual/mixin members directly
@@ -180,233 +179,142 @@ impl Backend {
             // find_declaring_class needs the raw (unmerged) class so it
             // can trace the member to the actual declaring class through
             // the real inheritance/mixin chain.
-            let raw_class = Self::reload_raw_class(target_class, &ctx.classes, &class_loader);
+            let raw_class = Self::reload_raw_class(target_class, &ctx.classes, class_loader);
             let lookup_class = raw_class.as_ref().unwrap_or(target_class);
-
-            // Check if the member name is a trait `as` alias on this class.
-            // If so, resolve to the original method name and (optionally) the
-            // source trait so we jump to the actual method definition rather
-            // than failing to find an alias that only exists after inheritance
-            // resolution.
-            let (effective_name, alias_trait) =
-                Self::resolve_trait_alias(target_class, member_name);
-
-            // When we matched an alias, jump directly to the trait method.
-            // This is important when the class also declares a method with
-            // the same name as the original (e.g. `use Foo { foo as __foo; }`
-            // on a class that also has its own `foo()`).  Without this,
-            // `find_declaring_class` would find the class's own `foo()`
-            // instead of the trait's.
-            let is_alias = effective_name != member_name;
-            if is_alias {
-                // Determine the source trait: use the explicit trait name
-                // from a qualified alias (`TraitA::method as alias`), or
-                // search the class's used traits for the original method.
-                let source_trait_name = alias_trait.clone().or_else(|| {
-                    Self::find_declaring_in_traits(
-                        &target_class.used_traits,
-                        &effective_name,
-                        &class_loader,
-                    )
-                    .map(|(_, fqn)| fqn)
-                });
-
-                if let Some(ref trait_name) = source_trait_name
-                    && let Some(trait_info) = class_loader(trait_name)
-                    && Self::classify_member(&trait_info, &effective_name, access_hint).is_some()
-                    && let Some(location) = self.member_position_location(
-                        trait_name,
-                        uri,
-                        content,
-                        &trait_info,
-                        &effective_name,
-                        MemberKind::Method,
-                    )
-                {
-                    return Some(location);
-                }
-            }
-
-            // ── Timestamp constant redirect ─────────────────────────
-            // When the property name matches a timestamp column,
-            // jump straight to the CREATED_AT / UPDATED_AT constant.
-            // Base resolution sees a `CREATED_AT` a parent model overrides.
-            if extends_eloquent_model(lookup_class, &class_loader)
-                && let Some(const_name) = Self::timestamp_property_to_constant(
-                    &crate::virtual_members::resolve_class_base_cached(lookup_class, &class_loader),
-                    &effective_name,
-                )
-                && let Some((const_class, const_fqn)) =
-                    Self::find_declaring_class(lookup_class, const_name, &class_loader)
-                && let Some(location) = self.member_position_location(
-                    &const_fqn,
-                    uri,
-                    content,
-                    &const_class,
-                    const_name,
-                    MemberKind::Constant,
-                )
+            if let Some(location) =
+                self.member_definition_on_candidate(&lookup, target_class, lookup_class)
             {
                 return Some(location);
             }
+        }
 
-            // ── Scope method mapping ────────────────────────────────
-            // Laravel scope methods are defined as `scopeActive()` but
-            // invoked as `active()`.  When the effective name doesn't
-            // exist as a real member, check if `scopeXxx` does and
-            // redirect to that method definition instead.
-            let (search_name, declaring_class, declaring_fqn) = Self::resolve_search_name(
-                target_class,
-                lookup_class,
-                &effective_name,
-                &class_loader,
-                Some(&self.resolved_class_cache),
+        // No candidate had the member: fall back to the first candidate
+        // so we at least get partial results when possible.
+        let raw_fallback = Self::reload_raw_class(first, &ctx.classes, class_loader);
+        self.member_definition_fallback(&lookup, first, raw_fallback.as_ref().unwrap_or(first))
+    }
+
+    /// Look the member up on one candidate class of the subject.
+    ///
+    /// `target_class` is the candidate as resolved (possibly merged with
+    /// its virtual members); `lookup_class` is the same class as declared.
+    fn member_definition_on_candidate(
+        &self,
+        lookup: &MemberLookup<'_>,
+        target_class: &ClassInfo,
+        lookup_class: &ClassInfo,
+    ) -> Option<Location> {
+        let (uri, content) = (lookup.uri, lookup.content);
+
+        // A trait `as` alias resolves to the original method name and
+        // (optionally) the source trait.  Jump straight to the trait method:
+        // the class may also declare a method with the original name
+        // (`use Foo { foo as __foo; }` beside its own `foo()`), which
+        // `find_declaring_class` would find instead.
+        let (effective_name, alias_trait) =
+            Self::resolve_trait_alias(target_class, lookup.member_name);
+        if effective_name != lookup.member_name
+            && let Some(location) =
+                self.trait_alias_location(lookup, target_class, &effective_name, alias_trait)
+        {
+            return Some(location);
+        }
+
+        let is_model = extends_eloquent_model(lookup_class, lookup.class_loader);
+        if is_model
+            && let Some(location) =
+                self.timestamp_constant_location(lookup, lookup_class, &effective_name)
+        {
+            return Some(location);
+        }
+
+        let (search_name, declaring_class, declaring_fqn) = Self::resolve_search_name(
+            target_class,
+            lookup_class,
+            &effective_name,
+            lookup.class_loader,
+            Some(&self.resolved_class_cache),
+        )
+        .unwrap_or_else(|| {
+            (
+                effective_name.clone(),
+                ClassInfo::clone(target_class),
+                target_class.name.to_string(),
             )
-            .unwrap_or_else(|| {
-                (
-                    effective_name.clone(),
-                    ClassInfo::clone(target_class),
-                    target_class.name.to_string(),
-                )
-            });
+        });
 
-            if access_hint == MemberAccessHint::PropertyAccess
-                && is_accessor_or_mutator_method(&declaring_class, &search_name)
-                && let Some(location) = self.member_position_location(
-                    &declaring_fqn,
-                    uri,
-                    content,
-                    &declaring_class,
-                    &search_name,
-                    MemberKind::Method,
-                )
-            {
-                return Some(location);
-            }
-
-            // ── Eloquent array entry fallback (pre-classify) ─────────────────
-            // Virtual properties synthesised from $casts, $dates, $attributes,
-            // $fillable, $guarded, $hidden, $visible, and $appends are NOT
-            // stored in ClassInfo.properties — they exist only as virtual
-            // members produced at resolve time.  classify_member therefore
-            // returns None for them, causing us to `continue` past this
-            // candidate before ever reaching the fallback below.  Check
-            // the array entry here, before that early-exit, so that GTD on
-            // $dates/$casts etc. still jumps to the correct string literal.
-            if extends_eloquent_model(lookup_class, &class_loader)
-                && let Some(location) = self.eloquent_array_entry_location(
-                    &declaring_fqn,
-                    uri,
-                    content,
-                    &effective_name,
-                    (
-                        declaring_class.start_offset as usize,
-                        declaring_class.end_offset as usize,
-                    ),
-                )
-            {
-                return Some(location);
-            }
-
-            // ── where{Property} method → column entry fallback ───────────────
-            // `whereFlour()`, `whereKitchenId()` etc. are virtual methods
-            // synthesised from column names.  They have no real method
-            // declaration; GTD should jump to the column's string literal
-            // in the relevant Eloquent array ($fillable, $casts, etc.).
-            // A real method of that name, such as a `scopeWhereEmail`
-            // scope, is what Laravel calls instead, so it wins.
-            if extends_eloquent_model(lookup_class, &class_loader)
-                && Self::classify_member(&declaring_class, &search_name, access_hint).is_none()
-                && let Some(column) = where_property_method_to_column(&effective_name)
-                && let Some(location) = self.eloquent_array_entry_location(
-                    &declaring_fqn,
-                    uri,
-                    content,
-                    &column,
-                    (
-                        lookup_class.start_offset as usize,
-                        lookup_class.end_offset as usize,
-                    ),
-                )
-            {
-                return Some(location);
-            }
-
-            let member_kind =
-                match Self::classify_member(&declaring_class, &search_name, access_hint) {
-                    Some(k) => k,
-                    None => continue, // member not on this candidate, try next
-                };
-
-            // ── Laravel macro registration site ─────────────────────
-            // A macro method has no declaration in the declaring class's own
-            // file; jump to its `::macro('name', ...)` registration instead.
-            if member_kind == MemberKind::Method
-                && let Some(location) =
-                    self.macro_definition_location(declaring_class.fqn().as_str(), &search_name)
-            {
-                return Some(location);
-            }
-
-            if let Some(location) = self.member_position_location(
+        if lookup.access_hint == MemberAccessHint::PropertyAccess
+            && is_accessor_or_mutator_method(&declaring_class, &search_name)
+            && let Some(location) = self.member_position_location(
                 &declaring_fqn,
                 uri,
                 content,
                 &declaring_class,
                 &search_name,
-                member_kind,
+                MemberKind::Method,
+            )
+        {
+            return Some(location);
+        }
+
+        let member_kind = Self::classify_member(&declaring_class, &search_name, lookup.access_hint);
+
+        if is_model {
+            // Virtual attributes synthesised from $casts, $dates,
+            // $attributes, $fillable, $guarded, $hidden, $visible and
+            // $appends have no declaration; jump to the string literal in
+            // the array instead.
+            if let Some(location) = self.eloquent_array_entry_location(
+                lookup,
+                &declaring_fqn,
+                &effective_name,
+                &declaring_class,
             ) {
                 return Some(location);
             }
-
-            // ── Object shape property fallback ──────────────────────
-            // Synthetic `__object_shape` classes have no backing file.
-            // Search the current file's docblocks for an `object{…}`
-            // annotation that contains the property key and jump there.
-            if declaring_fqn == "__object_shape"
-                && let Some(location) =
-                    self.object_shape_property_location(uri, content, &search_name, cursor_offset)
-            {
-                return Some(location);
-            }
-
-            // ── Eloquent array entry fallback ───────────────────────
-            // Virtual properties from $casts, $dates, $attributes,
-            // $fillable, $guarded, $hidden, $visible, and $appends don't
-            // have a method or property declaration.  Jump to the string
-            // literal entry inside the array property instead.
-            if extends_eloquent_model(lookup_class, &class_loader)
+            // `whereFlour()`, `whereKitchenId()` etc. are synthesised from
+            // column names; jump to the column's entry.  A real method of
+            // that name, such as a `scopeWhereEmail` scope, is what Laravel
+            // calls instead, so it wins.
+            if member_kind.is_none()
+                && let Some(column) = where_property_method_to_column(&effective_name)
                 && let Some(location) = self.eloquent_array_entry_location(
+                    lookup,
                     &declaring_fqn,
-                    uri,
-                    content,
-                    &effective_name,
-                    (
-                        declaring_class.start_offset as usize,
-                        declaring_class.end_offset as usize,
-                    ),
+                    &column,
+                    lookup_class,
                 )
             {
                 return Some(location);
             }
         }
 
-        // No candidate had the member — fall back to the first candidate
-        // and try the original (non-iterating) logic so we at least get
-        // partial results when possible.
-        let target_class = &candidates[0];
-        let raw_fallback = Self::reload_raw_class(target_class, &ctx.classes, &class_loader);
-        let fallback_class = raw_fallback.as_ref().unwrap_or(target_class);
+        self.declared_member_location(
+            lookup,
+            &declaring_fqn,
+            &declaring_class,
+            &search_name,
+            member_kind?,
+        )
+    }
 
-        let (effective_name, alias_trait) = Self::resolve_trait_alias(target_class, member_name);
+    /// The fallback when no candidate declares the member: retry on the
+    /// first candidate without requiring the member to classify up front.
+    fn member_definition_fallback(
+        &self,
+        lookup: &MemberLookup<'_>,
+        target_class: &ClassInfo,
+        fallback_class: &ClassInfo,
+    ) -> Option<Location> {
+        let (effective_name, alias_trait) =
+            Self::resolve_trait_alias(target_class, lookup.member_name);
 
-        // Direct trait lookup for aliased members in the fallback path.
         if let Some(ref trait_name) = alias_trait
-            && let Some(ref trait_info) = class_loader(trait_name)
+            && let Some(ref trait_info) = (lookup.class_loader)(trait_name)
             && let Some(location) = self.member_position_location(
                 trait_name,
-                uri,
-                content,
+                lookup.uri,
+                lookup.content,
                 trait_info,
                 &effective_name,
                 MemberKind::Method,
@@ -415,63 +323,116 @@ impl Backend {
             return Some(location);
         }
 
-        // Try with scope mapping in the fallback path too.
         let Some((search_name, declaring_class, declaring_fqn)) = Self::resolve_search_name(
             target_class,
             fallback_class,
             &effective_name,
-            &class_loader,
+            lookup.class_loader,
             Some(&self.resolved_class_cache),
         ) else {
-            // Last resort: Eloquent array entry (virtual properties) and
-            // where{Property} method mapping.
-            if extends_eloquent_model(fallback_class, &class_loader) {
-                let fqn = fallback_class.name.to_string();
-                let bounds = (
-                    fallback_class.start_offset as usize,
-                    fallback_class.end_offset as usize,
-                );
-                // where{Property} → column entry
-                if let Some(column) = where_property_method_to_column(&effective_name)
-                    && let Some(location) =
-                        self.eloquent_array_entry_location(&fqn, uri, content, &column, bounds)
-                {
-                    return Some(location);
-                }
-                if let Some(location) =
-                    self.eloquent_array_entry_location(&fqn, uri, content, &effective_name, bounds)
-                {
-                    return Some(location);
-                }
+            // Last resort: an Eloquent attribute's array entry, for the
+            // attribute itself or for a where{Property} method.
+            if !extends_eloquent_model(fallback_class, lookup.class_loader) {
+                return None;
             }
-            return None;
+            let fqn = fallback_class.fqn();
+            return where_property_method_to_column(&effective_name)
+                .and_then(|column| {
+                    self.eloquent_array_entry_location(lookup, &fqn, &column, fallback_class)
+                })
+                .or_else(|| {
+                    self.eloquent_array_entry_location(
+                        lookup,
+                        &fqn,
+                        &effective_name,
+                        fallback_class,
+                    )
+                });
         };
 
-        let member_kind = Self::classify_member(&declaring_class, &search_name, access_hint)?;
-
-        // ── Laravel macro registration site (fallback path) ─────
-        if member_kind == MemberKind::Method
-            && let Some(location) =
-                self.macro_definition_location(declaring_class.fqn().as_str(), &search_name)
-        {
-            return Some(location);
-        }
-
-        // ── Object shape property fallback (fallback path) ──────
-        if declaring_fqn == "__object_shape"
-            && let Some(location) =
-                self.object_shape_property_location(uri, content, &search_name, cursor_offset)
-        {
-            return Some(location);
-        }
-
-        self.member_position_location(
+        let member_kind =
+            Self::classify_member(&declaring_class, &search_name, lookup.access_hint)?;
+        self.declared_member_location(
+            lookup,
             &declaring_fqn,
-            uri,
-            content,
             &declaring_class,
             &search_name,
             member_kind,
+        )
+    }
+
+    /// Locate a member once its declaring class and kind are known: a
+    /// macro's registration site, the declaration in the class's file, or
+    /// a synthetic object shape's docblock key.
+    fn declared_member_location(
+        &self,
+        lookup: &MemberLookup<'_>,
+        declaring_fqn: &str,
+        declaring_class: &ClassInfo,
+        search_name: &str,
+        member_kind: MemberKind,
+    ) -> Option<Location> {
+        // A macro method has no declaration in the declaring class's own
+        // file; jump to its `::macro('name', ...)` registration instead.
+        if member_kind == MemberKind::Method
+            && let Some(location) =
+                self.macro_definition_location(declaring_class.fqn().as_str(), search_name)
+        {
+            return Some(location);
+        }
+
+        if let Some(location) = self.member_position_location(
+            declaring_fqn,
+            lookup.uri,
+            lookup.content,
+            declaring_class,
+            search_name,
+            member_kind,
+        ) {
+            return Some(location);
+        }
+
+        // Synthetic `__object_shape` classes have no backing file.  Search
+        // the current file's docblocks for an `object{…}` annotation that
+        // contains the property key.
+        if declaring_fqn == "__object_shape" {
+            return self.object_shape_property_location(
+                lookup.uri,
+                lookup.content,
+                search_name,
+                lookup.cursor_offset,
+            );
+        }
+        None
+    }
+
+    /// Jump to the trait method an `as` alias names, through the trait the
+    /// alias qualifies (`TraitA::method as alias`) or else the used trait
+    /// that declares the original method.
+    fn trait_alias_location(
+        &self,
+        lookup: &MemberLookup<'_>,
+        target_class: &ClassInfo,
+        effective_name: &str,
+        alias_trait: Option<String>,
+    ) -> Option<Location> {
+        let trait_name = alias_trait.or_else(|| {
+            Self::find_declaring_in_traits(
+                &target_class.used_traits,
+                effective_name,
+                lookup.class_loader,
+            )
+            .map(|(_, fqn)| fqn)
+        })?;
+        let trait_info = (lookup.class_loader)(&trait_name)?;
+        Self::classify_member(&trait_info, effective_name, lookup.access_hint)?;
+        self.member_position_location(
+            &trait_name,
+            lookup.uri,
+            lookup.content,
+            &trait_info,
+            effective_name,
+            MemberKind::Method,
         )
     }
 
@@ -490,34 +451,10 @@ impl Backend {
     ) -> Option<Location> {
         let (class_uri, class_content) =
             self.find_class_file_content(declaring_fqn, uri, content)?;
-        let member_position = Self::find_member_position(
-            &class_content,
-            search_name,
-            member_kind,
-            declaring_class.member_name_offset(search_name, member_kind.as_str()),
-        )?;
+        let member_position =
+            Self::find_member_position(&class_content, search_name, member_kind, declaring_class)?;
         let parsed_uri = Url::parse(&class_uri).ok()?;
         Some(point_location(parsed_uri, member_position))
-    }
-
-    /// Look up an Eloquent virtual array entry's position (a `$casts`,
-    /// `$fillable`, `$dates`, etc. string literal), bundling the same
-    /// `find_class_file_content` → `find_eloquent_array_entry` →
-    /// `point_location` sequence shared by every array-entry fallback.
-    fn eloquent_array_entry_location(
-        &self,
-        declaring_fqn: &str,
-        uri: &str,
-        content: &str,
-        entry_name: &str,
-        class_bounds: (usize, usize),
-    ) -> Option<Location> {
-        let (class_uri, class_content) =
-            self.find_class_file_content(declaring_fqn, uri, content)?;
-        let entry_position =
-            Self::find_eloquent_array_entry(&class_content, entry_name, Some(class_bounds))?;
-        let parsed_uri = Url::parse(&class_uri).ok()?;
-        Some(point_location(parsed_uri, entry_position))
     }
 
     /// Look up a synthetic `__object_shape` property's position in the
@@ -626,54 +563,6 @@ impl Backend {
         None
     }
 
-    /// Find where a static call on a Laravel facade is declared on the
-    /// concrete class the facade forwards to (or on something that class
-    /// inherits or mixes in).
-    fn find_facade_forwarded_method(
-        class: &ClassInfo,
-        member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        cache: Option<&ResolvedClassCache>,
-    ) -> Option<(ClassInfo, String)> {
-        let concrete = facade_concrete_class(class, class_loader, cache)?;
-        let (declaring_class, fqn) =
-            Self::find_declaring_class(&concrete, member_name, class_loader)?;
-
-        // A member declared on the concrete class itself comes back under
-        // its short name; use the FQN so the file lookup can disambiguate.
-        if !fqn.contains('\\') && fqn == concrete.name {
-            Some((declaring_class, concrete.fqn().to_string()))
-        } else {
-            Some((declaring_class, fqn))
-        }
-    }
-
-    /// Locate the `::macro('name', ...)` registration site for a Laravel macro
-    /// method named `name` on the class `fqn`.
-    ///
-    /// A macro is synthesized onto its target class but has no declaration in
-    /// that class's own file, so the ordinary declaring-class file lookup finds
-    /// nothing.  This jumps to the name literal of the registration call
-    /// instead (typically in a service provider).  Returns `None` when the
-    /// project has no macros or the member is not a recognized macro.
-    fn macro_definition_location(&self, fqn: &str, name: &str) -> Option<Location> {
-        if !self
-            .laravel_has_macros
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            return None;
-        }
-        let (uri, offset) = {
-            let index = self.laravel_macros.read();
-            let (uri, offset) = index.definition(fqn, name)?;
-            (uri.to_string(), offset)
-        };
-        let content = self.get_file_content(&uri)?;
-        let position = crate::text_position::offset_to_position(&content, offset as usize + 1);
-        let parsed_uri = Url::parse(&uri).ok()?;
-        Some(point_location(parsed_uri, position))
-    }
-
     // ─── Member Access Context Extraction ───────────────────────────────────
 
     /// Extract the subject and access kind for the member access under
@@ -723,11 +612,7 @@ impl Backend {
                 is_static,
                 ..
             } => {
-                let access_kind = if *is_static {
-                    AccessKind::DoubleColon
-                } else {
-                    AccessKind::Arrow
-                };
+                let access_kind = AccessKind::of_member_access(*is_static);
                 Some((subject_text.as_str(source).to_string(), access_kind))
             }
             _ => None,
@@ -811,192 +696,5 @@ impl Backend {
             .any(|(name, _)| name == member_name);
 
         (has_method, has_property)
-    }
-
-    // ─── Scope Name Mapping ─────────────────────────────────────────────────
-
-    /// Map a virtual scope method name to the underlying `scopeXxx` method.
-    ///
-    /// Laravel scope methods are defined as `scopeActive(Builder $query)`
-    /// but invoked as `active()` (or `BlogAuthor::active()`).  This helper
-    /// converts `"active"` → `"scopeActive"` so that go-to-definition can
-    /// find the actual method declaration.
-    fn scope_method_name(member_name: &str) -> String {
-        let mut scope = String::with_capacity("scope".len() + member_name.len());
-        scope.push_str("scope");
-        let mut chars = member_name.chars();
-        if let Some(first) = chars.next() {
-            scope.extend(first.to_uppercase());
-            scope.extend(chars);
-        }
-        scope
-    }
-
-    // ─── Eloquent Builder Forwarding ────────────────────────────────────────
-
-    /// Check if a method is available on the Eloquent Builder for a Model
-    /// subclass.
-    ///
-    /// Laravel's `Model::__callStatic()` forwards static calls to
-    /// `Builder`, but the real `Model` class has no `@mixin Builder`
-    /// annotation.  This function bridges that gap for go-to-definition
-    /// by loading the Builder and searching its inheritance chain
-    /// (including `@mixin Query\Builder` and traits like
-    /// `BuildsQueries`) for the requested method.
-    ///
-    /// Returns `Some((ClassInfo, fqn))` of the declaring class when the
-    /// method is found, or `None` if the class is not an Eloquent Model
-    /// subclass or the method does not exist on Builder.
-    fn find_builder_forwarded_method(
-        class: &ClassInfo,
-        member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> Option<(ClassInfo, String)> {
-        if !extends_eloquent_model(class, class_loader) {
-            return None;
-        }
-
-        let builder_fqn = custom_builder_fqn(class, class_loader)
-            .unwrap_or_else(|| ELOQUENT_BUILDER_FQN.to_string());
-
-        let builder = class_loader(&builder_fqn)?;
-        let (declaring_class, fqn) =
-            Self::find_declaring_class(&builder, member_name, class_loader)?;
-
-        // When the declaring class is the builder itself, find_declaring_class
-        // returns the short name ("Builder"). Replace it with the FQN so
-        // that find_class_file_content can disambiguate.
-        if !fqn.contains('\\') && fqn == builder.name {
-            Some((declaring_class, builder_fqn))
-        } else {
-            Some((declaring_class, fqn))
-        }
-    }
-
-    /// Find a scope method's declaration on the model when the target
-    /// class is an Eloquent Builder instance.
-    ///
-    /// When a variable resolves to `Builder<User>`, completion injects
-    /// the model's scope methods onto the Builder.  For go-to-definition,
-    /// we need to trace back to the `scopeXxx` method on the model.
-    ///
-    /// `resolved_candidate` is the fully-resolved Builder (with scope
-    /// methods injected by `type_hint_to_classes_typed`).  We use it to
-    /// confirm the member exists and to extract the model name from the
-    /// scope method's return type.
-    ///
-    /// Returns `Some((declaring_class, fqn, scope_method_name))` when
-    /// the scope is found on the model, or `None` otherwise.
-    fn find_scope_on_builder_model(
-        resolved_candidate: &ClassInfo,
-        raw_class: &ClassInfo,
-        member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> Option<(ClassInfo, String, String)> {
-        // Only applies to the Eloquent Builder class.
-        let raw_fqn = raw_class.fqn();
-        if raw_fqn != ELOQUENT_BUILDER_FQN {
-            return None;
-        }
-
-        // Check if the resolved (scope-injected) candidate has this
-        // method.  If not, the member is not a scope.
-        let scope_method = resolved_candidate
-            .methods
-            .iter()
-            .find(|m| m.name == member_name && !m.is_static)?;
-
-        // Extract the model name from a Builder-typed return type.
-        //
-        // The return type is typically
-        // `Illuminate\Database\Eloquent\Builder<App\Models\User>`.
-        // We specifically look for return types whose base type is
-        // the Eloquent Builder and extract the first generic arg as
-        // the model name.
-        let extract_model_from_builder_ret = |ret: &crate::php_type::PhpType| -> Option<String> {
-            match ret.kind() {
-                crate::php_type::TypeKind::Generic(g) if !g.args.is_empty() => {
-                    // Check that the base type is the Eloquent Builder.
-                    if g.name != ELOQUENT_BUILDER_FQN && g.name != "Builder" {
-                        return None;
-                    }
-                    g.args[0].base_name().map(|s| s.to_string())
-                }
-                _ => None,
-            }
-        };
-
-        // When a scope declares a bare `Builder` return type (without
-        // generic args like `<Model>`), the extraction above fails.
-        // In that case, scan all other instance methods on the
-        // resolved candidate for a Builder-typed return that carries
-        // the model name.  All scope methods on the same
-        // Builder<Model> instance share the same model, so any match
-        // is valid.
-        let model_name = scope_method
-            .return_type
-            .as_ref()
-            .and_then(extract_model_from_builder_ret)
-            .or_else(|| {
-                resolved_candidate.methods.iter().find_map(|m| {
-                    if m.is_static {
-                        return None;
-                    }
-                    m.return_type
-                        .as_ref()
-                        .and_then(extract_model_from_builder_ret)
-                })
-            })?;
-
-        // Load the model and verify it extends Eloquent Model.
-        let model = class_loader(&model_name)?;
-        if !extends_eloquent_model(&model, class_loader) {
-            return None;
-        }
-
-        // Look for `scopeXxx` on the model's inheritance chain.
-        // For `#[Scope]`-attributed methods, the declaration uses the
-        // original name (e.g. `active`), not `scopeActive`.  Try the
-        // `scopeX` convention first, then fall back to the original name.
-        let scope_name = Self::scope_method_name(member_name);
-        if let Some((declaring, fqn)) =
-            Self::find_declaring_class(&model, &scope_name, class_loader)
-        {
-            return Some((declaring, fqn, scope_name));
-        }
-
-        // Fallback: `#[Scope]` attribute — the method keeps its own name.
-        let (declaring, fqn) = Self::find_declaring_class(&model, member_name, class_loader)?;
-        Some((declaring, fqn, member_name.to_string()))
-    }
-
-    /// Map a timestamp virtual property name to its defining constant.
-    ///
-    /// Returns `Some("CREATED_AT")` or `Some("UPDATED_AT")` when the
-    /// property name matches the model's configured timestamp column,
-    /// or `None` when the property is not a timestamp.
-    fn timestamp_property_to_constant<'a>(
-        class: &ClassInfo,
-        property_name: &str,
-    ) -> Option<&'a str> {
-        if let Some(laravel) = class.laravel() {
-            let created_col = match &laravel.created_at_name {
-                Some(Some(name)) => Some(name.as_str()),
-                Some(None) => None,
-                None => Some("created_at"),
-            };
-            let updated_col = match &laravel.updated_at_name {
-                Some(Some(name)) => Some(name.as_str()),
-                Some(None) => None,
-                None => Some("updated_at"),
-            };
-            if created_col == Some(property_name) {
-                return Some("CREATED_AT");
-            }
-            if updated_col == Some(property_name) {
-                return Some("UPDATED_AT");
-            }
-        }
-        None
     }
 }

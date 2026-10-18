@@ -226,13 +226,7 @@ impl Backend {
 
         // Drop coalescing state for this file so the maps don't grow unbounded
         // across an editing session.
-        let suffix = format!("\u{0}{uri}");
-        {
-            let coalesce = &self.whole_file_coalesce;
-            coalesce.latest.lock().retain(|k, _| !k.ends_with(&suffix));
-            coalesce.locks.lock().retain(|k, _| !k.ends_with(&suffix));
-            coalesce.last.lock().retain(|k, _| !k.ends_with(&suffix));
-        }
+        self.whole_file_coalesce.forget_uri(&uri);
 
         if crate::resource_navigation::is_resource_document(&uri) {
             if let Some(content) = self.get_file_content(&uri) {
@@ -252,7 +246,7 @@ impl Backend {
                 Ok(content) => {
                     backend.update_ast(uri, &content);
                 }
-                Err(_) => backend.clear_file_maps(uri),
+                Err(_) => backend.forget_closed_file(uri),
             };
             if self.sync_ast_updates {
                 reparse(self, &uri);
@@ -272,7 +266,7 @@ impl Backend {
                 });
             }
         } else {
-            self.clear_file_maps(&uri);
+            self.forget_closed_file(&uri);
         }
 
         // Clear diagnostics so stale warnings don't linger after the file is closed

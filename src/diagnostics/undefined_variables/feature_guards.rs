@@ -231,7 +231,7 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Vec<u32>> for ImportWalker {
     }
 
     fn walk_in_function_call(&self, node: &'ast FunctionCall<'arena>, context: &mut Vec<u32>) {
-        if is_named_call(node, b"blade_view_directive") {
+        if is_named_call(node, crate::blade::markers::VIEW.as_bytes()) {
             context.push(node.span().start.offset);
         }
     }

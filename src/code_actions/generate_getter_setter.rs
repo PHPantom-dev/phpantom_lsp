@@ -165,100 +165,49 @@ impl Backend {
         let any_can_getter = available.iter().any(|a| a.can_getter);
         let any_can_setter = available.iter().any(|a| a.can_setter);
 
-        // ── Generate getter ─────────────────────────────────────────────
+        // One action per selection: getters, setters, or both, each over
+        // every property that can still take one.
+        let mut push_action = |title: &str, getters: bool, setters: bool| {
+            let mut methods_text = String::new();
+            for avail in &available {
+                if getters && avail.can_getter {
+                    methods_text.push_str(&build_getter(&avail.prop, &indent));
+                }
+                if setters && avail.can_setter {
+                    methods_text.push_str(&build_setter(&avail.prop, &indent));
+                }
+            }
+
+            let edit = TextEdit {
+                range: Range {
+                    start: insert_pos,
+                    end: insert_pos,
+                },
+                new_text: methods_text,
+            };
+
+            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: title.to_string(),
+                kind: Some(CodeActionKind::REFACTOR),
+                diagnostics: None,
+                edit: Some(crate::code_actions::single_file_edit(
+                    doc_uri.clone(),
+                    vec![edit],
+                )),
+                command: None,
+                is_preferred: Some(false),
+                disabled: None,
+                data: None,
+            }));
+        };
         if any_can_getter {
-            let mut methods_text = String::new();
-            for avail in &available {
-                if avail.can_getter {
-                    methods_text.push_str(&build_getter(&avail.prop, &indent));
-                }
-            }
-
-            let edit = TextEdit {
-                range: Range {
-                    start: insert_pos,
-                    end: insert_pos,
-                },
-                new_text: methods_text,
-            };
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: "Generate getter".to_string(),
-                kind: Some(CodeActionKind::REFACTOR),
-                diagnostics: None,
-                edit: Some(crate::code_actions::single_file_edit(
-                    doc_uri.clone(),
-                    vec![edit],
-                )),
-                command: None,
-                is_preferred: Some(false),
-                disabled: None,
-                data: None,
-            }));
+            push_action("Generate getter", true, false);
         }
-
-        // ── Generate setter ─────────────────────────────────────────────
         if any_can_setter {
-            let mut methods_text = String::new();
-            for avail in &available {
-                if avail.can_setter {
-                    methods_text.push_str(&build_setter(&avail.prop, &indent));
-                }
-            }
-
-            let edit = TextEdit {
-                range: Range {
-                    start: insert_pos,
-                    end: insert_pos,
-                },
-                new_text: methods_text,
-            };
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: "Generate setter".to_string(),
-                kind: Some(CodeActionKind::REFACTOR),
-                diagnostics: None,
-                edit: Some(crate::code_actions::single_file_edit(
-                    doc_uri.clone(),
-                    vec![edit],
-                )),
-                command: None,
-                is_preferred: Some(false),
-                disabled: None,
-                data: None,
-            }));
+            push_action("Generate setter", false, true);
         }
-
-        // ── Generate getter and setter ──────────────────────────────────
         if any_can_getter && any_can_setter {
-            let mut methods_text = String::new();
-            for avail in &available {
-                if avail.can_getter {
-                    methods_text.push_str(&build_getter(&avail.prop, &indent));
-                }
-                if avail.can_setter {
-                    methods_text.push_str(&build_setter(&avail.prop, &indent));
-                }
-            }
-
-            let edit = TextEdit {
-                range: Range {
-                    start: insert_pos,
-                    end: insert_pos,
-                },
-                new_text: methods_text,
-            };
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: "Generate getter and setter".to_string(),
-                kind: Some(CodeActionKind::REFACTOR),
-                diagnostics: None,
-                edit: Some(crate::code_actions::single_file_edit(doc_uri, vec![edit])),
-                command: None,
-                is_preferred: Some(false),
-                disabled: None,
-                data: None,
-            }));
+            push_action("Generate getter and setter", true, true);
         }
     }
 }

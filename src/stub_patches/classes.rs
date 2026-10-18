@@ -103,9 +103,7 @@ fn mark_impure_methods(class: &mut ClassInfo) {
         {
             continue;
         }
-        let mut method = (**method).clone();
-        method.is_impure = true;
-        class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+        update_method_at(class, idx, |method| method.is_impure = true);
     }
 }
 
@@ -140,29 +138,25 @@ pub fn apply_third_party_class_patches(class: &mut ClassInfo) {
         if fqn.as_str() != *class_fqn {
             continue;
         }
-        let Some(idx) = class
-            .methods
-            .iter()
-            .position(|m| m.name.as_str() == *method_name)
-        else {
+        let Some(idx) = method_index(class, method_name) else {
             continue;
         };
         // A version that grew the tag upstream keeps its own.
         if !class.methods[idx].type_assertions().is_empty() {
             continue;
         }
-        let mut method = (*class.methods[idx]).clone();
-        method
-            .extras_mut()
-            .type_assertions
-            .push(crate::types::TypeAssertion {
-                kind: crate::types::AssertionKind::IfTrue,
-                param_name: (*subject).to_string(),
-                asserted_type: PhpType::null(),
-                negated: true,
-                is_equality: false,
-            });
-        class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+        update_method_at(class, idx, |method| {
+            method
+                .extras_mut()
+                .type_assertions
+                .push(crate::types::TypeAssertion {
+                    kind: crate::types::AssertionKind::IfTrue,
+                    param_name: (*subject).to_string(),
+                    asserted_type: PhpType::null(),
+                    negated: true,
+                    is_equality: false,
+                });
+        });
     }
 }
 
@@ -186,9 +180,7 @@ fn mark_benevolent_methods(class: &mut ClassInfo) {
         else {
             continue;
         };
-        let mut method = (*class.methods[idx]).clone();
-        method.return_type = Some(tagged);
-        class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+        update_method_at(class, idx, |method| method.return_type = Some(tagged));
     }
 }
 
@@ -202,25 +194,11 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
     if !class.template_params.is_empty() {
         return;
     }
-    add_templates(class, &[("TKey", None), ("TValue", None)]);
-    // TIterator has a complex bound `Traversable<TKey, TValue>` — add it
-    // manually since `add_templates` only handles simple string bounds.
-    let t_iter = atom("TIterator");
-    if !class.template_params.contains(&t_iter) {
-        class.template_params.push(t_iter);
-    }
-    class
-        .template_param_bounds
-        .entry(atom("TIterator"))
-        .or_insert_with(|| {
-            PhpType::generic(
-                "Traversable",
-                vec![PhpType::named(atom("TKey")), PhpType::named(atom("TValue"))],
-            )
-        });
+    add_iterator_templates(class);
     add_implements_generics(class, "OuterIterator", &["TKey", "TValue"]);
     // Add @mixin TIterator so that methods from the wrapped iterator
     // are available on the wrapper.
+    let t_iter = atom("TIterator");
     if !class.mixins.contains(&t_iter) {
         class.mixins.push(t_iter);
     }
@@ -230,33 +208,11 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
     // hides the generic type.  PHPStan's stubs override these.
     patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
     patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
+    patch_inner_iterator_return_type(class);
 
     // Patch the constructor: add template binding TIterator → $iterator
     // so that `new IteratorIterator(new Subject())` infers TIterator = Subject.
-    if let Some(ctor_idx) = class
-        .methods
-        .iter()
-        .position(|m| m.name.as_str() == "__construct")
-    {
-        let mut ctor = (*class.methods[ctor_idx]).clone();
-        bind_ctor_template(
-            &mut ctor,
-            &class.template_params,
-            atom("TIterator"),
-            atom("$iterator"),
-        );
-        // Update the parameter type hint from Traversable to TIterator
-        // so that classify_template_binding recognises a Direct binding.
-        if let Some(param) = ctor
-            .parameters
-            .make_mut()
-            .iter_mut()
-            .find(|p| p.name == "$iterator")
-        {
-            param.type_hint = Some(PhpType::named(atom("TIterator")));
-        }
-        class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
-    }
+    patch_constructor_template_binding(class, "TIterator", "$iterator");
 }
 
 /// Add `@template T of RecursiveIterator|IteratorAggregate` and
@@ -287,26 +243,7 @@ fn patch_recursive_iterator_iterator(class: &mut ClassInfo) {
     if !class.mixins.contains(&t) {
         class.mixins.push(t);
     }
-
-    if let Some(ctor_idx) = class
-        .methods
-        .iter()
-        .position(|m| m.name.as_str() == "__construct")
-    {
-        let mut ctor = (*class.methods[ctor_idx]).clone();
-        bind_ctor_template(&mut ctor, &class.template_params, t, atom("$iterator"));
-        // A `T` hint (rather than the stub's `Traversable`) is what makes
-        // `classify_template_binding` read the argument as a direct bind.
-        if let Some(param) = ctor
-            .parameters
-            .make_mut()
-            .iter_mut()
-            .find(|p| p.name == "$iterator")
-        {
-            param.type_hint = Some(PhpType::named(t));
-        }
-        class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
-    }
+    patch_constructor_template_binding(class, "T", "$iterator");
 }
 
 /// Add `@template TKey`, `@template TValue`,
@@ -322,6 +259,24 @@ fn patch_filter_iterator(class: &mut ClassInfo) {
     patch_iterator_iterator_subclass(class, "IteratorIterator");
     patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
     patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
+    patch_inner_iterator_return_type(class);
+}
+
+/// Type `getInnerIterator()` as `Iterator<TKey, TValue>`, the return
+/// PHPStan's stub gives `OuterIterator::getInnerIterator()`.
+///
+/// phpstorm-stubs redeclare the method as `?Iterator` on `IteratorIterator`
+/// and `FilterIterator`, so the inner iterator's elements would otherwise
+/// be `mixed` however the wrapper is parameterised.
+fn patch_inner_iterator_return_type(class: &mut ClassInfo) {
+    patch_method_return_type(
+        class,
+        "getInnerIterator",
+        PhpType::generic(
+            "Iterator",
+            vec![PhpType::named(atom("TKey")), PhpType::named(atom("TValue"))],
+        ),
+    );
 }
 
 /// Patch `NoRewindIterator` with template params inherited from `IteratorIterator`.
@@ -334,7 +289,7 @@ fn patch_no_rewind_iterator(class: &mut ClassInfo) {
         return;
     }
     patch_iterator_iterator_subclass(class, "IteratorIterator");
-    patch_constructor_iterator_binding(class);
+    patch_constructor_template_binding(class, "TIterator", "$iterator");
 }
 
 /// Patch `CachingIterator` with template params inherited from `IteratorIterator`.
@@ -348,7 +303,7 @@ fn patch_caching_iterator(class: &mut ClassInfo) {
     patch_iterator_iterator_subclass(class, "IteratorIterator");
     patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
     patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
-    patch_constructor_iterator_binding(class);
+    patch_constructor_template_binding(class, "TIterator", "$iterator");
 }
 
 /// Patch `InfiniteIterator` with template params inherited from `IteratorIterator`.
@@ -359,7 +314,7 @@ fn patch_infinite_iterator(class: &mut ClassInfo) {
         return;
     }
     patch_iterator_iterator_subclass(class, "IteratorIterator");
-    patch_constructor_iterator_binding(class);
+    patch_constructor_template_binding(class, "TIterator", "$iterator");
 }
 
 /// Patch `LimitIterator` with template params inherited from `IteratorIterator`.
@@ -372,7 +327,7 @@ fn patch_limit_iterator(class: &mut ClassInfo) {
     patch_iterator_iterator_subclass(class, "IteratorIterator");
     patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
     patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
-    patch_constructor_iterator_binding(class);
+    patch_constructor_template_binding(class, "TIterator", "$iterator");
 }
 
 /// Patch `CallbackFilterIterator` with template params inherited from `FilterIterator`.
@@ -384,7 +339,7 @@ fn patch_callback_filter_iterator(class: &mut ClassInfo) {
         return;
     }
     patch_iterator_iterator_subclass(class, "FilterIterator");
-    patch_constructor_iterator_binding(class);
+    patch_constructor_template_binding(class, "TIterator", "$iterator");
 }
 
 /// Type `DOMNamedNodeMap::item()` by the map's node type.
@@ -394,15 +349,12 @@ fn patch_callback_filter_iterator(class: &mut ClassInfo) {
 /// `TNode`, but `item()` is declared `DOMNode|null`, so an element's
 /// `attributes->item(0)` loses the `DOMAttr` every other accessor keeps.
 fn patch_dom_named_node_map(class: &mut ClassInfo) {
-    let Some(idx) = class.methods.iter().position(|m| m.name.as_str() == "item") else {
-        return;
-    };
-    let mut method = (*class.methods[idx]).clone();
-    method.return_type = Some(PhpType::union(vec![
-        PhpType::named(atom("TNode")),
-        PhpType::null(),
-    ]));
-    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+    with_method_mut(class, "item", |method| {
+        method.return_type = Some(PhpType::union(vec![
+            PhpType::named(atom("TNode")),
+            PhpType::null(),
+        ]));
+    });
 }
 
 /// Let `DOMNode::hasAttributes()` prove `$attributes` is not null.
@@ -419,18 +371,18 @@ fn patch_dom_node(class: &mut ClassInfo) {
     else {
         return;
     };
-    let mut method = (*class.methods[idx]).clone();
-    method
-        .extras_mut()
-        .type_assertions
-        .push(crate::types::TypeAssertion {
-            kind: crate::types::AssertionKind::IfTrue,
-            param_name: "$this->attributes".to_string(),
-            asserted_type: PhpType::null(),
-            negated: true,
-            is_equality: true,
-        });
-    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+    update_method_at(class, idx, |method| {
+        method
+            .extras_mut()
+            .type_assertions
+            .push(crate::types::TypeAssertion {
+                kind: crate::types::AssertionKind::IfTrue,
+                param_name: "$this->attributes".to_string(),
+                asserted_type: PhpType::null(),
+                negated: true,
+                is_equality: true,
+            });
+    });
 }
 
 /// Drop the `null` from `DOMElement::$attributes`.
@@ -503,24 +455,24 @@ fn patch_reflection_is_subclass_of(class: &mut ClassInfo) {
         return;
     }
     let template = atom("TIsSubclassOf");
-    let mut method = (*class.methods[idx]).clone();
-    let extras = method.extras_mut();
-    extras.template_params.push(template);
-    extras
-        .template_param_bounds
-        .insert(template, PhpType::object());
-    extras.template_bindings.push((template, param));
-    extras.type_assertions.push(crate::types::TypeAssertion {
-        kind: crate::types::AssertionKind::IfTrue,
-        param_name: "$this".to_string(),
-        asserted_type: PhpType::generic_atom(
-            atom("ReflectionClass"),
-            vec![PhpType::named(template)],
-        ),
-        negated: false,
-        is_equality: false,
+    update_method_at(class, idx, |method| {
+        let extras = method.extras_mut();
+        extras.template_params.push(template);
+        extras
+            .template_param_bounds
+            .insert(template, PhpType::object());
+        extras.template_bindings.push((template, param));
+        extras.type_assertions.push(crate::types::TypeAssertion {
+            kind: crate::types::AssertionKind::IfTrue,
+            param_name: "$this".to_string(),
+            asserted_type: PhpType::generic_atom(
+                atom("ReflectionClass"),
+                vec![PhpType::named(template)],
+            ),
+            negated: false,
+            is_equality: false,
+        });
     });
-    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
 }
 
 /// Fix two `ReflectionClass` return types phpstorm-stubs understate.
@@ -540,21 +492,11 @@ fn patch_reflection_is_subclass_of(class: &mut ClassInfo) {
 fn patch_reflection_class(class: &mut ClassInfo) {
     patch_reflection_is_subclass_of(class);
 
-    if let Some(idx) = class
-        .methods
-        .iter()
-        .position(|m| m.name.as_str() == "getInterfaceNames")
-    {
-        let mut method = (*class.methods[idx]).clone();
+    with_method_mut(class, "getInterfaceNames", |method| {
         method.return_type = Some(PhpType::parse("list<class-string>"));
-        class.methods.make_mut()[idx] = std::sync::Arc::new(method);
-    }
+    });
 
-    let Some(idx) = class
-        .methods
-        .iter()
-        .position(|m| m.name.as_str() == "newInstanceArgs")
-    else {
+    let Some(idx) = method_index(class, "newInstanceArgs") else {
         return;
     };
     let non_null_return = class.methods[idx]
@@ -568,14 +510,14 @@ fn patch_reflection_class(class: &mut ClassInfo) {
     if non_null_return.is_none() && non_null_native.is_none() {
         return;
     }
-    let mut method = (*class.methods[idx]).clone();
-    if non_null_return.is_some() {
-        method.return_type = non_null_return;
-    }
-    if non_null_native.is_some() {
-        method.native_return_type = non_null_native;
-    }
-    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+    update_method_at(class, idx, |method| {
+        if non_null_return.is_some() {
+            method.return_type = non_null_return;
+        }
+        if non_null_native.is_some() {
+            method.native_return_type = non_null_native;
+        }
+    });
 }
 
 /// Carry `ReflectionObject`'s reflected class the way `ReflectionClass`
@@ -599,29 +541,7 @@ fn patch_reflection_object(class: &mut ClassInfo) {
             .push((parent, vec![PhpType::named(atom("T"))]));
     }
 
-    let Some(ctor_idx) = class
-        .methods
-        .iter()
-        .position(|m| m.name.as_str() == "__construct")
-    else {
-        return;
-    };
-    let mut ctor = (*class.methods[ctor_idx]).clone();
-    bind_ctor_template(
-        &mut ctor,
-        &class.template_params,
-        atom("T"),
-        atom("$object"),
-    );
-    if let Some(param) = ctor
-        .parameters
-        .make_mut()
-        .iter_mut()
-        .find(|p| p.name == "$object")
-    {
-        param.type_hint = Some(PhpType::named(atom("T")));
-    }
-    class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
+    patch_constructor_template_binding(class, "T", "$object");
 }
 
 /// Give a method a conditional return type, provided the stub declares the
@@ -632,11 +552,7 @@ fn patch_method_conditional_return(
     param_name: &str,
     conditional: PhpType,
 ) {
-    let Some(idx) = class
-        .methods
-        .iter()
-        .position(|m| m.name.as_str() == method_name)
-    else {
+    let Some(idx) = method_index(class, method_name) else {
         return;
     };
     if !class.methods[idx]
@@ -646,29 +562,16 @@ fn patch_method_conditional_return(
     {
         return;
     }
-    let mut method = (*class.methods[idx]).clone();
-    method.extras_mut().conditional_return = Some(conditional);
-    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+    update_method_at(class, idx, |method| {
+        method.extras_mut().conditional_return = Some(conditional);
+    });
 }
 
 /// Shared helper: add `@template TKey, TValue, TIterator` and
 /// `@extends <parent><TKey, TValue, TIterator>` to an `IteratorIterator`
 /// subclass (or sub-subclass like `CallbackFilterIterator`).
 fn patch_iterator_iterator_subclass(class: &mut ClassInfo, parent: &str) {
-    add_templates(class, &[("TKey", None), ("TValue", None)]);
-    let t_iter = atom("TIterator");
-    if !class.template_params.contains(&t_iter) {
-        class.template_params.push(t_iter);
-    }
-    class
-        .template_param_bounds
-        .entry(atom("TIterator"))
-        .or_insert_with(|| {
-            PhpType::generic(
-                "Traversable",
-                vec![PhpType::named(atom("TKey")), PhpType::named(atom("TValue"))],
-            )
-        });
+    add_iterator_templates(class);
     let parent_atom = atom(parent);
     if !class
         .extends_generics
@@ -707,31 +610,28 @@ fn bind_ctor_template(
     }
 }
 
-/// Shared helper: patch the constructor to bind `TIterator` from the
-/// `$iterator` parameter.
-fn patch_constructor_iterator_binding(class: &mut ClassInfo) {
-    if let Some(ctor_idx) = class
-        .methods
-        .iter()
-        .position(|m| m.name.as_str() == "__construct")
+/// Patch the constructor to bind the class template `template` from its
+/// `param` parameter, and retype that parameter to the template.
+///
+/// The template hint (rather than the stub's `Traversable` or `object`) is
+/// what makes `classify_template_binding` read the argument as a direct
+/// bind.
+fn patch_constructor_template_binding(class: &mut ClassInfo, template: &str, param: &str) {
+    let Some(ctor_idx) = method_index(class, "__construct") else {
+        return;
+    };
+    let template = atom(template);
+    let mut ctor = (*class.methods[ctor_idx]).clone();
+    bind_ctor_template(&mut ctor, &class.template_params, template, atom(param));
+    if let Some(p) = ctor
+        .parameters
+        .make_mut()
+        .iter_mut()
+        .find(|p| p.name == param)
     {
-        let mut ctor = (*class.methods[ctor_idx]).clone();
-        bind_ctor_template(
-            &mut ctor,
-            &class.template_params,
-            atom("TIterator"),
-            atom("$iterator"),
-        );
-        if let Some(param) = ctor
-            .parameters
-            .make_mut()
-            .iter_mut()
-            .find(|p| p.name == "$iterator")
-        {
-            param.type_hint = Some(PhpType::named(atom("TIterator")));
-        }
-        class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
+        p.type_hint = Some(PhpType::named(template));
     }
+    class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
 }
 
 /// Override a method's return type on a class.
@@ -739,20 +639,62 @@ fn patch_constructor_iterator_binding(class: &mut ClassInfo) {
 /// If the method exists, replaces its `return_type` with the given type.
 /// Used to patch stub methods like `current(): mixed` → `current(): TValue`.
 fn patch_method_return_type(class: &mut ClassInfo, method_name: &str, return_type: PhpType) {
-    if let Some(idx) = class
-        .methods
-        .iter()
-        .position(|m| m.name.as_str() == method_name)
-    {
-        let mut method = (*class.methods[idx]).clone();
+    with_method_mut(class, method_name, |method| {
         method.return_type = Some(return_type);
-        class.methods.make_mut()[idx] = std::sync::Arc::new(method);
-    }
+    });
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Helpers
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Index of the method named exactly `name`.
+fn method_index(class: &ClassInfo, name: &str) -> Option<usize> {
+    class.methods.iter().position(|m| m.name.as_str() == name)
+}
+
+/// Replace the method at `idx` with a copy `f` has mutated.
+fn update_method_at(
+    class: &mut ClassInfo,
+    idx: usize,
+    f: impl FnOnce(&mut crate::types::MethodInfo),
+) {
+    let mut method = (*class.methods[idx]).clone();
+    f(&mut method);
+    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+}
+
+/// Mutate the method named exactly `name`, if the class declares it.
+fn with_method_mut(
+    class: &mut ClassInfo,
+    name: &str,
+    f: impl FnOnce(&mut crate::types::MethodInfo),
+) {
+    if let Some(idx) = method_index(class, name) {
+        update_method_at(class, idx, f);
+    }
+}
+
+/// Add `@template TKey`, `@template TValue` and
+/// `@template TIterator of Traversable<TKey, TValue>`.
+fn add_iterator_templates(class: &mut ClassInfo) {
+    add_templates(class, &[("TKey", None), ("TValue", None)]);
+    // TIterator has a complex bound `Traversable<TKey, TValue>` — add it
+    // manually since `add_templates` only handles simple string bounds.
+    let t_iter = atom("TIterator");
+    if !class.template_params.contains(&t_iter) {
+        class.template_params.push(t_iter);
+    }
+    class
+        .template_param_bounds
+        .entry(t_iter)
+        .or_insert_with(|| {
+            PhpType::generic(
+                "Traversable",
+                vec![PhpType::named(atom("TKey")), PhpType::named(atom("TValue"))],
+            )
+        });
+}
 
 /// Add template parameters with optional upper bounds.
 ///

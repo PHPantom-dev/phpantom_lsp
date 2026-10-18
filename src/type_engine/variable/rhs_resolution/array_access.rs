@@ -1,6 +1,7 @@
-/// Array access (`$arr[0]`, `$arr['key']`) resolution: extracts the
-/// generic element type or array-shape value type from the base array's
-/// annotation or assignment, including chained bracket access.
+//! Array access (`$arr[0]`, `$arr['key']`) resolution: extracts the
+//! generic element type or array-shape value type from the base array's
+//! annotation or assignment, including chained bracket access.
+
 use std::collections::HashMap;
 
 use mago_span::HasSpan;
@@ -8,7 +9,6 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
-use crate::docblock;
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::ResolvedType;
 
@@ -47,44 +47,38 @@ pub(super) fn resolve_rhs_array_access<'b>(
     // Resolve the base expression's type.
     // For bare variables (`$var['key']`), use docblock or assignment scanning.
     // For property chains (`$obj->prop['key']`), resolve the property type.
-    let raw_type: Option<PhpType> = if let Expression::Variable(Variable::Direct(base_dv)) =
-        current_expr
-    {
-        let base_var = bytes_to_str(base_dv.name).to_string();
-        // The forward walker's scope comes before the docblock scan.  It
-        // already incorporates @var annotations AND applies
-        // condition-based narrowing (e.g. null stripping on array
-        // shape keys through guard clauses, or the `string` arm an
-        // enclosing `is_array()` ruled out), which the raw docblock
-        // discards.  The two channels the walker publishes it through are
-        // consulted in turn: the resolver it threads down its own call
-        // tree, then the snapshot cache it leaves for the diagnostic
-        // consumers it does not drive.
-        let scope_result = if ctx.scope_var_resolver.is_some() {
-            let resolved = resolve_var_types(&base_var, ctx, access_offset as u32);
-            if resolved.is_empty() {
-                None
+    let raw_type: Option<PhpType> =
+        if let Expression::Variable(Variable::Direct(base_dv)) = current_expr {
+            let base_var = bytes_to_str(base_dv.name).to_string();
+            // The forward walker's scope comes before the docblock scan.  It
+            // already incorporates @var annotations AND applies
+            // condition-based narrowing (e.g. null stripping on array
+            // shape keys through guard clauses, or the `string` arm an
+            // enclosing `is_array()` ruled out), which the raw docblock
+            // discards.  The two channels the walker publishes it through are
+            // consulted in turn: the resolver it threads down its own call
+            // tree, then the snapshot cache it leaves for the diagnostic
+            // consumers it does not drive.
+            let scope_result = if ctx.scope_var_resolver.is_some() {
+                let resolved = resolve_var_types(&base_var, ctx, access_offset as u32);
+                if resolved.is_empty() {
+                    None
+                } else {
+                    Some(ResolvedType::types_joined(&resolved))
+                }
             } else {
-                Some(ResolvedType::types_joined(&resolved))
-            }
-        } else {
-            let resolved = crate::type_engine::variable::resolution::walker_scope_types(
-                &base_var,
-                access_offset as u32,
-                None,
-            );
-            if resolved.is_empty() {
-                None
-            } else {
-                Some(ResolvedType::types_joined(&resolved))
-            }
-        };
-        scope_result
-            .or_else(|| {
-                docblock::find_iterable_raw_type_in_source(ctx.content, access_offset, &base_var)
-                    .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
-            })
-            .or_else(|| {
+                let resolved = crate::type_engine::variable::resolution::walker_scope_types(
+                    &base_var,
+                    access_offset as u32,
+                    None,
+                );
+                if resolved.is_empty() {
+                    None
+                } else {
+                    Some(ResolvedType::types_joined(&resolved))
+                }
+            };
+            scope_result.or_else(|| {
                 let resolved = resolve_var_types(&base_var, ctx, access_offset as u32);
                 if resolved.is_empty() {
                     None
@@ -92,16 +86,16 @@ pub(super) fn resolve_rhs_array_access<'b>(
                     Some(ResolvedType::types_joined(&resolved))
                 }
             })
-    } else {
-        // Non-variable base (e.g. property access `$obj->prop['key']`,
-        // method call `$obj->getItems()['key']`, etc.).
-        let base_resolved = resolve_rhs_expression(current_expr, ctx);
-        if base_resolved.is_empty() {
-            None
         } else {
-            Some(ResolvedType::types_joined(&base_resolved))
-        }
-    };
+            // Non-variable base (e.g. property access `$obj->prop['key']`,
+            // method call `$obj->getItems()['key']`, etc.).
+            let base_resolved = resolve_rhs_expression(current_expr, ctx);
+            if base_resolved.is_empty() {
+                None
+            } else {
+                Some(ResolvedType::types_joined(&base_resolved))
+            }
+        };
 
     let Some(mut current) = raw_type else {
         // The base expression's type is unknown (e.g. an untyped parameter
@@ -114,9 +108,9 @@ pub(super) fn resolve_rhs_array_access<'b>(
 
     // Expand type aliases so that shape/generic extraction can see the
     // underlying type (e.g. a `@phpstan-type` alias).
-    if let Some(expanded) = crate::type_engine::type_resolution::resolve_type_alias_typed(
+    if let Some(expanded) = crate::type_engine::types::aliases::resolve_type_alias_typed(
         &current,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     ) {
@@ -139,9 +133,9 @@ pub(super) fn resolve_rhs_array_access<'b>(
 
         // After each segment, the resulting type might itself be an
         // alias (e.g. a shape value defined as another alias).
-        if let Some(expanded) = crate::type_engine::type_resolution::resolve_type_alias_typed(
+        if let Some(expanded) = crate::type_engine::types::aliases::resolve_type_alias_typed(
             &current,
-            &ctx.current_class.name,
+            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         ) {
@@ -151,7 +145,7 @@ pub(super) fn resolve_rhs_array_access<'b>(
 
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &current,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -308,7 +302,7 @@ fn index_segment(
     // `OpeningHours extends DataCollection<string, Day>`.
     let class_element = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         base,
-        ctx.current_class.map_or("", |cls| &cls.name),
+        &ctx.current_class.map(|cls| cls.fqn()).unwrap_or_default(),
         ctx.all_classes,
         ctx.class_loader,
     )

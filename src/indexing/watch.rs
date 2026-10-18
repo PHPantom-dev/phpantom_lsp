@@ -67,9 +67,9 @@ impl Backend {
         let config_path = root.join(crate::config::CONFIG_FILE_NAME);
         let changes = self.spell_changes_as_indexed(&params.changes);
         {
-            let open = self.open_files.read();
-            let parsed = self.parsed_uris.read();
-            let indexed = self.symbol_maps.read();
+            // The index guards are taken per check, not across the loop:
+            // migration discovery walks directories.
+            let is_open = |uri: &str| self.open_files.read().contains_key(uri);
             let laravel_config = self.config().laravel;
             let filters = self.index_filters();
             let translations = self.laravel_string_key_cache.read().translations.clone();
@@ -133,7 +133,7 @@ impl Backend {
                 }
                 let uri_str = change.uri.to_string();
                 if is_laravel
-                    && !open.contains_key(&uri_str)
+                    && !is_open(&uri_str)
                     && (path_str.contains("/lang/")
                         || translations
                             .as_ref()
@@ -146,7 +146,7 @@ impl Backend {
                     translations_changed = true;
                 }
                 if crate::resource_navigation::is_resource_document(path_str) {
-                    if open.contains_key(&uri_str) {
+                    if is_open(&uri_str) {
                         continue;
                     }
                     let Ok(file_path) = change.uri.to_file_path() else {
@@ -159,6 +159,7 @@ impl Backend {
                     }
                     if change.typ == FileChangeType::CHANGED {
                         let canonical_uri = crate::util::path_to_uri(&file_path);
+                        let indexed = self.symbol_maps.read();
                         if !indexed.contains_key(&uri_str)
                             && !indexed.contains_key(canonical_uri.as_str())
                         {
@@ -177,7 +178,7 @@ impl Backend {
                 }
 
                 // Open files are already tracked via did_open/did_change.
-                if open.contains_key(&uri_str) {
+                if is_open(&uri_str) {
                     continue;
                 }
                 let Ok(file_path) = change.uri.to_file_path() else {
@@ -195,8 +196,10 @@ impl Backend {
                     // the canonical `file://` URI for lazily loaded ones;
                     // check both spellings.
                     let canonical_uri = crate::util::path_to_uri(&file_path);
+                    let parsed = self.parsed_uris.read();
                     let loaded =
                         parsed.contains(&uri_str) || parsed.contains(canonical_uri.as_str());
+                    drop(parsed);
                     if !loaded {
                         continue;
                     }
@@ -903,22 +906,6 @@ mod tests {
                 .get("Vendor\\Variant")
                 .is_some_and(|cls| cls.methods.iter().any(|m| m.name == "bare")),
             "the class index must describe the surviving declaration"
-        );
-        assert!(
-            backend
-                .symbols
-                .method_store
-                .read()
-                .contains_key(&("Vendor\\Variant".to_string(), "bare".to_string())),
-            "the method store must follow the surviving declaration"
-        );
-        assert!(
-            !backend
-                .symbols
-                .method_store
-                .read()
-                .contains_key(&("Vendor\\Variant".to_string(), "rich".to_string())),
-            "the deleted file's members must be gone"
         );
     }
 

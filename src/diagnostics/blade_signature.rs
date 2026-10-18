@@ -89,7 +89,7 @@ impl Backend {
         let view_names = self.view_names_for_blade_uri(uri);
         let qualify = self.blade_type_qualifier(view_names.first().map_or("", String::as_str));
         let file_ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&file_ctx);
+        let class_loader = self.resolved_class_loader(&file_ctx);
 
         for (name, declared) in declarations {
             let Some((layout, inherited)) = chain.iter().find_map(|(layout, declarations)| {

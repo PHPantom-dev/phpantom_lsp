@@ -1,6 +1,6 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
-    slow_diagnostic_messages, unknown_member_diagnostics_with_scope_cache,
+    slow_diagnostic_messages, type_at_marker, unknown_member_diagnostics_with_scope_cache,
 };
 use tower_lsp::lsp_types::*;
 
@@ -301,6 +301,209 @@ class Endpoint {
     assert!(
         diags.is_empty(),
         "Expected no unknown_member diagnostics, got: {diags:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Pass-by-ref out types reach the variable whatever shape the call has
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn pass_by_ref_class_type_reaches_the_variable_through_any_receiver() {
+    let backend = create_test_backend();
+    let uri = "file:///test_by_ref_receivers.php";
+    let text = r#"<?php
+class Foo {}
+class Filler {
+    public function fill(?Foo &$out): void { $out = new Foo(); }
+    public static function fillStatic(?Foo &$out): void { $out = new Foo(); }
+    public function viaThis(): void {
+        $out = null;
+        $this->fill($out);
+        /*THIS*/$out;
+    }
+}
+class Holder {
+    public Filler $filler;
+    public function run(Filler $filler, ?Filler $maybe): void {
+        $viaVariable = null;
+        $filler->fill($viaVariable);
+        /*VARIABLE*/$viaVariable;
+        $viaNullsafe = null;
+        $maybe?->fill($viaNullsafe);
+        /*NULLSAFE*/$viaNullsafe;
+        $viaProperty = null;
+        $this->filler->fill($viaProperty);
+        /*PROPERTY*/$viaProperty;
+        $viaStatic = null;
+        Filler::fillStatic($viaStatic);
+        /*STATIC*/$viaStatic;
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let through_this = type_at_marker(&backend, uri, text, "THIS");
+    assert_ne!(through_this, "null", "the call writes `$out`");
+    for marker in ["VARIABLE", "NULLSAFE", "PROPERTY", "STATIC"] {
+        assert_eq!(
+            type_at_marker(&backend, uri, text, marker),
+            through_this,
+            "the call through {marker} writes the variable like one through `$this`"
+        );
+    }
+}
+
+#[test]
+fn pass_by_ref_reaches_the_variable_through_a_constructor() {
+    let backend = create_test_backend();
+    let uri = "file:///test_by_ref_constructor.php";
+    let text = r#"<?php
+class Parser {
+    public function __construct(string $source, ?array &$errors) { $errors = []; }
+    public function parseInto(string $source, ?array &$errors): void { $errors = []; }
+}
+class StrictParser extends Parser {}
+function run(Parser $parser): void {
+    $fromMethod = null;
+    $parser->parseInto('x', $fromMethod);
+    /*METHOD*/$fromMethod;
+    $fromConstructor = null;
+    new Parser('x', $fromConstructor);
+    /*CONSTRUCTOR*/$fromConstructor;
+    $fromInherited = null;
+    new StrictParser('x', $fromInherited);
+    /*INHERITED*/$fromInherited;
+}
+"#;
+    backend.update_ast(uri, text);
+    let through_method = type_at_marker(&backend, uri, text, "METHOD");
+    assert_ne!(through_method, "null", "the call writes `$errors`");
+    for marker in ["CONSTRUCTOR", "INHERITED"] {
+        assert_eq!(
+            type_at_marker(&backend, uri, text, marker),
+            through_method,
+            "a constructor writes through {marker} like a method does"
+        );
+    }
+}
+
+#[test]
+fn pass_by_ref_reaches_the_variable_through_a_class_named_by_a_value() {
+    let backend = create_test_backend();
+    let uri = "file:///test_by_ref_class_values.php";
+    let text = r#"<?php
+class Foo {}
+class Filler {
+    public static function fillStatic(?Foo &$out): void { $out = new Foo(); }
+    public function __construct(?Foo &$made = null) { $made = new Foo(); }
+}
+function run(Filler $filler): void {
+    $named = null;
+    Filler::fillStatic($named);
+    /*NAMED*/$named;
+    $class = Filler::class;
+    $viaClassString = null;
+    $class::fillStatic($viaClassString);
+    /*CLASS_STRING*/$viaClassString;
+    $viaObject = null;
+    $filler::fillStatic($viaObject);
+    /*OBJECT*/$viaObject;
+    $namedNew = null;
+    new Filler($namedNew);
+    /*NAMED_NEW*/$namedNew;
+    $made = null;
+    new $class($made);
+    /*NEW*/$made;
+}
+"#;
+    backend.update_ast(uri, text);
+    for (named, through_value) in [
+        ("NAMED", ["CLASS_STRING", "OBJECT"].as_slice()),
+        ("NAMED_NEW", ["NEW"].as_slice()),
+    ] {
+        let through_name = type_at_marker(&backend, uri, text, named);
+        assert_ne!(
+            through_name, "null",
+            "the call at {named} writes the variable"
+        );
+        for marker in through_value {
+            assert_eq!(
+                type_at_marker(&backend, uri, text, marker),
+                through_name,
+                "the call at {marker} writes the variable like the one at {named}"
+            );
+        }
+    }
+}
+
+/// Unpacking an array into a variadic by-reference parameter writes through
+/// its elements, so the array holds the parameter's class afterwards rather
+/// than becoming one.
+#[test]
+fn pass_by_ref_class_variadic_writes_through_unpacked_elements() {
+    let backend = create_test_backend();
+    let uri = "file:///test_by_ref_class_variadic.php";
+    let text = r#"<?php
+class Foo {}
+function fillAll(Foo &...$items): void {}
+function run(): void {
+    $one = null;
+    fillAll($one);
+    /*ONE*/$one;
+    $many = [null];
+    fillAll(...$many);
+    /*MANY*/$many;
+}
+"#;
+    backend.update_ast(uri, text);
+    assert_eq!(type_at_marker(&backend, uri, text, "ONE"), "Foo");
+    assert_eq!(
+        type_at_marker(&backend, uri, text, "MANY"),
+        "array<int, Foo>"
+    );
+}
+
+/// A closure the callee binds to another object (`@param-closure-this`,
+/// `Closure::call()`) holds that object as `$this`, so a call on `$this`
+/// inside it writes through that object's by-reference parameters.
+#[test]
+fn pass_by_ref_through_a_rebound_this_reaches_the_variable() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class Foo {
+    public function fooOnly(): void {}
+}
+class Filler {
+    public function fill(?Foo &$out): void { $out = new Foo(); }
+}
+class Runner {
+    /** @param-closure-this Filler $callback */
+    public static function with(\Closure $callback): void {}
+}
+class Outer {
+    public function run(): void {
+        Runner::with(function () {
+            $tagged = null;
+            $this->fill($tagged);
+            $tagged->fooOnly();
+        });
+        (function () {
+            $called = null;
+            $this->fill($called);
+            $called->fooOnly();
+        })->call(new Filler());
+    }
+}
+"#;
+    let messages = slow_diagnostic_messages(
+        &backend,
+        "file:///by_ref_rebound_this.php",
+        php,
+        "scalar_member_access",
+    );
+    assert!(
+        messages.is_empty(),
+        "`$this->fill()` writes `Foo` into the variable, got: {messages:?}"
     );
 }
 
@@ -1337,6 +1540,81 @@ fn by_reference_capture_in_a_narrowed_branch_matches_the_if_block() {
     assert_eq!(in_ternary, in_if);
 }
 
+/// A by-reference capture reads the variable when the closure runs, so
+/// what the enclosing function writes to it after creating the closure
+/// reaches the body.
+#[test]
+fn by_reference_capture_sees_writes_after_the_closure_is_created() {
+    let cases = [
+        (
+            "if block",
+            "if ($c !== null) { $f = function () use (&$c) { $this->take($c); }; $c = null; $f(); }",
+        ),
+        (
+            "ternary branch",
+            "$run = $c ? function () use (&$c) { $this->take($c); } : null; $c = null;",
+        ),
+        (
+            "outside the narrowed block",
+            "if ($c !== null) { $f = function () use (&$c) { $this->take($c); }; } $c = null;",
+        ),
+        (
+            "earlier in an enclosing loop",
+            "foreach ([1, 2] as $i) { $c = null; if (rand()) { $c = new Conversation(); $f = function () use (&$c) { $this->take($c); }; } }",
+        ),
+        (
+            "closure handed to an object",
+            "if ($c !== null) { $w = new \\ArrayObject([function () use (&$c) { $this->take($c); }]); $c = null; }",
+        ),
+    ];
+    let failing = failing_cases(&cases, |messages| messages.len() == 1);
+    assert!(
+        failing.is_empty(),
+        "expected exactly one mismatch, got: {failing:#?}"
+    );
+}
+
+/// The narrowing still holds inside a by-reference capture when nothing
+/// that can run after the closure is created writes a different value.
+#[test]
+fn by_reference_capture_keeps_narrowing_without_a_later_null_write() {
+    let cases = [
+        (
+            "no later write",
+            "if ($c !== null) { $f = function () use (&$c) { $this->take($c); }; $f(); }",
+        ),
+        (
+            "write before the closure",
+            "if ($c === null) { $c = new Conversation(); } $f = function () use (&$c) { $this->take($c); };",
+        ),
+        (
+            "later write of the same type",
+            "if ($c !== null) { $f = function () use (&$c) { $this->take($c); }; $c = new Conversation(); }",
+        ),
+        (
+            "invoked before the call returns",
+            "if ($c !== null) { array_map(function ($x) use (&$c) { $this->take($c); }, [1]); $c = null; }",
+        ),
+        (
+            "invoked where it is written",
+            "if ($c !== null) { (function () use (&$c) { $this->take($c); })(); $c = null; }",
+        ),
+        (
+            "captured by value",
+            "if ($c !== null) { $f = function () use ($c) { $this->take($c); }; $c = null; }",
+        ),
+        (
+            "write in another closure's own scope",
+            "if ($c !== null) { $f = function () use (&$c) { $this->take($c); }; $g = function () { $c = null; }; }",
+        ),
+    ];
+    let failing = failing_cases(&cases, <[String]>::is_empty);
+    assert!(
+        failing.is_empty(),
+        "expected no mismatch, got: {failing:#?}"
+    );
+}
+
 /// A `match ($x::class)` arm proves the subject's class to a closure
 /// written in it, as it does to a direct use there.
 #[test]
@@ -1370,5 +1648,36 @@ class Painter
         messages.len(),
         1,
         "only the default arm's closure passes a Shape, got: {messages:?}"
+    );
+}
+
+/// A closure's `@param` stands in for the native hint only where it may,
+/// by the rule a function's parameters follow: one that names a class for
+/// an `int` parameter leaves the parameter an `int`.
+#[test]
+fn closure_param_docblock_does_not_replace_an_incompatible_hint() {
+    let backend = create_test_backend_with_full_stubs();
+    let php = r#"<?php
+class Foo {}
+
+function takesFoo(Foo $f): void {}
+
+function run(): void {
+    $closure = /** @param Foo $x */ function (int $x) {
+        takesFoo($x);
+    };
+    $arrow = /** @param Foo $y */ fn (int $y) => takesFoo($y);
+}
+"#;
+    let messages = slow_diagnostic_messages(
+        &backend,
+        "file:///closure_param_hint.php",
+        php,
+        "type_mismatch_argument",
+    );
+    assert_eq!(
+        messages.len(),
+        2,
+        "both parameters are ints, so both calls pass the wrong type, got: {messages:?}"
     );
 }

@@ -340,29 +340,8 @@ async fn test_user_function_takes_precedence_over_stub() {
     // Pre-populate global_functions with a user-defined `str_contains`.
     let custom_func = phpantom_lsp::FunctionInfo {
         name: atom("str_contains"),
-        name_offset: 0,
-        parameters: vec![].into(),
         return_type: Some(PhpType::parse("CustomReturn")),
-        native_return_type: None,
-        description: None,
-        return_description: None,
-        links: vec![],
-        see_refs: vec![],
-        namespace: None,
-        conditional_return: None,
-        type_assertions: vec![],
-        deprecation_message: None,
-        deprecated_replacement: None,
-        template_params: vec![],
-        template_param_bounds: Default::default(),
-        template_bindings: vec![],
-        template_param_defaults: Default::default(),
-        throws: vec![],
-        is_polyfill: false,
-        overloads: vec![],
-        is_pure: false,
-        is_impure: false,
-        reads_func_args: false,
+        ..Default::default()
     };
 
     {

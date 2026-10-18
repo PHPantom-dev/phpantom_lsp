@@ -101,14 +101,8 @@ fn try_build_scope_from_statement(stmt: &Statement<'_>, offset: u32) -> Option<S
                 ));
             }
         }
-        Statement::Class(class) => {
-            return try_build_scope_from_members(class.members.as_slice(), offset);
-        }
-        Statement::Trait(tr) => {
-            return try_build_scope_from_members(tr.members.as_slice(), offset);
-        }
-        Statement::Enum(en) => {
-            return try_build_scope_from_members(en.members.as_slice(), offset);
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            return try_build_scope_from_members(body.members, offset);
         }
         Statement::Namespace(ns) => {
             for inner in ns.statements().iter() {

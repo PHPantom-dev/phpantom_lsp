@@ -157,8 +157,16 @@ impl Backend {
         self.symbols.uri_classes_index.read().get(uri).cloned()
     }
 
-    /// The classes `uri` declares, with the type aliases they import linked
-    /// into their members.
+    /// The innermost class `uri` declares around `offset` (see
+    /// [`find_class_at_offset`](crate::class_lookup::find_class_at_offset)),
+    /// unlinked, without copying the file's class list.
+    pub(crate) fn class_at_offset(&self, uri: &str, offset: u32) -> Option<Arc<ClassInfo>> {
+        let index = self.symbols.uri_classes_index.read();
+        crate::class_lookup::find_shared_class_at_offset(index.get(uri)?, offset).cloned()
+    }
+
+    /// The classes `uri` declares, linked the way the class loader links a
+    /// class it loads (see [`link_loaded_class`](Self::link_loaded_class)).
     ///
     /// The file's own classes are found in this list before the class
     /// loader is asked, so they have to be linked here the way the loader
@@ -172,8 +180,8 @@ impl Backend {
             .cloned()
             .unwrap_or_default();
         for class in &mut classes {
-            if crate::type_engine::types::aliases::has_imported_type_aliases(class) {
-                *class = self.link_imported_type_aliases(Arc::clone(class));
+            if crate::resolution::needs_linking(class) {
+                *class = self.link_loaded_class(Arc::clone(class));
             }
         }
         classes
@@ -229,6 +237,7 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
+        let symbol_imports = self.symbol_imports_for(uri);
 
         let (namespace, namespace_spans) = self.namespace_and_spans(uri);
         let resolved_names = self.resolved_names.read().get(uri).cloned();
@@ -236,6 +245,7 @@ impl Backend {
         FileContext {
             classes,
             use_map,
+            symbol_imports,
             namespace,
             namespace_spans,
             resolved_names,
@@ -257,20 +267,6 @@ impl Backend {
             return ctx;
         }
         ctx.at(byte_offset)
-    }
-
-    /// Subset of [`file_context_at`](Self::file_context_at) for callers
-    /// that only need the enclosing class list and namespace (e.g.
-    /// resolving `self`/`static`/`parent`). Skips the `use`-map and
-    /// `resolved_names` clones.
-    pub(crate) fn classes_and_namespace_at(
-        &self,
-        uri: &str,
-        byte_offset: u32,
-    ) -> (Vec<Arc<ClassInfo>>, Option<String>) {
-        let classes = self.linked_classes_for_uri(uri);
-        let namespace = self.namespace_at_offset(uri, byte_offset);
-        (classes, namespace)
     }
 
     /// Subset of [`file_context_at`](Self::file_context_at) for callers
@@ -369,29 +365,36 @@ impl Backend {
             if let Some(spans) = nmap.get(uri)
                 && spans.len() > 1
             {
-                return spans
-                    .iter()
-                    .map(|span| ImportBlock {
-                        namespace: span.namespace.clone(),
-                        use_map: span.use_map.clone(),
-                        range: Some((span.start as usize, span.end as usize)),
-                    })
-                    .collect();
+                return spans.iter().map(ImportBlock::of_span).collect();
             }
         }
-        vec![ImportBlock {
-            namespace: self.first_file_namespace(uri),
-            use_map: self.file_use_map(uri),
-            range: None,
-        }]
+        vec![self.whole_file_import_block(uri)]
     }
 
     /// The [`import_blocks`](Self::import_blocks) entry for the block
     /// containing `offset`.
     pub(crate) fn import_block_at(&self, uri: &str, offset: usize) -> ImportBlock {
-        let mut blocks = self.import_blocks(uri);
-        let index = ImportBlock::index_at(&blocks, offset);
-        blocks.swap_remove(index)
+        {
+            let nmap = self.file_namespaces.read();
+            if let Some(spans) = nmap.get(uri)
+                && spans.len() > 1
+                && let Some(span) = NamespaceSpan::containing(spans, offset as u32)
+            {
+                return ImportBlock::of_span(span);
+            }
+        }
+        self.whole_file_import_block(uri)
+    }
+
+    /// The one [`ImportBlock`] of a file that does not declare several
+    /// `namespace` blocks.
+    fn whole_file_import_block(&self, uri: &str) -> ImportBlock {
+        ImportBlock {
+            namespace: self.first_file_namespace(uri),
+            use_map: self.file_use_map(uri),
+            symbol_imports: self.symbol_imports_for(uri),
+            range: None,
+        }
     }
 
     /// The byte range of the block containing `offset`, as
@@ -416,6 +419,15 @@ impl Backend {
     /// querying `resolved_names` directly via [`file_context`] instead.
     pub(crate) fn file_use_map(&self, uri: &str) -> std::collections::HashMap<String, String> {
         self.file_imports
+            .read()
+            .get(uri)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// The `use function` and `use const` imports of a file.
+    pub(crate) fn symbol_imports_for(&self, uri: &str) -> crate::types::SymbolImports {
+        self.file_symbol_imports
             .read()
             .get(uri)
             .cloned()
@@ -467,6 +479,7 @@ impl Backend {
         self.morph_column_spans_cache.write().clear();
         self.evict_reference_index_uri(uri);
         self.file_imports.write().remove(uri);
+        self.file_symbol_imports.write().remove(uri);
         self.resolved_names.write().remove(uri);
         self.file_pest_uses.write().remove(uri);
         self.file_namespaces.write().remove(uri);
@@ -495,6 +508,25 @@ impl Backend {
         // fqn_class_index keeps the full ClassInfo for cross-file resolution.
         // The file will be re-parsed from disk on next access via
         // parse_and_cache_file when needed (issue #99).
+    }
+
+    /// [`clear_file_maps`](Self::clear_file_maps) for a closed file the
+    /// workspace index does not cover, which also gives up the functions
+    /// and constants it declared and the record that it was parsed.  A
+    /// vendor or autoload file is parsed again on its next lookup.
+    ///
+    /// Its classes stay in `fqn_class_index` (see `clear_file_maps`), and
+    /// so do their inheritance edges, which describe those classes.
+    pub(crate) fn forget_closed_file(&self, uri: &str) {
+        self.clear_file_maps(uri);
+        self.parsed_uris.write().remove(uri);
+        let uris = std::collections::HashSet::from([uri.to_string()]);
+        self.withdraw_functions_for_uris(&uris);
+        self.symbols
+            .global_defines
+            .write()
+            .retain(|_, d| d.file_uri.as_str() != uri);
+        self.symbols.uri_globals_index.write().remove(uri);
     }
 
     /// The on-disk path of `uri` when it is a PHP file the workspace index
@@ -560,14 +592,26 @@ pub(crate) fn namespace_in_spans(spans: &[NamespaceSpan], byte_offset: u32) -> O
 pub(crate) struct ImportBlock {
     /// The block's namespace, or `None` for the global namespace.
     pub(crate) namespace: Option<String>,
-    /// The imports the block declares (alias → FQN).
+    /// The class imports the block declares (alias → FQN).
     pub(crate) use_map: HashMap<String, String>,
+    /// The `use function` and `use const` imports the block declares.
+    pub(crate) symbol_imports: crate::types::SymbolImports,
     /// The block's byte range, or `None` when the file has only one
     /// block and its imports apply to the whole file.
     pub(crate) range: Option<(usize, usize)>,
 }
 
 impl ImportBlock {
+    /// The block `span` covers, in a file that declares several.
+    fn of_span(span: &NamespaceSpan) -> ImportBlock {
+        ImportBlock {
+            namespace: span.namespace.clone(),
+            use_map: span.use_map.clone(),
+            symbol_imports: span.symbol_imports.clone(),
+            range: Some((span.start as usize, span.end as usize)),
+        }
+    }
+
     /// The index of the block containing `offset`, or of the last block
     /// for an offset past every block (e.g. code after its closing brace).
     pub(crate) fn index_at(blocks: &[ImportBlock], offset: usize) -> usize {

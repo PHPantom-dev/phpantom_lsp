@@ -310,8 +310,7 @@ impl Backend {
     /// Whether the project has Laravel's `resolve()` helper, which is how
     /// the virtual PHP spells "the container builds this one".
     fn has_container_resolve_helper(&self) -> bool {
-        let empty_use_map = std::collections::HashMap::new();
-        self.function_loader_with(None, &empty_use_map, &None)("resolve", 0).is_some()
+        self.find_or_load_function(&["resolve"]).is_some()
     }
 
     /// A [`super::preprocessor::ComponentResolver`] over the index the

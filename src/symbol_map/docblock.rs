@@ -63,17 +63,7 @@ pub(crate) fn is_navigable_type(name: &str) -> bool {
 /// `is_fqn` accordingly.  The leading `\` is stripped from the stored
 /// `name` in all cases.
 pub(super) fn class_ref_span(start: u32, end: u32, raw_name: &str) -> SymbolSpan {
-    let is_fqn = raw_name.starts_with('\\');
-    let name = crate::atom::atom(strip_fqn_prefix(raw_name));
-    SymbolSpan {
-        start,
-        end,
-        kind: SymbolKind::ClassReference {
-            name,
-            is_fqn,
-            context: ClassRefContext::Other,
-        },
-    }
+    class_ref_span_ctx(start, end, raw_name, ClassRefContext::Other)
 }
 
 /// Like [`class_ref_span`] but with an explicit [`ClassRefContext`].
@@ -591,8 +581,14 @@ fn emit_covers_reference(
     let member_start = file_offset + 2;
     let member_end = member_start + member.len() as u32;
     let kind = match default_class {
+        // A qualified default class is taken as fully qualified, the way
+        // `emit_see_reference` reads the tag's own class reference.
         Some(class) => SymbolKind::MemberAccess {
-            subject_text: SubjectText::owned(class.to_string()),
+            subject_text: SubjectText::owned(if class.contains('\\') && !class.starts_with('\\') {
+                format!("\\{class}")
+            } else {
+                class.to_string()
+            }),
             member_name: crate::atom::atom(member),
             is_static: true,
             is_method_call: false,
@@ -993,10 +989,6 @@ fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
     }
 }
 
-/// Emit a span for a type identifier (class name, or self/static/parent).
-///
-/// Checks [`is_navigable_type`] and emits either a `ClassReference` or
-/// `SelfStaticParent` span as appropriate.
 /// Emit the operand of a type operator (`key-of<X>`, `value-of<X>`, `X[K]`).
 ///
 /// A bare name in that position is usually array-typed rather than a class:
@@ -1041,6 +1033,10 @@ fn emit_int_mask_member_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink
     }
 }
 
+/// Emit a span for a type identifier (class name, or self/static/parent).
+///
+/// Checks [`is_navigable_type`] and emits either a `ClassReference` or
+/// `SelfStaticParent` span as appropriate.
 fn emit_identifier_span(name: &str, start: u32, end: u32, spans: &mut Vec<SymbolSpan>) {
     emit_identifier_span_in(name, start, end, ClassRefContext::Other, spans);
 }
@@ -1226,9 +1222,15 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
         (reference, 0u32)
     };
 
-    if let Some(sep_pos) = reference.find("::") {
+    // `Class::member` names a static member; the legacy phpDocumentor
+    // fragment syntax `Class#member` an instance property or method.
+    let member_separator = match reference.find("::") {
+        Some(pos) => Some((pos, 2, true)),
+        None => reference.find('#').map(|pos| (pos, 1, false)),
+    };
+    if let Some((sep_pos, sep_len, is_static)) = member_separator {
         let class_part = &reference[..sep_pos];
-        let member_part = &reference[sep_pos + 2..];
+        let member_part = &reference[sep_pos + sep_len..];
 
         if class_part.is_empty() || member_part.is_empty() {
             return;
@@ -1259,22 +1261,19 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
             spans,
         );
 
-        let member_start = file_offset + sep_pos as u32 + 2 - prefix_len;
-        let is_property = member_part.starts_with('$');
-        let member_name = if is_property {
-            &member_part[1..] // strip $
-        } else {
-            member_part
-        };
+        let member_start = file_offset + (sep_pos + sep_len) as u32 - prefix_len;
+        // The subject keeps the leading `\` too: the resolver reads the bare
+        // name as relative to the file's namespace, as in code.
+        let member_name = member_part.strip_prefix('$').unwrap_or(member_part);
         if !member_name.is_empty() {
             let member_end = member_start + member_part.len() as u32;
             spans.push(SymbolSpan {
                 start: member_start,
                 end: member_end,
                 kind: SymbolKind::MemberAccess {
-                    subject_text: SubjectText::owned(clean_class.to_string()),
+                    subject_text: SubjectText::owned(class_part.to_string()),
                     member_name: crate::atom::atom(member_name),
-                    is_static: true,
+                    is_static,
                     is_method_call: false,
                     docblock_ref: DocblockMemberRef::See,
                     is_array_callable: false,
@@ -1282,47 +1281,6 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                 },
             });
         }
-    } else if let Some(sep_pos) = reference.find('#') {
-        // Legacy phpDocumentor fragment syntax: `Class#member` refers to
-        // an instance property or method, unlike `Class::member`.
-        let class_part = &reference[..sep_pos];
-        let member_part = &reference[sep_pos + 1..];
-
-        if class_part.is_empty() || member_part.is_empty() {
-            return;
-        }
-
-        let clean_class = class_part.trim_start_matches('\\');
-        let is_self_like = self_static_parent_kind(clean_class).is_some();
-        if !is_self_like && !is_navigable_type(clean_class) {
-            return;
-        }
-
-        let class_start = file_offset;
-        let class_end = file_offset + class_part.len() as u32 - prefix_len;
-        emit_identifier_span_in(
-            class_part,
-            class_start,
-            class_end,
-            ClassRefContext::DocblockSee,
-            spans,
-        );
-
-        let member_start = file_offset + sep_pos as u32 + 1 - prefix_len;
-        let member_end = member_start + member_part.len() as u32;
-        spans.push(SymbolSpan {
-            start: member_start,
-            end: member_end,
-            kind: SymbolKind::MemberAccess {
-                subject_text: SubjectText::owned(clean_class.to_string()),
-                member_name: crate::atom::atom(member_part),
-                is_static: false,
-                is_method_call: false,
-                docblock_ref: DocblockMemberRef::See,
-                is_array_callable: false,
-                is_nullsafe: false,
-            },
-        });
     } else {
         // No `::` or `#` — either a class name or a standalone function.
         // Bail out unless this is self/static/parent or a navigable type

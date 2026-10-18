@@ -118,6 +118,18 @@ fn block_comment_inside_double_string_ignored() {
 }
 
 #[test]
+fn line_comment_inside_interpolated_key_ignored() {
+    // The quotes of a `{$…}` expression do not end the outer string, so
+    // the `//` in its key is still inside the string.
+    let content = "<?php\n$x = \"{$map[\"a // b\"]}\";\n";
+    let pos = Position {
+        line: 1,
+        character: 18,
+    };
+    assert!(!is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
 fn line_comment_after_code_on_same_line() {
     let content = "<?php\n$x = 1; // trailing comment\n";
     let pos = Position {
@@ -2278,6 +2290,7 @@ fn smart_var_property_with_templates_has_snippet_tab_stops() {
         class_loader: Some(&class_loader),
         function_loader: None,
         import_target: None,
+        local_classes: &[],
     };
 
     let items = build_phpdoc_completions(
@@ -2343,6 +2356,7 @@ fn smart_var_property_with_templates_and_prefix_has_snippet_tab_stops() {
         class_loader: Some(&class_loader),
         function_loader: None,
         import_target: None,
+        local_classes: &[],
     };
 
     let items = build_phpdoc_completions(
@@ -2449,6 +2463,7 @@ fn smart_var_property_class_without_templates_no_snippet_format() {
         class_loader: Some(&class_loader),
         function_loader: None,
         import_target: None,
+        local_classes: &[],
     };
 
     let items = build_phpdoc_completions(
@@ -2508,6 +2523,7 @@ fn smart_var_constant_with_templates_has_snippet_tab_stops() {
         class_loader: Some(&class_loader),
         function_loader: None,
         import_target: None,
+        local_classes: &[],
     };
 
     // Use Constant context — should behave the same as Property.

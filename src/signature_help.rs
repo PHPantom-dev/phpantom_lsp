@@ -17,8 +17,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::completion::named_args::{
-    extract_call_expression, find_enclosing_open_paren, position_to_char_offset,
-    split_args_top_level,
+    extract_call_expression, find_enclosing_open_paren, is_function_definition_paren,
+    position_to_char_offset,
 };
 use crate::php_type::PhpType;
 
@@ -100,77 +100,15 @@ fn detect_call_site_text_fallback(content: &str, position: Position) -> Option<C
         return None;
     }
 
-    // Count the active parameter by splitting the text between `(` and the
-    // cursor into top-level comma-separated segments.
+    // The active parameter is the number of top-level commas between the
+    // `(` and the cursor.
     let args_text: String = chars[open_paren + 1..cursor].iter().collect();
-    let segments = split_args_top_level(&args_text);
-    // `split_args_top_level` returns one segment per completed comma-separated
-    // argument (it omits a trailing empty segment).  The number of commas
-    // equals the number of segments (each segment ended with a comma, except
-    // possibly the last one which is the argument currently being typed).
-    //
-    // If the text ends with a comma (i.e. the cursor is right after `,`),
-    // the split will have consumed it and the cursor is on the *next*
-    // parameter.  Otherwise, the cursor is still on the segment after the
-    // last comma.
-    let trimmed = args_text.trim_end();
-    let active = if trimmed.is_empty() {
-        0
-    } else if trimmed.ends_with(',') {
-        segments.len() as u32
-    } else {
-        // The user is in the middle of typing an argument.  The number of
-        // completed args equals segments.len() - 1 (last segment is the
-        // current one) + 1 for the current, but we want a 0-based index
-        // so it's segments.len() - 1.  However split_args_top_level may
-        // or may not include the trailing segment.  Counting commas
-        // directly is more reliable.
-        count_top_level_commas(&chars, open_paren + 1, cursor)
-    };
+    let active = crate::text_scan::top_level_commas(&args_text).count() as u32;
 
     Some(CallSiteContext {
         call_expression: call_expr,
         active_parameter: active,
     })
-}
-
-/// Count commas at nesting depth 0 between `start` (inclusive) and `end`
-/// (exclusive) in a char slice, skipping nested parens/brackets and
-/// string literals.
-fn count_top_level_commas(chars: &[char], start: usize, end: usize) -> u32 {
-    let mut count = 0u32;
-    let mut depth = 0i32;
-    let mut i = start;
-
-    while i < end {
-        match chars[i] {
-            '(' | '[' => depth += 1,
-            ')' | ']' => depth -= 1,
-            ',' if depth == 0 => count += 1,
-            '\'' | '"' => {
-                let q = chars[i];
-                i += 1;
-                while i < end {
-                    if chars[i] == q {
-                        let mut backslashes = 0u32;
-                        let mut k = i;
-                        while k > start && chars[k - 1] == '\\' {
-                            backslashes += 1;
-                            k -= 1;
-                        }
-                        if backslashes.is_multiple_of(2) {
-                            break;
-                        }
-                    }
-                    i += 1;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    count
 }
 
 // ─── Signature building ─────────────────────────────────────────────────────
@@ -392,78 +330,15 @@ fn collect_fcc_targets(
                 out.push(found);
             }
         }
-        Statement::Block(block) => walk!(block.statements.iter()),
-        Statement::Namespace(ns) => walk!(ns.statements().iter()),
-        Statement::Class(cls) => {
-            use mago_syntax::cst::class_like::member::ClassLikeMember;
-            use mago_syntax::cst::class_like::method::MethodBody;
-            for member in cls.members.iter() {
-                if let ClassLikeMember::Method(method) = member
-                    && let MethodBody::Concrete(block) = &method.body
-                {
-                    walk!(block.statements.iter(), span_of(method.span()));
-                }
-            }
-        }
-        Statement::Trait(t) => {
-            use mago_syntax::cst::class_like::member::ClassLikeMember;
-            use mago_syntax::cst::class_like::method::MethodBody;
-            for member in t.members.iter() {
-                if let ClassLikeMember::Method(method) = member
-                    && let MethodBody::Concrete(block) = &method.body
-                {
-                    walk!(block.statements.iter(), span_of(method.span()));
-                }
-            }
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            crate::parser::for_each_concrete_method(body.members, |method, block| {
+                walk!(block.statements.iter(), span_of(method.span()));
+            });
         }
         Statement::Function(func) => {
             walk!(func.body.statements.iter(), span_of(func.body.span()));
         }
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => {
-                collect_fcc_targets(body.statement, scope, content, out);
-                for ei in body.else_if_clauses.iter() {
-                    collect_fcc_targets(ei.statement, scope, content, out);
-                }
-                if let Some(ref else_clause) = body.else_clause {
-                    collect_fcc_targets(else_clause.statement, scope, content, out);
-                }
-            }
-            IfBody::ColonDelimited(body) => {
-                walk!(body.statements.iter());
-                for ei in body.else_if_clauses.iter() {
-                    walk!(ei.statements.iter());
-                }
-                if let Some(ref else_clause) = body.else_clause {
-                    walk!(else_clause.statements.iter());
-                }
-            }
-        },
-        Statement::Foreach(foreach) => match &foreach.body {
-            ForeachBody::Statement(inner) => collect_fcc_targets(inner, scope, content, out),
-            ForeachBody::ColonDelimited(body) => walk!(body.statements.iter()),
-        },
-        Statement::For(for_stmt) => match &for_stmt.body {
-            ForBody::Statement(inner) => collect_fcc_targets(inner, scope, content, out),
-            ForBody::ColonDelimited(body) => walk!(body.statements.iter()),
-        },
-        Statement::While(while_stmt) => match &while_stmt.body {
-            WhileBody::Statement(inner) => collect_fcc_targets(inner, scope, content, out),
-            WhileBody::ColonDelimited(body) => walk!(body.statements.iter()),
-        },
-        Statement::DoWhile(do_while) => {
-            collect_fcc_targets(do_while.statement, scope, content, out);
-        }
-        Statement::Try(try_stmt) => {
-            walk!(try_stmt.block.statements.iter());
-            for catch in try_stmt.catch_clauses.iter() {
-                walk!(catch.block.statements.iter());
-            }
-            if let Some(ref finally) = try_stmt.finally_clause {
-                walk!(finally.block.statements.iter());
-            }
-        }
-        _ => {}
+        _ => crate::parser::for_each_nested_statement_list(stmt, |nested| walk!(nested.iter())),
     }
 }
 
@@ -582,17 +457,13 @@ impl Backend {
             // a re-parsed AST so resolution can find class context.
             let patched = Self::patch_content_for_signature(content, position);
             if patched != content {
-                let patched_classes: Vec<Arc<crate::types::ClassInfo>> =
-                    self.parse_php(&patched).into_iter().map(Arc::new).collect();
+                let patched_classes: Vec<Arc<crate::types::ClassInfo>> = self
+                    .parse_php_resolved(&patched)
+                    .into_iter()
+                    .map(Arc::new)
+                    .collect();
                 if !patched_classes.is_empty() {
-                    let patched_ctx = FileContext {
-                        classes: patched_classes,
-                        use_map: ctx.use_map.clone(),
-                        namespace: ctx.namespace.clone(),
-                        namespace_spans: ctx.namespace_spans.clone(),
-                        resolved_names: ctx.resolved_names.clone(),
-                        pest_uses: ctx.pest_uses.clone(),
-                    };
+                    let patched_ctx = ctx.with_classes(patched_classes);
                     if let Some(result) =
                         self.resolve_signature(&site, &patched, position, &patched_ctx)
                     {
@@ -686,70 +557,6 @@ fn clamp_active_param(active: u32, params: &[ParameterInfo]) -> u32 {
     }
     let last = (params.len() - 1) as u32;
     active.min(last)
-}
-
-// ─── Definition-site suppression ────────────────────────────────────────────
-
-/// Check whether the open parenthesis at `paren_pos` belongs to a
-/// function or method *definition* rather than a call expression.
-///
-/// Walks backward from `(` through the function name (if any), then
-/// through whitespace, looking for the `function` or `fn` keyword.
-/// Returns `true` for `function foo(`, `function (`, `fn(`, and
-/// `public function bar(`.
-fn is_function_definition_paren(chars: &[char], paren_pos: usize) -> bool {
-    let mut i = paren_pos;
-
-    // Skip whitespace before `(`
-    while i > 0 && chars[i - 1].is_ascii_whitespace() {
-        i -= 1;
-    }
-
-    // Walk backward through the identifier (function name, which may be
-    // empty for anonymous functions / closures).
-    let name_end = i;
-    while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
-        i -= 1;
-    }
-
-    let name: String = chars[i..name_end].iter().collect();
-
-    // Anonymous `function(` or arrow `fn(` — the name *is* the keyword.
-    if name == "function" || name == "fn" {
-        return true;
-    }
-
-    // Named function / method: skip whitespace before the name and check
-    // for the `function` or `fn` keyword.
-    let mut j = i;
-    while j > 0 && chars[j - 1].is_ascii_whitespace() {
-        j -= 1;
-    }
-
-    if ends_with_keyword(chars, j, "function") || ends_with_keyword(chars, j, "fn") {
-        return true;
-    }
-
-    false
-}
-
-/// Check whether the text ending at `pos` (exclusive) ends with `keyword`
-/// on a word boundary.
-fn ends_with_keyword(chars: &[char], pos: usize, keyword: &str) -> bool {
-    let kw_len = keyword.len();
-    if pos < kw_len {
-        return false;
-    }
-    let start = pos - kw_len;
-    let candidate: String = chars[start..pos].iter().collect();
-    if candidate != keyword {
-        return false;
-    }
-    // Ensure word boundary before the keyword.
-    if start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == '_') {
-        return false;
-    }
-    true
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

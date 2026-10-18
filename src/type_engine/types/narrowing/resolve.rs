@@ -21,14 +21,20 @@ use crate::type_engine::resolver::VarResolutionCtx;
 /// Narrowing to the trait instead loses every member the hosts declare
 /// themselves, since a trait need not declare what its methods use.
 ///
+/// `ty` is always resolved already: a class a check names as written is
+/// resolved by [`WrittenNames::class_type`] where it is extracted, and the rest
+/// (an `@phpstan-assert` type, an `in_array` haystack's classes, the
+/// target of `$x instanceof $cls`) arrive resolved.
+///
 /// [`type_hint_to_classes_typed`]: super::super::resolution::type_hint_to_classes_typed
+/// [`WrittenNames::class_type`]: crate::type_engine::resolver::WrittenNames::class_type
 pub(in crate::type_engine) fn resolve_narrowing_target(
     ty: &PhpType,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<Arc<ClassInfo>> {
     let resolved = super::super::resolution::type_hint_to_classes_typed(
         ty,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -50,18 +56,18 @@ pub(in crate::type_engine) fn resolve_narrowing_target(
     out
 }
 
-/// Resolve a list of `PhpType` values into a deduplicated `Vec<ClassInfo>`.
+/// Resolve a list of `PhpType` values into a deduplicated class list.
 ///
 /// This is a shared helper for the compound instanceof/assert narrowing
 /// patterns that produce a union of classes from multiple branches.
 pub(crate) fn resolve_class_names_to_union(
     classes: &[PhpType],
     ctx: &VarResolutionCtx<'_>,
-) -> Vec<ClassInfo> {
+) -> Vec<Arc<ClassInfo>> {
     let mut union = Vec::new();
     for ty in classes {
         for arc_cls in resolve_narrowing_target(ty, ctx) {
-            ClassInfo::push_unique(&mut union, Arc::unwrap_or_clone(arc_cls));
+            ClassInfo::push_unique_arc(&mut union, arc_cls);
         }
     }
     union

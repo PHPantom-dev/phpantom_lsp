@@ -77,7 +77,7 @@ class Comment {
                 .contains(&(atom(method), explicit.then(|| atom(column))))
         );
         assert!(is_morph_type_column(model, column, &|name| {
-            classes.get(&atom(name)).cloned()
+            classes.get(&atom(name.trim_start_matches('\\'))).cloned()
         }));
     }
 }
@@ -201,7 +201,7 @@ class SecondTraitAliasModel {
 }
 "#,
     );
-    let loader = |name: &str| classes.get(&atom(name)).cloned();
+    let loader = |name: &str| classes.get(&atom(name.trim_start_matches('\\'))).cloned();
     for (model, column, expected) in [
         ("TraitModel", "trait_type", true),
         ("TraitModel", "parent_type", false),
@@ -254,7 +254,7 @@ class Second extends First {}
     assert!(!is_morph_type_column(
         &classes[&atom("First")],
         "subject_type",
-        &|name| classes.get(&atom(name)).cloned(),
+        &|name| classes.get(&atom(name.trim_start_matches('\\'))).cloned(),
     ));
 }
 
@@ -292,7 +292,7 @@ class Comment extends BaseComment {}
     let mut merged = classes[&atom("Comment")].as_ref().clone();
     merged.methods = classes[&atom("BaseComment")].methods.clone();
     assert!(is_morph_type_column(&merged, "subject_type", &|name| {
-        classes.get(&atom(name)).cloned()
+        classes.get(&atom(name.trim_start_matches('\\'))).cloned()
     }));
 }
 

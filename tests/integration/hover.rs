@@ -882,6 +882,33 @@ function test(): void {
     );
 }
 
+/// A by-reference closure capture is read when the closure runs, so a
+/// reassignment after the closure is created reaches its body.
+#[test]
+fn hover_by_reference_capture_includes_writes_after_the_closure() {
+    let backend = create_test_backend();
+    let uri = "file:///by-ref-capture-later-write.php";
+    let content = r#"<?php
+class Node {}
+function test(?Node $c): void {
+    if ($c !== null) {
+        $f = function () use (&$c) {
+            echo $c;
+        };
+        $c = null;
+        $f();
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 5, 18).expect("hover on $c");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("null"),
+        "the later `null` write must reach the by-reference capture: {text}"
+    );
+}
+
 /// The counterpart to the test above: a by-reference call invalidates the
 /// exact value, not everything else known about the variable. `array_shift`
 /// is declared `array &$array` and says nothing about the element type, so
@@ -1347,6 +1374,32 @@ class Drawer {
     assert!(
         text.contains("$pens"),
         "hover should show the parameter name: {}",
+        text
+    );
+}
+
+/// A `@param` naming a class that does not narrow the native one loses to
+/// it at the parameter definition site too, as everywhere else.
+#[test]
+fn hover_parameter_definition_ignores_docblock_class_not_narrowing_native() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App;
+class Base {}
+class Other {}
+class Service {
+    /** @param Other $b */
+    public function handle(Base $b): void {}
+}
+"#;
+
+    let hover =
+        hover_at(&backend, uri, content, 6, 33).expect("hover should be active on parameter $b");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Base") && !text.contains("Other"),
+        "hover should show the native class: {}",
         text
     );
 }
@@ -1988,6 +2041,124 @@ class Child extends Base {
     let text = hover_text(&hover);
     assert!(text.contains("parent"), "should mention parent: {}", text);
     assert!(text.contains("Base"), "should resolve to Base: {}", text);
+}
+
+/// `parent` is the class the declaration stored, not whatever the file
+/// imports under the same short name.
+#[test]
+fn hover_parent_keyword_global_parent_shadowed_by_import() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace {
+    /** The global base. */
+    class Base {}
+}
+namespace Lib {
+    /** The library base. */
+    class Base {}
+}
+namespace App {
+    use Lib\Base;
+    class Child extends \Base {
+        public function hello(): void {
+            parent::class;
+        }
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 13, 13).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("The global base."),
+        "should resolve to \\Base: {}",
+        text
+    );
+}
+
+/// The type `id(Foo::BAR)` binds its template to inside `namespace App`,
+/// where `Foo` is a global class and `imports` is the block's `use` list.
+fn template_bound_by_global_class_constant(imports: &str) -> String {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = format!(
+        r#"<?php
+namespace {{
+    class Foo {{ const BAR = 'global'; }}
+}}
+namespace App {{
+    {imports}
+    /**
+     * @template T
+     * @param T $value
+     * @return T
+     */
+    function id($value) {{ return $value; }}
+    $result = id(Foo::BAR);
+    $result;
+}}
+"#
+    );
+    let hover = hover_at(&backend, uri, &content, 13, 6).expect("expected hover");
+    hover_text(&hover).to_string()
+}
+
+/// An unimported `Foo` inside a namespace is `App\Foo`, so the global
+/// class's constant does not bind the template.
+#[test]
+fn hover_template_bound_by_unimported_global_class_constant() {
+    let imported = template_bound_by_global_class_constant("use Foo;");
+    assert!(
+        imported.contains("'global'"),
+        "`use Foo;` names the global class: {imported}"
+    );
+    let unimported = template_bound_by_global_class_constant("");
+    assert!(
+        !unimported.contains("'global'"),
+        "`Foo` is `App\\Foo` without an import: {unimported}"
+    );
+}
+
+/// Hovering a class name written in code or a docblock shows the class PHP
+/// reads it as: the import, else the current namespace's, never a global
+/// class of the same short name.
+#[test]
+fn hover_class_reference_resolves_in_the_current_namespace() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace {
+    /** The global foo. */
+    class Foo {}
+    /** The global bar. */
+    class Bar {}
+}
+namespace App {
+    /** The app foo. */
+    class Foo {}
+    /** @var Foo $f */
+    $f = new Foo();
+    Bar::class;
+    \Bar::class;
+}
+"#;
+    let text = |line, col| {
+        hover_at(&backend, uri, content, line, col)
+            .map(|h| hover_text(&h).to_string())
+            .unwrap_or_default()
+    };
+    let docblock = text(10, 14);
+    assert!(docblock.contains("The app foo."), "@var Foo: {docblock}");
+    let code = text(11, 15);
+    assert!(code.contains("The app foo."), "new Foo: {code}");
+    let unimported = text(12, 5);
+    assert!(
+        !unimported.contains("The global bar."),
+        "`Bar` is the missing App\\Bar: {unimported}"
+    );
+    let qualified = text(13, 6);
+    assert!(qualified.contains("The global bar."), "\\Bar: {qualified}");
 }
 
 // ─── Function call hover ────────────────────────────────────────────────────
@@ -2689,6 +2860,36 @@ function demo(): void {
         "should NOT show User as the owner class, got: {}",
         text
     );
+}
+
+/// A parent's own method overrides the one its trait supplies, so the
+/// parent is the class that declares it.
+#[test]
+fn hover_inherited_method_prefers_the_parent_over_its_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+trait Runs {
+    public function run(): void {}
+}
+class Base {
+    use Runs;
+    public function run(): void {}
+}
+class Child extends Base {}
+function demo(Child $child): void {
+    $child->run();
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 10, 14).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class Base"),
+        "should show declaring class Base, got: {}",
+        text
+    );
+    assert!(!text.contains("trait Runs"), "got: {}", text);
 }
 
 // ─── Class with parent and implements ───────────────────────────────────────
@@ -9507,6 +9708,43 @@ function test() {
 }
 
 #[test]
+fn hover_inherited_class_constant_reads_self_and_parent_on_declaring_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class G { const X = 1; }
+trait T { const TB = self::TA; }
+interface I { const IA = 1; const IB = self::IA; }
+class P extends G implements I { use T; const A = 1; const B = self::A; const X = 2; const Y = parent::X; const N = self::class; const TA = 1; }
+class C extends P { const A = 2; const TA = 2; const IA = 2; }
+function test() {
+    $b = C::B;
+    $y = C::Y;
+    $n = C::N;
+    $t = C::TB;
+    $i = C::IB;
+    echo $b, $y, $n, $t, $i;
+}
+"#;
+
+    for (var, expected) in [
+        ("$b", "1"),
+        ("$y", "1"),
+        ("$n", "class-string<P>"),
+        ("$t", "1"),
+        ("$i", "1"),
+    ] {
+        let col = content.lines().nth(12).unwrap().find(var).unwrap() as u32 + 1;
+        let hover = hover_at(&backend, uri, content, 12, col).expect("expected hover");
+        let text = hover_text(&hover);
+        assert!(
+            text.contains(&format!("{var} = {expected}\n")),
+            "{var} should be {expected}, got: {text}"
+        );
+    }
+}
+
+#[test]
 fn hover_variable_assigned_from_typed_class_constant_keeps_literal() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
@@ -11916,6 +12154,180 @@ class Sub extends Base {
     );
 }
 
+// ─── Class constant initializers read from another file ───────────────
+
+/// A class named in a constant's initializer is the one the declaring
+/// file imports, not the one the reading file imports under the same
+/// short name.
+#[test]
+fn hover_constant_initializer_names_classes_through_the_declaring_files_imports() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "Vendor\\": "src/Vendor/", "Other\\": "src/Other/", "Lib\\": "src/Lib/" } } }"#,
+        &[
+            (
+                "src/Vendor/Defaults.php",
+                "<?php\nnamespace Vendor;\n\nclass Defaults\n{\n    const MODE = 'strict';\n}\n",
+            ),
+            (
+                "src/Other/Defaults.php",
+                "<?php\nnamespace Other;\n\nclass Defaults\n{\n    const MODE = 'other';\n}\n",
+            ),
+            (
+                "src/Lib/Settings.php",
+                "<?php\nnamespace Lib;\n\nuse Vendor\\Defaults;\n\nclass Settings\n{\n    const MODE = Defaults::MODE;\n    const MODES = [Defaults::MODE];\n    const SOURCES = [Defaults::class];\n    const SOURCE = Defaults::class;\n}\n",
+            ),
+        ],
+    );
+    let uri = "file:///run.php";
+    let content = r#"<?php
+namespace App;
+
+use Other\Defaults;
+
+function test(): void {
+    $mode = \Lib\Settings::MODE;
+    $mode;
+    $modes = \Lib\Settings::MODES;
+    $modes;
+    $sources = \Lib\Settings::SOURCES;
+    $sources;
+    $source = \Lib\Settings::SOURCE;
+    $sourceMode = $source::MODE;
+    $sourceMode;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 6).expect("expected hover on $mode");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("'strict'") && !text.contains("'other'"),
+        "`Defaults` is the `Vendor\\Defaults` that `Lib\\Settings` imports, got: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 9, 6).expect("expected hover on $modes");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("'strict'") && !text.contains("'other'"),
+        "an array element names the declaring file's `Defaults` too, got: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 11, 6).expect("expected hover on $sources");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains(r"'Vendor\\Defaults'") && !text.contains("Other"),
+        "`Defaults::class` is the declaring file's `Defaults`, got: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 14, 6).expect("expected hover on $sourceMode");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("'strict'") && !text.contains("'other'"),
+        "a bare `Defaults::class` names the declaring file's `Defaults` too, got: {text}"
+    );
+
+    // The constant itself shows which `Defaults` it reads.
+    let hover = hover_at(&backend, uri, content, 6, 28).expect("expected hover on MODE");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains(r"const MODE = \Vendor\Defaults::MODE;"),
+        "the initializer names the class fully qualified, got: {text}"
+    );
+}
+
+/// An inherited constant's initializer is read in the namespace of the
+/// class that declares it, not of the class it is read through.
+#[test]
+fn hover_inherited_constant_initializer_names_classes_in_the_parents_namespace() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "Lib\\": "src/Lib/", "App\\": "src/App/" } } }"#,
+        &[
+            (
+                "src/Lib/Labels.php",
+                "<?php\nnamespace Lib;\n\nclass Labels\n{\n    const DEFAULT = 'lib';\n}\n",
+            ),
+            (
+                "src/Lib/Base.php",
+                "<?php\nnamespace Lib;\n\nclass Base\n{\n    const LABEL = Labels::DEFAULT;\n}\n",
+            ),
+            (
+                "src/App/Labels.php",
+                "<?php\nnamespace App;\n\nclass Labels\n{\n    const DEFAULT = 'app';\n}\n",
+            ),
+            (
+                "src/App/Child.php",
+                "<?php\nnamespace App;\n\nclass Child extends \\Lib\\Base {}\n",
+            ),
+        ],
+    );
+    let uri = "file:///run.php";
+    let content = r#"<?php
+namespace App;
+
+function test(): void {
+    $label = Child::LABEL;
+    $label;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 5, 6).expect("expected hover on $label");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("'lib'") && !text.contains("'app'"),
+        "`Labels` in `Lib\\Base` is `Lib\\Labels`, got: {text}"
+    );
+}
+
+/// A constant initialized to `Foo::class` holds that class's name, as
+/// `$x = Foo::class;` does in code, however the class is named.
+#[test]
+fn hover_class_constant_initialized_to_class_name() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Defaults {}
+enum Suit { case Hearts; }
+class Base {}
+class Settings extends Base {
+    const SOURCE = Defaults::class;
+    const KIND = Suit::class;
+    const MINE = self::class;
+    const BASE = parent::class;
+    const GONE = Missing::class;
+}
+
+function test(): void {
+    $source = Settings::SOURCE;
+    $source;
+    $kind = Settings::KIND;
+    $kind;
+    $mine = Settings::MINE;
+    $mine;
+    $base = Settings::BASE;
+    $base;
+    $gone = Settings::GONE;
+    $gone;
+}
+"#;
+
+    for (line, var, expected) in [
+        (14, "$source", "class-string<Defaults>"),
+        // An enum's `::class` is its name, not one of its cases.
+        (16, "$kind", "class-string<Suit>"),
+        (18, "$mine", "class-string<Settings>"),
+        (20, "$base", "class-string<Base>"),
+        // PHP names a class without loading it.
+        (22, "$gone", "class-string<Missing>"),
+    ] {
+        let hover = hover_at(&backend, uri, content, line, 6)
+            .unwrap_or_else(|| panic!("expected hover on {var}"));
+        let text = hover_text(&hover);
+        assert!(
+            text.contains(&format!("{var} = {expected}")),
+            "{var} should be {expected}, got: {text}"
+        );
+    }
+}
+
 // ─── instanceof on nullable strips null ───────────────────────────────
 
 #[test]
@@ -12531,6 +12943,187 @@ class Demo {
     assert!(
         text.contains("string"),
         "@method generic T should be substituted to string through @implements, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_virtual_method_short_implements_args_bind_trailing_template() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App;
+
+class User {}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @method TValue first()
+ */
+interface Coll {}
+
+/**
+ * @implements Coll<User>
+ */
+class Users implements Coll {
+    public function __call(string $name, array $args) {}
+}
+
+class Demo {
+    public function test(Users $users): void {
+        $result = $users->first();
+        $result;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 22, 9).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("User") && !text.contains("TValue"),
+        "a single @implements argument should bind the trailing TValue, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_closure_param_keeps_hyphenated_pseudo_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @param callable(positive-int): void $cb
+ */
+function eachCount(callable $cb): void {}
+
+eachCount(function ($n) {
+    $n;
+});
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 5).expect("expected hover on $n");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("positive-int"),
+        "a closure parameter inferred as positive-int should keep it, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_property_typed_from_constructor_new_matches_import_case_insensitively() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App\Models {
+    class User {}
+}
+
+namespace Ns {
+    use App\Models\User;
+
+    class Holder {
+        public $user;
+
+        public function __construct() {
+            $this->user = new user();
+        }
+
+        public function test(): void {
+            $u = $this->user;
+            $u;
+        }
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 17, 13).expect("expected hover on $u");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("namespace App\\Models;") && text.contains("$u = User"),
+        "`new user()` should resolve through the `use App\\Models\\User` import, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_virtual_method_own_trait_use_args_substitute() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App;
+
+class User {}
+
+/**
+ * @template TValue
+ * @method TValue first()
+ */
+trait HasItems {}
+
+class Users {
+    /** @use HasItems<User> */
+    use HasItems;
+
+    public function __call(string $name, array $args) {}
+}
+
+class Demo {
+    public function test(Users $users): void {
+        $result = $users->first();
+        $result;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 21, 9).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("User") && !text.contains("TValue"),
+        "the class's own @use arguments should reach the trait's @method tags, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_virtual_method_short_use_args_bind_trailing_template() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App;
+
+class User {}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @method TValue first()
+ */
+trait HasItems {}
+
+class Base {
+    /** @use HasItems<User> */
+    use HasItems;
+
+    public function __call(string $name, array $args) {}
+}
+
+class Users extends Base {}
+
+class Demo {
+    public function test(Users $users): void {
+        $result = $users->first();
+        $result;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 24, 9).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("User") && !text.contains("TValue"),
+        "a single @use argument should bind the trailing TValue, got: {}",
         text
     );
 }
@@ -14332,6 +14925,56 @@ function test(): void {
         hover.contains("Generator") && hover.contains("string") && hover.contains("int"),
         "$closure should expose Generator<int, string, mixed, int>-like type, got: {hover}"
     );
+}
+
+/// An arrow function whose body is a `yield` is a generator too.
+#[test]
+fn hover_generator_arrow_function_infers_return_type() {
+    let backend = create_test_backend();
+    let uri = "file:///generator_arrow.php";
+    let content = r#"<?php
+function test(): void {
+    $arrow = fn () => yield 'x';
+    $arrow;
+}
+"#;
+
+    let hover =
+        hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $arrow")).to_string();
+    assert!(
+        hover.contains("Generator<int, string, mixed, void>"),
+        "$arrow should be a Generator of strings, got: {hover}"
+    );
+}
+
+/// A string passed where a `model-property<Model>` parameter is expected
+/// hovers as that model's property, passed by position or by name.
+#[test]
+fn hover_model_property_string_argument() {
+    let backend = create_test_backend();
+    let uri = "file:///model_property.php";
+    let content = r#"<?php
+class User { /** The login address. */ public string $email = ''; }
+class Query {
+    /** @param model-property<User> $column */
+    public function where(string $column): static { return $this; }
+}
+function f(Query $q): void {
+    $q->where('email');
+    $q->where(column: 'email');
+}
+"#;
+    for line in [7, 8] {
+        let column = if line == 7 { 16 } else { 24 };
+        let hover = hover_text(
+            &hover_at(&backend, uri, content, line, column).expect("hover the column name"),
+        )
+        .to_string();
+        assert!(
+            hover.contains("$email"),
+            "line {line} should hover as `User::$email`, got: {hover}"
+        );
+    }
 }
 
 // ─── Package provenance badges ──────────────────────────────────────────────
@@ -16163,4 +16806,28 @@ namespace Eloquent {
         grouped.contains("Collection<array-key, Collection<int, Member>>"),
         "groupBy should keep the element type: {grouped}"
     );
+}
+
+/// PHP's superglobals exist in every scope, so a method body sees them the
+/// way top-level code does.
+#[test]
+fn hover_superglobal_inside_method() {
+    let backend = create_test_backend();
+    let uri = "file:///superglobal_in_method.php";
+    let content = r#"<?php
+class Test {
+    public function run(): void {
+        echo $_SERVER;
+    }
+}
+echo $_SERVER;
+"#;
+    for (line, character) in [(3, 15), (6, 7)] {
+        let hover = hover_at(&backend, uri, content, line, character).expect("expected hover");
+        let text = hover_text(&hover);
+        assert!(
+            text.contains("$_SERVER = array"),
+            "line {line}: superglobals are arrays in every scope, got: {text}"
+        );
+    }
 }

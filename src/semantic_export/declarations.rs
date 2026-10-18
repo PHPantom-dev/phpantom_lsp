@@ -71,18 +71,24 @@ pub(super) fn export_declarations(
 }
 
 fn function_declared_by(backend: &Backend, fqn: &str, uri: &str) -> Option<FunctionInfo> {
-    if let Some((declaring_uri, function)) = backend.symbols.global_functions.read().get(fqn)
-        && declaring_uri == uri
-    {
-        return Some(function.clone());
-    }
-    backend
+    let indexed = backend
         .symbols
-        .duplicate_functions
+        .global_functions
         .read()
         .get(fqn)
-        .and_then(|declarations| declarations.get(uri))
-        .cloned()
+        .filter(|(declaring_uri, _)| declaring_uri == uri)
+        .map(|(_, function)| function.clone());
+    let mut function = indexed.or_else(|| {
+        backend
+            .symbols
+            .duplicate_functions
+            .read()
+            .get(fqn)
+            .and_then(|declarations| declarations.get(uri))
+            .cloned()
+    })?;
+    backend.verify_function_doc_types(&mut function);
+    Some(function)
 }
 
 fn export_function(source: &str, fqn: &str, function: &FunctionInfo) -> ExportDeclaration {

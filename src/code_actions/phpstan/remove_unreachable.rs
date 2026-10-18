@@ -25,15 +25,17 @@
 //!
 //! ## Reusable helpers
 //!
-//! - [`build_remove_unreachable_block_edit`] removes everything from
-//!   a line to the enclosing block's closing `}`.
+//! - [`build_remove_unreachable_block_edit`] removes everything from the
+//!   dead statement to the end of the statement list it sits in.
 
+use mago_span::HasSpan;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::phpstan::find_brace_match_line;
+use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::text_position::ranges_overlap;
+use crate::text_position::{line_start_byte_offset, offset_to_position};
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
 
@@ -63,23 +65,10 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
-
-        // Only match diagnostics under the cursor.
-        let cursor_hits: Vec<&Diagnostic> = phpstan_diags
-            .iter()
-            .filter(|diag| {
-                matches!(
-                    &diag.code,
-                    Some(NumberOrString::String(s)) if s == UNREACHABLE_ID
-                ) && ranges_overlap(&diag.range, &params.range)
-            })
-            .collect();
-
-        for diag in &cursor_hits {
+        for diag in self.phpstan_diags_overlapping(uri, &params.range) {
+            if phpstan_identifier(&diag) != Some(UNREACHABLE_ID) {
+                continue;
+            }
             let diag_line = diag.range.start.line as usize;
 
             let extra = serde_json::json!({
@@ -89,7 +78,7 @@ impl Backend {
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Remove unreachable code".to_string(),
                 kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![(*diag).clone()]),
+                diagnostics: Some(vec![diag]),
                 edit: None,
                 command: None,
                 is_preferred: Some(true),
@@ -127,38 +116,90 @@ impl Backend {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Build a [`TextEdit`] that removes all code from `diag_line` to the
-/// enclosing block's closing `}`.
+/// Build a [`TextEdit`] that removes the statement PHPStan reports on
+/// `diag_line` and every statement after it in the list it sits in: the
+/// rest of the block, `switch` case or body, which the statement before it
+/// never lets run.  The `}` (or the next `case`) that ends the list stays.
 ///
-/// Everything from the start of `diag_line` to the line before the `}`
-/// is deleted.  The `}` itself (which closes the function, if-block,
-/// etc.) is preserved.
+/// Whole lines go where the dead statements have them to themselves.
 ///
-/// Returns `None` if the line is out of bounds or no enclosing `}` can
-/// be found.
+/// Returns `None` if no statement starts on the line.
 fn build_remove_unreachable_block_edit(content: &str, diag_line: usize) -> Option<TextEdit> {
-    let lines: Vec<&str> = content.lines().collect();
-    if diag_line >= lines.len() {
-        return None;
-    }
+    let line_start = line_start_byte_offset(content, diag_line);
+    let line = content.get(line_start..)?.lines().next()?;
+    let offset = (line_start + line.len() - line.trim_start().len()) as u32;
+    let line_end = (line_start + line.len()) as u32;
+    let (first, last) =
+        crate::parser::with_parsed_program(content, "remove_unreachable", |program, _content| {
+            crate::code_actions::cursor_context::innermost_at(program, offset, |node| {
+                let statements = statement_list_at(node, offset)?;
+                let dead = statements
+                    .iter()
+                    .position(|statement| statement.span().end.offset > offset)?;
+                // The dead statement is the one that starts on the line; a
+                // list whose statement only spans it holds the line deeper
+                // down, if anywhere.
+                let start = statements[dead].span().start.offset;
+                if start < offset || start > line_end {
+                    return None;
+                }
+                Some((
+                    start as usize,
+                    statements.last()?.span().end.offset as usize,
+                ))
+            })
+        })?;
 
-    // Find the enclosing `}` by scanning forward from the diagnostic
-    // line.  Depth starts at 0; when it goes negative we've found the
-    // enclosing block's close brace.
-    let close_line = find_brace_match_line(&lines, diag_line, |d| d < 0)?;
-
-    // Delete from the start of the diagnostic line to the start of the
-    // closing brace line (preserving the `}` and its indentation).
-    let start_pos = Position::new(diag_line as u32, 0);
-    let end_pos = Position::new(close_line as u32, 0);
+    let first_line_start = content[..first].rfind('\n').map_or(0, |at| at + 1);
+    let start = if content[first_line_start..first].trim().is_empty() {
+        first_line_start
+    } else {
+        first
+    };
+    let last_line_end = content[last..]
+        .find('\n')
+        .map_or(content.len(), |at| last + at);
+    let end = if content[last..last_line_end].trim().is_empty() {
+        (last_line_end + 1).min(content.len())
+    } else {
+        last
+    };
 
     Some(TextEdit {
         range: Range {
-            start: start_pos,
-            end: end_pos,
+            start: offset_to_position(content, start),
+            end: offset_to_position(content, end),
         },
         new_text: String::new(),
     })
+}
+
+/// The statement list `node` holds that the code at `offset` sits in: a
+/// block's, the file's, or one nested in a statement (a `switch` case, a
+/// `:`-delimited body, a namespace).
+fn statement_list_at<'a>(node: Node<'a, '_>, offset: u32) -> Option<&'a [Statement<'a>]> {
+    let holds = |statements: &[Statement<'_>]| {
+        statements.iter().any(|statement| {
+            let span = statement.span();
+            span.start.offset <= offset && offset <= span.end.offset
+        })
+    };
+    let statements = match node {
+        Node::Program(program) => program.statements.as_slice(),
+        Node::Block(block) => block.statements.as_slice(),
+        Node::Statement(statement) => {
+            crate::parser::try_for_each_nested_statement_list(statement, |statements| {
+                if holds(statements) {
+                    std::ops::ControlFlow::Break(statements)
+                } else {
+                    std::ops::ControlFlow::Continue(())
+                }
+            })
+            .break_value()?
+        }
+        _ => return None,
+    };
+    holds(statements).then_some(statements)
 }
 
 /// Check whether a `deadCode.unreachable` diagnostic is stale.
@@ -181,63 +222,6 @@ pub(crate) fn is_remove_unreachable_stale(content: &str, diag_line: usize) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::text_scan::find_semicolon_balanced;
-
-    /// Build a [`TextEdit`] that removes a single semicolon-terminated
-    /// statement starting on the given line.
-    fn build_remove_statement_edit(content: &str, diag_line: usize) -> Option<TextEdit> {
-        let lines: Vec<&str> = content.lines().collect();
-        if diag_line >= lines.len() {
-            return None;
-        }
-
-        let line_text = lines[diag_line];
-        let first_non_ws = line_text.find(|c: char| !c.is_whitespace())?;
-
-        let line_start_byte: usize = lines[..diag_line].iter().map(|l| l.len() + 1).sum();
-
-        let stmt_start_byte = line_start_byte + first_non_ws;
-        let from_stmt = &content[stmt_start_byte..];
-        let semi_offset = find_semicolon_balanced(from_stmt)?;
-        let semi_byte = stmt_start_byte + semi_offset;
-        let stmt_end_byte = semi_byte + 1;
-
-        let delete_end_byte =
-            if stmt_end_byte < content.len() && content.as_bytes()[stmt_end_byte] == b'\n' {
-                stmt_end_byte + 1
-            } else if stmt_end_byte < content.len() {
-                let after_semi = &content[stmt_end_byte..];
-                let next_nl = after_semi.find('\n');
-                match next_nl {
-                    Some(nl_off)
-                        if content[stmt_end_byte..stmt_end_byte + nl_off]
-                            .trim()
-                            .is_empty() =>
-                    {
-                        stmt_end_byte + nl_off + 1
-                    }
-                    _ => stmt_end_byte,
-                }
-            } else {
-                content.len()
-            };
-
-        let start_pos = Position::new(diag_line as u32, 0);
-        let end_line = content[..delete_end_byte].matches('\n').count();
-        let end_col = delete_end_byte
-            - content[..delete_end_byte]
-                .rfind('\n')
-                .map(|p| p + 1)
-                .unwrap_or(0);
-
-        Some(TextEdit {
-            range: Range {
-                start: start_pos,
-                end: Position::new(end_line as u32, end_col as u32),
-            },
-            new_text: String::new(),
-        })
-    }
 
     // ── build_remove_unreachable_block_edit ─────────────────────────
 
@@ -287,39 +271,34 @@ mod tests {
     }
 
     #[test]
-    fn returns_none_when_no_closing_brace() {
-        // Malformed — no closing brace after the dead code.
-        let content = "<?php\nreturn;\necho 'dead';";
-        assert!(build_remove_unreachable_block_edit(content, 2).is_none());
-    }
-
-    // ── build_remove_statement_edit ─────────────────────────────────
-
-    #[test]
-    fn removes_simple_statement() {
-        let content =
-            "<?php\nfunction foo(): never { throw new \\Exception(); }\necho 'unreachable';\n";
-        let edit = build_remove_statement_edit(content, 2).unwrap();
-        assert_eq!(edit.new_text, "");
+    fn removes_dead_code_at_the_top_level() {
+        let content = "<?php\nreturn;\necho 'dead';\necho 'also dead';\n";
+        let edit = build_remove_unreachable_block_edit(content, 2).unwrap();
         assert_eq!(edit.range.start, Position::new(2, 0));
-    }
-
-    #[test]
-    fn removes_indented_statement() {
-        let content = "<?php\nif (true) {\n    return;\n    echo 'dead';\n}\n";
-        let edit = build_remove_statement_edit(content, 3).unwrap();
-        assert_eq!(edit.new_text, "");
-        assert_eq!(edit.range.start, Position::new(3, 0));
         assert_eq!(edit.range.end, Position::new(4, 0));
     }
 
     #[test]
-    fn handles_string_with_semicolons() {
-        let content = "<?php\nreturn;\necho 'a;b;c';\n";
-        let edit = build_remove_statement_edit(content, 2).unwrap();
-        assert_eq!(edit.new_text, "");
-        assert_eq!(edit.range.start, Position::new(2, 0));
-        assert_eq!(edit.range.end, Position::new(3, 0));
+    fn dead_code_in_a_switch_case_stops_at_the_next_case() {
+        let content = "<?php\nswitch ($x) {\n    case 1:\n        return 1;\n        echo 'dead';\n    case 2:\n        echo 'alive';\n}\n";
+        let edit = build_remove_unreachable_block_edit(content, 4).unwrap();
+        assert_eq!(edit.range.start, Position::new(4, 0));
+        assert_eq!(edit.range.end, Position::new(5, 0));
+    }
+
+    #[test]
+    fn braces_in_strings_do_not_end_the_block() {
+        let content =
+            "<?php\nfunction foo(): int {\n    return 1;\n    echo '}';\n    echo 'dead';\n}\n";
+        let edit = build_remove_unreachable_block_edit(content, 3).unwrap();
+        assert_eq!(edit.range.start, Position::new(3, 0));
+        assert_eq!(edit.range.end, Position::new(5, 0));
+    }
+
+    #[test]
+    fn returns_none_on_a_line_with_no_statement() {
+        let content = "<?php\nfunction foo(): int {\n    return 1;\n\n}\n";
+        assert!(build_remove_unreachable_block_edit(content, 3).is_none());
     }
 
     // ── is_remove_unreachable_stale ─────────────────────────────────

@@ -643,6 +643,50 @@ function myFunc() {
 }
 
 #[test]
+fn missing_return_type_infers_function_named_through_a_class_import() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App\Helpers {
+    function total(): string { return ''; }
+}
+namespace Lib\Helpers {
+    function total(): int { return 1; }
+}
+namespace App {
+    use Lib\Helpers;
+    class Cart {
+        public function sum() {
+            return Helpers\total();
+        }
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        10,
+        "Method App\\Cart::sum() has no return type specified.",
+        "missingType.return",
+    );
+
+    let actions = get_code_actions_on_line(&backend, uri, content, 10);
+    let action = find_action(&actions, "Add return type").expect("should offer 'Add return type'");
+
+    let resolved = resolve_action(&backend, uri, content, action);
+    let edits = extract_edits(&resolved);
+    let result = apply_edits(content, &edits);
+
+    assert!(
+        result.contains("sum(): int"),
+        "should insert `: int`:\n{}",
+        result
+    );
+}
+
+#[test]
 fn missing_return_type_brace_on_next_line() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
@@ -1584,5 +1628,68 @@ class Foo {
         !result.contains("@return"),
         "a literal redundant with a broad branch must not create PHPDoc:\n{}",
         result
+    );
+}
+
+// ── CRLF line endings ───────────────────────────────────────────────────────
+
+#[test]
+fn return_void_strips_expression_in_a_crlf_file() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "<?php\r\nclass Foo {\r\n    public function first(): int {\r\n        return 1;\r\n    }\r\n\r\n    public function run(): void {\r\n        return $this->doWork();\r\n    }\r\n}\r\n";
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        7,
+        "Method Foo::run() with return type void returns void but should not return anything.",
+        "return.void",
+    );
+
+    let actions = get_code_actions_on_line(&backend, uri, content, 7);
+    let action = find_action(&actions, "Remove return statement")
+        .expect("should offer 'Remove return statement'");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edits(content, &extract_edits(&resolved));
+
+    assert!(
+        result.contains("    public function run(): void {\r\n        $this->doWork();\r\n    }"),
+        "the expression should stay as a statement in run():\n{result:?}"
+    );
+    assert!(
+        result.contains("        return 1;\r\n"),
+        "first() should be untouched:\n{result:?}"
+    );
+}
+
+#[test]
+fn return_void_keeps_a_bare_return_in_a_crlf_file() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "<?php\r\nclass Foo {\r\n    public function run(): void {\r\n        if (rand(0, 1)) {\r\n            return $this->doWork();\r\n        }\r\n        echo 'done';\r\n    }\r\n}\r\n";
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        4,
+        "Method Foo::run() with return type void returns void but should not return anything.",
+        "return.void",
+    );
+
+    let actions = get_code_actions_on_line(&backend, uri, content, 4);
+    let action = find_action(&actions, "Remove return statement")
+        .expect("should offer 'Remove return statement'");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edits(content, &extract_edits(&resolved));
+
+    assert_eq!(
+        result,
+        content.replace(
+            "return $this->doWork();\r\n",
+            "$this->doWork();\r\n            return;\r\n"
+        )
     );
 }

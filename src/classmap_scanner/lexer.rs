@@ -29,14 +29,46 @@ pub fn find_symbols(content: &[u8]) -> ScanResult {
     if !has_any_keyword(content) {
         return ScanResult::default();
     }
-
     let mut result = ScanResult::default();
+    scan::<true>(content, &mut result);
+    result
+}
+
+/// The **PSR-4 scanner**: a single-pass byte-level scanner that
+/// extracts fully-qualified class, interface, trait, and enum names
+/// from PHP source bytes.
+///
+/// This is the classes-only scanner used by the PSR-4 directory walker
+/// and vendor package scanner.  For a scanner that also extracts
+/// functions and constants, see [`find_symbols`] (the full-scan).
+pub fn find_classes(content: &[u8]) -> Vec<String> {
+    // Quick rejection — use SIMD to check if any class-like keywords exist
+    if !has_class_keyword(content) {
+        return Vec::new();
+    }
+    let mut result = ScanResult {
+        classes: Vec::with_capacity(4),
+        ..ScanResult::default()
+    };
+    scan::<false>(content, &mut result);
+    result.classes
+}
+
+/// The state machine behind both scanners, collecting into `result`.
+///
+/// Skips comments, strings, heredocs, and nowdocs inline without
+/// allocating a separate "cleaned" buffer.  With `SYMBOLS` it also
+/// tracks brace depth and collects top-level functions and constants;
+/// without it, it collects only class-likes and compiles down to the
+/// lean PSR-4 loop.
+fn scan<const SYMBOLS: bool>(content: &[u8], result: &mut ScanResult) {
     let mut namespace = String::new();
     let len = content.len();
     let mut i = 0;
 
-    // Brace depth tracking for top-level `const` detection.
-    // Depth 0 = top-level, depth 1 = inside a class/namespace block.
+    // Brace depth tracking for top-level `function` / `const` detection
+    // (`SYMBOLS` only). Depth 0 = top-level, depth 1 = inside a
+    // class/namespace block.
     let mut brace_depth: u32 = 0;
     let mut in_braced_namespace = false;
     // The brace depth at which the current namespace was opened.
@@ -110,410 +142,6 @@ pub fn find_symbols(content: &[u8]) -> ScanResult {
         // ── Skip: heredoc / nowdoc (memchr to newline) ──────────────
         if in_heredoc {
             let line_start = i;
-            while i < len && (content[i] == b' ' || content[i] == b'\t') {
-                i += 1;
-            }
-            if i + heredoc_id.len() <= len && &content[i..i + heredoc_id.len()] == heredoc_id {
-                let after = i + heredoc_id.len();
-                if after >= len
-                    || content[after] == b';'
-                    || content[after] == b'\n'
-                    || content[after] == b'\r'
-                    || content[after] == b','
-                    || content[after] == b')'
-                {
-                    in_heredoc = false;
-                    i = after;
-                    continue;
-                }
-            }
-            i = line_start;
-            if let Some(pos) = memchr(b'\n', &content[i..]) {
-                i += pos + 1;
-            } else {
-                break; // rest of file is inside heredoc
-            }
-            continue;
-        }
-
-        // ── Main code parsing ───────────────────────────────────────
-        let b = content[i];
-
-        // Braces for depth tracking
-        if b == b'{' {
-            brace_depth += 1;
-            i += 1;
-            continue;
-        }
-        if b == b'}' {
-            brace_depth = brace_depth.saturating_sub(1);
-            // Exiting a braced namespace block resets the namespace.
-            if in_braced_namespace && brace_depth == namespace_brace_depth {
-                in_braced_namespace = false;
-                namespace.clear();
-            }
-            i += 1;
-            continue;
-        }
-
-        // Comments
-        if b == b'/' && i + 1 < len {
-            if content[i + 1] == b'/' {
-                in_line_comment = true;
-                i += 2;
-                continue;
-            }
-            if content[i + 1] == b'*' {
-                in_block_comment = true;
-                i += 2;
-                continue;
-            }
-        }
-
-        if b == b'#' {
-            if i + 1 < len && content[i + 1] == b'[' {
-                i += 1;
-                continue;
-            }
-            in_line_comment = true;
-            i += 1;
-            continue;
-        }
-
-        // Strings
-        if b == b'\'' {
-            in_single_string = true;
-            i += 1;
-            continue;
-        }
-        if b == b'"' {
-            in_double_string = true;
-            i += 1;
-            continue;
-        }
-
-        // Heredoc / nowdoc
-        if b == b'<' && i + 2 < len && content[i + 1] == b'<' && content[i + 2] == b'<' {
-            i += 3;
-            while i < len && content[i] == b' ' {
-                i += 1;
-            }
-            if i < len && (content[i] == b'\'' || content[i] == b'"') {
-                i += 1;
-            }
-            let id_start = i;
-            while i < len && (content[i].is_ascii_alphanumeric() || content[i] == b'_') {
-                i += 1;
-            }
-            if i > id_start {
-                heredoc_id = &content[id_start..i];
-                in_heredoc = true;
-                if i < len && (content[i] == b'\'' || content[i] == b'"') {
-                    i += 1;
-                }
-                while i < len && content[i] != b'\n' {
-                    i += 1;
-                }
-                if i < len {
-                    i += 1;
-                }
-            }
-            continue;
-        }
-
-        // ── Keyword detection ───────────────────────────────────────
-        if is_keyword_boundary(content, i) {
-            if b == b'n'
-                && i + 9 <= len
-                && &content[i..i + 9] == b"namespace"
-                && (i + 9 >= len
-                    || content[i + 9].is_ascii_whitespace()
-                    || content[i + 9] == b';'
-                    || content[i + 9] == b'{')
-            {
-                i += 9;
-                while i < len && content[i].is_ascii_whitespace() {
-                    i += 1;
-                }
-
-                let ns_start = i;
-                while i < len {
-                    let c = content[i];
-                    if c.is_ascii_alphanumeric()
-                        || c == b'_'
-                        || c == b'\\'
-                        || c.is_ascii_whitespace()
-                    {
-                        i += 1;
-                    } else {
-                        break;
-                    }
-                }
-                namespace = content[ns_start..i]
-                    .iter()
-                    .filter(|&&c| !c.is_ascii_whitespace())
-                    .map(|&c| c as char)
-                    .collect();
-                if !namespace.is_empty() && !namespace.ends_with('\\') {
-                    namespace.push('\\');
-                }
-
-                // Check for braced namespace: `namespace Foo { ... }`
-                while i < len && content[i].is_ascii_whitespace() {
-                    i += 1;
-                }
-                if i < len && content[i] == b'{' {
-                    in_braced_namespace = true;
-                    namespace_brace_depth = brace_depth;
-                    brace_depth += 1;
-                    i += 1;
-                }
-                continue;
-            }
-
-            if b == b'c'
-                && i + 5 <= len
-                && &content[i..i + 5] == b"class"
-                && (i + 5 >= len || content[i + 5].is_ascii_whitespace())
-            {
-                i += 5;
-                if let Some(name) = read_name(content, &mut i) {
-                    result.classes.push(format!("{namespace}{name}"));
-                }
-                continue;
-            }
-
-            if b == b'i'
-                && i + 9 <= len
-                && &content[i..i + 9] == b"interface"
-                && (i + 9 >= len || content[i + 9].is_ascii_whitespace())
-            {
-                i += 9;
-                if let Some(name) = read_name(content, &mut i) {
-                    result.classes.push(format!("{namespace}{name}"));
-                }
-                continue;
-            }
-
-            if b == b't'
-                && i + 5 <= len
-                && &content[i..i + 5] == b"trait"
-                && (i + 5 >= len || content[i + 5].is_ascii_whitespace())
-            {
-                i += 5;
-                if let Some(name) = read_name(content, &mut i) {
-                    result.classes.push(format!("{namespace}{name}"));
-                }
-                continue;
-            }
-
-            if b == b'e'
-                && i + 4 <= len
-                && &content[i..i + 4] == b"enum"
-                && (i + 4 >= len || content[i + 4].is_ascii_whitespace())
-            {
-                i += 4;
-                if let Some(name) = read_name(content, &mut i) {
-                    result.classes.push(format!("{namespace}{name}"));
-                }
-                continue;
-            }
-
-            // function (standalone — not inside a class/trait/enum body)
-            if b == b'f'
-                && i + 8 <= len
-                && &content[i..i + 8] == b"function"
-                && (i + 8 >= len || content[i + 8].is_ascii_whitespace() || content[i + 8] == b'(')
-            {
-                // Skip `use function …;` import statements — these
-                // are not function declarations.
-                if is_preceded_by_use(content, i) {
-                    i += 8;
-                    // Advance past the rest of the `use function` line
-                    // so we don't accidentally pick up names from it.
-                    while i < len && content[i] != b';' && content[i] != b'\n' {
-                        i += 1;
-                    }
-                    if i < len && content[i] == b';' {
-                        i += 1;
-                    }
-                    continue;
-                }
-
-                // Only top-level functions: depth 0 (no braced ns) or
-                // the namespace brace depth + 1 doesn't apply — we
-                // want depth == 0 outside braced ns, or depth ==
-                // namespace_brace_depth + 1 inside braced ns.
-                let is_top_level = if in_braced_namespace {
-                    brace_depth == namespace_brace_depth + 1
-                } else {
-                    brace_depth == 0
-                };
-
-                if is_top_level {
-                    i += 8;
-                    // Skip `function (` — that's a closure, not a named function.
-                    let mut j = i;
-                    while j < len && content[j].is_ascii_whitespace() {
-                        j += 1;
-                    }
-                    if j < len && content[j] == b'(' {
-                        // Anonymous function / closure — skip.
-                        i = j;
-                    } else if let Some(name) = read_name(content, &mut i) {
-                        result.functions.push(format!("{namespace}{name}"));
-                    }
-                } else {
-                    i += 8;
-                }
-                continue;
-            }
-
-            // define('NAME', ...)
-            if b == b'd'
-                && i + 6 <= len
-                && &content[i..i + 6] == b"define"
-                && (i + 6 < len && content[i + 6] == b'(')
-            {
-                i += 7; // skip `define(`
-                while i < len && content[i].is_ascii_whitespace() {
-                    i += 1;
-                }
-                // Read the constant name from the string argument.
-                if let Some(name) = read_define_name(content, &mut i) {
-                    result.constants.push(name.to_string());
-                }
-                continue;
-            }
-
-            // const NAME = ... (top-level only)
-            if b == b'c'
-                && i + 5 <= len
-                && &content[i..i + 5] == b"const"
-                && (i + 5 >= len || content[i + 5].is_ascii_whitespace())
-            {
-                // Skip `use const …;` import statements.
-                if is_preceded_by_use(content, i) {
-                    i += 5;
-                    while i < len && content[i] != b';' && content[i] != b'\n' {
-                        i += 1;
-                    }
-                    if i < len && content[i] == b';' {
-                        i += 1;
-                    }
-                    continue;
-                }
-
-                let is_top_level = if in_braced_namespace {
-                    brace_depth == namespace_brace_depth + 1
-                } else {
-                    brace_depth == 0
-                };
-
-                if is_top_level {
-                    i += 5;
-                    if let Some(name) = read_name(content, &mut i) {
-                        // Top-level const names are FQN with namespace.
-                        result.constants.push(format!("{namespace}{name}"));
-                    }
-                } else {
-                    i += 5;
-                }
-                continue;
-            }
-        }
-
-        i += 1;
-    }
-
-    result
-}
-
-/// The **PSR-4 scanner**: a single-pass byte-level scanner that
-/// extracts fully-qualified class, interface, trait, and enum names
-/// from PHP source bytes.
-///
-/// This is the classes-only scanner used by the PSR-4 directory walker
-/// and vendor package scanner.  For a scanner that also extracts
-/// functions and constants, see [`find_symbols`] (the full-scan).
-///
-/// Skips comments, strings, heredocs, and nowdocs inline without
-/// allocating a separate "cleaned" buffer.
-pub fn find_classes(content: &[u8]) -> Vec<String> {
-    // Quick rejection — use SIMD to check if any class-like keywords exist
-    if !has_class_keyword(content) {
-        return Vec::new();
-    }
-
-    let mut classes = Vec::with_capacity(4);
-    let mut namespace = String::new();
-    let len = content.len();
-    let mut i = 0;
-
-    // State flags
-    let mut in_line_comment = false;
-    let mut in_block_comment = false;
-    let mut in_single_string = false;
-    let mut in_double_string = false;
-    let mut in_heredoc = false;
-    let mut heredoc_id: &[u8] = &[];
-
-    while i < len {
-        // ── Skip: line comment (memchr to newline) ──────────────────
-        if in_line_comment {
-            if let Some(pos) = memchr(b'\n', &content[i..]) {
-                i += pos + 1;
-            } else {
-                break;
-            }
-            in_line_comment = false;
-            continue;
-        }
-
-        // ── Skip: block comment (memmem to "*/") ────────────────────
-        if in_block_comment {
-            if let Some(pos) = memmem::find(&content[i..], b"*/") {
-                i += pos + 2;
-                in_block_comment = false;
-            } else {
-                break;
-            }
-            continue;
-        }
-
-        // ── Skip: single-quoted string (memchr to '\'' or '\\') ────
-        if in_single_string {
-            match memchr2_single_string(&content[i..]) {
-                Some((offset, b'\\')) => {
-                    i += offset + 2;
-                }
-                Some((offset, _)) => {
-                    i += offset + 1;
-                    in_single_string = false;
-                }
-                None => break,
-            }
-            continue;
-        }
-
-        // ── Skip: double-quoted string (memchr to '"' or '\\') ─────
-        if in_double_string {
-            match memchr2_double_string(&content[i..]) {
-                Some((offset, b'\\')) => {
-                    i += offset + 2;
-                }
-                Some((offset, _)) => {
-                    i += offset + 1;
-                    in_double_string = false;
-                }
-                None => break,
-            }
-            continue;
-        }
-
-        // ── Skip: heredoc / nowdoc (memchr to newline) ──────────────
-        if in_heredoc {
-            let line_start = i;
             // Skip leading whitespace (PHP 7.3+ flexible heredoc)
             while i < len && (content[i] == b' ' || content[i] == b'\t') {
                 i += 1;
@@ -537,13 +165,32 @@ pub fn find_classes(content: &[u8]) -> Vec<String> {
             if let Some(pos) = memchr(b'\n', &content[i..]) {
                 i += pos + 1;
             } else {
-                break;
+                break; // rest of file is inside heredoc
             }
             continue;
         }
 
         // ── Main code parsing ───────────────────────────────────────
         let b = content[i];
+
+        // Braces for depth tracking
+        if SYMBOLS {
+            if b == b'{' {
+                brace_depth += 1;
+                i += 1;
+                continue;
+            }
+            if b == b'}' {
+                brace_depth = brace_depth.saturating_sub(1);
+                // Exiting a braced namespace block resets the namespace.
+                if in_braced_namespace && brace_depth == namespace_brace_depth {
+                    in_braced_namespace = false;
+                    namespace.clear();
+                }
+                i += 1;
+                continue;
+            }
+        }
 
         // Comments: // and /* */
         if b == b'/' && i + 1 < len {
@@ -631,8 +278,8 @@ pub fn find_classes(content: &[u8]) -> Vec<String> {
                     i += 1;
                 }
 
-                // Check for braced namespace (e.g. `namespace Foo { ... }`)
-                // vs. semicolon form. Either way, read the name.
+                // Braced (`namespace Foo { ... }`) or semicolon form;
+                // either way, read the name.
                 let ns_start = i;
                 while i < len {
                     let c = content[i];
@@ -654,62 +301,136 @@ pub fn find_classes(content: &[u8]) -> Vec<String> {
                 if !namespace.is_empty() && !namespace.ends_with('\\') {
                     namespace.push('\\');
                 }
-                continue;
-            }
 
-            if b == b'c'
-                && i + 5 <= len
-                && &content[i..i + 5] == b"class"
-                && (i + 5 >= len || content[i + 5].is_ascii_whitespace())
-            {
-                i += 5;
-                if let Some(name) = read_name(content, &mut i) {
-                    classes.push(format!("{namespace}{name}"));
+                // A braced namespace ends at its closing brace.
+                if SYMBOLS && i < len && content[i] == b'{' {
+                    in_braced_namespace = true;
+                    namespace_brace_depth = brace_depth;
+                    brace_depth += 1;
+                    i += 1;
                 }
                 continue;
             }
 
-            if b == b'i'
-                && i + 9 <= len
-                && &content[i..i + 9] == b"interface"
-                && (i + 9 >= len || content[i + 9].is_ascii_whitespace())
-            {
-                i += 9;
+            if let Some(keyword_len) = class_keyword_at(content, i) {
+                i += keyword_len;
                 if let Some(name) = read_name(content, &mut i) {
-                    classes.push(format!("{namespace}{name}"));
+                    result.classes.push(format!("{namespace}{name}"));
                 }
                 continue;
             }
 
-            if b == b't'
-                && i + 5 <= len
-                && &content[i..i + 5] == b"trait"
-                && (i + 5 >= len || content[i + 5].is_ascii_whitespace())
-            {
-                i += 5;
-                if let Some(name) = read_name(content, &mut i) {
-                    classes.push(format!("{namespace}{name}"));
-                }
-                continue;
-            }
+            if SYMBOLS {
+                // Only top-level declarations: depth 0 outside a braced
+                // namespace, or directly inside the braced namespace.
+                let is_top_level = || {
+                    if in_braced_namespace {
+                        brace_depth == namespace_brace_depth + 1
+                    } else {
+                        brace_depth == 0
+                    }
+                };
 
-            if b == b'e'
-                && i + 4 <= len
-                && &content[i..i + 4] == b"enum"
-                && (i + 4 >= len || content[i + 4].is_ascii_whitespace())
-            {
-                i += 4;
-                if let Some(name) = read_name(content, &mut i) {
-                    classes.push(format!("{namespace}{name}"));
+                // function (standalone — not inside a class/trait/enum body)
+                if b == b'f'
+                    && i + 8 <= len
+                    && &content[i..i + 8] == b"function"
+                    && (i + 8 >= len
+                        || content[i + 8].is_ascii_whitespace()
+                        || content[i + 8] == b'(')
+                {
+                    i += 8;
+                    // Skip `use function …;` import statements — these
+                    // are not function declarations.
+                    if is_preceded_by_use(content, i - 8) {
+                        skip_use_statement(content, &mut i);
+                    } else if is_top_level() {
+                        // Skip `function (` — that's a closure, not a named function.
+                        let mut j = i;
+                        while j < len && content[j].is_ascii_whitespace() {
+                            j += 1;
+                        }
+                        if j < len && content[j] == b'(' {
+                            // Anonymous function / closure — skip.
+                            i = j;
+                        } else if let Some(name) = read_name(content, &mut i) {
+                            result.functions.push(format!("{namespace}{name}"));
+                        }
+                    }
+                    continue;
                 }
-                continue;
+
+                // define('NAME', ...)
+                if b == b'd'
+                    && i + 6 <= len
+                    && &content[i..i + 6] == b"define"
+                    && (i + 6 < len && content[i + 6] == b'(')
+                {
+                    i += 7; // skip `define(`
+                    while i < len && content[i].is_ascii_whitespace() {
+                        i += 1;
+                    }
+                    // Read the constant name from the string argument.
+                    if let Some(name) = read_define_name(content, &mut i) {
+                        result.constants.push(name.to_string());
+                    }
+                    continue;
+                }
+
+                // const NAME = ... (top-level only)
+                if b == b'c'
+                    && i + 5 <= len
+                    && &content[i..i + 5] == b"const"
+                    && (i + 5 >= len || content[i + 5].is_ascii_whitespace())
+                {
+                    i += 5;
+                    // Skip `use const …;` import statements.
+                    if is_preceded_by_use(content, i - 5) {
+                        skip_use_statement(content, &mut i);
+                    } else if is_top_level()
+                        && let Some(name) = read_name(content, &mut i)
+                    {
+                        // Top-level const names are FQN with namespace.
+                        result.constants.push(format!("{namespace}{name}"));
+                    }
+                    continue;
+                }
             }
         }
 
         i += 1;
     }
+}
 
-    classes
+/// The length of the `class`, `interface`, `trait` or `enum` keyword
+/// starting at `i` and followed by whitespace, if there is one.
+#[inline(always)]
+fn class_keyword_at(content: &[u8], i: usize) -> Option<usize> {
+    let keyword: &[u8] = match content[i] {
+        b'c' => b"class",
+        b'i' => b"interface",
+        b't' => b"trait",
+        b'e' => b"enum",
+        _ => return None,
+    };
+    let end = i + keyword.len();
+    (end <= content.len()
+        && &content[i..end] == keyword
+        && (end >= content.len() || content[end].is_ascii_whitespace()))
+    .then_some(keyword.len())
+}
+
+/// Advance `i` past the rest of a `use function` / `use const` import so
+/// the names it lists are not mistaken for declarations.
+#[inline]
+fn skip_use_statement(content: &[u8], i: &mut usize) {
+    let len = content.len();
+    while *i < len && content[*i] != b';' && content[*i] != b'\n' {
+        *i += 1;
+    }
+    if *i < len && content[*i] == b';' {
+        *i += 1;
+    }
 }
 
 /// SIMD-accelerated pre-screening: check whether the content contains

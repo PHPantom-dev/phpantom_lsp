@@ -187,21 +187,24 @@ pub(super) fn apply_literal_identity_narrowing(
     let equal = equal == truthy;
     seed_synthetic_key_if_needed(&var_name, scope, ctx);
     let types = scope.get(&var_name).to_vec();
-    if types.is_empty() {
-        return;
-    }
 
     if equal {
-        let admits = types.iter().any(|rt| {
-            rt.type_string
-                .union_members()
-                .iter()
-                .any(|member| literal.is_subtype_of(member))
-        });
+        // An unknown subject (an offset on a receiver whose class does not
+        // exist) admits every value, so the identity alone decides it.
+        let admits = types.is_empty()
+            || types.iter().any(|rt| {
+                rt.type_string
+                    .union_members()
+                    .iter()
+                    .any(|member| literal.is_subtype_of(member))
+            });
         if admits {
             scope.set(&var_name, vec![ResolvedType::from_type_string(literal)]);
             write_offset_key_into_shapes(&var_name, scope);
         }
+        return;
+    }
+    if types.is_empty() {
         return;
     }
 

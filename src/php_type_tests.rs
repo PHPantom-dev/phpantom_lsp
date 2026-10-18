@@ -5430,6 +5430,23 @@ fn benevolence_survives_a_rewrite() {
 }
 
 #[test]
+fn benevolence_survives_a_trip_through_text() {
+    // The displayed form hides the marker, so text the type engine reads
+    // back has to spell it.
+    let ty = PhpType::parse("__benevolent<string|false>");
+    assert_eq!(ty.to_reparseable_string(), "__benevolent<string|false>");
+    assert!(PhpType::parse(&ty.to_reparseable_string()).is_benevolent());
+
+    let nested = PhpType::parse("array<int, __benevolent<string|false>>|null");
+    let spelled = nested.to_reparseable_string();
+    assert_eq!(spelled, "array<int, __benevolent<string|false>>|null");
+    assert_eq!(PhpType::parse(&spelled).to_reparseable_string(), spelled);
+
+    let plain = PhpType::parse("array<string, int|false>|null");
+    assert_eq!(plain.to_reparseable_string(), plain.to_string());
+}
+
+#[test]
 fn a_union_inside_an_intersection_keeps_its_parentheses() {
     let ty = PhpType::parse("(FunctionNode|MethodNode)&MockObject");
     assert_eq!(ty.to_string(), "(FunctionNode|MethodNode)&MockObject");

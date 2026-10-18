@@ -202,8 +202,21 @@ impl PhpType {
                 atom(&resolver(name))
             }
         };
+        // A `Foo::BAR` operand (`key-of<Foo::BAR>`) names its class the way
+        // the docblock was written, so only the class half is resolved.
+        let resolve_constant = |s: &str| -> Option<String> {
+            let (class, constant) = class_constant_key(s)?;
+            Some(format!("{}::{constant}", resolve(&atom(class))))
+        };
         match self.raw_kind() {
-            TypeKind::Named(s) => PhpType::named(resolve(s)),
+            TypeKind::Named(s) => match resolve_constant(s) {
+                Some(reference) => PhpType::named(atom(&reference)),
+                None => PhpType::named(resolve(s)),
+            },
+            TypeKind::Raw(s) => match resolve_constant(s) {
+                Some(reference) => PhpType::raw(reference),
+                None => self.clone(),
+            },
             TypeKind::Generic(g) => PhpType::generic_atom(
                 resolve(&g.name),
                 g.args.iter().map(|a| a.resolve_names(resolver)).collect(),

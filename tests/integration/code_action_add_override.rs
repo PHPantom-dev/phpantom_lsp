@@ -1026,3 +1026,32 @@ namespace B {
         result
     );
 }
+
+// ── CRLF line endings ───────────────────────────────────────────────────────
+
+#[test]
+fn adds_override_in_a_crlf_file() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "<?php\r\nclass Child extends Base {\r\n    public function bar(): void {}\r\n\r\n    public function foo(): void {}\r\n}\r\n";
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        4,
+        "Method Child::foo() overrides method Base::foo() but is missing the #[\\Override] attribute.",
+        "method.missingOverride",
+    );
+
+    let actions = get_code_actions_at(&backend, uri, content, 4, 10);
+    let action = find_action_containing(&actions, "#[Override]")
+        .expect("should offer Add #[Override] action");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edits(content, &extract_edits(&resolved));
+
+    assert_eq!(
+        result,
+        "<?php\r\nclass Child extends Base {\r\n    public function bar(): void {}\r\n\r\n    #[Override]\r\n    public function foo(): void {}\r\n}\r\n"
+    );
+}

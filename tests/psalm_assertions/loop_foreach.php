@@ -348,8 +348,8 @@ namespace PsalmTest_loop_foreach_20 {
 
 // Test: nullableGenerator
 namespace PsalmTest_loop_foreach_21 {
-    /** @return Generator<int,int|null> */
-    function gen() : Generator {
+    /** @return \Generator<int,int|null> */
+    function gen() : \Generator {
         yield null;
         yield 1;
     }
@@ -364,8 +364,8 @@ namespace PsalmTest_loop_foreach_21 {
 
 // Test: nonNullableGenerator
 namespace PsalmTest_loop_foreach_22 {
-    /** @return Generator<int,int> */
-        function gen() : Generator {
+    /** @return \Generator<int,int> */
+        function gen() : \Generator {
             yield 1;
         }
         $gen = gen();

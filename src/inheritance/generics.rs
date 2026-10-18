@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use crate::atom::Atom;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo, PropertyInfo};
-use crate::util::short_name;
 
 /// Apply generic type substitution to a method's return type, type
 /// assertions and parameter type hints.
@@ -330,49 +329,58 @@ pub(crate) fn build_substitution_map(
     parent: &ClassInfo,
     active_subs: &HashMap<String, PhpType>,
 ) -> HashMap<String, PhpType> {
-    if parent.template_params.is_empty() {
-        return active_subs.clone();
-    }
-
-    let parent_short = short_name(&parent.name);
-
     // Search `current.extends_generics` for an entry matching this parent.
-    // Also check `implements_generics` for interface inheritance.
-    let type_args = current
-        .extends_generics
-        .iter()
-        .chain(current.implements_generics.iter())
-        .find(|(name, _)| {
-            let name_short = short_name(name);
-            name_short == parent_short
-        })
-        .map(|(_, args)| args);
+    // Also check `implements_generics` for interface inheritance.  With
+    // no entry, carry forward any active substitutions — they may still
+    // apply if the parent's methods reference template params from a
+    // grandchild.
+    bind_template_args(
+        parent,
+        current
+            .extends_generics
+            .iter()
+            .chain(current.implements_generics.iter()),
+        active_subs,
+    )
+    .unwrap_or_else(|| active_subs.clone())
+}
 
-    let type_args = match type_args {
-        Some(args) => args,
-        None => {
-            // No @extends/@implements generics for this parent.
-            // Carry forward any active substitutions — they may still
-            // apply if the parent's methods reference template params
-            // from a grandchild.
-            return active_subs.clone();
-        }
-    };
+/// Bind `parent`'s `@template` parameters to the type arguments of the
+/// `generics` entry (`@extends`/`@implements`/`@use`) that names it.
+///
+/// Each argument is first resolved through `active_subs`, so a chained
+/// `@extends A<T>` binds what `T` stands for at the level below.  A short
+/// argument list is right-aligned onto the trailing parameters, matching
+/// `build_generic_subs` and PHPStan/Psalm convention, so
+/// `@extends Collection<User>` binds `User` to the value parameter.
+///
+/// `None` when `parent` declares no template parameters or no entry
+/// names it; callers pick their own fallback.
+pub(crate) fn bind_template_args<'g>(
+    parent: &ClassInfo,
+    generics: impl IntoIterator<Item = &'g (Atom, Vec<PhpType>)>,
+    active_subs: &HashMap<String, PhpType>,
+) -> Option<HashMap<String, PhpType>> {
+    if parent.template_params.is_empty() {
+        return None;
+    }
+    let parent_fqn = parent.fqn();
+    let type_args = generics
+        .into_iter()
+        .find(|(name, _)| {
+            name.strip_prefix('\\')
+                .unwrap_or(name)
+                .eq_ignore_ascii_case(&parent_fqn)
+        })
+        .map(|(_, args)| args)?;
 
     let mut map = HashMap::new();
-
-    // Right-align a short argument list to the trailing template params,
-    // matching `build_generic_subs` and PHPStan/Psalm convention so that
-    // `@extends Collection<User>` binds `User` to the value parameter.
     let offset = generic_arg_offset(parent, type_args.len());
 
     let mut omitted: Vec<&Atom> = Vec::new();
     for (i, param_name) in parent.template_params.iter().enumerate() {
         match i.checked_sub(offset).and_then(|index| type_args.get(index)) {
             Some(arg) => {
-                // Apply any active substitutions to the type argument.
-                // This handles chaining: if arg is "T" and active_subs has
-                // {T => Foo}, the result is {param_name => Foo}.
                 let resolved = if active_subs.is_empty() {
                     arg.clone()
                 } else {
@@ -403,7 +411,7 @@ pub(crate) fn build_substitution_map(
         map.insert(param_name.to_string(), fallback);
     }
 
-    map
+    Some(map)
 }
 
 /// Apply a substitution map to a type string.
@@ -534,11 +542,15 @@ pub(crate) fn default_type_args(class: &ClassInfo) -> Vec<PhpType> {
 /// (`parent::get()`) sees `@extends Foo<Dog>`'s `Dog` where the parent
 /// says `T`.  `None` when the child does not extend `parent` generically.
 pub(crate) fn extends_type_args(child: &ClassInfo, parent: &ClassInfo) -> Option<Vec<PhpType>> {
-    let parent_short = crate::util::short_name(&parent.name);
+    let parent_fqn = parent.fqn();
     child
         .extends_generics
         .iter()
-        .find(|(name, _)| crate::util::short_name(name) == parent_short)
+        .find(|(name, _)| {
+            name.strip_prefix('\\')
+                .unwrap_or(name)
+                .eq_ignore_ascii_case(&parent_fqn)
+        })
         .map(|(_, args)| args.clone())
 }
 

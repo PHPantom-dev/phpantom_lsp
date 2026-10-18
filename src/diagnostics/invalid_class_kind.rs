@@ -69,7 +69,7 @@ impl Backend {
 
         let use_line_ranges = compute_use_line_ranges(content);
 
-        let class_loaders = self.class_loaders(&ctx.file);
+        let class_loaders = self.resolved_class_loaders(&ctx.file);
 
         for span in &symbol_map.spans {
             if !super::incremental::reports_site(span.start) {

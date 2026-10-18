@@ -20,11 +20,11 @@
 
 use tower_lsp::lsp_types::*;
 
-use super::{InsertionPoint, find_method_insertion_point};
+use super::attributes::attributed_member_at;
 use crate::Backend;
-use crate::code_actions::phpstan::contains_php_attribute;
+use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::text_position::{offset_to_position, ranges_overlap};
+use crate::text_position::{line_ending, offset_to_position};
 
 /// The PHPStan identifier we match on.
 const TENTATIVE_RETURN_TYPE_ID: &str = "method.tentativeReturnType";
@@ -32,6 +32,9 @@ const TENTATIVE_RETURN_TYPE_ID: &str = "method.tentativeReturnType";
 /// The attribute to insert (always FQN — `ReturnTypeWillChange` lives
 /// in the global namespace and has no short-form import convention).
 const ATTRIBUTE_TEXT: &str = "#[\\ReturnTypeWillChange]";
+
+/// The attribute's name, however it is spelled on the method.
+const ATTRIBUTE_NAME: &str = "ReturnTypeWillChange";
 
 impl Backend {
     /// Collect "Add `#[\\ReturnTypeWillChange]`" code actions for
@@ -48,19 +51,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if identifier != TENTATIVE_RETURN_TYPE_ID {
@@ -68,14 +63,13 @@ impl Backend {
             }
 
             let diag_line = diag.range.start.line as usize;
-
-            let Some(insertion) = find_method_insertion_point(content, diag_line) else {
+            let Some(method) = attributed_member_at(content, diag_line) else {
                 continue;
             };
 
             // If the attribute is already present (user added it
             // manually since PHPStan last ran), skip.
-            if already_has_return_type_will_change(content, &insertion) {
+            if method.has_attribute(ATTRIBUTE_NAME) {
                 continue;
             }
 
@@ -118,18 +112,23 @@ impl Backend {
         let uri = &data.uri;
         let diag_line = data.extra.get("diagnostic_line")?.as_u64()? as usize;
 
-        let insertion = find_method_insertion_point(content, diag_line)?;
+        let method = attributed_member_at(content, diag_line)?;
 
         // If the attribute was added since the action was offered, bail.
-        if already_has_return_type_will_change(content, &insertion) {
+        if method.has_attribute(ATTRIBUTE_NAME) {
             return None;
         }
 
-        // Build the text edit: insert `#[\ReturnTypeWillChange]\n<indent>`
-        // at the insertion point (before any existing attributes or
-        // modifiers).
-        let insert_text = format!("{}{}\n", insertion.indent, ATTRIBUTE_TEXT);
-        let insert_pos = offset_to_position(content, insertion.insert_offset);
+        // Build the text edit: insert `<indent>#[\ReturnTypeWillChange]` on
+        // a line of its own at the insertion point (before any existing
+        // attributes or modifiers).
+        let insert_text = format!(
+            "{}{}{}",
+            method.indent,
+            ATTRIBUTE_TEXT,
+            line_ending(content)
+        );
+        let insert_pos = offset_to_position(content, method.line_start);
 
         let edits = vec![TextEdit {
             range: Range {
@@ -170,61 +169,12 @@ fn extract_method_name(message: &str) -> Option<&str> {
     Some(name)
 }
 
-/// Check if the method already has a `#[ReturnTypeWillChange]` or
-/// `#[\ReturnTypeWillChange]` attribute.
-fn already_has_return_type_will_change(content: &str, insertion: &InsertionPoint) -> bool {
-    // Check existing attribute lines above the method.
-    if insertion.attrs_end_offset > insertion.first_token_offset {
-        let attr_region = &content[insertion.first_token_offset..insertion.attrs_end_offset];
-        for line in attr_region.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("#[") && contains_php_attribute(trimmed, b"ReturnTypeWillChange")
-            {
-                return true;
-            }
-        }
-    }
-
-    // Also check a few lines above the insertion point in case the
-    // attribute is on its own line before other attributes.
-    let lines: Vec<&str> = content.lines().collect();
-    let insert_line = content[..insertion.insert_offset]
-        .chars()
-        .filter(|&c| c == '\n')
-        .count();
-
-    let search_start = insert_line.saturating_sub(3);
-    for i in search_start..=insert_line {
-        if i < lines.len() {
-            let trimmed = lines[i].trim();
-            if trimmed.starts_with("#[") && contains_php_attribute(trimmed, b"ReturnTypeWillChange")
-            {
-                return true;
-            }
-        }
-    }
-
-    false
-}
-
 /// Check whether a `method.tentativeReturnType` diagnostic is stale
 /// by verifying that the `#[\ReturnTypeWillChange]` attribute is now
-/// present near the diagnostic line.
+/// written on the method.
 pub(crate) fn is_add_return_type_will_change_stale(content: &str, diag_line: usize) -> bool {
-    let lines: Vec<&str> = content.lines().collect();
-    if diag_line >= lines.len() {
-        return false;
-    }
-
-    // Search backward from the diagnostic line for the attribute.
-    let search_start = diag_line.saturating_sub(10);
-    for i in (search_start..=diag_line).rev() {
-        let trimmed = lines[i].trim();
-        if trimmed.starts_with("#[") && contains_php_attribute(trimmed, b"ReturnTypeWillChange") {
-            return true;
-        }
-    }
-    false
+    attributed_member_at(content, diag_line)
+        .is_some_and(|method| method.has_attribute(ATTRIBUTE_NAME))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -251,143 +201,5 @@ mod tests {
     fn returns_none_for_unrelated_message() {
         let msg = "Some other PHPStan error about something.";
         assert_eq!(extract_method_name(msg), None);
-    }
-
-    // ── contains_php_attribute ──────────────────────────────────────
-
-    #[test]
-    fn finds_rtwc_simple() {
-        assert!(contains_php_attribute(
-            "#[ReturnTypeWillChange]",
-            b"ReturnTypeWillChange"
-        ));
-    }
-
-    #[test]
-    fn finds_rtwc_with_backslash() {
-        assert!(contains_php_attribute(
-            "#[\\ReturnTypeWillChange]",
-            b"ReturnTypeWillChange"
-        ));
-    }
-
-    #[test]
-    fn finds_rtwc_in_list() {
-        assert!(contains_php_attribute(
-            "#[ReturnTypeWillChange, Deprecated]",
-            b"ReturnTypeWillChange"
-        ));
-        assert!(contains_php_attribute(
-            "#[Deprecated, ReturnTypeWillChange]",
-            b"ReturnTypeWillChange"
-        ));
-        assert!(contains_php_attribute(
-            "#[Deprecated, \\ReturnTypeWillChange]",
-            b"ReturnTypeWillChange"
-        ));
-    }
-
-    #[test]
-    fn does_not_match_partial() {
-        assert!(!contains_php_attribute(
-            "#[ReturnTypeWillChangeSomething]",
-            b"ReturnTypeWillChange"
-        ));
-        assert!(!contains_php_attribute(
-            "#[MyReturnTypeWillChange]",
-            b"ReturnTypeWillChange"
-        ));
-    }
-
-    // ── find_method_insertion_point ──────────────────────────────────
-
-    #[test]
-    fn finds_insertion_for_simple_method() {
-        let content = "<?php\nclass Foo {\n    public function bar(): void {}\n}\n";
-        let line = 2;
-        let ins = find_method_insertion_point(content, line).unwrap();
-        assert_eq!(ins.indent, "    ");
-        let expected_offset = content.find("    public function").unwrap();
-        assert_eq!(ins.insert_offset, expected_offset);
-    }
-
-    #[test]
-    fn finds_insertion_for_method_with_existing_attributes() {
-        let content =
-            "<?php\nclass Foo {\n    #[Route('/bar')]\n    public function bar(): void {}\n}\n";
-        let line = 3;
-        let ins = find_method_insertion_point(content, line).unwrap();
-        assert_eq!(ins.indent, "    ");
-        let expected_offset = content.find("    #[Route").unwrap();
-        assert_eq!(ins.insert_offset, expected_offset);
-    }
-
-    #[test]
-    fn finds_insertion_with_multiple_attributes() {
-        let content = "<?php\nclass Foo {\n    #[Route('/bar')]\n    #[Deprecated]\n    public function bar(): void {}\n}\n";
-        let line = 4;
-        let ins = find_method_insertion_point(content, line).unwrap();
-        let expected_offset = content.find("    #[Route").unwrap();
-        assert_eq!(ins.insert_offset, expected_offset);
-    }
-
-    // ── already_has_return_type_will_change ──────────────────────────
-
-    #[test]
-    fn detects_existing_rtwc() {
-        let content = "<?php\nclass Foo {\n    #[\\ReturnTypeWillChange]\n    public function count(): int {}\n}\n";
-        let line = 3;
-        let ins = find_method_insertion_point(content, line).unwrap();
-        assert!(already_has_return_type_will_change(content, &ins));
-    }
-
-    #[test]
-    fn no_rtwc_when_absent() {
-        let content = "<?php\nclass Foo {\n    public function count(): int {}\n}\n";
-        let line = 2;
-        let ins = find_method_insertion_point(content, line).unwrap();
-        assert!(!already_has_return_type_will_change(content, &ins));
-    }
-
-    #[test]
-    fn detects_rtwc_without_backslash() {
-        let content = "<?php\nclass Foo {\n    #[ReturnTypeWillChange]\n    public function count(): int {}\n}\n";
-        let line = 3;
-        let ins = find_method_insertion_point(content, line).unwrap();
-        assert!(already_has_return_type_will_change(content, &ins));
-    }
-
-    // ── is_add_return_type_will_change_stale ─────────────────────────
-
-    #[test]
-    fn stale_when_rtwc_present() {
-        let content = "<?php\nclass Foo {\n    #[\\ReturnTypeWillChange]\n    public function count(): int {}\n}\n";
-        assert!(is_add_return_type_will_change_stale(content, 3));
-    }
-
-    #[test]
-    fn not_stale_when_rtwc_absent() {
-        let content = "<?php\nclass Foo {\n    public function count(): int {}\n}\n";
-        assert!(!is_add_return_type_will_change_stale(content, 2));
-    }
-
-    // ── Integration: build edit text ────────────────────────────────
-
-    #[test]
-    fn builds_correct_rtwc_text() {
-        let content = "<?php\nclass Foo {\n    public function count(): int {}\n}\n";
-        let line = 2;
-        let ins = find_method_insertion_point(content, line).unwrap();
-        let insert_text = format!("{}{}\n", ins.indent, ATTRIBUTE_TEXT);
-        assert_eq!(insert_text, "    #[\\ReturnTypeWillChange]\n");
-    }
-
-    #[test]
-    fn builds_correct_rtwc_text_nested() {
-        let content = "<?php\nclass Foo {\n        protected function count(): int {}\n}\n";
-        let line = 2;
-        let ins = find_method_insertion_point(content, line).unwrap();
-        let insert_text = format!("{}{}\n", ins.indent, ATTRIBUTE_TEXT);
-        assert_eq!(insert_text, "        #[\\ReturnTypeWillChange]\n");
     }
 }

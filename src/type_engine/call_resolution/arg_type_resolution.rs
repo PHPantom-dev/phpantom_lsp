@@ -1,19 +1,17 @@
-/// Argument-text-to-type resolution: converts call-site argument texts
-/// (literals, array shapes, variables, chained expressions) to `PhpType`
-/// for template substitution and generic argument binding.
+//! Argument-text-to-type resolution: converts call-site argument texts
+//! (literals, array shapes, variables, chained expressions) to `PhpType`
+//! for template substitution and generic argument binding.
+
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use crate::Backend;
-use crate::class_lookup::resolve_class_keyword;
-use crate::docblock;
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::PhpType;
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 
-use crate::type_engine::conditional_resolution::split_text_args;
-use crate::type_engine::resolver::{Loaders, ResolutionCtx};
+use crate::text_scan::split_top_level_commas;
+use crate::type_engine::resolver::ResolutionCtx;
 use crate::type_engine::subject_expr::split_call_subject_raw;
 use crate::type_engine::variable::array_func_rules::ArrayFuncArgs;
 
@@ -66,7 +64,7 @@ pub(super) struct TextArrayFuncArgs<'a, 'ctx> {
 impl<'a, 'ctx> TextArrayFuncArgs<'a, 'ctx> {
     pub(super) fn new(text_args: &'a str, ctx: &'a ResolutionCtx<'ctx>) -> Self {
         Self {
-            args: split_text_args(text_args),
+            args: split_top_level_commas(text_args),
             ctx,
         }
     }
@@ -118,7 +116,7 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
             // carries the file's own spelling of the class (`Support\Pen`
             // behind a `use App\Support;`).  It is compared against types
             // that arrived fully qualified, so canonicalise it here.
-            .map(|ty| crate::util::resolve_php_type_names(&ty, self.ctx.class_loader))
+            .map(|ty| self.ctx.written_names().resolve_hint(&ty))
             .or_else(|| {
                 // See the AST counterpart: a callable string names a
                 // function whose declared return the call hands back.
@@ -161,6 +159,7 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
             param_index,
             subject,
             Some(&self.ctx.class_loader),
+            &self.ctx.written_names(),
         )
     }
 
@@ -180,12 +179,12 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
 impl Backend {
     /// Extract the first argument from a comma-separated argument text.
     ///
-    /// [`split_text_args`] does the splitting: it respects nested
+    /// [`split_top_level_commas`](crate::text_scan::split_top_level_commas) does the splitting: it respects nested
     /// brackets and, unlike the hand-rolled scan this replaced, string
     /// literals too, so a comma inside `'a, b'` no longer ends the first
     /// argument.
     pub(super) fn extract_first_arg_text(args_text: &str) -> Option<String> {
-        let first = split_text_args(args_text).into_iter().next()?.trim();
+        let first = split_top_level_commas(args_text).into_iter().next()?.trim();
         (!first.is_empty()).then(|| crate::call_args::text_arg_value(first).to_string())
     }
 
@@ -215,8 +214,6 @@ impl Backend {
             key: arg_text.to_string(),
         };
 
-        let current_class = ctx.current_class;
-        let all_classes = ctx.all_classes;
         let class_loader = ctx.class_loader;
 
         // ── Plain variable: `$customers` ────────────────────────────────
@@ -226,9 +223,7 @@ impl Backend {
                 .all(|c| c.is_alphanumeric() || c == '_')
         {
             // The walker's scope comes first: it knows which guard the
-            // call sits behind, while the backward `@var` scan below
-            // describes the variable at the annotation, before any
-            // narrowing the guard proved.
+            // call sits behind.
             let from_scope = crate::type_engine::variable::resolution::walker_scope_types(
                 arg_text,
                 ctx.cursor_offset,
@@ -241,57 +236,9 @@ impl Backend {
                 }
             }
 
-            // Try docblock annotation (@var / @param).
-            if let Some(raw) = docblock::find_iterable_raw_type_in_source(
-                ctx.content,
-                ctx.cursor_offset as usize,
-                arg_text,
-            )
-            .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
-            {
-                // A bare identifier that isn't a known keyword type and
-                // doesn't resolve to a loadable class is most likely an
-                // unbound method-level `@template` parameter (e.g.
-                // `@template T of Token[]` used as `@param T $tokens`).
-                // The raw scan above is a text-only lookup that doesn't
-                // apply template-bound substitution, so trusting it here
-                // would leave the caller with an unresolvable `T` instead
-                // of the array-of-`Token` type the forward walker would
-                // produce.  Fall through to the unified pipeline below,
-                // which resolves the variable through the forward walker
-                // and substitutes template params with their bounds.
-                let looks_like_unbound_template = match &raw.kind() {
-                    TypeKind::Named(name) => {
-                        !crate::php_type::is_keyword_type(name)
-                            && (ctx.class_loader)(name).is_none()
-                    }
-                    _ => false,
-                };
-                if !looks_like_unbound_template {
-                    return Some(raw);
-                }
-            }
             // Fall back to the unified variable resolution pipeline.
-            let default_class;
-            let effective_class = match current_class {
-                Some(cc) => cc,
-                None => {
-                    default_class = crate::class_lookup::class_context_placeholder(
-                        ctx.content,
-                        ctx.cursor_offset,
-                    );
-                    &default_class
-                }
-            };
             let resolved = crate::type_engine::variable::resolution::resolve_variable_types(
-                arg_text,
-                effective_class,
-                all_classes,
-                ctx.content,
-                ctx.cursor_offset,
-                class_loader,
-                ctx.backend,
-                Loaders::with_function(ctx.function_loader),
+                ctx.var_query(arg_text),
             );
             if !resolved.is_empty() {
                 return Some(ResolvedType::types_joined(&resolved));
@@ -312,13 +259,7 @@ impl Backend {
                 // function-level `@template` substitution all report
                 // through the hint.
                 callee @ SubjectExpr::FunctionCall(_) => {
-                    let mut hint: Option<PhpType> = None;
-                    let _ = Backend::resolve_call_return_types_expr_with_hint(
-                        callee,
-                        call_args,
-                        ctx,
-                        Some(&mut hint),
-                    );
+                    let hint = Backend::resolve_call_return_type_hint(callee, call_args, ctx);
                     if hint.is_some() {
                         return hint;
                     }
@@ -343,19 +284,7 @@ impl Backend {
                     }
                 }
                 SubjectExpr::StaticMethodCall { class, method } => {
-                    let owner = if let Some(resolved) = resolve_class_keyword(class, current_class)
-                    {
-                        class_loader(&resolved).map(Arc::unwrap_or_clone)
-                    } else {
-                        let ns = current_class.and_then(|c| c.file_namespace.as_deref());
-                        let fqn = crate::util::resolve_source_class_name(
-                            class,
-                            ns,
-                            all_classes,
-                            class_loader,
-                        );
-                        class_loader(&fqn).map(Arc::unwrap_or_clone)
-                    };
+                    let owner = class_loader(&ctx.written_names().resolve_class(class));
                     if let Some(ref cls) = owner
                         && let Some(rt) = crate::inheritance::resolve_method_return_type(
                             cls,

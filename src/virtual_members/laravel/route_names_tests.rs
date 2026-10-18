@@ -5,8 +5,8 @@ fn test_uri() -> Url {
     Url::parse("file:///app/routes/web.php").unwrap()
 }
 
-/// Resolve `target` against a single route file, as `resolve_route_definitions`
-/// does per file (without the workspace walk).
+/// Resolve `target` against the route table of a single route file, as
+/// `resolve_route_definitions` does against the workspace's.
 fn definitions_of(
     content: &str,
     target: &str,
@@ -15,12 +15,16 @@ fn definitions_of(
     workspace_root: Option<&Path>,
     macros: &MacroScope,
 ) -> Vec<Location> {
-    let mut sink = RouteDefinitions {
-        target,
-        out: Vec::new(),
-    };
-    walk_route_file(content, uri, file_path, workspace_root, macros, &mut sink);
-    sink.out
+    let mut collector = RouteCollector::default();
+    walk_route_file(
+        content,
+        uri,
+        file_path,
+        workspace_root,
+        macros,
+        &mut collector,
+    );
+    collector.into_discovery().definitions(target)
 }
 
 /// Collect the routes of a single route file, as `enumerate_all_routes` does
@@ -35,22 +39,20 @@ fn routes_and_prefixes(content: &str) -> (Vec<RouteEntry>, Vec<String>) {
 }
 
 fn routes_and_open_names(content: &str) -> (Vec<RouteEntry>, Vec<String>, Vec<String>) {
-    let mut out = Vec::new();
-    let mut open_prefixes = Vec::new();
-    let mut open_suffixes = Vec::new();
+    let mut collector = RouteCollector::default();
     walk_route_file(
         content,
         &test_uri(),
         None,
         None,
         &MacroScope::default(),
-        &mut RouteCollector {
-            out: &mut out,
-            open_prefixes: &mut open_prefixes,
-            open_suffixes: &mut open_suffixes,
-        },
+        &mut collector,
     );
-    (out, open_prefixes, open_suffixes)
+    (
+        collector.routes,
+        collector.open_prefixes,
+        collector.open_suffixes,
+    )
 }
 
 /// Collect the routes of a route file that can call the router macros
@@ -80,22 +82,9 @@ fn routes_with_macros(content: &str, macro_source: &str, names: &[&str]) -> Vec<
         ..MacroScope::default()
     };
 
-    let mut out = Vec::new();
-    let mut open_prefixes = Vec::new();
-    let mut open_suffixes = Vec::new();
-    walk_route_file(
-        content,
-        &test_uri(),
-        None,
-        None,
-        &scope,
-        &mut RouteCollector {
-            out: &mut out,
-            open_prefixes: &mut open_prefixes,
-            open_suffixes: &mut open_suffixes,
-        },
-    );
-    out
+    let mut collector = RouteCollector::default();
+    walk_route_file(content, &test_uri(), None, None, &scope, &mut collector);
+    collector.routes
 }
 
 fn uri_of(content: &str, name: &str) -> String {
@@ -920,22 +909,16 @@ fn registrations_inside_a_provider_method_are_collected() {
 /// files it pulls in have to be read relative to.
 fn routes_of_file(path: &Path, workspace_root: &Path) -> Vec<RouteEntry> {
     let content = std::fs::read_to_string(path).unwrap();
-    let mut out = Vec::new();
-    let mut open_prefixes = Vec::new();
-    let mut open_suffixes = Vec::new();
+    let mut collector = RouteCollector::default();
     walk_route_file(
         &content,
         &Url::from_file_path(path).unwrap(),
         Some(path),
         Some(workspace_root),
         &MacroScope::default(),
-        &mut RouteCollector {
-            out: &mut out,
-            open_prefixes: &mut open_prefixes,
-            open_suffixes: &mut open_suffixes,
-        },
+        &mut collector,
     );
-    out
+    collector.routes
 }
 
 /// Write `files` (relative paths) into a fresh workspace and return it.

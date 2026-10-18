@@ -500,7 +500,7 @@ impl Backend {
             Some(class) => format!("\\{}", class.fqn()),
             None => name.to_string(),
         })
-        .to_string()
+        .to_reparseable_string()
     }
 }
 

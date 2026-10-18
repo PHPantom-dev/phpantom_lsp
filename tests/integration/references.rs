@@ -1,5 +1,5 @@
 use crate::common::{
-    create_test_backend, create_test_backend_with_full_stubs, find_references, open_php,
+    block_on, create_test_backend, create_test_backend_with_full_stubs, find_references, open_php,
 };
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
@@ -4640,6 +4640,68 @@ async fn test_constructor_references_finds_attribute_usage() {
         locs
     );
 }
+
+/// Checking whether a descendant declares its own constructor loads it, and
+/// loading `Child` parses the `DateTimeImmutable` stub to confirm that its
+/// docblock type narrows the native hint.  Publishing that parse writes the
+/// reverse-inheritance index the hierarchy walk reads from.  `Child` has a
+/// file of its own because the request loads the classes of the file it is
+/// made in before the walk starts, which would parse the stub too early.
+///
+/// A regression hangs instead of returning a wrong answer, so the request
+/// runs on its own thread and is collected through a `recv_timeout`.
+#[test]
+fn constructor_references_survive_a_parse_during_the_hierarchy_walk() {
+    let base_uri = Url::parse("file:///Base.php").unwrap();
+    let base_text = concat!(
+        "<?php\n",                                // L0
+        "class Base {\n",                         // L1
+        "    public function __construct() {}\n", // L2
+        "}\n",                                    // L3
+    );
+    let child_uri = Url::parse("file:///Child.php").unwrap();
+    let child_text = concat!(
+        "<?php\n",                               // L0
+        "class Child extends Base {\n",          // L1
+        "    /** @var \\DateTimeImmutable */\n", // L2
+        "    public \\DateTimeInterface $at;\n", // L3
+        "}\n",                                   // L4
+        "$child = new Child();\n",               // L5
+    );
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .stack_size(phpantom_lsp::PARSE_WORKER_STACK_SIZE)
+        .spawn({
+            let child_uri = child_uri.clone();
+            move || {
+                let backend = Backend::new_test_with_stubs(std::collections::HashMap::from([
+                    ("DateTimeInterface", "<?php interface DateTimeInterface {}"),
+                    (
+                        "DateTimeImmutable",
+                        "<?php class DateTimeImmutable implements DateTimeInterface {}",
+                    ),
+                ]));
+                let locs = block_on(async {
+                    open_php(&backend, &base_uri, base_text).await;
+                    open_php(&backend, &child_uri, child_text).await;
+                    references_at(&backend, &base_uri, 2, 25, false).await
+                });
+                let _ = tx.send(locs);
+            }
+        })
+        .expect("spawn constructor-references thread");
+
+    let locs = rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("Find References on a constructor should finish while a descendant loads");
+    assert!(
+        locs.iter()
+            .any(|l| l.uri == child_uri && l.range.start.line == 5),
+        "`new Child()` inherits the constructor, got {locs:?}"
+    );
+}
+
 // ─── Property-receiver resolution (psysh corpus shapes) ─────────────────────
 //
 // Each receiver property is named `$ctx` (not `$holder`/`$context`) so the

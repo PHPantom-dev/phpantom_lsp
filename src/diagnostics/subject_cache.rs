@@ -22,32 +22,44 @@
 //! care handle it with an uncached re-resolution fallback rather than by
 //! making the key finer.
 
-use crate::symbol_map::SymbolMap;
+use crate::atom::Atom;
 use crate::types::{AccessKind, ClassInfo};
+
+use super::helpers::FileDiagnosticContext;
 
 /// Scope identifier for the subject resolution cache.
 ///
 /// Two member accesses share the same scope when they are inside the
 /// same class body (identified by class name and byte offset of the
-/// opening brace) **and** the same function/method/closure body
-/// (identified by its start offset).  This prevents two methods in
-/// the same class from sharing a cache entry when a same-named
-/// variable has a different type in each method.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// opening brace), or outside any class in the same `namespace` block,
+/// **and** in the same function/method/closure body (identified by its
+/// start offset).  This prevents two methods in the same class from
+/// sharing a cache entry when a same-named variable has a different
+/// type in each method.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ScopeKey {
     /// Inside a class at the given byte offset, within a specific
     /// function/method/closure scope.  `fn_scope_start` is the byte
     /// offset of the enclosing function body (from
-    /// [`SymbolMap::find_enclosing_scope`]), or `0` for class-level
-    /// code outside any method.
+    /// [`SymbolMap::find_enclosing_scope`](crate::symbol_map::SymbolMap::find_enclosing_scope)),
+    /// or `0` for class-level code outside any method.
     Class {
-        name: String,
+        name: Atom,
         start_offset: u32,
         fn_scope_start: u32,
     },
     /// Top-level code outside any class, within a specific
     /// function scope (`0` when truly top-level).
-    TopLevel { fn_scope_start: u32 },
+    ///
+    /// `namespace_start` is the start of the `namespace` block the code
+    /// is in (see [`FileContext::block_start_at`](crate::types::FileContext::block_start_at)).
+    /// Every block's top-level code is function scope `0`, but each block
+    /// resolves names through its own namespace and imports, so the same
+    /// `make()` or `Foo::` can name something different in each.
+    TopLevel {
+        namespace_start: u32,
+        fn_scope_start: u32,
+    },
 }
 
 /// Cache key combining the subject text, access kind, and scope.
@@ -82,12 +94,13 @@ impl SubjectCacheKey {
     /// Build the cache key for a member access on `subject_text` at
     /// `access_offset`.
     pub(crate) fn build(
-        symbol_map: &SymbolMap,
+        ctx: &FileDiagnosticContext,
         current_class: Option<&ClassInfo>,
         subject_text: &str,
         access_kind: AccessKind,
         access_offset: u32,
     ) -> Self {
+        let symbol_map = &ctx.symbol_map;
         let fn_scope_start = symbol_map.find_enclosing_scope(access_offset);
 
         // For variable subjects (excluding $this), compute the active
@@ -130,26 +143,30 @@ impl SubjectCacheKey {
             (0, 0)
         };
 
+        let scope = match current_class {
+            Some(cc) => ScopeKey::Class {
+                name: cc.name,
+                start_offset: cc.start_offset,
+                fn_scope_start,
+            },
+            None => ScopeKey::TopLevel {
+                namespace_start: ctx.file.block_start_at(access_offset),
+                fn_scope_start,
+            },
+        };
+
         SubjectCacheKey {
             subject_text: subject_text.to_string(),
             access_kind,
-            scope: scope_key_for(current_class, fn_scope_start),
+            scope,
             var_def_offset,
             narrowing_offset,
             assert_offset,
         }
     }
-}
 
-/// Build a [`ScopeKey`] from the innermost enclosing class (if any)
-/// and the enclosing function/method/closure scope start offset.
-fn scope_key_for(current_class: Option<&ClassInfo>, fn_scope_start: u32) -> ScopeKey {
-    match current_class {
-        Some(cc) => ScopeKey::Class {
-            name: cc.name.to_string(),
-            start_offset: cc.start_offset,
-            fn_scope_start,
-        },
-        None => ScopeKey::TopLevel { fn_scope_start },
+    /// The scope the access sits in.
+    pub(crate) fn scope(&self) -> ScopeKey {
+        self.scope
     }
 }

@@ -32,7 +32,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::php_type::PhpType;
-use crate::text_scan::{ScanStep, find_matching_forward_bytes, scan_top_level};
+use crate::text_scan::{find_matching_forward_bytes, split_top_level_commas};
 
 use super::call_site_inference::string_literal_contents;
 
@@ -144,7 +144,7 @@ pub(crate) fn extract_extends(content: &str) -> Vec<String> {
 /// The candidate layout names of an `@extendsFirst` directive.
 fn extends_first_candidates(masked: &str, content: &str) -> Option<Vec<String>> {
     let args = &content[find_directive_args(masked, "extendsFirst")?];
-    array_string_literals(split_top_level_args(args).into_iter().next()?)
+    array_string_literals(split_top_level_commas(args).into_iter().next()?)
 }
 
 /// The contents of the plain string literal an argument list starts with.
@@ -641,28 +641,6 @@ pub(crate) fn matching_paren(bytes: &[u8], open: usize) -> Option<usize> {
     find_matching_forward_bytes(bytes, open, bytes[open], close)
 }
 
-/// Split a directive's argument text at its top-level commas, ignoring the
-/// ones inside nested calls, arrays, string literals, and comments.
-pub(crate) fn split_top_level_args(args: &str) -> Vec<&str> {
-    let bytes = args.as_bytes();
-    let mut parts = Vec::new();
-    let mut start = 0;
-    // Each pass restarts at depth zero just past a top-level comma, which
-    // is outside every string, comment and bracket by construction.
-    while let Some(at) = scan_top_level(&bytes[start..], |bytes, i| {
-        if bytes[i] == b',' {
-            ScanStep::Stop
-        } else {
-            ScanStep::Skip(1)
-        }
-    }) {
-        parts.push(&args[start..start + at]);
-        start += at + 1;
-    }
-    parts.push(&args[start..]);
-    parts
-}
-
 /// The string literals of an array-literal argument, or `None` when the
 /// argument is not one.
 pub(crate) fn array_string_literals(argument: &str) -> Option<Vec<String>> {
@@ -672,7 +650,7 @@ pub(crate) fn array_string_literals(argument: &str) -> Option<Vec<String>> {
         .strip_suffix(']')
         .unwrap_or_default();
     let mut names = Vec::new();
-    for entry in split_top_level_args(inner) {
+    for entry in split_top_level_commas(inner) {
         let trimmed = entry.trim();
         if trimmed.is_empty() {
             continue;
@@ -1001,20 +979,6 @@ mod tests {
                 .map(|(n, _)| n.as_str())
                 .collect::<Vec<_>>(),
             vec!["a", "b", "c"]
-        );
-    }
-
-    /// A comma inside a comment ends nothing, so the argument after it is
-    /// still the one the caller asked for by index.
-    #[test]
-    fn arguments_do_not_split_at_a_comma_inside_a_comment() {
-        assert_eq!(
-            split_top_level_args("'view', // one, two\n['a' => 1]"),
-            vec!["'view'", " // one, two\n['a' => 1]"]
-        );
-        assert_eq!(
-            split_top_level_args("'view' /* one, two */, ['a' => 1]"),
-            vec!["'view' /* one, two */", " ['a' => 1]"]
         );
     }
 

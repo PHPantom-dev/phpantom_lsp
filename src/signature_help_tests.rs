@@ -122,30 +122,29 @@ fn detect_with_nested_parens_containing_comma() {
     assert_eq!(site.active_parameter, 1);
 }
 
-// ── count_top_level_commas ──────────────────────────────────────
+// ── active parameter ────────────────────────────────────────────
 
 #[test]
-fn count_commas_empty() {
-    let chars: Vec<char> = "()".chars().collect();
-    assert_eq!(count_top_level_commas(&chars, 1, 1), 0);
+fn a_comma_inside_a_match_argument_does_not_advance_the_parameter() {
+    let content = "<?php\nfoo(match ($x) { 1 => 'a', 2 => 'b' }, ";
+    let pos = Position {
+        line: 1,
+        character: 39,
+    };
+    let site = detect_call_site_text_fallback(content, pos).unwrap();
+    assert_eq!(site.call_expression, "foo");
+    assert_eq!(site.active_parameter, 1);
 }
 
 #[test]
-fn count_commas_two() {
-    let chars: Vec<char> = "($a, $b, $c)".chars().collect();
-    assert_eq!(count_top_level_commas(&chars, 1, 11), 2);
-}
-
-#[test]
-fn count_commas_nested() {
-    let chars: Vec<char> = "(foo(1, 2), $b)".chars().collect();
-    assert_eq!(count_top_level_commas(&chars, 1, 14), 1);
-}
-
-#[test]
-fn count_commas_in_string() {
-    let chars: Vec<char> = "('a,b', $c)".chars().collect();
-    assert_eq!(count_top_level_commas(&chars, 1, 10), 1);
+fn commas_in_strings_and_nested_calls_do_not_advance_the_parameter() {
+    let content = "<?php\nfoo('a,b', bar(1, 2), ";
+    let pos = Position {
+        line: 1,
+        character: 22,
+    };
+    let site = detect_call_site_text_fallback(content, pos).unwrap();
+    assert_eq!(site.active_parameter, 2);
 }
 
 // ── format_param_label ──────────────────────────────────────────
@@ -163,6 +162,7 @@ fn format_param_with_default_value() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     };
     assert_eq!(format_param_label(&p), "int $limit = 10");
 }
@@ -180,6 +180,7 @@ fn format_param_with_null_default() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     };
     assert_eq!(format_param_label(&p), "?string $name = null");
 }
@@ -198,6 +199,7 @@ fn format_param_optional_no_known_default() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     };
     assert_eq!(format_param_label(&p), "int $x");
 }
@@ -216,6 +218,7 @@ fn format_param_variadic_no_default_even_if_set() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     };
     assert_eq!(format_param_label(&p), "string ...$items");
 }
@@ -233,6 +236,7 @@ fn format_param_simple() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     };
     assert_eq!(format_param_label(&p), "int $x");
 }
@@ -250,6 +254,7 @@ fn format_param_variadic() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     };
     assert_eq!(format_param_label(&p), "string ...$items");
 }
@@ -267,6 +272,7 @@ fn format_param_reference() {
         is_reference: true,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     };
     assert_eq!(format_param_label(&p), "array &$arr");
 }
@@ -284,6 +290,7 @@ fn format_param_no_type() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     };
     assert_eq!(format_param_label(&p), "$x");
 }
@@ -304,6 +311,7 @@ fn build_signature_label() {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$age"),
@@ -316,6 +324,7 @@ fn build_signature_label() {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         },
     ];
     let ret = PhpType::parse("void");
@@ -337,6 +346,7 @@ fn build_signature_parameter_offsets() {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$b"),
@@ -349,6 +359,7 @@ fn build_signature_parameter_offsets() {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         },
     ];
     let sig = build_signature(&params, None);
@@ -387,6 +398,7 @@ fn build_signature_with_default_values() {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$count"),
@@ -399,6 +411,7 @@ fn build_signature_with_default_values() {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         },
     ];
     let ret = PhpType::parse("void");
@@ -427,6 +440,7 @@ fn build_signature_param_documentation_same_types() {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$array"),
@@ -439,6 +453,7 @@ fn build_signature_param_documentation_same_types() {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         },
     ];
     let ret = PhpType::parse("array");
@@ -471,6 +486,7 @@ fn build_signature_param_documentation_effective_differs() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     }];
     let ret = PhpType::parse("void");
     let sig = build_signature(&params, Some(&ret));
@@ -500,6 +516,7 @@ fn build_signature_param_effective_only_no_native() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     }];
     let sig = build_signature(&params, None);
     let pi = sig.parameters.unwrap();
@@ -529,6 +546,7 @@ fn build_signature_param_effective_differs_no_description() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     }];
     let ret = PhpType::parse("object");
     let sig = build_signature(&params, Some(&ret));
@@ -566,6 +584,7 @@ fn build_signature_param_effective_fqn_shortened_in_doc() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     }];
     let ret = PhpType::parse("void");
     let sig = build_signature(&params, Some(&ret));
@@ -593,6 +612,7 @@ fn build_signature_param_effective_fqn_no_desc() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     }];
     let sig = build_signature(&params, None);
     let pi = sig.parameters.unwrap();
@@ -701,6 +721,7 @@ fn clamp_within_range() {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$b"),
@@ -713,6 +734,7 @@ fn clamp_within_range() {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         },
     ];
     assert_eq!(clamp_active_param(0, &params), 0);
@@ -732,6 +754,7 @@ fn clamp_exceeds_range() {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     }];
     assert_eq!(clamp_active_param(5, &params), 0);
 }

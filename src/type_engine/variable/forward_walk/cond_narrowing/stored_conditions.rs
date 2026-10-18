@@ -94,7 +94,7 @@ pub(crate) fn condition_implications<'b>(
             seed_synthetic_key_if_needed(&key, &mut before, ctx);
             let prior = before.get(&key);
             let changed = !prior.is_empty()
-                && narrowing_changed_types(prior, &types)
+                && !same_types(prior, &types)
                 && rules_out_something(prior, &types);
             if !changed {
                 continue;

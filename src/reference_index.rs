@@ -17,7 +17,6 @@ use tower_lsp::lsp_types::Range;
 use crate::Backend;
 use crate::atom::{Atom, AtomMap, AtomSet, atom};
 use crate::backend::file_access::namespace_in_spans;
-use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{LaravelStringKind, SelfStaticParentKind, SymbolKind, SymbolMap};
 use crate::types::NamespaceSpan;
 use crate::util::{build_fqn, short_name, strip_fqn_prefix};
@@ -802,15 +801,14 @@ impl Backend {
                 class_keys(&fqn, name)
             }
             SymbolKind::SelfStaticParent(kind) if *kind != SelfStaticParentKind::This => {
-                let (classes, namespace) = self.classes_and_namespace_at(uri, span.start);
-                let Some(current_class) = find_class_at_offset(&classes, span.start) else {
+                let Some(current_class) = self.class_at_offset(uri, span.start) else {
                     return Vec::new();
                 };
                 let fqn = match kind {
                     SelfStaticParentKind::Parent => {
                         current_class.parent_class.map(normalize_symbol_name)
                     }
-                    _ => Some(build_fqn(&current_class.name, namespace.as_deref())),
+                    _ => Some(current_class.fqn().to_string()),
                 };
                 fqn.map(|name| class_keys(&name, short_name(&name)))
                     .unwrap_or_default()

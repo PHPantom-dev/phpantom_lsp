@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{LaravelStringKind, SymbolKind};
-use crate::text_position::{offset_to_position, ranges_overlap};
+use crate::text_position::{line_ending, offset_to_position, ranges_overlap};
 
 impl Backend {
     /// Offer one insertion per existing locale file for an unknown translation.
@@ -137,11 +137,7 @@ fn insert_into_array(
             };
         }
     }
-    let newline = if content.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
+    let newline = line_ending(content);
     let multiline = content[open..close].contains('\n');
     let close_line = content[..close].rfind('\n').map_or(0, |offset| offset + 1);
     let close_indent = &content[close_line..close];

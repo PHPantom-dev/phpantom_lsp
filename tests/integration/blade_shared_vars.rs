@@ -10,7 +10,7 @@
 mod tests {
     use crate::common::{
         USER_MODEL_STUB, blade_undefined_variables, create_psr4_workspace, markup_hover_at,
-        open_blade_template, open_initialized_blade_template,
+        open_blade_template, open_initialized_blade_template, with_code,
     };
 
     const COMPOSER_JSON: &str = r#"{
@@ -174,6 +174,142 @@ class ProfileComposer
         assert!(
             hover.contains("App\\Support") && hover.contains("Menu"),
             "an inline closure composer types its data too, got: {hover}"
+        );
+    }
+
+    /// A translation or a config value a composer passes reaches the
+    /// template typed by what its key names, the way the same call reads in
+    /// the provider itself.
+    #[tokio::test]
+    async fn a_composed_translation_or_config_value_is_what_its_key_names() {
+        const PROVIDER: &str = r#"<?php
+namespace App\Providers;
+
+use Illuminate\Support\Facades\View;
+
+class ViewServiceProvider
+{
+    public function boot(): void
+    {
+        View::composer('emails.*', function ($view) {
+            $view->with('footer', __('messages.welcome'));
+            $view->with('limit', config('mail.limit'));
+        });
+    }
+}
+"#;
+        const HELPERS: &str = "<?php\n/** @return string|array|null */\nfunction __($key = null, $replace = [], $locale = null) { return null; }\n";
+        const AUTOLOAD_FILES: &str = "<?php\n$vendorDir = dirname(__DIR__);\nreturn array(\n    'helpers' => $vendorDir . '/illuminate/Foundation/helpers.php',\n);\n";
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER_JSON,
+            &[
+                ("bootstrap/providers.php", PROVIDERS_PHP),
+                ("app/Providers/ViewServiceProvider.php", PROVIDER),
+                (
+                    "vendor/illuminate/Foundation/Application.php",
+                    APPLICATION_CLASS,
+                ),
+                ("vendor/illuminate/Foundation/helpers.php", HELPERS),
+                ("vendor/composer/autoload_files.php", AUTOLOAD_FILES),
+                (
+                    "lang/en/messages.php",
+                    "<?php\nreturn ['welcome' => 'Welcome'];\n",
+                ),
+                ("config/mail.php", "<?php\nreturn ['limit' => 25];\n"),
+                (
+                    "resources/views/emails/welcome.blade.php",
+                    "{{ $footer }}\n{{ $limit }}\n",
+                ),
+            ],
+        );
+        let uri =
+            open_initialized_blade_template(&backend, "resources/views/emails/welcome.blade.php")
+                .await;
+
+        let footer = markup_hover_at(&backend, &uri, 0, 5).await;
+        assert!(
+            footer.contains("string") && !footer.contains("array"),
+            "the key names a single line, got: {footer}"
+        );
+        let limit = markup_hover_at(&backend, &uri, 1, 5).await;
+        assert!(
+            limit.contains("int"),
+            "the key names an integer, got: {limit}"
+        );
+    }
+
+    /// A translation whose key is only known at runtime may be a line or a
+    /// group, and the provider itself may pass it on wherever a string is
+    /// expected. The template it reaches accepts it the same way, while a
+    /// value that is never a string is still reported.
+    #[tokio::test]
+    async fn a_composed_translation_with_a_runtime_key_is_accepted_where_a_string_is() {
+        const PROVIDER: &str = r#"<?php
+namespace App\Providers;
+
+use Illuminate\Support\Facades\View;
+
+class ViewServiceProvider
+{
+    private string $footerKey = 'messages.welcome';
+
+    public function boot(): void
+    {
+        View::composer('emails.*', function ($view) {
+            $view->with('footer', __($this->footerKey));
+            $view->with('tags', ['a', 'b']);
+        });
+    }
+}
+"#;
+        const HELPERS: &str = "<?php\n\
+            /** @return ($key is null ? null : array|string) */\n\
+            function __($key = null, $replace = [], $locale = null): string|array|null { return null; }\n\
+            function e(string|int|float|null $value, $doubleEncode = true): string { return ''; }\n";
+        const AUTOLOAD_FILES: &str = "<?php\n$vendorDir = dirname(__DIR__);\nreturn array(\n    'helpers' => $vendorDir . '/illuminate/Foundation/helpers.php',\n);\n";
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER_JSON,
+            &[
+                ("bootstrap/providers.php", PROVIDERS_PHP),
+                ("app/Providers/ViewServiceProvider.php", PROVIDER),
+                (
+                    "vendor/illuminate/Foundation/Application.php",
+                    APPLICATION_CLASS,
+                ),
+                ("vendor/illuminate/Foundation/helpers.php", HELPERS),
+                ("vendor/composer/autoload_files.php", AUTOLOAD_FILES),
+                (
+                    "lang/en/messages.php",
+                    "<?php\nreturn ['welcome' => 'Welcome'];\n",
+                ),
+                (
+                    "resources/views/emails/welcome.blade.php",
+                    "{{ $footer }}\n{{ $tags }}\n",
+                ),
+            ],
+        );
+        let uri =
+            open_initialized_blade_template(&backend, "resources/views/emails/welcome.blade.php")
+                .await;
+
+        let footer = markup_hover_at(&backend, &uri, 0, 5).await;
+        assert!(
+            footer.contains("string") && footer.contains("array"),
+            "a runtime key may name a line or a group, got: {footer}"
+        );
+        let virtual_php = backend
+            .blade_virtual_php(uri.as_str())
+            .expect("blade virtual content");
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+        let reported: Vec<u32> = with_code(diags, "type_mismatch_argument")
+            .iter()
+            .map(|d| d.range.start.line)
+            .collect();
+        assert_eq!(
+            reported,
+            vec![1],
+            "only echoing the array is reported, not the translation"
         );
     }
 

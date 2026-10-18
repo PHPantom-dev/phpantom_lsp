@@ -6,6 +6,7 @@ use crate::parser::with_parsed_program;
 
 use super::helpers::make_diagnostic;
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 impl Backend {
@@ -73,50 +74,40 @@ pub(crate) fn psr4_expectation(
     composer::resolve_namespace_from_path(&mappings, &workspace_root, &file_path)
 }
 
+/// The namespace the file's first `namespace` declaration names, with the
+/// range of its name, or `None` with an empty range at the start of the
+/// file when it declares none (an unnamed `namespace { }` block names none
+/// either, with the range just past its keyword).
 pub(crate) fn namespace_decl_from_content(content: &str) -> Option<(Option<String>, Range)> {
-    for (line_idx, line) in content.lines().enumerate() {
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with("namespace ") {
-            continue;
-        }
-
-        let indent = line.len() - trimmed.len();
-        let name_start_char = indent + "namespace ".len();
-        let rest = &trimmed["namespace ".len()..];
-        let name_len = rest.find([';', '{']).unwrap_or(rest.len());
-        let ns = rest[..name_len].trim().to_string();
-        let leading_ws = rest[..name_len].len() - rest[..name_len].trim_start().len();
-        let start_char = (name_start_char + leading_ws) as u32;
-        let end_char = start_char + ns.len() as u32;
-
-        return Some((
-            if ns.is_empty() { None } else { Some(ns) },
-            Range {
-                start: Position {
-                    line: line_idx as u32,
-                    character: start_char,
-                },
-                end: Position {
-                    line: line_idx as u32,
-                    character: end_char,
-                },
+    with_parsed_program(content, "namespace_decl", |program, _| {
+        let namespace = program.statements.iter().find_map(|stmt| match stmt {
+            Statement::Namespace(namespace) => Some(namespace),
+            _ => None,
+        });
+        Some(match namespace {
+            Some(namespace) => match &namespace.name {
+                Some(name) => {
+                    let span = name.span();
+                    (
+                        Some(crate::atom::bytes_to_str(name.value()).to_string()),
+                        crate::text_position::byte_range_to_lsp_range(
+                            content,
+                            span.start.offset as usize,
+                            span.end.offset as usize,
+                        ),
+                    )
+                }
+                None => {
+                    let at = crate::text_position::offset_to_position(
+                        content,
+                        namespace.namespace.span().end.offset as usize,
+                    );
+                    (None, Range { start: at, end: at })
+                }
             },
-        ));
-    }
-
-    Some((
-        None,
-        Range {
-            start: Position {
-                line: 0,
-                character: 0,
-            },
-            end: Position {
-                line: 0,
-                character: 0,
-            },
-        },
-    ))
+            None => (None, Range::default()),
+        })
+    })
 }
 
 pub(crate) fn is_structural_single_classlike_file(content: &str) -> bool {

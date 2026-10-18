@@ -451,6 +451,28 @@ function test(): void {
     }
 
     #[test]
+    fn flags_too_few_args_to_function_named_through_a_class_import() {
+        let php = r#"<?php
+namespace Lib\Helpers {
+    function greet(string $name, int $times): void {}
+}
+namespace App {
+    use Lib\Helpers;
+    function test(): void {
+        Helpers\greet("x");
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("Expected 2") && d.message.contains("got 1")),
+            "Expected too-few-args diagnostic, got: {diags:?}",
+        );
+    }
+
+    #[test]
     fn no_diagnostic_for_correct_user_function_call() {
         let php = r#"<?php
 function myHelper(string $a, int $b = 0): void {}
@@ -1198,6 +1220,27 @@ final class PropertyInvoked
         assert!(
             diags[0].message.contains("Expected 1 argument") && diags[0].message.contains("got 0"),
             "Calling the method with too few arguments is still reported, got: {diags:?}",
+        );
+    }
+
+    /// Top-level code in a namespace reads an unimported class name in
+    /// that namespace, not as a global class of the same short name.
+    #[test]
+    fn top_level_new_in_namespace_does_not_reach_global_class() {
+        let php = r#"<?php
+namespace {
+    class Greeter { public function __construct(string $name) {} }
+}
+
+namespace App {
+    new Greeter();
+    Greeter::make();
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "`Greeter` names `App\\Greeter`, not the global class, got: {diags:?}",
         );
     }
 }

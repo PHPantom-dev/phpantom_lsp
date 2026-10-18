@@ -28,8 +28,8 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::text_position::ranges_overlap;
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
 
@@ -55,19 +55,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if identifier != ALREADY_NARROWED_ID {
@@ -146,10 +138,7 @@ fn build_remove_assert_edit(content: &str, diag_line: usize) -> Option<TextEdit>
     let assert_col = line_text.find("assert(")?;
 
     // Compute the byte offset within `content` where this line starts.
-    let line_start_byte = lines[..diag_line]
-        .iter()
-        .map(|l| l.len() + 1) // +1 for newline
-        .sum::<usize>();
+    let line_start_byte = crate::text_position::line_start_byte_offset(content, diag_line);
 
     let assert_byte = line_start_byte + assert_col;
 

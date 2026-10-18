@@ -30,7 +30,6 @@ use mago_syntax::cst::function_like::parameter::{
     FunctionLikeParameterDefaultValue, FunctionLikeParameterList,
 };
 use mago_syntax::cst::function_like::r#return::FunctionLikeReturnTypeHint;
-use mago_syntax::cst::sequence::Sequence;
 use mago_syntax::cst::statement::Statement;
 use mago_syntax::cst::*;
 
@@ -120,10 +119,9 @@ fn walk_statement(stmt: &Statement<'_>, ctx: &Ctx<'_>, out: &mut Vec<Finding>) {
                 }
             }
         },
-        Statement::Class(class) => walk_members(&class.members, ctx, out),
-        Statement::Interface(interface) => walk_members(&interface.members, ctx, out),
-        Statement::Trait(trait_def) => walk_members(&trait_def.members, ctx, out),
-        Statement::Enum(enum_def) => walk_members(&enum_def.members, ctx, out),
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            walk_members(body.members, ctx, out)
+        }
         Statement::Function(func) => check_declaration(
             func,
             &func.parameter_list,
@@ -135,12 +133,8 @@ fn walk_statement(stmt: &Statement<'_>, ctx: &Ctx<'_>, out: &mut Vec<Finding>) {
     }
 }
 
-fn walk_members<'arena>(
-    members: &Sequence<'arena, ClassLikeMember<'arena>>,
-    ctx: &Ctx<'_>,
-    out: &mut Vec<Finding>,
-) {
-    for member in members.iter() {
+fn walk_members(members: &[ClassLikeMember<'_>], ctx: &Ctx<'_>, out: &mut Vec<Finding>) {
+    for member in members {
         if let ClassLikeMember::Method(method) = member {
             check_declaration(
                 method,

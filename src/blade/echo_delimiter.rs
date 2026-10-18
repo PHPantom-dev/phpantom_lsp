@@ -130,9 +130,7 @@ impl crate::Backend {
     /// Build hover content for `{{ }}` (escaped echo via `e()`).
     fn blade_escaped_echo_contents(&self) -> HoverContents {
         // Try to resolve the actual `e()` function from the project/stubs.
-        let empty_use_map = std::collections::HashMap::new();
-        let loader = self.function_loader_with(None, &empty_use_map, &None);
-        if let Some(func) = loader("e", 0) {
+        if let Some(func) = self.find_or_load_function(&["e"]) {
             crate::hover::hover_for_function(&func, None, None, false).contents
         } else {
             HoverContents::Markup(MarkupContent {

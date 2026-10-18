@@ -326,3 +326,20 @@ fn rejects_variable_that_is_a_method_parameter() {
     let php = "<?php\nclass Foo {\n    public function bar($x) {\n        echo $x;\n        /*|*/$x = 1;\n    }\n}";
     assert!(run_convert(php).is_none());
 }
+
+#[test]
+fn rejects_variable_of_a_closure_in_the_method() {
+    let php = "<?php\nclass Foo {\n    public function bar() {\n        $f = function () {\n            /*|*/$x = 1;\n            return $x;\n        };\n    }\n}";
+    assert!(run_convert(php).is_none());
+}
+
+#[test]
+fn converts_the_variable_a_closure_is_assigned_to() {
+    let php = "<?php\nclass Foo {\n    public function bar() {\n        /*|*/$f = function () {\n            $x = 1;\n        };\n        return $f;\n    }\n}";
+    let content = php.replace("/*|*/", "");
+    let edits = run_convert(php).expect("action should be offered");
+    let result = apply_edits(&content, &edits);
+    assert!(result.contains("private $f;"), "{result}");
+    assert!(result.contains("$this->f = function () {"), "{result}");
+    assert!(result.contains("return $this->f;"), "{result}");
+}

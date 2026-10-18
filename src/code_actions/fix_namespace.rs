@@ -46,11 +46,7 @@ impl Backend {
         };
         let ns_line = edit_range.start.line;
 
-        let cursor_line = params.range.start.line;
-        let ns_decl_line = find_namespace_keyword_line(content);
-        let target_line = ns_decl_line.unwrap_or(ns_line);
-
-        if cursor_line != target_line && cursor_line != ns_line {
+        if params.range.start.line != ns_line {
             return;
         }
 
@@ -77,16 +73,6 @@ impl Backend {
             ..Default::default()
         }));
     }
-}
-
-fn find_namespace_keyword_line(content: &str) -> Option<u32> {
-    for (i, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("namespace ") {
-            return Some(i as u32);
-        }
-    }
-    None
 }
 
 /// The edit that writes a `namespace` statement into a file that has

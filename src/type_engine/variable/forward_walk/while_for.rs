@@ -31,22 +31,13 @@ pub(crate) fn process_while<'b>(
     let entry = process_condition(while_stmt.condition, scope, ctx);
     *scope = entry.truthy(ctx).clone();
 
-    // When the cursor is inside the loop body (completion path), discovery
-    // passes must walk the ENTIRE body; the final pass uses the real
-    // cursor_offset so it stops at the cursor as usual.
-    let body_span = match &while_stmt.body {
-        WhileBody::Statement(inner) => inner.span(),
-        WhileBody::ColonDelimited(body) => body.span(),
-    };
-    let cursor_in_body =
-        ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset;
-    let discovery_ctx = (if cursor_in_body && !is_diagnostic_scope_active() {
-        ctx.with_cursor_offset(u32::MAX)
-    } else {
-        ctx.with_cursor_offset(ctx.cursor_offset)
-    })
-    .with_in_loop(true);
-    let loop_body_ctx = ctx.with_in_loop(true);
+    let loop_ctxs = LoopBodyCtxs::new(
+        ctx,
+        match &while_stmt.body {
+            WhileBody::Statement(inner) => inner.span(),
+            WhileBody::ColonDelimited(body) => body.span(),
+        },
+    );
 
     // Record a snapshot after condition processing (same reasoning as
     // the corresponding snapshot in `process_if`).
@@ -70,13 +61,7 @@ pub(crate) fn process_while<'b>(
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        LoopWalk {
-            pre_loop_scope: &pre_loop_scope,
-            assignment_depth,
-            fold_exit_edges: !cursor_in_body,
-            ctx: &loop_body_ctx,
-            discovery_ctx: &discovery_ctx,
-        },
+        loop_ctxs.walk(&pre_loop_scope, assignment_depth),
         |next_scope, point| {
             if point != LoopSeedPoint::Entry {
                 return;
@@ -91,7 +76,7 @@ pub(crate) fn process_while<'b>(
     // the scope with condition narrowing applied.  The post-loop
     // merge would erase the narrowing (since the loop might not execute),
     // but the cursor IS inside the body, so the condition is true.
-    if cursor_in_body && !is_diagnostic_scope_active() {
+    if loop_ctxs.answers_cursor() {
         return;
     }
 
@@ -170,22 +155,13 @@ pub(crate) fn process_for<'b>(
         *scope = entry.truthy(ctx).clone();
     }
 
-    // When the cursor is inside the loop body (completion path), discovery
-    // passes must walk the ENTIRE body; the final pass uses the real
-    // cursor_offset so it stops at the cursor as usual.
-    let body_span = match &for_stmt.body {
-        ForBody::Statement(inner) => inner.span(),
-        ForBody::ColonDelimited(body) => body.span(),
-    };
-    let cursor_in_body =
-        ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset;
-    let discovery_ctx = (if cursor_in_body && !is_diagnostic_scope_active() {
-        ctx.with_cursor_offset(u32::MAX)
-    } else {
-        ctx.with_cursor_offset(ctx.cursor_offset)
-    })
-    .with_in_loop(true);
-    let loop_body_ctx = ctx.with_in_loop(true);
+    let loop_ctxs = LoopBodyCtxs::new(
+        ctx,
+        match &for_stmt.body {
+            ForBody::Statement(inner) => inner.span(),
+            ForBody::ColonDelimited(body) => body.span(),
+        },
+    );
 
     // ── Assignment-depth-bounded loop iteration ─────────────────
     let body_stmts: Vec<&Statement<'b>> = match &for_stmt.body {
@@ -205,13 +181,7 @@ pub(crate) fn process_for<'b>(
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        LoopWalk {
-            pre_loop_scope: &pre_loop_scope,
-            assignment_depth,
-            fold_exit_edges: !cursor_in_body,
-            ctx: &loop_body_ctx,
-            discovery_ctx: &discovery_ctx,
-        },
+        loop_ctxs.walk(&pre_loop_scope, assignment_depth),
         |next_scope, point| match point {
             // The update clause runs after the body, so its reassignments
             // are what the next iteration starts from.  The initialisers
@@ -247,7 +217,7 @@ pub(crate) fn process_for<'b>(
     // scope with condition narrowing applied.  The post-loop merge would
     // erase the narrowing (since the loop might not execute), but the
     // cursor IS inside the body, so the conditions are true there.
-    if cursor_in_body && !is_diagnostic_scope_active() {
+    if loop_ctxs.answers_cursor() {
         return;
     }
 
@@ -370,31 +340,18 @@ pub(crate) fn process_do_while<'b>(
     }
 
     let pre_loop_scope = scope.clone();
-
-    // A caller asking about a position inside the body is asking about a
-    // point the loop's exit edges have not reached yet.
-    let body_span = dw.statement.span();
-    let cursor_in_body =
-        ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset;
+    let loop_ctxs = LoopBodyCtxs::new(ctx, dw.statement.span());
 
     // ── Assignment-depth-bounded loop iteration ─────────────────
     let body_stmts: Vec<&Statement<'b>> = vec![dw.statement];
     let assignment_depth =
         clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
-    let loop_body_ctx = ctx.with_in_loop(true);
-
     let exit_frame = ExitFrameGuard::push();
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        LoopWalk {
-            pre_loop_scope: &pre_loop_scope,
-            assignment_depth,
-            fold_exit_edges: !cursor_in_body,
-            ctx: &loop_body_ctx,
-            discovery_ctx: &loop_body_ctx,
-        },
+        loop_ctxs.walk(&pre_loop_scope, assignment_depth),
         |next_scope, point| match point {
             // The condition is tested after the body and the loop only
             // re-enters when it held, so every iteration past the first
@@ -421,7 +378,7 @@ pub(crate) fn process_do_while<'b>(
 
     // A caller asking about a position inside the body has its answer: the
     // walk stopped there.
-    if cursor_in_body && !is_diagnostic_scope_active() {
+    if loop_ctxs.answers_cursor() {
         return;
     }
 

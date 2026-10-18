@@ -256,10 +256,8 @@ fn collect_gate_call(
 
 /// Read a `[Model::class => Policy::class, …]` literal into the scan.
 fn collect_policy_map(expr: &Expression<'_>, resolved: &OwnedResolvedNames, scan: &mut GateScan) {
-    let elements = match expr {
-        Expression::Array(array) => &array.elements,
-        Expression::LegacyArray(array) => &array.elements,
-        _ => return,
+    let Some(elements) = crate::parser::array_literal_elements(expr) else {
+        return;
     };
     for element in elements.iter() {
         let ArrayElement::KeyValue(kv) = element else {
@@ -341,34 +339,17 @@ fn callback_signature(expr: &Expression<'_>, content: &str) -> Option<String> {
 /// statements.  A plain string literal is accepted too, since
 /// `['App\Models\Post' => …]` is a legal (if unidiomatic) spelling.
 fn class_constant_fqn(expr: &Expression<'_>, resolved: &OwnedResolvedNames) -> Option<String> {
-    match expr {
-        Expression::Access(Access::ClassConstant(access))
-            if matches!(
-                &access.constant,
-                ClassLikeConstantSelector::Identifier(constant)
-                    if bytes_to_str(constant.value).eq_ignore_ascii_case("class")
-            ) =>
-        {
-            // `self`/`static`/`parent` are their own expression kinds, so
-            // requiring a plain identifier already excludes them — a keyword
-            // names no class that can be loaded from here.
-            let Expression::Identifier(ident) = access.class else {
-                return None;
-            };
-            let raw = bytes_to_str(ident.value());
-            resolved
-                .get(ident.span().start.offset)
-                .map(|fqn| fqn.trim_start_matches('\\').to_string())
-                .or_else(|| (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string()))
-        }
-        Expression::Literal(Literal::String(s)) => {
-            let value = literal_bytes_to_str(s.value?)?;
-            let fqn = value.replace("\\\\", "\\");
-            let fqn = fqn.trim_start_matches('\\');
-            (!fqn.is_empty() && fqn.contains('\\')).then(|| fqn.to_string())
-        }
-        _ => None,
+    // `self`/`static`/`parent` name no class that can be loaded from here.
+    if let Some(ident) = crate::parser::class_fetch_identifier(expr) {
+        return resolved.class_fqn(ident);
     }
+    let Expression::Literal(Literal::String(s)) = expr else {
+        return None;
+    };
+    let value = literal_bytes_to_str(s.value?)?;
+    let fqn = value.replace("\\\\", "\\");
+    let fqn = fqn.trim_start_matches('\\');
+    (!fqn.is_empty() && fqn.contains('\\')).then(|| fqn.to_string())
 }
 
 // ─── Index ───────────────────────────────────────────────────────────────────
