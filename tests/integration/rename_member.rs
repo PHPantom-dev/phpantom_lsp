@@ -1072,3 +1072,105 @@ async fn rename_data_provider_updates_the_metadata_naming_it() {
         )
     );
 }
+
+// ─── Constants versus same-named methods and properties ─────────────────────
+
+/// Open `text` and rename the `sub` inside the first occurrence of `needle`,
+/// returning the text with the edits applied.
+async fn rename_in(text: &str, needle: &str, sub: &str, new_name: &str) -> String {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, text).await;
+    let (line, character) = line_char_of(text, needle);
+    let character = character + needle.find(sub).unwrap() as u32;
+    let edit = rename(&backend, &uri, line, character, new_name)
+        .await
+        .expect("expected a rename");
+    apply_edits(text, &edits_for_uri(&edit, &uri))
+}
+
+const TAG: &str = concat!(
+    "<?php\n",
+    "class Tag {\n",
+    "    const name = 'tag';\n",
+    "    public string $name = 'tag';\n",
+    "    public function name(): string {\n",
+    "        return self::name . $this->name . $this->name();\n",
+    "    }\n",
+    "}\n",
+    "echo Tag::name;\n",
+);
+
+#[tokio::test]
+async fn renaming_a_constant_leaves_a_same_named_method_and_property_alone() {
+    let expected = TAG
+        .replace("const name", "const label")
+        .replace("self::name", "self::label")
+        .replace("Tag::name", "Tag::label");
+    for needle in ["const name", "self::name", "Tag::name"] {
+        assert_eq!(
+            rename_in(TAG, needle, "name", "label").await,
+            expected,
+            "renaming from {needle:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn renaming_a_method_or_property_leaves_a_same_named_constant_alone() {
+    for needle in ["function name", "$this->name()", "$name = 'tag'"] {
+        let renamed = rename_in(TAG, needle, "name", "label").await;
+        for constant in ["const name", "self::name", "Tag::name"] {
+            assert!(
+                renamed.contains(constant),
+                "renaming from {needle:?} touched {constant:?}:\n{renamed}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn renaming_a_static_property_or_a_constant_leaves_the_other_alone() {
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    const path = '/etc';\n",
+        "    public static string $path = '/tmp';\n",
+        "}\n",
+        "echo Config::path;\n",
+        "echo Config::$path;\n",
+    );
+    assert_eq!(
+        rename_in(text, "Config::path", "path", "root").await,
+        text.replace("const path", "const root")
+            .replace("Config::path", "Config::root"),
+    );
+    assert_eq!(
+        rename_in(text, "Config::$path", "path", "root").await,
+        text.replace("$path", "$root"),
+    );
+}
+
+#[tokio::test]
+async fn renaming_an_enum_case_leaves_a_same_named_static_method_alone() {
+    let text = concat!(
+        "<?php\n",
+        "enum Suit {\n",
+        "    case Hearts;\n",
+        "    public static function Hearts(): self { return self::Hearts; }\n",
+        "}\n",
+        "Suit::Hearts();\n",
+        "$s = Suit::Hearts;\n",
+    );
+    assert_eq!(
+        rename_in(text, "case Hearts", "Hearts", "Spades").await,
+        text.replace("case Hearts", "case Spades")
+            .replace("self::Hearts", "self::Spades")
+            .replace("$s = Suit::Hearts", "$s = Suit::Spades"),
+    );
+    assert_eq!(
+        rename_in(text, "function Hearts", "Hearts", "Deal").await,
+        text.replace("function Hearts", "function Deal")
+            .replace("Suit::Hearts()", "Suit::Deal()"),
+    );
+}
