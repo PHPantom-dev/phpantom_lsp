@@ -282,6 +282,15 @@ impl Backend {
             return Ok(None);
         }
 
+        if let Some((class, contract)) =
+            self.method_rename_contract_conflict(uri, content, &span.kind, span.start)
+        {
+            return Err(format!(
+                "Renaming this method would leave `{class}` without `{contract}`, \
+                 which it has to implement. Rename `{contract}` instead."
+            ));
+        }
+
         // A function is named three different ways across its references,
         // and only one of them is the plain new name.  The old short name
         // comes from the resolved FQN rather than from the text under the
