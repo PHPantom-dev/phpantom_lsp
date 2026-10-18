@@ -1,0 +1,23 @@
+// test: pipe into a namespaced function callable resolves in a multi-namespace file
+// feature: completion
+// expect: getTimestamp(
+---
+<?php
+
+namespace Other {
+    function makeStamp(string $input): int {}
+}
+
+namespace App {
+    class Stamp {
+        public function getTimestamp(): int {}
+    }
+
+    function makeStamp(string $input): Stamp {
+        return new Stamp();
+    }
+
+    $result = 'now' |> makeStamp(...);
+
+    $result-><>
+}

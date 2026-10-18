@@ -22,8 +22,8 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::names::resolve_to_fqn;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
-use crate::util::resolve_to_fqn;
 
 use super::helpers::make_diagnostic;
 

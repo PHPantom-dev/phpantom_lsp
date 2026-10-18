@@ -22,9 +22,10 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::code_actions::CodeActionData;
 use crate::code_actions::make_code_action_data;
+use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{DocblockAbove, find_docblock_above_line};
+use crate::docblock::strip_docblock_line_delimiters;
 use crate::php_type::PhpType;
-use crate::text_position::{offset_to_position, ranges_overlap};
 use crate::util::short_name;
 
 /// PHPStan identifiers we match on.
@@ -41,19 +42,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if identifier != UNUSED_TYPE_ID && identifier != NOT_THROWABLE_ID {
@@ -199,9 +192,8 @@ fn extract_throws_type(message: &str, identifier: &str) -> Option<PhpType> {
 /// Build a `TextEdit` that removes the `@throws` line matching the
 /// given type from the docblock.
 ///
-/// If the docblock would become "empty" (only summary or nothing) after
-/// removal, this still preserves the docblock shell — removing the
-/// whole docblock could lose `@param` / `@return` / summary text.
+/// A docblock left with nothing else in it is removed entirely; one that
+/// still holds a summary or other tags keeps them.
 fn build_remove_throws_edit(
     content: &str,
     docblock: &DocblockAbove,
@@ -221,21 +213,14 @@ fn build_remove_throws_edit(
     // Identify which line indices to remove.
     let mut lines_to_remove: Vec<usize> = Vec::new();
     for (i, line) in doc_lines.iter().enumerate() {
-        let mut trimmed = line.trim();
         // Strip docblock delimiters so single-line `/** @throws ... */`
         // and multi-line `* @throws ...` are both handled.
-        if let Some(inner) = trimmed.strip_prefix("/**") {
-            trimmed = inner.trim_start();
-        }
-        if let Some(inner) = trimmed.strip_suffix("*/") {
-            trimmed = inner.trim_end();
-        }
-        trimmed = trimmed.trim_start_matches('*').trim();
+        let trimmed = strip_docblock_line_delimiters(line.trim());
         if let Some(rest) = trimmed.strip_prefix("@throws") {
             let rest = rest.trim_start();
             let tag_type = rest.split_whitespace().next().unwrap_or("");
             let tag_fqn =
-                crate::util::resolve_to_fqn(tag_type, use_map, file_namespace).to_lowercase();
+                crate::names::resolve_to_fqn(tag_type, use_map, file_namespace).to_lowercase();
 
             if tag_fqn == target_fqn {
                 lines_to_remove.push(i);
@@ -277,51 +262,8 @@ fn build_remove_throws_edit(
         }
     }
     lines_to_remove.extend(extra_removals);
-    lines_to_remove.sort();
-    lines_to_remove.dedup();
 
-    // Build the new docblock text by excluding the removed lines.
-    let new_lines: Vec<&str> = doc_lines
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| !lines_to_remove.contains(i))
-        .map(|(_, l)| *l)
-        .collect();
-
-    // If the docblock is now essentially empty (just `/**` and `*/`
-    // with maybe blank `*` lines), keep it minimal.
-    let has_content = new_lines.iter().any(|l| {
-        let mut t = l.trim();
-        if let Some(inner) = t.strip_prefix("/**") {
-            t = inner.trim_start();
-        }
-        if let Some(inner) = t.strip_suffix("*/") {
-            t = inner.trim_end();
-        }
-        t = t.trim_start_matches('*').trim();
-        !t.is_empty()
-    });
-
-    let new_text = if !has_content && new_lines.len() <= 3 {
-        // The docblock is essentially empty after removal — remove it
-        // entirely (including its trailing newline).
-        String::new()
-    } else {
-        let mut text = new_lines.join("\n");
-        // Preserve trailing newline if original had one.
-        if docblock.text.ends_with('\n') && !text.ends_with('\n') {
-            text.push('\n');
-        }
-        text
-    };
-
-    let start = offset_to_position(content, docblock.start);
-    let end = offset_to_position(content, docblock.end);
-
-    Some(TextEdit {
-        range: Range { start, end },
-        new_text,
-    })
+    Some(docblock.remove_lines_edit(content, &lines_to_remove))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

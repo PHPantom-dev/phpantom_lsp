@@ -800,14 +800,7 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
         "bool" => matches!(sub_n, "true" | "false"),
 
         // ── int supertypes ──────────────────────────────────────
-        "int" => matches!(
-            sub_n,
-            "positive-int"
-                | "negative-int"
-                | "non-positive-int"
-                | "non-negative-int"
-                | "non-zero-int"
-        ),
+        "int" => matches!(sub_n, int_refinement!()),
         // ── refined-int cross-subtyping ─────────────────────────
         // e.g. positive-int <: non-negative-int (1..max ⊆ 0..max)
         "positive-int" | "negative-int" | "non-positive-int" | "non-negative-int"
@@ -824,36 +817,10 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
         "non-zero-int" => matches!(sub_n, "positive-int" | "negative-int"),
 
         // ── float supertypes ────────────────────────────────────
-        "float" => matches!(
-            sub_n,
-            "int"
-                | "positive-int"
-                | "negative-int"
-                | "non-positive-int"
-                | "non-negative-int"
-                | "non-zero-int"
-        ),
+        "float" => matches!(sub_n, "int" | int_refinement!()),
 
         // ── string supertypes ───────────────────────────────────
-        "string" => matches!(
-            sub_n,
-            "non-empty-string"
-                | "numeric-string"
-                | "class-string"
-                | "interface-string"
-                | "literal-string"
-                | "callable-string"
-                | "truthy-string"
-                | "non-falsy-string"
-                | "trait-string"
-                | "enum-string"
-                | "view-string"
-                | "lowercase-string"
-                | "uppercase-string"
-                | "non-empty-lowercase-string"
-                | "non-empty-uppercase-string"
-                | "non-empty-literal-string"
-        ),
+        "string" => matches!(sub_n, string_refinement!() | "view-string"),
 
         // An interface and an enum are class-likes, so the string that
         // names one is a `class-string`.  A trait is not — `trait-string`
@@ -901,25 +868,9 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
         // ── numeric supertypes ──────────────────────────────────
         "numeric" => matches!(
             sub_n,
-            "int"
-                | "float"
-                | "positive-int"
-                | "negative-int"
-                | "non-positive-int"
-                | "non-negative-int"
-                | "non-zero-int"
-                | "numeric-string"
+            "int" | "float" | int_refinement!() | "numeric-string"
         ),
-        "number" => matches!(
-            sub_n,
-            "int"
-                | "float"
-                | "positive-int"
-                | "negative-int"
-                | "non-positive-int"
-                | "non-negative-int"
-                | "non-zero-int"
-        ),
+        "number" => matches!(sub_n, "int" | "float" | int_refinement!()),
 
         // ── scalar supertype ────────────────────────────────────
         "scalar" => matches!(
@@ -930,26 +881,8 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
                 | "bool"
                 | "true"
                 | "false"
-                | "positive-int"
-                | "negative-int"
-                | "non-positive-int"
-                | "non-negative-int"
-                | "non-zero-int"
-                | "non-empty-string"
-                | "numeric-string"
-                | "class-string"
-                | "interface-string"
-                | "literal-string"
-                | "callable-string"
-                | "truthy-string"
-                | "non-falsy-string"
-                | "trait-string"
-                | "enum-string"
-                | "lowercase-string"
-                | "uppercase-string"
-                | "non-empty-lowercase-string"
-                | "non-empty-uppercase-string"
-                | "non-empty-literal-string"
+                | int_refinement!()
+                | string_refinement!()
                 | "numeric"
                 | "number"
         ),
@@ -957,28 +890,7 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
         // ── array-key supertype ─────────────────────────────────
         "array-key" => matches!(
             sub_n,
-            "int"
-                | "string"
-                | "positive-int"
-                | "negative-int"
-                | "non-positive-int"
-                | "non-negative-int"
-                | "non-zero-int"
-                | "non-empty-string"
-                | "numeric-string"
-                | "literal-string"
-                | "class-string"
-                | "interface-string"
-                | "callable-string"
-                | "truthy-string"
-                | "non-falsy-string"
-                | "trait-string"
-                | "enum-string"
-                | "lowercase-string"
-                | "uppercase-string"
-                | "non-empty-lowercase-string"
-                | "non-empty-uppercase-string"
-                | "non-empty-literal-string"
+            "int" | "string" | int_refinement!() | string_refinement!()
         ),
 
         // ── array supertypes ────────────────────────────────────

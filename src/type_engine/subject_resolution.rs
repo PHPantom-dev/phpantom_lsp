@@ -1,22 +1,24 @@
-/// Shared subject type resolution utility.
-///
-/// Resolves a subject string (`$this`, `self`, `static`, `parent`,
-/// bare class names, or `$variable`) to a [`PhpType`].  This is the
-/// single point of truth for all features that need to answer "what
-/// type does this subject refer to?" without the full completion
-/// resolver pipeline.
-///
-/// Consumers: deprecated diagnostics, find-references, code actions.
+//! Shared subject type resolution utility.
+//!
+//! Resolves a subject string (`$this`, `self`, `static`, `parent`,
+//! bare class names, or `$variable`) to a [`PhpType`].  This is the
+//! single point of truth for all features that need to answer "what
+//! type does this subject refer to?" without the full completion
+//! resolver pipeline.
+//!
+//! Consumers: deprecated diagnostics, find-references, code actions.
+
 use crate::atom::atom;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::class_lookup::find_class_at_offset;
+use crate::names::resolve_to_fqn;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::Loaders;
 use crate::type_engine::subject_expr::SubjectExpr;
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{AccessKind, ClassInfo, ResolvedType};
-use crate::util::resolve_to_fqn;
 
 /// Context for resolving a subject expression to its type.
 pub(crate) struct SubjectResolutionCtx<'a> {
@@ -28,8 +30,10 @@ pub(crate) struct SubjectResolutionCtx<'a> {
     pub namespace: &'a Option<String>,
     /// File content.
     pub content: &'a str,
-    /// Class loader.
+    /// Class loader for already-resolved names.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_class_loader`](crate::type_engine::resolver::ResolutionCtx::source_class_loader).
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// Server state for project-wide answers.  See
     /// [`ResolutionCtx::backend`](crate::type_engine::resolver::ResolutionCtx::backend).
     pub backend: Option<&'a crate::Backend>,
@@ -78,14 +82,18 @@ pub(crate) fn resolve_subject_type(
                 // which is position-accurate (reassignment, narrowing).
                 let current_class = find_class_at_offset(ctx.local_classes, access_offset);
                 return crate::type_engine::variable::resolution::resolve_variable_php_type(
-                    trimmed,
-                    ctx.content,
-                    access_offset,
-                    current_class,
-                    ctx.local_classes,
-                    ctx.class_loader,
-                    ctx.backend,
-                    Loaders::with_function(Some(ctx.function_loader)),
+                    VarQuery {
+                        var_name: trimmed,
+                        cursor_offset: access_offset,
+                        content: ctx.content,
+                        current_class,
+                        all_classes: ctx.local_classes,
+                        class_loader: ctx.class_loader,
+                        source_class_loader: ctx.source_class_loader,
+                        source_imports: Some(ctx.use_map),
+                        backend: ctx.backend,
+                        loaders: Loaders::with_function(Some(ctx.function_loader)),
+                    },
                 );
             }
 
@@ -100,6 +108,8 @@ pub(crate) fn resolve_subject_type(
                 content: ctx.content,
                 cursor_offset: access_offset,
                 class_loader: ctx.class_loader,
+                source_class_loader: ctx.source_class_loader,
+                source_imports: Some(ctx.use_map),
                 backend: ctx.backend,
                 laravel_macro_this_resolver: None,
                 resolved_class_cache: ctx.backend.map(|b| &b.resolved_class_cache),
@@ -108,11 +118,7 @@ pub(crate) fn resolve_subject_type(
                 is_in_static_method: false,
                 preserve_static: false,
             };
-            let access_kind = if is_static {
-                AccessKind::DoubleColon
-            } else {
-                AccessKind::Arrow
-            };
+            let access_kind = AccessKind::of_member_access(is_static);
             let resolved = crate::type_engine::resolver::resolve_target_classes_expr(
                 &expr,
                 access_kind,

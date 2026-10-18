@@ -424,6 +424,53 @@ function test(): void {
     );
 }
 
+// ─── Calling a closure held in a parenthesized variable ─────────────────────
+
+#[test]
+fn flags_result_of_parenthesized_closure_variable_call() {
+    let php = r#"<?php
+class Customer {}
+function takes_int(int $x): void {}
+
+function test(): void {
+    $factory = function (): Customer { return new Customer(); };
+    takes_int(($factory)());
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        diags.iter().any(|d| d.message.contains("got Customer")),
+        "($factory)() should return what $factory() does, got: {diags:?}"
+    );
+}
+
+// ─── Static call on a union of class-strings ────────────────────────────────
+
+#[test]
+fn static_call_on_class_string_union_keeps_magic_method_results() {
+    let php = r#"<?php
+class Apple {
+    public static function make(): Apple { return new Apple(); }
+}
+class Pear {
+    public static function __callStatic(string $name, array $args): Pear { return new Pear(); }
+}
+function takes_int(int $x): void {}
+
+function test(bool $flag): void {
+    $cls = $flag ? Apple::class : Pear::class;
+    takes_int($cls::make());
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("Apple") && d.message.contains("Pear")),
+        "Pear::make() goes through __callStatic, so the call returns Apple|Pear, got: {diags:?}"
+    );
+}
+
 // ─── No diagnostic: object param with class instance ────────────────────────
 
 #[test]
@@ -1669,6 +1716,44 @@ function test(string $k): void {
     );
 }
 
+/// A `use const` import belongs to the `namespace` block that declares it,
+/// so the same bare name in another block still reads the global constant.
+#[test]
+fn constant_import_stays_in_its_namespace_block() {
+    let php = r#"<?php
+namespace Lib {
+    const LIMIT = 10;
+}
+namespace {
+    const LIMIT = [];
+    function takes_array(array $a): void {}
+}
+namespace A {
+    use const Lib\LIMIT;
+    \takes_array(LIMIT);
+}
+namespace B {
+    \takes_array(LIMIT);
+}
+"#;
+    let diags = collect(php);
+    let lines: Vec<u32> = diags
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
+            )
+        })
+        .map(|d| d.range.start.line)
+        .collect();
+    assert_eq!(
+        lines,
+        vec![10],
+        "Only block A's `LIMIT` is the imported int, got: {}",
+        messages_with_code(&diags, "type_mismatch_argument").join("; ")
+    );
+}
+
 /// A read that lands on a value the target cannot hold still reports, and
 /// names the specific value that fails rather than its base type.
 #[test]
@@ -2254,6 +2339,58 @@ function takes_string(string $s): void {}
 function test(): void {
     takes_string(fail("boom"));
 }
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A guard ending in a `never` call narrows what follows it wherever the
+/// call's receiver comes from: a variable holding the class name, or the
+/// `$this` a closure is bound to, inside a class or at the top level the
+/// way a Pest test closure is.
+#[test]
+fn a_never_call_through_a_class_value_or_a_bound_this_ends_the_branch() {
+    let php = r#"<?php
+class Foo {}
+class Aborter {
+    public static function fail(): never { throw new \Exception(); }
+    public function stop(): never { throw new \Exception(); }
+}
+class Runner {
+    /** @param-closure-this Aborter $callback */
+    public static function with(\Closure $callback): void {}
+}
+/** @param-closure-this Aborter $closure */
+function test(string $description, \Closure $closure): void {}
+function maybe_foo(): ?Foo { return null; }
+function takes_foo(Foo $foo): void {}
+
+function via_class_string(?Foo $x): void {
+    $class = Aborter::class;
+    if ($x === null) {
+        $class::fail();
+    }
+    takes_foo($x);
+}
+
+class Outer {
+    public function viaBoundThis(?Foo $x): void {
+        Runner::with(function () use ($x) {
+            if ($x === null) {
+                $this->stop();
+            }
+            takes_foo($x);
+        });
+    }
+}
+
+test('a top-level closure', function () {
+    $x = maybe_foo();
+    if ($x === null) {
+        $this->stop();
+    }
+    takes_foo($x);
+});
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
@@ -4239,6 +4376,47 @@ function test(): void {
         !has_type_error(&diags),
         "Anonymous class implementing Renderable should be accepted, got: {diags:?}"
     );
+}
+
+/// `($this->highlight)(…)` invokes the closure the property holds, so its
+/// arguments are checked against the closure's signature and never against
+/// a method that happens to share the property's name.
+#[test]
+fn invoked_property_arguments_checked_against_closure_not_method() {
+    let php = r#"<?php
+class A {}
+class B {}
+final class Highlighter
+{
+    /** @var \Closure(A, B): void */
+    private \Closure $highlight;
+    public function highlight(int $x, int $y): void {}
+    public function run(A $a, B $b): void
+    {
+        ($this->highlight)($a, $b);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(!has_type_error(&diags), "{diags:#?}");
+
+    let php = r#"<?php
+class A {}
+class B {}
+final class Highlighter
+{
+    /** @var \Closure(A, B): void */
+    private \Closure $highlight;
+    public function highlight(B $x, B $y): void {}
+    public function run(B $b): void
+    {
+        ($this->highlight)($b, $b);
+    }
+}
+"#;
+    let diags = collect(php);
+    let errors = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(errors.len(), 1, "{diags:#?}");
 }
 
 // ─── Type guard narrowing ──────────────────────────────────────────────
@@ -6973,6 +7151,61 @@ function test(): void {
         msgs.is_empty(),
         "Single-quoted string literal should match double-quoted literal union member, got: {msgs:?}"
     );
+}
+
+// ─── A ternary inside the object of a property access ──────────────────────
+
+/// A ternary built into the value a property is read off narrows its
+/// branches as it does anywhere else: `$resolved` in the truthy branch is
+/// the string `realpath()` returned, also when the whole expression is
+/// wrapped for `?->` or `->`.
+#[test]
+fn a_ternary_in_the_object_of_a_property_access_narrows_its_branches() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class Doc
+{
+    public string $text = '';
+}
+
+final class Registry
+{
+    public function get(string $path): ?Doc
+    {
+        return null;
+    }
+
+    public function sure(string $path): Doc
+    {
+        return new Doc();
+    }
+}
+
+final class Reader
+{
+    public function __construct(private readonly Registry $buffers) {}
+
+    public function nullsafe(string $path): ?string
+    {
+        return ($this->buffers->get($path) ?? $this->buffers->get(($resolved = \realpath($path)) ? $resolved : $path))?->text;
+    }
+
+    public function plain(string $path): string
+    {
+        return $this->buffers->sure(($resolved = \realpath($path)) ? $resolved : $path)->text;
+    }
+}
+"#;
+    // The full pipeline, with the stubs that type `realpath()`: the
+    // branch narrowing is recorded by the forward walk it runs.
+    let diags = collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_slow_diagnostics,
+    );
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
 }
 
 // ─── array_map callback return type (#147) ──────────────────────────────────
@@ -10002,6 +10235,71 @@ class Ids {
     );
 }
 
+/// A callee's `value-of<Suit>` names the enum its own file sees, not the one
+/// a caller in another namespace would reach by the same short name.
+#[test]
+fn value_of_enum_operand_is_read_in_the_declaring_namespace() {
+    let php = r#"<?php
+namespace {
+    enum Suit: string { case Hearts = 'h'; }
+    /** @param value-of<Suit> $s */
+    function take(string $s): void {}
+}
+namespace App {
+    enum Suit: string { case Other = 'x'; }
+    class Runner {
+        public function run(): void {
+            take('h');
+            take('x');
+        }
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("got 'x'"), "{messages:?}");
+}
+
+/// A callee's `key-of<Ids::TABLE>` reads its class through the callee's own
+/// imports, whether the caller has a same-named class or none at all.
+#[test]
+fn key_of_class_constant_operand_is_read_through_the_declaring_imports() {
+    let php = r#"<?php
+namespace Lib\Tables {
+    class Ids { const TABLE = ['immutable' => 1, 'mutable' => 'two']; }
+}
+namespace Lib {
+    use Lib\Tables\Ids;
+    /** @param key-of<Ids::TABLE> $key */
+    function pick(string $key): void {}
+}
+namespace App {
+    class Ids { const TABLE = ['other' => 1]; }
+    function run(): void {
+        \Lib\pick('mutable');
+        \Lib\pick('other');
+    }
+    class Runner {
+        public function run(): void {
+            \Lib\pick('immutable');
+            \Lib\pick('nope');
+        }
+    }
+}
+namespace {
+    \Lib\pick('immutable');
+    \Lib\pick('nope');
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(messages[0].contains("got 'other'"), "{messages:?}");
+    assert!(
+        messages[1..].iter().all(|m| m.contains("got 'nope'")),
+        "{messages:?}"
+    );
+}
+
 // ── interface-string ────────────────────────────────────────────────
 
 #[test]
@@ -10098,6 +10396,54 @@ takesStringCallback(static function (int $value): int { return $value; });
         messages
             .iter()
             .all(|m| m.contains("return type int does not satisfy string")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn callable_return_suffix_accepts_array_returning_closures_and_null() {
+    let php = r#"<?php
+namespace App;
+
+class Question {
+    /** @param (callable(string):string[])|null $callback */
+    public function setAutocompleterCallback(?callable $callback): static {
+        return $this;
+    }
+}
+
+/** @param list<string> $users */
+function configure(array $users): void {
+    $question = new Question();
+    $question->setAutocompleterCallback(static fn (): array => $users);
+    $question->setAutocompleterCallback(static fn (string $input): array => [$input]);
+    $question->setAutocompleterCallback(static function (string $input): array { return [$input]; });
+    $question->setAutocompleterCallback(null);
+}
+"#;
+    let diags = collect(php);
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
+#[test]
+fn callable_return_suffix_still_rejects_incompatible_arguments() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+/** @param (callable(string):string[])|null $callback */
+function configure(?callable $callback): void {}
+
+configure(static fn (): string => 'wrong');
+configure(static fn (): int => 42);
+configure(42);
+"#;
+    let diags = collect(php);
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "{diags:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("callable(string): array<string>")),
         "{messages:?}"
     );
 }
@@ -12514,6 +12860,79 @@ function acceptsKey(string $key): void {{
     }
 }
 
+/// A `use function` or `use const` import shares no names with classes, so
+/// one spelled like a class (case aside) must not answer for it, in a
+/// signature or in a body.
+#[test]
+fn function_and_constant_imports_do_not_claim_a_class_name() {
+    for import in [
+        "use function Laravel\\Prompts\\table;",
+        "use const App\\TABLE;",
+    ] {
+        let backend = create_test_backend();
+        // Declared in another file, so only the namespace can find it.
+        backend.update_ast(
+            "file:///Table.php",
+            "<?php\nnamespace App\\Console;\n\nclass Table {}\nclass Other {}\n",
+        );
+        let php = format!(
+            r#"<?php
+namespace App\Console;
+
+{import}
+
+/** @param Table $doc */
+function takesTable(Table $native, Table $doc): void {{}}
+
+function run(mixed $m): void {{
+    $t = new Table();
+    $o = new Other();
+    /** @var Table $v */
+    $v = $m;
+    takesTable($t, $v);
+    takesTable($o, $v);
+}}
+"#
+        );
+        let messages = messages_with_code(
+            &collect_diagnostics_with(&backend, &php, Backend::collect_argument_type_diagnostics),
+            "type_mismatch_argument",
+        );
+        assert_eq!(messages.len(), 1, "`{import}`: got {messages:?}");
+        assert!(
+            messages[0].contains("expects App\\Console\\Table, got App\\Console\\Other"),
+            "`{import}`: {messages:?}"
+        );
+    }
+}
+
+/// PHP class names are case-insensitive, so a type hint spelled in another
+/// case than its import still names the imported class.
+#[test]
+fn type_hint_matches_its_import_case_insensitively() {
+    let php = r#"<?php
+namespace Lib {
+    class Money {}
+}
+
+namespace App {
+    use Lib\Money;
+
+    class Other {}
+
+    /** @param money $doc */
+    function pay(money $native, $doc): void {}
+
+    function run(): void {
+        pay(new Money(), new Money());
+        pay(new Other(), new Other());
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
 /// A file may declare several `namespace` blocks. A call in the second
 /// block must resolve against that block's namespace, not the first
 /// block's, or the callee is never found and the check goes silent.
@@ -14322,4 +14741,322 @@ fn array_map_reads_the_element_type_of_a_call_on_a_parenthesised_new() {
         "array_map(fn(\\stdClass $s) => $s->name, (new R())->all());\n        takesInt(pairs((new R())->all()));",
     );
     assert_eq!(msgs, ["Argument 1 ($i) expects int, got list<stdClass>"]);
+}
+
+const TEMPLATE_NAMED_LIKE_A_CLASS: &str = r#"<?php
+namespace {
+    trait T {}
+}
+
+namespace App {
+    class Art {}
+
+    class Filter {
+        public function accept(Art $artifact): bool { return true; }
+    }
+
+    /** @template T of Art */
+    class ArtList {
+        /** @param T[] $artifacts */
+        public function __construct(array $artifacts) {
+            foreach ($artifacts as $artifact) {
+                (new Filter())->accept($artifact);
+            }
+        }
+    }
+
+    interface Node {
+        /**
+         * @template T of Node
+         * @param class-string<T> $targetType
+         * @return T|null
+         */
+        public function first($targetType);
+
+        /** @return Node[] */
+        public function children(): array;
+    }
+
+    abstract class AbstractNode implements Node {
+        public function first($targetType): ?Node {
+            foreach ($this->children() as $node) {
+                if ($node instanceof $targetType) {
+                    return $node;
+                }
+                if (($child = $node->first($targetType)) !== null) {
+                    return $child;
+                }
+            }
+            return null;
+        }
+    }
+}
+"#;
+
+#[test]
+fn a_template_shadows_a_class_of_the_same_name_in_argument_checks() {
+    let diags = collect(TEMPLATE_NAMED_LIKE_A_CLASS);
+    assert!(
+        !has_type_error(&diags),
+        "`T` is the template, not the global trait, got: {diags:?}"
+    );
+}
+
+#[test]
+fn a_template_shadows_a_class_of_the_same_name_in_return_checks() {
+    let diags = collect_diagnostics_with(
+        &create_test_backend(),
+        TEMPLATE_NAMED_LIKE_A_CLASS,
+        Backend::collect_return_type_diagnostics,
+    );
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "`T` is the template, not the global trait, got: {diags:?}"
+    );
+}
+
+/// `new ReflectionClass($this)` inside a namespaced class binds the stub's
+/// template to that class, not to a global class of the same short name.
+#[test]
+fn reflection_class_of_this_binds_template_to_namespaced_class() {
+    let php = r#"<?php
+namespace {
+    class Request {}
+}
+
+namespace App\Requests {
+
+use ReflectionClass;
+use ReflectionProperty;
+
+abstract class Request {
+    /** @return array<string, mixed> */
+    public function toArray(): array {
+        $reflection = new ReflectionClass($this);
+        $out = [];
+        foreach ($reflection->getProperties(ReflectionProperty::IS_PRIVATE) as $var) {
+            $out[$var->getName()] = $var->getValue($this);
+        }
+        return $out;
+    }
+}
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+/// A `@return` naming an imported subclass that shares its short name with
+/// the native return type refines that type rather than repeating it.
+#[test]
+fn docblock_subclass_sharing_native_short_name_refines_return() {
+    let php = r#"<?php
+namespace Adapter {
+    use ReflectionProperty as CoreReflectionProperty;
+
+    final class ReflectionProperty extends CoreReflectionProperty {}
+
+    final class ReflectionClass {
+        /** @return ReflectionProperty */
+        public function getProperty(string $name): \ReflectionProperty {}
+    }
+}
+
+namespace Consumer {
+    use Adapter\ReflectionClass;
+    use Adapter\ReflectionProperty;
+
+    function take(ReflectionProperty $p): void {}
+
+    function run(ReflectionClass $c): void {
+        take($c->getProperty('x'));
+    }
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(!has_type_error(&diags), "unexpected diagnostics: {diags:?}");
+}
+
+/// A docblock class that is not the native class or a subclass of it does
+/// not replace the native type: PHP enforces the hint, so a method's return
+/// value and the argument it takes are what the hint says.
+#[test]
+fn docblock_class_unrelated_to_native_type_loses_to_it() {
+    let lib = r#"<?php
+namespace Lib;
+
+class Base {}
+class Other {}
+
+class Factory {
+    /** @return Other */
+    public function make(): Base { return new Base(); }
+
+    /** @param Other $b */
+    public function take(Base $b): void {}
+}
+"#;
+    let php = r#"<?php
+namespace App;
+
+use Lib\Base;
+use Lib\Factory;
+use Lib\Other;
+
+function takeBase(Base $b): void {}
+function takeOther(Other $o): void {}
+
+function run(Factory $f): void {
+    takeBase($f->make());
+    $f->take(new Base());
+    takeOther($f->make());
+}
+"#;
+    let backend = create_test_backend();
+    backend.update_ast("file:///lib.php", lib);
+    backend.update_ast("file:///test.php", php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    let msgs = messages_with_code(&out, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "only `takeOther($f->make())` passes a `Base` where an `Other` is expected, got: {msgs:?}"
+    );
+    assert!(msgs[0].contains("Other"), "got: {msgs:?}");
+}
+
+/// The same for a property, a promoted constructor property, and a
+/// function's return type and parameter.
+#[test]
+fn docblock_class_unrelated_to_native_property_or_function_type_loses_to_it() {
+    let php = r#"<?php
+namespace App;
+
+class Base {}
+class Other {}
+
+class Holder {
+    /** @var Other */
+    public Base $item;
+
+    public function __construct(
+        /** @var Other */
+        public Base $promoted,
+    ) {}
+}
+
+/** @return Other */
+function make(): Base { return new Base(); }
+
+/** @param Other $b */
+function handle(Base $b): void {}
+
+function takeBase(Base $b): void {}
+
+function run(Holder $h): void {
+    takeBase($h->item);
+    takeBase($h->promoted);
+    takeBase(make());
+    handle(new Base());
+    new Holder(new Base());
+}
+"#;
+    let diags = collect(php);
+    assert!(!has_type_error(&diags), "unexpected diagnostics: {diags:?}");
+}
+
+/// A docblock class that does narrow the native type still refines it: a
+/// subclass of a native class, and a class implementing a native interface.
+#[test]
+fn docblock_class_narrowing_native_type_still_refines_it() {
+    let lib = r#"<?php
+namespace Lib;
+
+interface Shape {}
+class Base {}
+final class Sub extends Base {}
+final class Circle implements Shape {}
+
+class Factory {
+    /** @return Sub */
+    public function make(): Base { return new Sub(); }
+
+    /** @return Circle|null */
+    public function shape(): ?Shape { return new Circle(); }
+
+    /** @var Sub */
+    public Base $item;
+}
+
+/** @return Sub */
+function make(): Base { return new Sub(); }
+"#;
+    let php = r#"<?php
+namespace App;
+
+use Lib\Circle;
+use Lib\Factory;
+use Lib\Sub;
+
+function takeSub(Sub $s): void {}
+function takeCircle(?Circle $c): void {}
+
+function run(Factory $f): void {
+    takeSub($f->make());
+    takeCircle($f->shape());
+    takeSub($f->item);
+    takeSub(\Lib\make());
+}
+"#;
+    let backend = create_test_backend();
+    backend.update_ast("file:///lib.php", lib);
+    backend.update_ast("file:///test.php", php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    let msgs = messages_with_code(&out, "type_mismatch_argument");
+    assert!(msgs.is_empty(), "unexpected diagnostics: {msgs:?}");
+}
+
+/// `self::NUM` in a class that shares its short name with a global class
+/// reads the constant off the enclosing class, not off the global one.
+#[test]
+fn self_constant_argument_binds_template_in_class_named_like_global() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace {
+    class Clash {}
+}
+
+namespace App {
+    /**
+     * @template T
+     * @param T $x
+     * @return T
+     */
+    function id(mixed $x): mixed { return $x; }
+
+    function takesString(string $s): void {}
+
+    class Clash
+    {
+        const NUM = 5;
+
+        public function f(): void
+        {
+            takesString(id(self::NUM));
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        diags.iter().any(|d| d.message.contains("got 5")),
+        "`id(self::NUM)` must bind `T` to the constant's value, got: {diags:?}",
+    );
+    assert!(
+        !diags.iter().any(|d| d.message.contains("Clash")),
+        "`self` is `App\\Clash`, not the class itself as a value, got: {diags:?}",
+    );
 }

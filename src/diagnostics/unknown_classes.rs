@@ -167,14 +167,22 @@ impl Backend {
             // `key-of<ID_TABLE>` / `ID_TABLE[K]` name the array the constant
             // holds, not a class. The type engine reads the constant's own
             // initializer there (see
-            // `type_engine::call_resolution::constant_operand_shape`), so
+            // `type_engine::call_resolution::constant_operands`), so
             // insisting the name is a class would report every use of the
             // syntax PHPantom supports.
             if ref_context == ClassRefContext::TypeOperatorOperand
                 && (self.lookup_indexed_global_constant(&fqn).is_some()
                     || self
                         .lookup_indexed_global_constant(crate::util::short_name(&fqn))
-                        .is_some())
+                        .is_some()
+                    || ctx
+                        .file
+                        .symbol_imports
+                        .constants
+                        .get(ref_name)
+                        .is_some_and(|imported| {
+                            self.lookup_indexed_global_constant(imported).is_some()
+                        }))
             {
                 continue;
             }
@@ -252,47 +260,21 @@ impl Backend {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/// Compute the byte ranges of `#[...]` attribute blocks in the source.
-///
-/// Returns a list of `(start, end)` byte offset pairs covering each
-/// attribute list.  Handles nested brackets (e.g. `#[Attr([1,2])]`).
+/// The byte ranges of the `#[...]` attribute lists in the source.
 fn compute_attribute_ranges(content: &str) -> Vec<ByteRange> {
-    let mut ranges = Vec::new();
-    let bytes = content.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
-
-    while i < len {
-        if bytes[i] == b'#' && i + 1 < len && bytes[i + 1] == b'[' {
-            let start = i;
-            let mut depth: u32 = 1;
-            i += 2;
-            while i < len && depth > 0 {
-                match bytes[i] {
-                    b'[' => depth += 1,
-                    b']' => depth -= 1,
-                    b'\'' | b'"' => {
-                        // Skip string literals to avoid counting brackets inside them.
-                        let quote = bytes[i];
-                        i += 1;
-                        while i < len && bytes[i] != quote {
-                            if bytes[i] == b'\\' {
-                                i += 1;
-                            }
-                            i += 1;
-                        }
-                    }
-                    _ => {}
+    crate::parser::with_parsed_program(content, "attribute_ranges", |program, _| {
+        let mut ranges = Vec::new();
+        crate::parser::for_each_node_with_ancestors(
+            mago_syntax::cst::Node::Program(program),
+            |node, _| {
+                if let mago_syntax::cst::Node::AttributeList(list) = node {
+                    let span = mago_span::HasSpan::span(list);
+                    ranges.push((span.start.offset as usize, span.end.offset as usize));
                 }
-                i += 1;
-            }
-            ranges.push((start, i));
-        } else {
-            i += 1;
-        }
-    }
-
-    ranges
+            },
+        );
+        ranges
+    })
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

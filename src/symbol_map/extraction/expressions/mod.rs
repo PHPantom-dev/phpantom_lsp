@@ -10,6 +10,7 @@ mod calls;
 mod closures;
 mod constructs;
 mod member_access;
+mod string_names;
 
 use anonymous_class::*;
 use assignment::*;
@@ -17,6 +18,7 @@ use calls::*;
 use closures::*;
 use constructs::*;
 use member_access::*;
+use string_names::*;
 
 use call_sites::emit_call_site;
 pub(in crate::symbol_map::extraction) use call_sites::emit_partial_call_site;
@@ -32,6 +34,8 @@ pub(super) fn extract_variable_symbol_spans<'a>(
         Variable::Direct(dv) => {
             let raw = bytes_to_str(dv.name);
             if raw == "$this" {
+                // `$this` is semantically equivalent to `static` for
+                // go-to-definition — resolve it to the enclosing class.
                 ctx.spans.push(SymbolSpan {
                     start: dv.span.start.offset,
                     end: dv.span.end.offset,
@@ -131,26 +135,8 @@ pub(super) fn extract_from_expression<'a>(
     }
 
     match expr {
-        // ── Variables ──
-        Expression::Variable(Variable::Direct(dv)) => {
-            let raw = bytes_to_str(dv.name);
-            if raw == "$this" {
-                // `$this` is semantically equivalent to `static` for
-                // go-to-definition — resolve it to the enclosing class.
-                ctx.spans.push(SymbolSpan {
-                    start: dv.span.start.offset,
-                    end: dv.span.end.offset,
-                    kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::This),
-                });
-            } else {
-                let name = crate::atom::atom(raw.strip_prefix('$').unwrap_or(raw));
-                ctx.spans.push(SymbolSpan {
-                    start: dv.span.start.offset,
-                    end: dv.span.end.offset,
-                    kind: SymbolKind::Variable { name },
-                });
-            }
-        }
+        // ── Variables: `$name`, `${…}`, `$$name` ──
+        Expression::Variable(var) => extract_variable_symbol_spans(var, ctx, scope_start),
 
         // ── self / static / parent keywords ──
         Expression::Self_(kw) => {
@@ -177,20 +163,11 @@ pub(super) fn extract_from_expression<'a>(
 
         // ── Identifiers (standalone class/constant references) ──
         Expression::Identifier(ident) => {
-            let name = bytes_to_str(ident.value()).to_string();
-            let name_clean = strip_fqn_prefix(&name).to_string();
-            if is_navigable_type(&name_clean) {
-                ctx.spans.push(class_ref_span(
-                    ident.span().start.offset,
-                    ident.span().end.offset,
-                    &name,
-                ));
+            if is_navigable_type(strip_fqn_prefix(bytes_to_str(ident.value()))) {
+                ctx.spans
+                    .push(identifier_class_ref(ident, ClassRefContext::Other));
             }
         }
-
-        // ── Indirect variables: `${…}`, `$$name` ──
-        // The direct `$name` case has its own arm above.
-        Expression::Variable(var) => extract_variable_symbol_spans(var, ctx, scope_start),
 
         // ── Instantiation: `new Foo(...)` ──
         Expression::Instantiation(inst) => extract_instantiation_expr(inst, ctx, scope_start),
@@ -209,18 +186,11 @@ pub(super) fn extract_from_expression<'a>(
             record_morph_column_comparison(bin, ctx.content, &mut ctx.morph_column_sites);
             extract_from_expression(bin.lhs, ctx, scope_start);
             // Tag the RHS of `instanceof` with the Instanceof context.
-            if bin.operator.is_instanceof() {
-                if let Expression::Identifier(ident) = bin.rhs {
-                    let raw = bytes_to_str(ident.value()).to_string();
-                    ctx.spans.push(class_ref_span_ctx(
-                        ident.span().start.offset,
-                        ident.span().end.offset,
-                        &raw,
-                        ClassRefContext::Instanceof,
-                    ));
-                } else {
-                    extract_from_expression(bin.rhs, ctx, scope_start);
-                }
+            if bin.operator.is_instanceof()
+                && let Expression::Identifier(ident) = bin.rhs
+            {
+                ctx.spans
+                    .push(identifier_class_ref(ident, ClassRefContext::Instanceof));
             } else {
                 extract_from_expression(bin.rhs, ctx, scope_start);
             }
@@ -439,10 +409,7 @@ pub(super) fn collect_destructuring_var_defs(
         };
         match value_expr {
             Expression::Variable(Variable::Direct(dv)) => {
-                let name = {
-                    let s = bytes_to_str(dv.name);
-                    s.strip_prefix('$').unwrap_or(s).to_string()
-                };
+                let name = bare_variable_name(dv.name);
                 var_defs.push(VarDefSite {
                     offset: dv.span.start.offset,
                     name,
@@ -533,45 +500,20 @@ pub(super) fn extract_from_array_elements<'a>(
     }
 }
 
-/// For the class part of a static call/property/constant access, emit
-/// the appropriate span (ClassReference, SelfStaticParent, or recurse).
+/// For the class part of `new`, a static call, or a static property or
+/// constant access, emit the appropriate span.
+///
+/// Unlike a standalone identifier, which may be a pseudo-type keyword, a
+/// name in class position is always a class reference.
 pub(super) fn emit_class_expr_span<'a>(
     expr: &'a Expression<'a>,
+    context: ClassRefContext,
     ctx: &mut ExtractionCtx<'a>,
     scope_start: u32,
 ) {
-    match expr {
-        Expression::Identifier(ident) => {
-            let raw = bytes_to_str(ident.value()).to_string();
-            ctx.spans.push(class_ref_span(
-                ident.span().start.offset,
-                ident.span().end.offset,
-                &raw,
-            ));
-        }
-        Expression::Self_(kw) => {
-            ctx.spans.push(SymbolSpan {
-                start: kw.span.start.offset,
-                end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Self_),
-            });
-        }
-        Expression::Static(kw) => {
-            ctx.spans.push(SymbolSpan {
-                start: kw.span.start.offset,
-                end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Static),
-            });
-        }
-        Expression::Parent(kw) => {
-            ctx.spans.push(SymbolSpan {
-                start: kw.span.start.offset,
-                end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Parent),
-            });
-        }
-        _ => {
-            extract_from_expression(expr, ctx, scope_start);
-        }
+    if let Expression::Identifier(ident) = expr {
+        ctx.spans.push(identifier_class_ref(ident, context));
+    } else {
+        extract_from_expression(expr, ctx, scope_start);
     }
 }

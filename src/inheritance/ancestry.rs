@@ -118,6 +118,43 @@ fn find_declaring_trait_at(
     None
 }
 
+/// Every trait `trait_names` names and every trait those use in turn, each
+/// once, with the name it was loaded by: a trait comes before the traits it
+/// uses, so a caller reading the result in order meets the nearer
+/// declaration first. A trait the loader cannot produce is left out, along
+/// with whatever only it would have led to.
+pub(crate) fn used_traits_deep(
+    trait_names: &[Atom],
+    class_loader: ClassLoader<'_>,
+) -> Vec<(Atom, Arc<ClassInfo>)> {
+    let mut visited: HashSet<Atom> = HashSet::new();
+    let mut out = Vec::new();
+    collect_used_traits(trait_names, class_loader, &mut visited, &mut out, 0);
+    out
+}
+
+fn collect_used_traits(
+    trait_names: &[Atom],
+    class_loader: ClassLoader<'_>,
+    visited: &mut HashSet<Atom>,
+    out: &mut Vec<(Atom, Arc<ClassInfo>)>,
+    depth: u32,
+) {
+    if depth > MAX_TRAIT_DEPTH {
+        return;
+    }
+    for name in trait_names {
+        if !visited.insert(*name) {
+            continue;
+        }
+        let Some(used) = class_loader(name) else {
+            continue;
+        };
+        out.push((*name, Arc::clone(&used)));
+        collect_used_traits(&used.used_traits, class_loader, visited, out, depth + 1);
+    }
+}
+
 /// `iface_name` or the first interface it extends for which `declares`
 /// holds. An interface's parents are recorded both in `interfaces` and,
 /// for a single `extends`, in `parent_class`.

@@ -116,39 +116,17 @@ pub(super) fn extract_from_statement<'a>(
             if let Some(key_expr) = foreach_stmt.target.key() {
                 extract_from_expression(key_expr, ctx, scope_start);
                 if let Expression::Variable(Variable::Direct(dv)) = key_expr {
-                    let name = {
-                        let s = bytes_to_str(dv.name);
-                        s.strip_prefix('$').unwrap_or(s).to_string()
-                    };
+                    let name = bare_variable_name(dv.name);
                     let offset = dv.span.start.offset;
-                    ctx.var_defs.push(VarDefSite {
-                        offset,
-                        name,
-                        kind: VarDefKind::Foreach,
-                        scope_start,
-                        effective_from: offset,
-                        nesting_depth: ctx.cond_nesting_depth,
-                        block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-                    });
+                    ctx.push_var_def(offset, name, VarDefKind::Foreach, scope_start, offset);
                 }
             }
             let value_expr = foreach_stmt.target.value();
             extract_from_expression(value_expr, ctx, scope_start);
             if let Expression::Variable(Variable::Direct(dv)) = value_expr {
-                let name = {
-                    let s = bytes_to_str(dv.name);
-                    s.strip_prefix('$').unwrap_or(s).to_string()
-                };
+                let name = bare_variable_name(dv.name);
                 let offset = dv.span.start.offset;
-                ctx.var_defs.push(VarDefSite {
-                    offset,
-                    name,
-                    kind: VarDefKind::Foreach,
-                    scope_start,
-                    effective_from: offset,
-                    nesting_depth: ctx.cond_nesting_depth,
-                    block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-                });
+                ctx.push_var_def(offset, name, VarDefKind::Foreach, scope_start, offset);
             } else if let Expression::Array(arr) = value_expr {
                 // Destructuring: `foreach ($items as [$name, $value])`
                 collect_destructuring_var_defs(
@@ -199,27 +177,12 @@ pub(super) fn extract_from_statement<'a>(
                 emit_keyword(&catch.r#catch, ctx);
                 extract_from_hint_ctx(&catch.hint, &mut ctx.spans, ClassRefContext::Catch);
                 if let Some(ref var) = catch.variable {
-                    let var_name = {
-                        let s = bytes_to_str(var.name);
-                        s.strip_prefix('$').unwrap_or(s).to_string()
-                    };
-                    ctx.spans.push(SymbolSpan {
-                        start: var.span.start.offset,
-                        end: var.span.end.offset,
-                        kind: SymbolKind::Variable {
-                            name: crate::atom::atom(&var_name),
-                        },
-                    });
-                    let catch_var_offset = var.span.start.offset;
-                    ctx.var_defs.push(VarDefSite {
-                        offset: catch_var_offset,
-                        name: var_name,
-                        kind: VarDefKind::Catch,
+                    ctx.push_variable_definition(
+                        (var.span.start.offset, var.span.end.offset),
+                        bare_variable_name(var.name),
+                        VarDefKind::Catch,
                         scope_start,
-                        effective_from: catch_var_offset,
-                        nesting_depth: ctx.cond_nesting_depth,
-                        block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-                    });
+                    );
                 }
                 let catch_block_end = catch.block.span().end.offset;
                 push_cond_nesting(ctx, catch_block_end);
@@ -244,27 +207,12 @@ pub(super) fn extract_from_statement<'a>(
             emit_keyword(&global.global, ctx);
             for var in global.variables.iter() {
                 if let Variable::Direct(dv) = var {
-                    let name = {
-                        let s = bytes_to_str(dv.name);
-                        s.strip_prefix('$').unwrap_or(s).to_string()
-                    };
-                    ctx.spans.push(SymbolSpan {
-                        start: dv.span.start.offset,
-                        end: dv.span.end.offset,
-                        kind: SymbolKind::Variable {
-                            name: crate::atom::atom(&name),
-                        },
-                    });
-                    let global_offset = dv.span.start.offset;
-                    ctx.var_defs.push(VarDefSite {
-                        offset: global_offset,
-                        name,
-                        kind: VarDefKind::GlobalDecl,
+                    ctx.push_variable_definition(
+                        (dv.span.start.offset, dv.span.end.offset),
+                        bare_variable_name(dv.name),
+                        VarDefKind::GlobalDecl,
                         scope_start,
-                        effective_from: global_offset,
-                        nesting_depth: ctx.cond_nesting_depth,
-                        block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-                    });
+                    );
                 }
             }
         }
@@ -272,27 +220,12 @@ pub(super) fn extract_from_statement<'a>(
             emit_keyword(&static_stmt.r#static, ctx);
             for item in static_stmt.items.iter() {
                 let dv = item.variable();
-                let name = {
-                    let s = bytes_to_str(dv.name);
-                    s.strip_prefix('$').unwrap_or(s).to_string()
-                };
-                ctx.spans.push(SymbolSpan {
-                    start: dv.span.start.offset,
-                    end: dv.span.end.offset,
-                    kind: SymbolKind::Variable {
-                        name: crate::atom::atom(&name),
-                    },
-                });
-                let static_offset = dv.span.start.offset;
-                ctx.var_defs.push(VarDefSite {
-                    offset: static_offset,
-                    name,
-                    kind: VarDefKind::StaticDecl,
+                ctx.push_variable_definition(
+                    (dv.span.start.offset, dv.span.end.offset),
+                    bare_variable_name(dv.name),
+                    VarDefKind::StaticDecl,
                     scope_start,
-                    effective_from: static_offset,
-                    nesting_depth: ctx.cond_nesting_depth,
-                    block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-                });
+                );
             }
         }
         Statement::Unset(unset_stmt) => {
@@ -300,19 +233,14 @@ pub(super) fn extract_from_statement<'a>(
             for val in unset_stmt.values.iter() {
                 extract_from_expression(val, ctx, scope_start);
                 if let Expression::Variable(Variable::Direct(dv)) = val {
-                    let name = {
-                        let s = bytes_to_str(dv.name);
-                        s.strip_prefix('$').unwrap_or(s).to_string()
-                    };
-                    ctx.var_defs.push(VarDefSite {
-                        offset: dv.span.start.offset,
+                    let name = bare_variable_name(dv.name);
+                    ctx.push_var_def(
+                        dv.span.start.offset,
                         name,
-                        kind: VarDefKind::Unset,
+                        VarDefKind::Unset,
                         scope_start,
-                        effective_from: unset_stmt.span().end.offset,
-                        nesting_depth: ctx.cond_nesting_depth,
-                        block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-                    });
+                        unset_stmt.span().end.offset,
+                    );
                 }
             }
         }
@@ -542,7 +470,10 @@ pub(super) fn extract_from_switch_body<'a>(
     };
     for case in cases.iter() {
         match case {
-            SwitchCase::Expression(expr_case) => emit_keyword(&expr_case.case, ctx),
+            SwitchCase::Expression(expr_case) => {
+                emit_keyword(&expr_case.case, ctx);
+                extract_from_expression(expr_case.expression, ctx, scope_start);
+            }
             SwitchCase::Default(def_case) => emit_keyword(&def_case.default, ctx),
         }
         let case_end = case

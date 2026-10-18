@@ -46,27 +46,11 @@ pub(crate) fn apply_type_guard_on_operands(
     // Decompose `&&` chains so that `is_object($x) && is_string($y)`
     // applies both guards.
     let operands = collect_and_chain_operands(condition);
-    let mut var_names: Vec<String> = scope_keys_named_by(condition, scope)
-        .iter()
-        .map(|k| k.to_string())
-        .collect();
-    // Include property access keys from conditions (e.g. `$a->foo`
-    // from `is_string($a->foo)`) so they can be narrowed.
-    for key in collect_condition_property_keys(condition) {
-        if !var_names.contains(&key) {
-            var_names.push(key);
-        }
-    }
-    // Include plain variables the condition names but the scope has no
-    // type for — a guard on a value read from an unknown source (a
-    // `stdClass` property, an untyped array offset) is the only thing
-    // that says what it is, so it must not be skipped for want of a
-    // prior type.
-    for name in collect_condition_var_names(condition) {
-        if !var_names.contains(&name) {
-            var_names.push(name);
-        }
-    }
+    // A subject the scope has no type for counts too: a guard on a value
+    // read from an unknown source (a `stdClass` property, an untyped array
+    // offset) is the only thing that says what it is, so it must not be
+    // skipped for want of a prior type.
+    let var_names = condition_subject_keys(condition, scope);
     for operand in &operands {
         for var_name in &var_names {
             if let Some((kind, negated)) = narrowing::try_extract_type_guard(operand, var_name) {
@@ -207,7 +191,7 @@ pub(crate) fn apply_class_string_guard_narrowing<'b>(
                 }
                 let resolved_fqn = target
                     .as_deref()
-                    .map(|name| crate::util::resolve_name_via_loader(name, ctx.class_loader));
+                    .map(|name| ctx.written_names().resolve_class(name));
                 let class_string_type = match &resolved_fqn {
                     Some(fqn) => PhpType::parse(&format!("class-string<{}>", fqn)),
                     None => PhpType::parse("class-string"),

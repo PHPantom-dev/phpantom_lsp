@@ -1212,23 +1212,11 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             }
         }
     }
-    let mut store_keys = Sz::default();
-    {
-        let store = backend.symbols.method_store.read();
-        store_keys += map_buckets::<(String, String), Arc<MethodInfo>>(store.capacity());
-        for ((f, m_name), m) in store.iter() {
-            store_keys.add(f.capacity());
-            store_keys.add(m_name.capacity());
-            a.method(m);
-        }
-    }
     eprintln!(
-        "── unresolved indexes: +{} classes, +{} methods over cache | index overhead {:.1} MB | method_store keys+buckets {:.1} MB ({} allocs) | incremental content {:.1} MB",
+        "── unresolved indexes: +{} classes, +{} methods over cache | index overhead {:.1} MB | incremental content {:.1} MB",
         a.n_classes - n_cls,
         a.n_methods - n_m,
         mb(idx_overhead.bytes),
-        mb(store_keys.bytes),
-        store_keys.allocs,
         mb(a.total() - before),
     );
 
@@ -1536,6 +1524,12 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             for route in &discovery.routes {
                 laravel_keys.add(route.name.capacity());
                 laravel_keys.add(route.uri.capacity());
+                if let Some(first) = route.declarations.first() {
+                    laravel_keys.add(route.declarations.capacity() * size_of_val(first));
+                }
+            }
+            for source in &discovery.sources {
+                laravel_keys.add(source.capacity());
             }
             for prefix in &discovery.open_prefixes {
                 laravel_keys.add(prefix.capacity());
@@ -1636,7 +1630,6 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     let grand = a.total()
         + cache_overhead.bytes
         + idx_overhead.bytes
-        + store_keys.bytes
         + fn_overhead.bytes
         + def_overhead.bytes
         + side.bytes
@@ -1735,6 +1728,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     probe("file_imports", &mut || {
         *backend.file_imports.write() = Default::default()
     });
+    probe("file_symbol_imports", &mut || {
+        *backend.file_symbol_imports.write() = Default::default()
+    });
     probe("symbol_maps", &mut || {
         *backend.symbol_maps.write() = Default::default()
     });
@@ -1750,9 +1746,6 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         for uri in uris {
             backend.evict_reference_index_uri(&uri);
         }
-    });
-    probe("method_store", &mut || {
-        *backend.symbols.method_store.write() = Default::default()
     });
     probe("resolved_class_cache", &mut || {
         *backend.resolved_class_cache.write() = Default::default()

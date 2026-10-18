@@ -8,20 +8,23 @@
 
 use tower_lsp::lsp_types::Position;
 
+use std::cell::OnceCell;
+
 use crate::completion::source::code_context::{CodeContext, Operator};
 use crate::symbol_map::LaravelStringKind;
+use crate::symbol_map::extraction::laravel::{
+    MORPH_TYPES_ARG, MethodReceiver, argument_takes_name_list, facade_static_call_arg_kind,
+    helper_function_accepts_name_list, helper_function_first_arg_kind, instance_method_arg_kind,
+    is_morph_map_registration_method, is_morph_types_query_method,
+};
 use crate::text_position::position_to_offset;
+use crate::text_scan::{CodeOffsets, is_escaped, scan_ident_backward, skip_php_trivia};
 
 pub(super) struct LaravelStringKeyContext<'a> {
     pub(super) kind: LaravelStringKind,
     pub(super) prefix: &'a str,
     /// Byte offset of the string content start (right after the opening quote).
     pub(super) content_start_offset: usize,
-    /// When set, the key is a sub-key under this config path prefix.
-    /// For example, `#[Database('mysql')]` sets this to `"database.connections."`
-    /// so completion filters to `database.connections.*` keys and strips the
-    /// prefix, showing just `mysql`, `sqlite`, etc.
-    pub(super) config_sub_prefix: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -33,23 +36,38 @@ pub(super) enum StringArgumentShape {
     ArrayValue,
 }
 
+/// Where a string literal sits among the arguments of the call it is
+/// passed to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum ArgumentSlot<'a> {
+    /// The positional argument at this index.
+    Positional(usize),
+    /// The argument passed by this name.
+    Named(&'a str),
+}
+
+impl ArgumentSlot<'_> {
+    /// Whether this is the first positional argument, or the one named
+    /// `name`.
+    pub(super) fn is_first_or_named(self, name: &str) -> bool {
+        self.matches_parameter(0, name)
+    }
+
+    /// Match PHP's positional or named spelling of a parameter.
+    fn matches_parameter(self, index: usize, name: &str) -> bool {
+        match self {
+            Self::Positional(position) => position == index,
+            Self::Named(named) => named == name,
+        }
+    }
+}
+
 pub(super) struct StringArgumentContext<'a> {
     pub(super) callable: &'a str,
     /// Method-call operator and the end of its receiver, ignoring comments.
     pub(super) operator: Option<Operator>,
-    pub(super) named_argument: Option<&'a str>,
-    /// Zero-based argument position, counting only commas in the call itself.
-    pub(super) argument_index: usize,
+    pub(super) slot: ArgumentSlot<'a>,
     pub(super) shape: StringArgumentShape,
-}
-
-#[inline]
-pub(super) fn is_unescaped(bytes: &[u8], index: usize) -> bool {
-    let mut before = index;
-    while before > 0 && bytes[before - 1] == b'\\' {
-        before -= 1;
-    }
-    (index - before).is_multiple_of(2)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -66,54 +84,13 @@ pub(super) fn string_literal_is_array_key(content: &str, cursor: usize, quote: u
     let bytes = content.as_bytes();
     let mut index = cursor;
     while index < bytes.len() {
-        if bytes[index] == quote && is_unescaped(bytes, index) {
-            let after_literal = skip_php_trivia_forward(content, index + 1);
+        if bytes[index] == quote && !is_escaped(bytes, index) {
+            let after_literal = skip_php_trivia(bytes, index + 1);
             return content[after_literal..].starts_with("=>");
         }
         index += 1;
     }
     false
-}
-
-/// Skip whitespace and PHP comments without allocating or scanning beyond the
-/// first real token. Comments are valid between an array key and its `=>`.
-pub(super) fn skip_php_trivia_forward(content: &str, mut index: usize) -> usize {
-    let bytes = content.as_bytes();
-    loop {
-        while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
-            index += 1;
-        }
-        match bytes.get(index..index.saturating_add(2)) {
-            Some(b"//") => {
-                index += 2;
-                while bytes.get(index).is_some_and(|byte| *byte != b'\n') {
-                    index += 1;
-                }
-            }
-            Some(b"/*") => {
-                index += 2;
-                while index < bytes.len() && bytes.get(index..index + 2) != Some(b"*/") {
-                    index += 1;
-                }
-                index = (index + 2).min(bytes.len());
-            }
-            _ if bytes.get(index) == Some(&b'#') => {
-                index += 1;
-                while bytes.get(index).is_some_and(|byte| *byte != b'\n') {
-                    index += 1;
-                }
-            }
-            _ => return index,
-        }
-    }
-}
-
-impl StringArgumentContext<'_> {
-    /// Match PHP's positional or named spelling of a parameter.
-    fn matches_parameter(&self, index: usize, name: &str) -> bool {
-        self.named_argument
-            .map_or(self.argument_index == index, |argument| argument == name)
-    }
 }
 
 impl StringArgumentShape {
@@ -138,10 +115,12 @@ pub(super) fn string_argument_context<'a>(
     let before_inner = &content[..inner.code_before];
     let token_start = crate::text_scan::scan_ident_backward(content.as_bytes(), inner.code_before);
     let is_array = inner.byte == b'['
-        || (inner.byte == b'(' && before_inner[token_start..].eq_ignore_ascii_case("array"));
+        || (inner.byte == b'('
+            && inner.callee_operator.is_none()
+            && before_inner[token_start..].eq_ignore_ascii_case("array"));
     let (call, value_start, shape) = if is_array {
         let call = code.open_brackets.iter().rev().nth(1)?;
-        let element_start = skip_php_trivia_forward(content, inner.item_start);
+        let element_start = skip_php_trivia(content.as_bytes(), inner.item_start);
         let shape = if element_start == quote_pos {
             if string_literal_is_array_key(content, cursor, quote as u8) {
                 StringArgumentShape::ArrayKey
@@ -166,7 +145,7 @@ pub(super) fn string_argument_context<'a>(
         return None;
     }
 
-    let argument_start = skip_php_trivia_forward(content, call.item_start);
+    let argument_start = skip_php_trivia(content.as_bytes(), call.item_start);
     let named_argument = if argument_start == value_start {
         None
     } else {
@@ -179,10 +158,10 @@ pub(super) fn string_argument_context<'a>(
         {
             name_end += 1;
         }
-        let colon = skip_php_trivia_forward(content, name_end);
+        let colon = skip_php_trivia(content.as_bytes(), name_end);
         if name_end == argument_start
             || bytes.get(colon) != Some(&b':')
-            || skip_php_trivia_forward(content, colon + 1) != value_start
+            || skip_php_trivia(content.as_bytes(), colon + 1) != value_start
         {
             return None;
         }
@@ -191,8 +170,7 @@ pub(super) fn string_argument_context<'a>(
     Some(StringArgumentContext {
         callable: &content[..call.code_before],
         operator: call.callee_operator,
-        named_argument,
-        argument_index: call.commas,
+        slot: named_argument.map_or(ArgumentSlot::Positional(call.commas), ArgumentSlot::Named),
         shape,
     })
 }
@@ -323,7 +301,10 @@ pub(super) fn resolve_known_class_reference(
                     continue;
                 };
                 let prefix = clause[..open].trim();
-                if let Some(target) = clause[open + 1..close].split(',').find_map(|item| {
+                let Some(members) = clause.get(open + 1..close) else {
+                    continue;
+                };
+                if let Some(target) = members.split(',').find_map(|item| {
                     imported_item_target(
                         item,
                         Some(prefix),
@@ -431,72 +412,10 @@ pub(super) fn semantic_class_reference<'a>(
 /// Find the last syntactic PHP attribute opener before `end`.
 /// Attribute-looking text inside strings and comments is deliberately ignored.
 pub(super) fn last_attribute_open_before(content: &str, end: usize) -> Option<usize> {
-    let bytes = content.as_bytes();
-    let end = end.min(bytes.len());
-    let mut state = PhpLexState::Code;
-    let mut last = None;
-    let mut index = 0usize;
-
-    while index < end {
-        let byte = bytes[index];
-        match state {
-            PhpLexState::Code => match byte {
-                b'\'' => {
-                    state = PhpLexState::SingleQuoted;
-                    index += 1;
-                }
-                b'"' => {
-                    state = PhpLexState::DoubleQuoted;
-                    index += 1;
-                }
-                b'/' if bytes.get(index + 1) == Some(&b'/') => {
-                    state = PhpLexState::LineComment;
-                    index += 2;
-                }
-                b'/' if bytes.get(index + 1) == Some(&b'*') => {
-                    state = PhpLexState::BlockComment;
-                    index += 2;
-                }
-                b'#' if bytes.get(index + 1) == Some(&b'[') => {
-                    last = Some(index);
-                    index += 2;
-                }
-                b'#' => {
-                    state = PhpLexState::LineComment;
-                    index += 1;
-                }
-                _ => index += 1,
-            },
-            PhpLexState::SingleQuoted => {
-                if byte == b'\'' && is_unescaped(bytes, index) {
-                    state = PhpLexState::Code;
-                }
-                index += 1;
-            }
-            PhpLexState::DoubleQuoted => {
-                if byte == b'"' && is_unescaped(bytes, index) {
-                    state = PhpLexState::Code;
-                }
-                index += 1;
-            }
-            PhpLexState::LineComment => {
-                if byte == b'\n' || byte == b'\r' {
-                    state = PhpLexState::Code;
-                }
-                index += 1;
-            }
-            PhpLexState::BlockComment => {
-                if byte == b'*' && bytes.get(index + 1) == Some(&b'/') {
-                    state = PhpLexState::Code;
-                    index += 2;
-                } else {
-                    index += 1;
-                }
-            }
-        }
-    }
-
-    last
+    let bytes = &content.as_bytes()[..end.min(content.len())];
+    CodeOffsets::new(bytes)
+        .filter(|&index| bytes[index..].starts_with(b"#["))
+        .last()
 }
 
 /// Start of the class name for the attribute call ending at `name_start`.
@@ -532,7 +451,7 @@ pub(super) fn attribute_class_start(before_paren: &str, name_start: usize) -> Op
 
     for (index, byte) in bytes.iter().copied().enumerate() {
         if let Some(active) = quote {
-            if byte == active && is_unescaped(bytes, index) {
+            if byte == active && !is_escaped(bytes, index) {
                 quote = None;
             }
             continue;
@@ -567,76 +486,35 @@ pub(super) fn receiver_chain_start(prefix: &str) -> usize {
     let mut boundary = 0usize;
     let mut round = 0usize;
     let mut square = 0usize;
-    let mut state = PhpLexState::Code;
-    let mut index = 0usize;
+    let mut offsets = CodeOffsets::new(bytes);
 
-    while index < bytes.len() {
-        let byte = bytes[index];
-        match state {
-            PhpLexState::Code => {
-                if bytes
-                    .get(index..index.saturating_add(5))
-                    .is_some_and(|tag| tag.eq_ignore_ascii_case(b"<?php"))
-                {
-                    boundary = index + 5;
-                    index += 5;
-                    continue;
-                }
-                if bytes.get(index..index.saturating_add(3)) == Some(b"<?=") {
-                    boundary = index + 3;
-                    index += 3;
-                    continue;
-                }
-                if bytes.get(index..index.saturating_add(2)) == Some(b"?>") {
-                    boundary = index + 2;
-                    index += 2;
-                    continue;
-                }
-                match byte {
-                    b'\'' => state = PhpLexState::SingleQuoted,
-                    b'"' => state = PhpLexState::DoubleQuoted,
-                    b'/' if bytes.get(index + 1) == Some(&b'/') => {
-                        state = PhpLexState::LineComment;
-                        index += 1;
-                    }
-                    b'/' if bytes.get(index + 1) == Some(&b'*') => {
-                        state = PhpLexState::BlockComment;
-                        index += 1;
-                    }
-                    b'#' if bytes.get(index + 1) != Some(&b'[') => {
-                        state = PhpLexState::LineComment;
-                    }
-                    b'(' => round += 1,
-                    b')' if round > 0 => round -= 1,
-                    b'[' => square += 1,
-                    b']' if square > 0 => square -= 1,
-                    b';' | b'{' | b'}' if round == 0 && square == 0 => boundary = index + 1,
-                    _ => {}
-                }
-            }
-            PhpLexState::SingleQuoted => {
-                if byte == b'\'' && is_unescaped(bytes, index) {
-                    state = PhpLexState::Code;
-                }
-            }
-            PhpLexState::DoubleQuoted => {
-                if byte == b'"' && is_unescaped(bytes, index) {
-                    state = PhpLexState::Code;
-                }
-            }
-            PhpLexState::LineComment => {
-                if byte == b'\n' || byte == b'\r' {
-                    state = PhpLexState::Code;
-                }
-            }
-            PhpLexState::BlockComment => {
-                if byte == b'*' && bytes.get(index + 1) == Some(&b'/') {
-                    state = PhpLexState::Code;
-                    index += 1;
-                }
-            }
+    while let Some(index) = offsets.next() {
+        let rest = &bytes[index..];
+        let open_or_close_tag = if rest
+            .get(..5)
+            .is_some_and(|tag| tag.eq_ignore_ascii_case(b"<?php"))
+        {
+            5
+        } else if rest.starts_with(b"<?=") {
+            3
+        } else if rest.starts_with(b"?>") {
+            2
+        } else {
+            0
+        };
+        if open_or_close_tag > 0 {
+            boundary = index + open_or_close_tag;
+            offsets.skip_to(boundary);
+            continue;
         }
-        index += 1;
+        match bytes[index] {
+            b'(' => round += 1,
+            b')' if round > 0 => round -= 1,
+            b'[' => square += 1,
+            b']' if square > 0 => square -= 1,
+            b';' | b'{' | b'}' if round == 0 && square == 0 => boundary = index + 1,
+            _ => {}
+        }
     }
 
     boundary
@@ -659,17 +537,6 @@ pub(super) fn middleware_completion_context(
     let current = raw_current.trim_start();
     let start = prefix.len().saturating_sub(raw_current.len());
     Some((LaravelStringKind::ConfigResource(resource), current, start))
-}
-
-pub(super) fn is_gate_check_method(method: &str) -> bool {
-    match method.len() {
-        3 => method.eq_ignore_ascii_case("any") || method.eq_ignore_ascii_case("has"),
-        4 => method.eq_ignore_ascii_case("none"),
-        5 => method.eq_ignore_ascii_case("check"),
-        6 => method.eq_ignore_ascii_case("allows") || method.eq_ignore_ascii_case("denies"),
-        7 => method.eq_ignore_ascii_case("inspect"),
-        _ => false,
-    }
 }
 
 pub(super) fn chain_starts_at_laravel_facade(
@@ -723,14 +590,14 @@ pub(super) fn is_method_chain_suffix(suffix: &str) -> bool {
         let byte = bytes[index];
         match state {
             PhpLexState::SingleQuoted => {
-                if byte == b'\'' && is_unescaped(bytes, index) {
+                if byte == b'\'' && !is_escaped(bytes, index) {
                     state = PhpLexState::Code;
                 }
                 index += 1;
                 continue;
             }
             PhpLexState::DoubleQuoted => {
-                if byte == b'"' && is_unescaped(bytes, index) {
+                if byte == b'"' && !is_escaped(bytes, index) {
                     state = PhpLexState::Code;
                 }
                 index += 1;
@@ -848,378 +715,433 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
     indexed_class_exists: Option<&dyn Fn(&str) -> bool>,
 ) -> Option<LaravelStringKeyContext<'a>> {
     let cursor_offset = position_to_offset(content, position) as usize;
-    let bytes = content.as_bytes();
-
-    if cursor_offset == 0 || cursor_offset > bytes.len() {
+    if cursor_offset == 0 || cursor_offset > content.len() {
         return None;
     }
 
     let (quote_pos, _) = code.open_string?;
-    let mut prefix = &content[quote_pos + 1..cursor_offset];
-    let mut content_start_offset = quote_pos + 1;
-    let before_quote = code.code_before;
+    let literal = &content[quote_pos + 1..cursor_offset];
+    let literal_start = quote_pos + 1;
     let argument = string_argument_context(content, code, cursor_offset)?;
     let before_paren = argument.callable;
 
     // ── Extract the function/method name ────────────────────────────
     let bp_bytes = before_paren.as_bytes();
-    let name_end = bp_bytes.len();
-    let mut name_start = name_end;
+    let mut name_start = bp_bytes.len();
     while name_start > 0
         && (bp_bytes[name_start - 1].is_ascii_alphanumeric() || bp_bytes[name_start - 1] == b'_')
     {
         name_start -= 1;
     }
-    if name_start == name_end {
+    if name_start == bp_bytes.len() {
         return None;
     }
-    let func_name = &before_paren[name_start..name_end];
 
-    // ── Check for static method syntax (Config::get, etc.) ──────────
-    let before_name = &before_paren[..name_start];
-    let is_static = argument.operator.is_some_and(|operator| operator.is_static);
-
-    // Check for instance method call (->route() or ?->route())
-    let trimmed_before = before_name.trim_end();
-    let is_instance_method = argument
-        .operator
-        .is_some_and(|operator| !operator.is_static);
-
-    // Check for PHP attribute syntax: #[Config('key')], grouped attributes,
-    // and fully-qualified container attributes.
-    let current_attribute_class_start = (!is_static && !is_instance_method)
-        .then(|| attribute_class_start(before_paren, name_start))
-        .flatten();
-    let is_attribute = current_attribute_class_start.is_some();
-
-    let is_morph_types = (is_static || is_instance_method)
-        && crate::symbol_map::extraction::laravel::is_morph_types_query_method(func_name);
-    let kind = if is_morph_types {
-        (argument.matches_parameter(1, "types")
-            && (argument.shape == StringArgumentShape::Scalar || argument.shape.is_array_value()))
-        .then_some(LaravelStringKind::MorphAlias)
-    } else if is_attribute {
-        if argument.shape != StringArgumentShape::Scalar {
-            return None;
-        }
-        let attr_start = current_attribute_class_start?;
-        let written_class = &before_paren[attr_start..];
-        let reference = semantic_class_reference(written_class, attr_start, resolved_names);
-        if resolve_known_class_reference(
-            content,
-            reference,
-            "Illuminate\\Container\\Attributes",
-            &["Config"],
-            false,
-            indexed_class_exists,
-        )
-        .is_some()
-        {
-            argument
-                .matches_parameter(0, "key")
-                .then_some(LaravelStringKind::Config)
-        } else if let Some(trigger) =
-            config_resource_attribute_trigger(content, reference, indexed_class_exists)
-        {
-            argument
-                .matches_parameter(0, trigger.argument)
-                .then_some(LaravelStringKind::ConfigResource(trigger.kind))
-        } else if resolve_known_class_reference(
-            content,
-            reference,
-            "Illuminate\\Foundation\\Http\\Attributes",
-            &["RedirectToRoute"],
-            false,
-            indexed_class_exists,
-        )
-        .is_some()
-        {
-            (argument.named_argument.is_none() && argument.argument_index == 0)
-                .then_some(LaravelStringKind::Route)
+    let call = StringCall {
+        content,
+        before_paren,
+        name_start,
+        name: &before_paren[name_start..],
+        literal,
+        argument,
+        resolved_names,
+        indexed_function_exists,
+        indexed_class_exists,
+    };
+    let before_name = before_paren[..name_start].trim_end();
+    let key = if call.argument.operator.is_some() && is_morph_types_query_method(call.name) {
+        (call
+            .argument
+            .slot
+            .matches_parameter(MORPH_TYPES_ARG, "types")
+            && (call.argument.shape == StringArgumentShape::Scalar
+                || call.argument.shape.is_array_value()))
+        .then_some(StringKey::Whole(LaravelStringKind::MorphAlias))?
+    } else if let Some(operator) = call.argument.operator {
+        let receiver = &content[..operator.code_before];
+        if operator.is_static {
+            static_call_key(&call, receiver)?
         } else {
-            None
+            instance_call_key(&call, receiver, before_name)?
         }
-    } else if is_static {
-        let before_colons = &content[..argument.operator?.code_before];
-        let bc_bytes = before_colons.as_bytes();
-        let mut cls_start = bc_bytes.len();
-        while cls_start > 0
-            && (bc_bytes[cls_start - 1].is_ascii_alphanumeric()
-                || bc_bytes[cls_start - 1] == b'_'
-                || bc_bytes[cls_start - 1] == b'\\')
-        {
-            cls_start -= 1;
-        }
-        let written_class = &before_colons[cls_start..];
-        let reference = semantic_class_reference(written_class, cls_start, resolved_names);
-        // Preserve the pre-existing legacy facade behavior. New resource
-        // triggers above resolve semantic aliases exactly; feeding an
-        // unrelated `Vendor\Config as Foo` target into the legacy short-name
-        // table would otherwise misclassify `Foo::get()` as Laravel Config.
-        let short = written_class.rsplit('\\').next().unwrap_or(written_class);
-
-        let fn_lower = func_name.to_ascii_lowercase();
-        let short_lower = short.to_ascii_lowercase();
-        let legacy_accepts_array = matches!(
-            (short_lower.as_str(), fn_lower.as_str()),
-            ("config", "getmany") | ("route", "is" | "currentroutenamed")
-        );
-
-        if crate::symbol_map::extraction::laravel::is_morph_map_registration_method(func_name)
-            && resolve_known_class_reference(
-                content,
-                reference,
-                "Illuminate\\Database\\Eloquent\\Relations",
-                &["Relation"],
-                true,
-                indexed_class_exists,
-            )
-            .is_some()
-        {
-            (argument.matches_parameter(0, "map") && argument.shape.is_array_key())
-                .then_some(LaravelStringKind::MorphAlias)
-        } else if func_name.eq_ignore_ascii_case("set")
-            && argument.matches_parameter(0, "key")
-            && argument.shape.is_array_key()
-            && is_laravel_facade_reference(content, reference, "Config", indexed_class_exists)
-        {
-            Some(LaravelStringKind::Config)
-        } else if let Some(trigger) =
-            config_resource_static_trigger(content, reference, func_name, indexed_class_exists)
-        {
-            if !argument.matches_parameter(0, trigger.argument)
-                || argument.shape == StringArgumentShape::ArrayKey
-                || (argument.shape.is_array_value() && !trigger.shape.accepts_array())
-                || (argument.shape == StringArgumentShape::Scalar
-                    && !trigger.shape.accepts_scalar())
-            {
-                return None;
-            }
-            Some(LaravelStringKind::ConfigResource(trigger.kind))
-        } else if func_name.eq_ignore_ascii_case("middleware")
-            && argument.matches_parameter(0, "middleware")
-            && argument.shape != StringArgumentShape::ArrayKey
-            && is_laravel_facade_reference(content, reference, "Route", indexed_class_exists)
-        {
-            let (middleware_kind, middleware_prefix, relative_start) =
-                middleware_completion_context(prefix)?;
-            prefix = middleware_prefix;
-            content_start_offset += relative_start;
-            Some(middleware_kind)
-        } else if argument.named_argument.is_some()
-            || argument.argument_index != 0
-            || argument.shape == StringArgumentShape::ArrayKey
-            || (argument.shape != StringArgumentShape::Scalar
-                && (!legacy_accepts_array || !before_quote.trim_end().ends_with('[')))
-        {
-            None
-        } else {
-            match (short_lower.as_str(), fn_lower.as_str()) {
-                (
-                    "config",
-                    "get" | "getmany" | "set" | "has" | "boolean" | "array" | "collection"
-                    | "prepend" | "push",
-                ) => Some(LaravelStringKind::Config),
-                ("view", "make" | "exists") => Some(LaravelStringKind::View),
-                ("lang", "get" | "has" | "hasforlocale" | "choice") => {
-                    Some(LaravelStringKind::Trans)
-                }
-                // Route names reached through the URL-building facades, and the
-                // "is the current route named …?" predicates.
-                (
-                    "url" | "redirect" | "response",
-                    "route" | "signedroute" | "temporarysignedroute" | "redirecttoroute",
-                ) => Some(LaravelStringKind::Route),
-                ("route", "is" | "currentroutenamed") => Some(LaravelStringKind::Route),
-                ("env", "get" | "getorfail") => Some(LaravelStringKind::Env),
-                // Artisan command names.
-                ("artisan", "call" | "queue") => Some(LaravelStringKind::Command),
-                ("schedule", "command") => Some(LaravelStringKind::Command),
-                // Eloquent morph aliases.
-                ("relation", "getmorphedmodel") => Some(LaravelStringKind::MorphAlias),
-                ("model", "getactualclassnameformorph") => Some(LaravelStringKind::MorphAlias),
-                // Authorization abilities checked through the Gate facade.
-                (
-                    "gate",
-                    "allows" | "denies" | "check" | "any" | "none" | "authorize" | "inspect"
-                    | "has" | "define",
-                ) => Some(LaravelStringKind::GateAbility),
-                _ => None,
-            }
-        }
-    } else if is_instance_method {
-        let receiver = &content[..argument.operator?.code_before];
-        // Whether the receiver is `$this` (used to scope command-running
-        // methods, whose names are too generic to match on any object).
-        let receiver_is_this = receiver.ends_with("$this");
-        // Whether the receiver plainly reads as the authenticated user,
-        // which is what makes `->can('…')` an authorization check rather
-        // than a same-named method on an unrelated object.  Mirrors the
-        // symbol-map rule that decides which `can()` calls get a span.
-        let receiver_is_user_like = {
-            let tail = receiver
-                .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-                .next()
-                .unwrap_or("");
-            tail.get(tail.len().saturating_sub(4)..)
-                .is_some_and(|suffix| suffix.eq_ignore_ascii_case("user"))
-                || receiver
-                    .get(receiver.len().saturating_sub(6)..)
-                    .is_some_and(|suffix| suffix.eq_ignore_ascii_case("user()"))
-        };
-        // A chain that starts at the `Gate` facade
-        // (`Gate::forUser($user)->allows('…')`) or at a route registration
-        // (`Route::get(…)->can('…')`) is an authorization check whatever the
-        // rest of the chain looks like.  Only the text back to the start of
-        // the statement is searched — `trimmed_before` is the whole file
-        // prefix, and an unrelated `Gate::` far above would false-positive.
-        let is_middleware = func_name.eq_ignore_ascii_case("middleware");
-        let is_can = func_name.eq_ignore_ascii_case("can")
-            || func_name.eq_ignore_ascii_case("cannot")
-            || func_name.eq_ignore_ascii_case("canAny");
-        let needs_route_root = is_middleware || is_can;
-        let needs_gate_root = is_can
-            || func_name.eq_ignore_ascii_case("authorize")
-            || is_gate_check_method(func_name);
-        let (chain_start, chain_text) = if needs_route_root || needs_gate_root {
-            let start = receiver_chain_start(trimmed_before);
-            (start, &trimmed_before[start..])
-        } else {
-            (0, "")
-        };
-        let chain_starts_at_gate = needs_gate_root
-            && chain_starts_at_laravel_facade(
-                content,
-                chain_text,
-                chain_start,
-                resolved_names,
-                "Gate",
-                indexed_class_exists,
-            );
-        let chain_starts_at_route = needs_route_root
-            && chain_starts_at_laravel_facade(
-                content,
-                chain_text,
-                chain_start,
-                resolved_names,
-                "Route",
-                indexed_class_exists,
-            );
-
-        if is_middleware
-            && chain_starts_at_route
-            && argument.matches_parameter(0, "middleware")
-            && argument.shape != StringArgumentShape::ArrayKey
-        {
-            let (middleware_kind, middleware_prefix, relative_start) =
-                middleware_completion_context(prefix)?;
-            prefix = middleware_prefix;
-            content_start_offset += relative_start;
-            Some(middleware_kind)
-        } else {
-            if argument.named_argument.is_some()
-                || argument.argument_index != 0
-                || argument.shape != StringArgumentShape::Scalar
-            {
-                return None;
-            }
-            if matches!(
-                func_name.to_ascii_lowercase().as_str(),
-                "route" | "signedroute" | "temporarysignedroute" | "redirecttoroute" | "routeis"
-            ) {
-                Some(LaravelStringKind::Route)
-                // `$this->call('cmd')` / `$this->callSilently('cmd')` inside a
-                // console command run another Artisan command.  Restricted to a
-                // `$this` receiver because `->call()` is a common method name.
-            } else if receiver_is_this
-                && (func_name.eq_ignore_ascii_case("call")
-                    || func_name.eq_ignore_ascii_case("callSilently"))
-            {
-                Some(LaravelStringKind::Command)
-                // `$this->authorize('update', $post)` in a controller.
-            } else if (func_name.eq_ignore_ascii_case("authorize")
-                && (receiver_is_this || chain_starts_at_gate))
-                // `$user->can('update', $post)`.
-                || (is_can
-                    && (receiver_is_user_like || chain_starts_at_route || chain_starts_at_gate))
-                || (is_gate_check_method(func_name) && chain_starts_at_gate)
-            {
-                Some(LaravelStringKind::GateAbility)
-            } else {
-                None
-            }
-        }
+    } else if let Some(attr_start) = attribute_class_start(before_paren, name_start) {
+        StringKey::Whole(attribute_key(&call, attr_start)?)
     } else {
-        let fn_lower = func_name.to_ascii_lowercase();
-        // The Blade preprocessor lowers `@includeFirst`/`@componentFirst`/
-        // `@extendsFirst` and `@canany` to markers that name their candidates
-        // inside an array literal rather than as a plain first argument.
-        let accepts_array = matches!(
-            fn_lower.as_str(),
-            "blade_view_directive" | "blade_component_directive" | "blade_can_directive"
-        );
-        let config_array_key = fn_lower == "config"
-            && argument.matches_parameter(0, "key")
-            && argument.shape.is_array_key();
-        if !config_array_key
-            && (argument.shape == StringArgumentShape::ArrayKey
-                || (argument.shape != StringArgumentShape::Scalar
-                    && (!accepts_array || !before_quote.trim_end().ends_with('['))))
-        {
-            return None;
-        }
-        let mut callable_start = name_start;
-        while callable_start > 0
-            && (bp_bytes[callable_start - 1].is_ascii_alphanumeric()
-                || matches!(bp_bytes[callable_start - 1], b'_' | b'\\'))
-        {
-            callable_start -= 1;
-        }
-        let written_function = &before_paren[callable_start..name_end];
-        if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
-            content,
-            written_function,
-            callable_start as u32,
-            resolved_names,
-            indexed_function_exists,
-        ) {
-            argument
-                .matches_parameter(0, trigger.argument)
-                .then_some(LaravelStringKind::ConfigResource(trigger.kind))
-        } else if config_array_key {
-            Some(LaravelStringKind::Config)
-        } else if argument.named_argument.is_some() || argument.argument_index != 0 {
-            None
-        } else {
-            match fn_lower.as_str() {
-                "route" | "to_route" => Some(LaravelStringKind::Route),
-                "config" => Some(LaravelStringKind::Config),
-                "view"
-                | "blade_view_directive"
-                | "blade_component_directive"
-                | "blade_each_directive" => Some(LaravelStringKind::View),
-                "__" | "trans" | "trans_choice" => Some(LaravelStringKind::Trans),
-                "env" => Some(LaravelStringKind::Env),
-                // The Blade preprocessor lowers `@can`/`@cannot`/`@canany` to
-                // this call, so completion inside the directive works too.
-                "blade_can_directive" => Some(LaravelStringKind::GateAbility),
-                _ => None,
-            }
-        }
+        StringKey::Whole(function_call_key(&call)?)
     };
 
-    let kind = kind?;
-    let config_sub_prefix = match &kind {
-        LaravelStringKind::ConfigResource(resource) => {
-            Some(crate::symbol_map::laravel_resources::descriptor(*resource).config_prefix)
-        }
-        _ => None,
+    let (kind, prefix, content_start_offset) = match key {
+        StringKey::Whole(kind) => (kind, literal, literal_start),
+        StringKey::Middleware {
+            kind,
+            prefix,
+            start,
+        } => (kind, prefix, literal_start + start),
     };
-
     Some(LaravelStringKeyContext {
         kind,
         prefix,
         content_start_offset,
-        config_sub_prefix,
     })
+}
+
+/// The call a string argument is passed to, as the text before the string
+/// spells it.
+struct StringCall<'a, 'f> {
+    content: &'a str,
+    /// The text before the call's `(`.
+    before_paren: &'a str,
+    /// Where the function or method name starts in `before_paren`.
+    name_start: usize,
+    /// The function or method name.
+    name: &'a str,
+    /// The literal typed so far, up to the cursor.
+    literal: &'a str,
+    argument: StringArgumentContext<'a>,
+    resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
+    indexed_function_exists: Option<&'f dyn Fn(&str) -> bool>,
+    indexed_class_exists: Option<&'f dyn Fn(&str) -> bool>,
+}
+
+impl StringCall<'_, '_> {
+    /// Whether the string can name a `kind` in the shape it was written in:
+    /// as a scalar, or as a bare entry of a list the call takes (a value
+    /// under `'key' =>` is not one).
+    fn shape_fits(&self, kind: &LaravelStringKind) -> bool {
+        match self.argument.shape {
+            StringArgumentShape::Scalar => true,
+            StringArgumentShape::ArrayElement => argument_takes_name_list(kind, self.name),
+            StringArgumentShape::ArrayKey | StringArgumentShape::ArrayValue => false,
+        }
+    }
+}
+
+/// What a string argument names, and which part of the literal is the key
+/// being typed.
+enum StringKey<'a> {
+    /// The whole literal typed so far is the key.
+    Whole(LaravelStringKind),
+    /// The key is the part of a middleware string after its `alias:`.
+    Middleware {
+        kind: LaravelStringKind,
+        prefix: &'a str,
+        start: usize,
+    },
+}
+
+/// The middleware key a `->middleware('auth:…')` string is typing.
+fn middleware_key(literal: &str) -> Option<StringKey<'_>> {
+    let (kind, prefix, start) = middleware_completion_context(literal)?;
+    Some(StringKey::Middleware {
+        kind,
+        prefix,
+        start,
+    })
+}
+
+/// A string inside a PHP attribute's arguments: `#[Config('app.name')]`,
+/// grouped attributes, and fully-qualified container attributes.
+fn attribute_key(call: &StringCall<'_, '_>, attr_start: usize) -> Option<LaravelStringKind> {
+    if call.argument.shape != StringArgumentShape::Scalar {
+        return None;
+    }
+    let written_class = &call.before_paren[attr_start..];
+    let reference = semantic_class_reference(written_class, attr_start, call.resolved_names);
+    let slot = call.argument.slot;
+    if resolve_known_class_reference(
+        call.content,
+        reference,
+        "Illuminate\\Container\\Attributes",
+        &["Config"],
+        false,
+        call.indexed_class_exists,
+    )
+    .is_some()
+    {
+        slot.is_first_or_named("key")
+            .then_some(LaravelStringKind::Config)
+    } else if let Some(trigger) =
+        config_resource_attribute_trigger(call.content, reference, call.indexed_class_exists)
+    {
+        slot.is_first_or_named(trigger.argument)
+            .then_some(LaravelStringKind::ConfigResource(trigger.kind))
+    } else if resolve_known_class_reference(
+        call.content,
+        reference,
+        "Illuminate\\Foundation\\Http\\Attributes",
+        &["RedirectToRoute"],
+        false,
+        call.indexed_class_exists,
+    )
+    .is_some()
+    {
+        (slot == ArgumentSlot::Positional(0)).then_some(LaravelStringKind::Route)
+    } else {
+        None
+    }
+}
+
+/// A string passed to a static call: `Config::get('…')`,
+/// `Storage::disk('…')`, `Route::view('/about', '…')`.
+fn static_call_key<'a>(call: &StringCall<'a, '_>, before_colons: &'a str) -> Option<StringKey<'a>> {
+    let bc_bytes = before_colons.as_bytes();
+    let mut cls_start = bc_bytes.len();
+    while cls_start > 0
+        && (bc_bytes[cls_start - 1].is_ascii_alphanumeric()
+            || bc_bytes[cls_start - 1] == b'_'
+            || bc_bytes[cls_start - 1] == b'\\')
+    {
+        cls_start -= 1;
+    }
+    let written_class = &before_colons[cls_start..];
+    let reference = semantic_class_reference(written_class, cls_start, call.resolved_names);
+    let slot = call.argument.slot;
+
+    if is_morph_map_registration_method(call.name)
+        && resolve_known_class_reference(
+            call.content,
+            reference,
+            "Illuminate\\Database\\Eloquent\\Relations",
+            &["Relation"],
+            true,
+            call.indexed_class_exists,
+        )
+        .is_some()
+    {
+        return (slot.is_first_or_named("map") && call.argument.shape.is_array_key())
+            .then_some(StringKey::Whole(LaravelStringKind::MorphAlias));
+    }
+    if call.name.eq_ignore_ascii_case("set")
+        && slot.is_first_or_named("key")
+        && call.argument.shape.is_array_key()
+        && is_laravel_facade_reference(call.content, reference, "Config", call.indexed_class_exists)
+    {
+        return Some(StringKey::Whole(LaravelStringKind::Config));
+    }
+    if let Some(trigger) = config_resource_static_trigger(
+        call.content,
+        reference,
+        call.name,
+        call.indexed_class_exists,
+    ) {
+        let shape_fits = match call.argument.shape {
+            StringArgumentShape::Scalar => trigger.shape.accepts_scalar(),
+            StringArgumentShape::ArrayElement | StringArgumentShape::ArrayValue => {
+                trigger.shape.accepts_array()
+            }
+            StringArgumentShape::ArrayKey => false,
+        };
+        return (slot.is_first_or_named(trigger.argument) && shape_fits).then_some(
+            StringKey::Whole(LaravelStringKind::ConfigResource(trigger.kind)),
+        );
+    }
+    if call.name.eq_ignore_ascii_case("middleware")
+        && slot.is_first_or_named("middleware")
+        && call.argument.shape != StringArgumentShape::ArrayKey
+        && is_laravel_facade_reference(call.content, reference, "Route", call.indexed_class_exists)
+    {
+        return middleware_key(call.literal);
+    }
+
+    // Classified by the class as written, the way the symbol map classifies
+    // the finished call. Resource triggers resolve semantic aliases exactly;
+    // an unrelated `Vendor\Config as Foo` must not make `Foo::get()` read as
+    // Laravel Config.
+    let ArgumentSlot::Positional(index) = slot else {
+        return None;
+    };
+    let clean_class = written_class.trim_start_matches('\\');
+    let kind = facade_static_call_arg_kind(clean_class, call.name, index)?;
+    call.shape_fits(&kind).then_some(StringKey::Whole(kind))
+}
+
+/// A string passed to an instance method call: `redirect()->route('…')`,
+/// `$user->can('…')`, `view()->renderWhen($ok, '…')`.
+///
+/// `receiver` is the text before the call's `->`, and `before_name` the
+/// same text with the `->` itself.
+fn instance_call_key<'a>(
+    call: &StringCall<'a, '_>,
+    receiver: &'a str,
+    before_name: &'a str,
+) -> Option<StringKey<'a>> {
+    let receiver = TextReceiver {
+        call,
+        receiver,
+        before_name,
+        chain_start: OnceCell::new(),
+    };
+    let slot = call.argument.slot;
+    if call.name.eq_ignore_ascii_case("middleware")
+        && slot.is_first_or_named("middleware")
+        && call.argument.shape != StringArgumentShape::ArrayKey
+        && receiver.roots_at_route()
+    {
+        return middleware_key(call.literal);
+    }
+    let ArgumentSlot::Positional(index) = slot else {
+        return None;
+    };
+    let kind = instance_method_arg_kind(call.name, index, &receiver)?;
+    call.shape_fits(&kind).then_some(StringKey::Whole(kind))
+}
+
+/// A string passed to a function: `route('…')`, `config('…')`, and the
+/// markers Blade directives lower to.
+fn function_call_key(call: &StringCall<'_, '_>) -> Option<LaravelStringKind> {
+    let slot = call.argument.slot;
+    let config_array_key = call.name.eq_ignore_ascii_case("config")
+        && slot.is_first_or_named("key")
+        && call.argument.shape.is_array_key();
+    if !config_array_key
+        && call.argument.shape != StringArgumentShape::Scalar
+        && (call.argument.shape != StringArgumentShape::ArrayElement
+            || !helper_function_accepts_name_list(call.name))
+    {
+        return None;
+    }
+    let bp_bytes = call.before_paren.as_bytes();
+    let mut callable_start = call.name_start;
+    while callable_start > 0
+        && (bp_bytes[callable_start - 1].is_ascii_alphanumeric()
+            || matches!(bp_bytes[callable_start - 1], b'_' | b'\\'))
+    {
+        callable_start -= 1;
+    }
+    let written_function = &call.before_paren[callable_start..];
+    if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
+        call.content,
+        written_function,
+        callable_start as u32,
+        call.resolved_names,
+        call.indexed_function_exists,
+    ) {
+        slot.is_first_or_named(trigger.argument)
+            .then_some(LaravelStringKind::ConfigResource(trigger.kind))
+    } else if config_array_key {
+        Some(LaravelStringKind::Config)
+    } else if slot == ArgumentSlot::Positional(0) {
+        helper_function_first_arg_kind(call.name)
+    } else {
+        None
+    }
+}
+
+/// The receiver of an instance method call, read from the text before its
+/// `->`.  Each fact is worked out only when a method name asks for it.
+struct TextReceiver<'a, 'c, 'f> {
+    call: &'c StringCall<'a, 'f>,
+    /// Everything before the `->`, back to the start of the file.
+    receiver: &'a str,
+    /// `receiver` with the call's own `->`, which counts as a link of the
+    /// chain a facade root is looked for down.
+    before_name: &'a str,
+    /// Where the statement the receiver chain is part of starts, found the
+    /// first time a facade root is asked about: only the text back to it is
+    /// searched, since an unrelated `Gate::` far above would false-positive.
+    chain_start: OnceCell<usize>,
+}
+
+impl TextReceiver<'_, '_, '_> {
+    /// Whether the receiver chain starts at a static call on the Laravel
+    /// facade `facade`.
+    fn chain_roots_at(&self, facade: &'static str) -> bool {
+        let start = *self
+            .chain_start
+            .get_or_init(|| receiver_chain_start(self.before_name));
+        chain_starts_at_laravel_facade(
+            self.call.content,
+            &self.before_name[start..],
+            start,
+            self.call.resolved_names,
+            facade,
+            self.call.indexed_class_exists,
+        )
+    }
+}
+
+impl MethodReceiver for TextReceiver<'_, '_, '_> {
+    fn is_this(&self) -> bool {
+        self.receiver.ends_with("$this")
+    }
+
+    // The class the call is typed into may not parse yet, so `$this` reads
+    // as a console command and a mailable alike: a stray suggestion in a
+    // class that turns out to take neither costs less than a missing one.
+    fn is_console_command(&self) -> bool {
+        self.is_this()
+    }
+
+    fn is_mailable(&self) -> bool {
+        self.is_this()
+    }
+
+    /// Mirrors the symbol map's rule: a name ending in `user`, or any
+    /// `user()` call.
+    fn is_user_like(&self) -> bool {
+        let tail = self
+            .receiver
+            .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .next()
+            .unwrap_or("");
+        tail.get(tail.len().saturating_sub(4)..)
+            .is_some_and(|suffix| suffix.eq_ignore_ascii_case("user"))
+            || self
+                .receiver
+                .get(self.receiver.len().saturating_sub(6)..)
+                .is_some_and(|suffix| suffix.eq_ignore_ascii_case("user()"))
+    }
+
+    fn roots_at_gate(&self) -> bool {
+        self.chain_roots_at("Gate")
+    }
+
+    fn roots_at_route(&self) -> bool {
+        self.chain_roots_at("Route")
+    }
+
+    fn is_route_name_helper(&self) -> bool {
+        ["redirect", "url", "response"]
+            .iter()
+            .any(|helper| ends_with_bare_helper_call(self.receiver, helper))
+    }
+
+    fn is_view_factory(&self) -> bool {
+        ends_with_bare_helper_call(self.receiver, "view")
+    }
+
+    fn is_config_repository(&self) -> bool {
+        ends_with_bare_helper_call(self.receiver, "config")
+    }
+
+    fn is_container(&self) -> bool {
+        ends_with_bare_helper_call(self.receiver, "app")
+            || self.receiver.ends_with("$this->app")
+            || self.receiver.ends_with("$app")
+    }
+}
+
+/// Whether `text` ends with a call to the function `name` that passes no
+/// arguments, `name()` or `\name()`, rather than a method of that name.
+fn ends_with_bare_helper_call(text: &str, name: &str) -> bool {
+    let Some(before_close) = text.strip_suffix(')') else {
+        return false;
+    };
+    let Some(before_open) = before_close.trim_end().strip_suffix('(') else {
+        return false;
+    };
+    let before_open = before_open.trim_end();
+    let name_start = scan_ident_backward(before_open.as_bytes(), before_open.len());
+    if !before_open[name_start..].eq_ignore_ascii_case(name) {
+        return false;
+    }
+    let before_name = before_open[..name_start]
+        .strip_suffix('\\')
+        .unwrap_or(&before_open[..name_start])
+        .trim_end();
+    !(before_name.ends_with("->")
+        || before_name.ends_with("::")
+        || before_name.ends_with('$')
+        || before_name.ends_with("new")
+        || before_name.ends_with("function"))
 }

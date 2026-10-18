@@ -167,6 +167,7 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
                     is_reference: false,
                     closure_this_type: None,
                     param_out_type: None,
+                    callable_invocation: None,
                 };
                 info.apply_null_default(|name| method.templates.iter().any(|t| t.name == name));
                 info

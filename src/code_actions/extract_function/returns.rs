@@ -77,89 +77,7 @@ pub(crate) fn analyse_returns(
 pub(crate) fn selection_stmt_contains_return(stmt: &Statement<'_>) -> bool {
     match stmt {
         Statement::Return(_) => true,
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => {
-                selection_stmt_contains_return(body.statement)
-                    || body
-                        .else_if_clauses
-                        .iter()
-                        .any(|c| selection_stmt_contains_return(c.statement))
-                    || body
-                        .else_clause
-                        .as_ref()
-                        .is_some_and(|c| selection_stmt_contains_return(c.statement))
-            }
-            IfBody::ColonDelimited(body) => {
-                body.statements
-                    .iter()
-                    .any(|s| selection_stmt_contains_return(s))
-                    || body.else_if_clauses.iter().any(|c| {
-                        c.statements
-                            .iter()
-                            .any(|s| selection_stmt_contains_return(s))
-                    })
-                    || body.else_clause.as_ref().is_some_and(|c| {
-                        c.statements
-                            .iter()
-                            .any(|s| selection_stmt_contains_return(s))
-                    })
-            }
-        },
-        Statement::Foreach(f) => match &f.body {
-            ForeachBody::Statement(s) => selection_stmt_contains_return(s),
-            ForeachBody::ColonDelimited(b) => b
-                .statements
-                .iter()
-                .any(|s| selection_stmt_contains_return(s)),
-        },
-        Statement::While(w) => match &w.body {
-            WhileBody::Statement(s) => selection_stmt_contains_return(s),
-            WhileBody::ColonDelimited(b) => b
-                .statements
-                .iter()
-                .any(|s| selection_stmt_contains_return(s)),
-        },
-        Statement::DoWhile(dw) => selection_stmt_contains_return(dw.statement),
-        Statement::For(f) => match &f.body {
-            ForBody::Statement(s) => selection_stmt_contains_return(s),
-            ForBody::ColonDelimited(b) => b
-                .statements
-                .iter()
-                .any(|s| selection_stmt_contains_return(s)),
-        },
-        Statement::Switch(sw) => sw.body.cases().iter().any(|c| match c {
-            SwitchCase::Expression(e) => e
-                .statements
-                .iter()
-                .any(|s| selection_stmt_contains_return(s)),
-            SwitchCase::Default(d) => d
-                .statements
-                .iter()
-                .any(|s| selection_stmt_contains_return(s)),
-        }),
-        Statement::Try(t) => {
-            t.block
-                .statements
-                .iter()
-                .any(|s| selection_stmt_contains_return(s))
-                || t.catch_clauses.iter().any(|c| {
-                    c.block
-                        .statements
-                        .iter()
-                        .any(|s| selection_stmt_contains_return(s))
-                })
-                || t.finally_clause.as_ref().is_some_and(|f| {
-                    f.block
-                        .statements
-                        .iter()
-                        .any(|s| selection_stmt_contains_return(s))
-                })
-        }
-        Statement::Block(b) => b
-            .statements
-            .iter()
-            .any(|s| selection_stmt_contains_return(s)),
-        _ => false,
+        _ => crate::parser::any_nested_statement(stmt, selection_stmt_contains_return),
     }
 }
 
@@ -216,6 +134,16 @@ pub(crate) enum ReturnStrategy {
     Unsafe,
 }
 
+/// A `return` statement the selected code owns, as opposed to one inside a
+/// nested function or closure, which returns from that instead.
+pub(crate) struct OwnReturn<'a> {
+    /// The returned expression's source text, `None` for a bare `return;`.
+    pub(crate) value: Option<&'a str>,
+    /// The bytes from just past the `return` keyword to the terminator: what
+    /// a rewrite to another value replaces.
+    pub(crate) after_keyword: std::ops::Range<usize>,
+}
+
 /// Collect the source text of every `return` expression in the selected
 /// statements.
 ///
@@ -225,6 +153,17 @@ pub(crate) fn collect_return_expressions<'a>(
     content: &'a str,
     stmts: &[&Statement<'_>],
 ) -> Vec<Option<&'a str>> {
+    collect_own_returns(content, stmts.iter().copied())
+        .into_iter()
+        .map(|own| own.value)
+        .collect()
+}
+
+/// Every `return` statement `stmts` own, in source order.
+pub(crate) fn collect_own_returns<'a, 's, 'ast: 's>(
+    content: &'a str,
+    stmts: impl IntoIterator<Item = &'s Statement<'ast>>,
+) -> Vec<OwnReturn<'a>> {
     let mut out = Vec::new();
     for stmt in stmts {
         collect_returns_from_stmt(content, stmt, &mut out);
@@ -232,104 +171,26 @@ pub(crate) fn collect_return_expressions<'a>(
     out
 }
 
-/// Recursively collect return expressions from a single statement.
-pub(crate) fn collect_returns_from_stmt<'a>(
+/// Recursively collect the returns a single statement owns.
+fn collect_returns_from_stmt<'a>(
     content: &'a str,
     stmt: &Statement<'_>,
-    out: &mut Vec<Option<&'a str>>,
+    out: &mut Vec<OwnReturn<'a>>,
 ) {
     match stmt {
-        Statement::Return(ret) => {
-            let expr_text = ret.value.as_ref().map(|expr| {
-                let s = expr.span().start.offset as usize;
-                let e = expr.span().end.offset as usize;
-                content[s..e].trim()
-            });
-            out.push(expr_text);
-        }
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => {
-                collect_returns_from_stmt(content, body.statement, out);
-                for c in &body.else_if_clauses {
-                    collect_returns_from_stmt(content, c.statement, out);
-                }
-                if let Some(c) = &body.else_clause {
-                    collect_returns_from_stmt(content, c.statement, out);
-                }
+        Statement::Return(ret) => out.push(OwnReturn {
+            value: ret.value.as_ref().map(|expr| {
+                let span = expr.span();
+                content[span.start.offset as usize..span.end.offset as usize].trim()
+            }),
+            after_keyword: ret.r#return.span().end.offset as usize
+                ..ret.terminator.span().start.offset as usize,
+        }),
+        _ => crate::parser::for_each_nested_statement_list(stmt, |nested| {
+            for inner in nested {
+                collect_returns_from_stmt(content, inner, out);
             }
-            IfBody::ColonDelimited(body) => {
-                for s in &body.statements {
-                    collect_returns_from_stmt(content, s, out);
-                }
-                for c in &body.else_if_clauses {
-                    for s in &c.statements {
-                        collect_returns_from_stmt(content, s, out);
-                    }
-                }
-                if let Some(c) = &body.else_clause {
-                    for s in &c.statements {
-                        collect_returns_from_stmt(content, s, out);
-                    }
-                }
-            }
-        },
-        Statement::Foreach(f) => match &f.body {
-            ForeachBody::Statement(s) => collect_returns_from_stmt(content, s, out),
-            ForeachBody::ColonDelimited(b) => {
-                for s in &b.statements {
-                    collect_returns_from_stmt(content, s, out);
-                }
-            }
-        },
-        Statement::While(w) => match &w.body {
-            WhileBody::Statement(s) => collect_returns_from_stmt(content, s, out),
-            WhileBody::ColonDelimited(b) => {
-                for s in &b.statements {
-                    collect_returns_from_stmt(content, s, out);
-                }
-            }
-        },
-        Statement::DoWhile(dw) => collect_returns_from_stmt(content, dw.statement, out),
-        Statement::For(f) => match &f.body {
-            ForBody::Statement(s) => collect_returns_from_stmt(content, s, out),
-            ForBody::ColonDelimited(b) => {
-                for s in &b.statements {
-                    collect_returns_from_stmt(content, s, out);
-                }
-            }
-        },
-        Statement::Switch(sw) => {
-            for c in sw.body.cases().iter() {
-                let stmts = match c {
-                    SwitchCase::Expression(e) => &e.statements,
-                    SwitchCase::Default(d) => &d.statements,
-                };
-                for s in stmts.iter() {
-                    collect_returns_from_stmt(content, s, out);
-                }
-            }
-        }
-        Statement::Try(t) => {
-            for s in &t.block.statements {
-                collect_returns_from_stmt(content, s, out);
-            }
-            for c in &t.catch_clauses {
-                for s in &c.block.statements {
-                    collect_returns_from_stmt(content, s, out);
-                }
-            }
-            if let Some(f) = &t.finally_clause {
-                for s in &f.block.statements {
-                    collect_returns_from_stmt(content, s, out);
-                }
-            }
-        }
-        Statement::Block(b) => {
-            for s in &b.statements {
-                collect_returns_from_stmt(content, s, out);
-            }
-        }
-        _ => {}
+        }),
     }
 }
 
@@ -515,33 +376,46 @@ pub(crate) fn sort_params_by_enclosing_order(
     params
 }
 
-/// Resolve the return type of the enclosing function/method at `offset`.
-///
-/// Extracts the native return type hint from the function signature.
-pub(crate) fn resolve_enclosing_return_type(content: &str, offset: u32) -> PhpType {
-    crate::parser::with_parsed_program(content, "extract_function", |program, _| {
-        let ctx = find_cursor_context(&program.statements, offset);
+/// The return types the function or method enclosing an offset declares.
+pub(crate) struct EnclosingReturnTypes {
+    /// The native return type hint, or untyped without one.
+    pub(crate) native: PhpType,
+    /// The `@return` type its docblock declares, as written.
+    pub(crate) docblock: Option<PhpType>,
+}
 
-        let ty = match ctx {
-            CursorContext::InClassLike { member, .. } => {
-                if let MemberContext::Method(method, true) = member {
-                    method
-                        .return_type_hint
-                        .as_ref()
-                        .map(|h| crate::parser::extract_hint_type(&h.hint))
-                        .unwrap_or_else(PhpType::untyped)
-                } else {
-                    PhpType::untyped()
-                }
-            }
-            CursorContext::InFunction(func, true) => func
-                .return_type_hint
-                .as_ref()
-                .map(|h| crate::parser::extract_hint_type(&h.hint))
-                .unwrap_or_else(PhpType::untyped),
-            _ => PhpType::untyped(),
+impl EnclosingReturnTypes {
+    pub(crate) fn none() -> Self {
+        EnclosingReturnTypes {
+            native: PhpType::untyped(),
+            docblock: None,
+        }
+    }
+}
+
+/// The return types the function or method whose body holds `offset`
+/// declares.
+pub(crate) fn enclosing_return_types(content: &str, offset: u32) -> EnclosingReturnTypes {
+    crate::parser::with_parsed_program(content, "extract_function", |program, content| {
+        let (hint, span) = match find_cursor_context(&program.statements, offset) {
+            CursorContext::InClassLike {
+                member: MemberContext::Method(method, true),
+                ..
+            } => (method.return_type_hint.as_ref(), method.span()),
+            CursorContext::InFunction(func, true) => (func.return_type_hint.as_ref(), func.span()),
+            _ => return None,
         };
-        Some(ty)
+        Some(EnclosingReturnTypes {
+            native: hint.map_or_else(PhpType::untyped, |h| {
+                crate::parser::extract_hint_type(&h.hint)
+            }),
+            docblock: crate::docblock::get_docblock_text_for_node(
+                program.trivia.as_slice(),
+                content,
+                &span,
+            )
+            .and_then(crate::docblock::extract_return_type),
+        })
     })
-    .unwrap_or_else(PhpType::untyped)
+    .unwrap_or_else(EnclosingReturnTypes::none)
 }

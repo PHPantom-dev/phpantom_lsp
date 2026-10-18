@@ -104,6 +104,80 @@ impl crate::Backend {
             },
         )
     }
+
+    /// Derive the view names a Blade file is addressable by: one per
+    /// configured view root that contains it, in dot notation, plus
+    /// `namespace::name` forms for provider-registered directories.
+    pub(crate) fn view_names_for_blade_uri(&self, uri: &str) -> Vec<String> {
+        let Ok(url) = tower_lsp::lsp_types::Url::parse(uri) else {
+            return Vec::new();
+        };
+        let Ok(path) = url.to_file_path() else {
+            return Vec::new();
+        };
+
+        let mut names = Vec::new();
+        let mut push_name = |rel: &std::path::Path, namespace: &str| {
+            let rel_str = rel.to_string_lossy();
+            let stripped = rel_str
+                .strip_suffix(".blade.php")
+                .or_else(|| rel_str.strip_suffix(".php"));
+            if let Some(stem) = stripped {
+                let name = stem.replace(['/', '\\'], ".");
+                if namespace.is_empty() {
+                    names.push(name);
+                } else {
+                    names.push(format!("{namespace}::{name}"));
+                }
+            }
+        };
+
+        // Each root is tried against the raw spelling first, so the common
+        // case costs no filesystem calls, and only falls back to canonical
+        // spellings when the raw ones do not line up.  Canonicalizing the
+        // template instead of trying it raw would lose one that is itself
+        // a symlink into a shared directory, since that resolves out of
+        // the view root it sits under.
+        let canonical = std::cell::OnceCell::new();
+        let mut match_root = |root: &std::path::Path,
+                              canonical_root: &dyn Fn() -> Option<std::path::PathBuf>,
+                              namespace: &str| {
+            if let Ok(rel) = path.strip_prefix(root) {
+                push_name(rel, namespace);
+                return;
+            }
+            // A view root can be relative when the workspace root was
+            // given relative (the analyse CLI passes `--project-root`
+            // through as-is), while `path` came from a file URI and is
+            // always absolute.
+            let Some(root) = canonical_root() else {
+                return;
+            };
+            if let Ok(rel) = path.strip_prefix(&root) {
+                push_name(rel, namespace);
+                return;
+            }
+            // The workspace itself can be reached under an alias: macOS
+            // exposes the same directory through both `/var` and
+            // `/private/var`, so a canonical root and a raw template path
+            // describe the same tree under two names.
+            let canonical =
+                canonical.get_or_init(|| crate::util::canonical_path_for_comparison(&path));
+            if let Ok(rel) = canonical.strip_prefix(&root) {
+                push_name(rel, namespace);
+            }
+        };
+
+        // The configured roots come canonicalized already; a provider's
+        // directory is only resolved when its raw spelling misses.
+        for root in self.laravel_view_roots().iter() {
+            match_root(&root.path, &|| root.canonical.clone(), "");
+        }
+        for res in &self.laravel_provider_resources.read().view_dirs {
+            match_root(&res.path, &|| res.path.canonicalize().ok(), &res.namespace);
+        }
+        names
+    }
 }
 
 /// Parse `config/view.php` to extract the `'paths'` array entries.

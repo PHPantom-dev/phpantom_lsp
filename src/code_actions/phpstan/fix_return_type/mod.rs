@@ -48,19 +48,20 @@ pub(crate) use inference::enrichment_return_type;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::phpstan::add_iterable_type::{
-    find_function_docblock, find_function_keyword_line as find_func_keyword_line,
-};
+use crate::code_actions::find_function_keyword_line as find_func_keyword_line;
+use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::php_type::PhpType;
-use crate::text_position::ranges_overlap;
 
 use edits::{
     build_change_return_type_edits_to, build_strip_return_expr_edit,
     build_update_return_type_edits, build_update_return_type_edits_split,
-    find_close_paren_before_brace, find_function_open_brace_line, find_open_brace_from_declaration,
-    gather_between_paren_and_brace, has_return_type_between, read_current_return_type,
-    should_use_own_inference,
+    find_function_open_brace_line, gather_between_paren_and_brace, has_return_type_between,
+    read_current_return_type, should_use_own_inference,
+};
+pub(in crate::code_actions::phpstan) use edits::{
+    find_close_paren_before_brace, find_open_brace_from_declaration, find_return_type_edit,
+    native_return_type, paren_function_docblock,
 };
 use message_parse::{
     RETURN_EMPTY_MSG_FRAGMENT, RETURN_VOID_MSG_SUFFIX, extract_actual_type,
@@ -111,19 +112,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             let diag_line = diag.range.start.line as usize;
@@ -402,91 +395,13 @@ impl Backend {
                 });
 
                 // When the effective type is richer than the native hint,
-                // add a `@return` docblock tag.
-                if let Some(ref eff_type) = inferred.effective {
-                    let eff = eff_type.to_string();
-                    let func_line = find_func_keyword_line(&lines, paren_line).unwrap_or(diag_line);
-                    let docblock_info = find_function_docblock(&lines, func_line);
-
-                    if docblock_info.has_docblock {
-                        if !docblock_info.has_return_tag {
-                            // Insert @return into the existing docblock.
-                            let doc_end = docblock_info.doc_end_line;
-                            let close_line = lines[doc_end];
-
-                            if docblock_info.doc_start_line == doc_end {
-                                // Single-line docblock: convert to multi-line.
-                                let trimmed = close_line.trim();
-                                let inner = trimmed
-                                    .strip_prefix("/**")
-                                    .and_then(|s| s.strip_suffix("*/"))
-                                    .map(|s| s.trim())
-                                    .unwrap_or("");
-
-                                let indent = &docblock_info.indent;
-                                let mut new_doc = format!("{}/**\n", indent);
-                                if !inner.is_empty() {
-                                    new_doc.push_str(&format!("{} * {}\n", indent, inner));
-                                    new_doc.push_str(&format!("{} *\n", indent));
-                                }
-                                new_doc.push_str(&format!("{} * @return {}\n", indent, eff));
-                                new_doc.push_str(&format!("{} */", indent));
-
-                                edits.push(TextEdit {
-                                    range: Range {
-                                        start: Position::new(doc_end as u32, 0),
-                                        end: Position::new(doc_end as u32, close_line.len() as u32),
-                                    },
-                                    new_text: new_doc,
-                                });
-                            } else {
-                                // Multi-line docblock: insert @return before `*/`.
-                                let indent = &docblock_info.indent;
-
-                                let prev_line = if doc_end > docblock_info.doc_start_line {
-                                    lines[doc_end - 1].trim()
-                                } else {
-                                    ""
-                                };
-                                let prev_trimmed = prev_line.trim_start_matches('*').trim();
-                                let needs_separator = !prev_trimmed.is_empty()
-                                    && !prev_trimmed.starts_with("@return")
-                                    && !prev_trimmed.starts_with("@throws")
-                                    && prev_trimmed.starts_with('@');
-
-                                let mut insert_text = String::new();
-                                if needs_separator {
-                                    insert_text.push_str(&format!("{} *\n", indent));
-                                }
-                                insert_text.push_str(&format!("{} * @return {}\n", indent, eff));
-
-                                edits.push(TextEdit {
-                                    range: Range {
-                                        start: Position::new(doc_end as u32, 0),
-                                        end: Position::new(doc_end as u32, 0),
-                                    },
-                                    new_text: insert_text,
-                                });
-                            }
-                        }
-                        // If the docblock already has a @return tag, we
-                        // don't overwrite it — the user intentionally
-                        // wrote it.
-                    } else {
-                        // No existing docblock — create one.
-                        let indent = &docblock_info.indent;
-                        let new_doc = format!(
-                            "{}/**\n{} * @return {}\n{} */\n",
-                            indent, indent, eff, indent
-                        );
-                        edits.push(TextEdit {
-                            range: Range {
-                                start: Position::new(func_line as u32, 0),
-                                end: Position::new(func_line as u32, 0),
-                            },
-                            new_text: new_doc,
-                        });
-                    }
+                // add a `@return` docblock tag.  An existing `@return` tag
+                // is left alone: the user wrote it on purpose.
+                if let Some(ref eff_type) = inferred.effective
+                    && let Some(docblock) = paren_function_docblock(content, paren_line, paren_col)
+                    && docblock.return_tag().is_none()
+                {
+                    edits.push(docblock.add_return_tag_edit(content, &eff_type.to_string()));
                 }
 
                 Some(crate::code_actions::single_file_edit(doc_uri, edits))
@@ -507,7 +422,7 @@ impl Backend {
 /// For `return.empty`: the diagnostic is stale when the enclosing
 /// function's return type declaration already says `void`.
 ///
-/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/mod.rs`.
+/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/stale.rs`.
 pub(crate) fn is_fix_return_type_stale(content: &str, diag_line: usize, identifier: &str) -> bool {
     let lines: Vec<&str> = content.lines().collect();
 

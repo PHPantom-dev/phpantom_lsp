@@ -50,3 +50,18 @@ pub(crate) use scope_map::{
     AccessKind, AccessRole, ByRefCallKind, ByRefResolver, ClosureUseList, Frame, FrameKind,
     ScopeMap,
 };
+
+/// PHP's auto-globals, which every scope sees without a `global`
+/// declaration.  A closure cannot list one in its `use` clause: PHP
+/// rejects that as a fatal error.
+pub(crate) const AUTO_GLOBALS: [&str; 9] = [
+    "$GLOBALS",
+    "$_SERVER",
+    "$_GET",
+    "$_POST",
+    "$_FILES",
+    "$_COOKIE",
+    "$_SESSION",
+    "$_REQUEST",
+    "$_ENV",
+];

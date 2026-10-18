@@ -102,61 +102,44 @@ pub(crate) fn drop_leg_answers_the_base_rules_out(leg: &mut ScopeState, base: &S
 /// it into `[a, b, c]`.  Non-`&&` expressions return a single-element
 /// list.
 pub(crate) fn collect_and_chain_operands<'b>(expr: &'b Expression<'b>) -> Vec<&'b Expression<'b>> {
-    let mut operands = Vec::new();
-    collect_and_chain_operands_inner(expr, &mut operands);
-    operands
-}
-
-fn collect_and_chain_operands_inner<'b>(
-    expr: &'b Expression<'b>,
-    out: &mut Vec<&'b Expression<'b>>,
-) {
-    if let Expression::Binary(bin) = expr
-        && matches!(
-            bin.operator,
-            BinaryOperator::And(_) | BinaryOperator::LowAnd(_)
-        )
-    {
-        collect_and_chain_operands_inner(bin.lhs, out);
-        collect_and_chain_operands_inner(bin.rhs, out);
-        return;
-    }
-    // Also unwrap parenthesised `&&` chains.
-    if let Expression::Parenthesized(inner) = expr {
-        let inner_ops = collect_and_chain_operands(inner.expression);
-        if inner_ops.len() > 1 {
-            out.extend(inner_ops);
-            return;
-        }
-    }
-    out.push(narrowing::fold_negation_pairs(expr));
+    collect_chain_operands(expr, |op| {
+        matches!(op, BinaryOperator::And(_) | BinaryOperator::LowAnd(_))
+    })
 }
 
 /// Collect operands of a `||` chain into a left-to-right list, the way
 /// [`collect_and_chain_operands`] does for `&&`.
 pub(crate) fn collect_or_chain_operands<'b>(expr: &'b Expression<'b>) -> Vec<&'b Expression<'b>> {
+    collect_chain_operands(expr, |op| {
+        matches!(op, BinaryOperator::Or(_) | BinaryOperator::LowOr(_))
+    })
+}
+
+/// The operands of a chain of the operator `joins` accepts, left to right,
+/// with parenthesised sub-chains of the same operator flattened in.
+fn collect_chain_operands<'b>(
+    expr: &'b Expression<'b>,
+    joins: fn(&BinaryOperator<'_>) -> bool,
+) -> Vec<&'b Expression<'b>> {
     let mut operands = Vec::new();
-    collect_or_chain_operands_inner(expr, &mut operands);
+    collect_chain_operands_inner(expr, joins, &mut operands);
     operands
 }
 
-fn collect_or_chain_operands_inner<'b>(
+fn collect_chain_operands_inner<'b>(
     expr: &'b Expression<'b>,
+    joins: fn(&BinaryOperator<'_>) -> bool,
     out: &mut Vec<&'b Expression<'b>>,
 ) {
     if let Expression::Binary(bin) = expr
-        && matches!(
-            bin.operator,
-            BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
-        )
+        && joins(&bin.operator)
     {
-        collect_or_chain_operands_inner(bin.lhs, out);
-        collect_or_chain_operands_inner(bin.rhs, out);
+        collect_chain_operands_inner(bin.lhs, joins, out);
+        collect_chain_operands_inner(bin.rhs, joins, out);
         return;
     }
-    // Also unwrap parenthesised `||` chains.
     if let Expression::Parenthesized(inner) = expr {
-        let inner_ops = collect_or_chain_operands(inner.expression);
+        let inner_ops = collect_chain_operands(inner.expression, joins);
         if inner_ops.len() > 1 {
             out.extend(inner_ops);
             return;

@@ -105,101 +105,15 @@ pub(crate) fn collect_assignment_deps(
         Statement::Expression(expr_stmt) => {
             collect_expr_assignment_deps(expr_stmt.expression, deps);
         }
-        Statement::If(if_stmt) => {
-            // Walk all branches via the IfBody enum.
-            match &if_stmt.body {
-                IfBody::Statement(body) => {
-                    collect_assignment_deps(body.statement, deps);
-                    for ei in body.else_if_clauses.iter() {
-                        collect_assignment_deps(ei.statement, deps);
-                    }
-                    if let Some(ref else_clause) = body.else_clause {
-                        collect_assignment_deps(else_clause.statement, deps);
-                    }
-                }
-                IfBody::ColonDelimited(body) => {
-                    for s in body.statements.iter() {
-                        collect_assignment_deps(s, deps);
-                    }
-                    for ei in body.else_if_clauses.iter() {
-                        for s in ei.statements.iter() {
-                            collect_assignment_deps(s, deps);
-                        }
-                    }
-                    if let Some(ref else_clause) = body.else_clause {
-                        for s in else_clause.statements.iter() {
-                            collect_assignment_deps(s, deps);
-                        }
-                    }
-                }
-            }
-        }
-        Statement::Block(block) => {
-            for s in block.statements.iter() {
-                collect_assignment_deps(s, deps);
-            }
-        }
-        Statement::Try(try_stmt) => {
-            for s in try_stmt.block.statements.iter() {
-                collect_assignment_deps(s, deps);
-            }
-            for catch in try_stmt.catch_clauses.iter() {
-                for s in catch.block.statements.iter() {
-                    collect_assignment_deps(s, deps);
-                }
-            }
-            if let Some(ref finally) = try_stmt.finally_clause {
-                for s in finally.block.statements.iter() {
-                    collect_assignment_deps(s, deps);
-                }
-            }
-        }
-        Statement::Switch(switch) => {
-            for case in switch.body.cases().iter() {
-                for s in case.statements().iter() {
-                    collect_assignment_deps(s, deps);
-                }
-            }
-        }
-        // Nested loops: walk their bodies too.
-        Statement::Foreach(f) => {
-            collect_foreach_header_deps(f, deps);
-            match &f.body {
-                ForeachBody::Statement(s) => {
-                    collect_assignment_deps(s, deps);
-                }
-                ForeachBody::ColonDelimited(body) => {
-                    for s in body.statements.iter() {
-                        collect_assignment_deps(s, deps);
-                    }
-                }
-            }
-        }
-        Statement::While(w) => match &w.body {
-            WhileBody::Statement(s) => {
-                collect_assignment_deps(s, deps);
-            }
-            WhileBody::ColonDelimited(body) => {
-                for s in body.statements.iter() {
-                    collect_assignment_deps(s, deps);
-                }
-            }
-        },
-        Statement::For(f) => match &f.body {
-            ForBody::Statement(s) => {
-                collect_assignment_deps(s, deps);
-            }
-            ForBody::ColonDelimited(body) => {
-                for s in body.statements.iter() {
-                    collect_assignment_deps(s, deps);
-                }
-            }
-        },
-        Statement::DoWhile(dw) => {
-            collect_assignment_deps(dw.statement, deps);
-        }
+        // Nested loops: their headers assign too.
+        Statement::Foreach(f) => collect_foreach_header_deps(f, deps),
         _ => {}
     }
+    crate::parser::for_each_nested_statement_list(stmt, |nested| {
+        for s in nested {
+            collect_assignment_deps(s, deps);
+        }
+    });
 }
 
 /// Extract assignment dependencies from an expression.
@@ -254,7 +168,9 @@ pub(crate) fn collect_expr_assignment_deps(
     }
 }
 
-fn increment_decrement_operand<'a>(expr: &'a Expression<'a>) -> Option<&'a Expression<'a>> {
+pub(crate) fn increment_decrement_operand<'a>(
+    expr: &'a Expression<'a>,
+) -> Option<&'a Expression<'a>> {
     use mago_syntax::cst::unary::UnaryPrefixOperator;
 
     match expr {

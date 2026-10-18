@@ -695,4 +695,29 @@ Lib\helper();
             diags,
         );
     }
+
+    /// An existence check spelled inside a string guards nothing; one in
+    /// an `elseif` condition guards its branch.
+    #[test]
+    fn only_a_real_existence_check_guards_a_call() {
+        let php = r#"<?php
+function test(bool $flag): void {
+    if ($flag) {
+        echo 'if (function_exists("maybe")) {';
+        maybe();
+    } elseif (function_exists('later')) {
+        later();
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.iter().any(|d| d.message.contains("maybe")),
+            "the string is not a guard, got: {diags:?}",
+        );
+        assert!(
+            !diags.iter().any(|d| d.message.contains("later")),
+            "the `elseif` check guards its branch, got: {diags:?}",
+        );
+    }
 }

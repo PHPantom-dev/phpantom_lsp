@@ -31,7 +31,7 @@ module tree moves around:
 - **Parsing** is in `parser/` (PHP source → `ClassInfo`/`FunctionInfo`)
   and `docblock/` (PHPDoc tags, templates, conditional types).
 - **The data model** is in `types/` and `php_type/`.
-- **Cross-file symbol resolution** is `resolution.rs` (class/function
+- **Cross-file symbol resolution** is `resolution/` (class/function
   lookup), with `composer.rs`/`classmap_scanner/` for autoloading,
   `inheritance/` for merging parent/trait/mixin members, and
   `virtual_members/` for synthesized members (`@method`/`@property`,
@@ -304,6 +304,7 @@ destroys in-progress builds for everyone.
 
 - **No diagnostic suppression.** Every diagnostic the LSP emits must be grounded in correct type resolution. Hiding a false positive by suppressing the diagnostic, adding a special-case exclusion, or falling back to a less-accurate resolver that happens to return empty results is **forbidden**. A no-op tool has zero false positives too. The goal is an accurate type engine, not a low error count. If a diagnostic fires incorrectly, fix the type resolution that feeds it. If the fix is too complex for the current task, file a bug instead of suppressing the symptom.
 - **Feature precedence.** Class own members > trait members > parent chain > mixins. This is PHP's actual resolution order.
+- **Resolve each class name once, by the rule for where it was written.** A name written in the file, in code or in a docblock, follows PHP's rule: the imports, else the current namespace, never a global class. A name the engine already resolved is an exact FQN. Read [Source Names and Resolved Names](docs/ARCHITECTURE.md#source-names-and-resolved-names) before choosing a class loader. The mistakes that keep recurring: handing a resolved FQN back to the source loader or `resolve_code_class_name`, building `Foo\Bar::X` text from a resolved name without a leading `\`, reading another file's text (a callee's parameter defaults, a constant initializer) with the call site's loader, and identifying a class by `ClassInfo::name` or `find_class_by_name` instead of its FQN. Test name-resolution changes with a global class and a namespaced class that share a short name, with and without an import, and from a caller in a different namespace than the declaration.
 - **User-facing writing style.** In the README, changelog, release notes, and other user-facing docs, prefer general claims over checklists of specific sub-features. Enumerating what works implies the unlisted parts don't. Write "**Generics.** `@template` with type substitution through inheritance chains and at call sites" rather than "Class-level and method-level `@template` with ..." since the latter invites the reader to wonder what other levels are missing.
 - **Match the writing style of surrounding documentation.** Keep punctuation, tone, and structure consistent with the file you're editing.
 - **No task IDs in code or test comments.** The backlog files (`docs/todo/bugs.md`, `docs/todo/type-inference.md`, etc.) use transient identifiers like `B17`, `T18`, `L12`. These get reassigned as items are completed and removed, so a comment like `// B13: Skip when cursor is inside the RHS` becomes meaningless within weeks. Instead, describe the *behaviour* the code handles. The commit history is the link between a bug report and its fix, not inline comments.

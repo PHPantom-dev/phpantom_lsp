@@ -1,0 +1,21 @@
+// test: an override without a docblock keeps its parent's conditional return type
+// feature: hover
+// expect: array{int}
+---
+<?php
+
+class Base {
+    /**
+     * @return ($p is int ? int : string)
+     */
+    public function pick($p) {}
+}
+
+class Child extends Base {
+    public function pick($p) {}
+}
+
+function demo(Child $child): void {
+    $picked = [$child->pick(1)];
+    echo $pic<>ked;
+}

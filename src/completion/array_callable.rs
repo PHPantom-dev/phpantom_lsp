@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::text_position::position_to_offset;
-use crate::types::{AccessKind, FileContext};
+use crate::types::{AccessKind, ClassInfo, FileContext};
 
 // ─── Context ────────────────────────────────────────────────────────────────
 
@@ -58,31 +58,7 @@ pub(crate) fn detect_array_callable_context(
     }
 
     // ── Step 1: Find the opening quote before the cursor ────────────
-    let mut quote_pos = None;
-    let mut i = cursor_offset;
-    while i > 0 {
-        i -= 1;
-        let ch = bytes[i];
-        if ch == b'\'' || ch == b'"' {
-            // Make sure this isn't an escaped quote.
-            let mut backslashes = 0;
-            let mut j = i;
-            while j > 0 && bytes[j - 1] == b'\\' {
-                backslashes += 1;
-                j -= 1;
-            }
-            if backslashes % 2 == 0 {
-                quote_pos = Some(i);
-                break;
-            }
-        }
-        // Stop at newlines — strings don't span lines.
-        if ch == b'\n' {
-            return None;
-        }
-    }
-
-    let quote_pos = quote_pos?;
+    let quote_pos = crate::text_scan::open_quote_before(content, cursor_offset)?;
     let string_content_start = quote_pos + 1;
 
     // The partial text typed so far (the method name prefix).
@@ -201,13 +177,6 @@ impl Backend {
     /// When the cursor is inside the method-name string of
     /// `[Class::class, '|']` or `[$obj, '|']`, resolve the class and
     /// offer its methods as completion items.
-    ///
-    /// Reuses the standard member-completion builder so that items have
-    /// the same rich formatting (label details, return type, deprecation
-    /// tags, `data` for lazy documentation resolve) as regular `->` / `::`
-    /// member completions.  The only post-processing is stripping snippet
-    /// parentheses from `insert_text` since we are inserting into a string
-    /// literal, not code.
     pub(crate) fn try_array_callable_completion(
         &self,
         uri: &str,
@@ -216,139 +185,102 @@ impl Backend {
         ctx: &FileContext,
     ) -> Option<CompletionResponse> {
         let ac_ctx = detect_array_callable_context(content, position)?;
+        let cursor_offset = position_to_offset(content, position);
+        let loaders = self.file_loaders(ctx);
+        let load = loaders.resolved_class_loader();
 
-        let class_loader = self.class_loader(ctx);
-
-        // Resolve the subject to a ClassInfo.
         let class_info = if ac_ctx.is_static {
             // `Class::class` — resolve the class name to FQN and load.
-            let fqn = resolve_class_name_to_fqn(self, &ac_ctx.subject, ctx)?;
-            class_loader(&fqn)?
+            load(&resolve_class_name_to_fqn(self, &ac_ctx.subject, ctx))?
+        } else if ac_ctx.subject == "$this" {
+            Arc::clone(crate::class_lookup::find_shared_class_at_offset(
+                &ctx.classes,
+                cursor_offset,
+            )?)
         } else {
-            // Variable — resolve its type.
-            let cursor_offset = position_to_offset(content, position);
-            let current_class =
-                crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
-
-            if ac_ctx.subject == "$this" {
-                // `$this` — use the current class.
-                current_class.map(|cc| Arc::new(cc.clone()))?
-            } else {
-                // Other variable — try variable resolution.
-                let default_class;
-                let current = match current_class {
-                    Some(cc) => cc,
-                    None => {
-                        default_class =
-                            crate::class_lookup::class_context_placeholder(content, cursor_offset);
-                        &default_class
-                    }
-                };
-                let results = crate::type_engine::variable::resolution::resolve_variable_types(
-                    &ac_ctx.subject,
-                    current,
-                    &ctx.classes,
-                    content,
-                    cursor_offset,
-                    &class_loader,
-                    Some(self),
-                    crate::type_engine::resolver::Loaders::default(),
-                );
-                let mut resolved_class = None;
-                for rt in &results {
-                    if let Some(base) = rt.type_string.base_name()
-                        && let Some(cls) = class_loader(base)
-                    {
-                        resolved_class = Some(cls);
-                        break;
-                    }
-                }
-                resolved_class?
-            }
+            // Any other variable: the first class its type names.
+            loaders
+                .resolution_ctx_at(content, cursor_offset)
+                .resolve_variable_at_cursor(&ac_ctx.subject)
+                .iter()
+                .find_map(|rt| load(rt.type_string.base_name()?))?
         };
 
-        // Build completion items using the standard builder, which gives
-        // us full label details, return types, deprecation tags, and
-        // `data` for lazy documentation resolve — identical to regular
-        // member completion.
-        //
-        // `AccessKind::Arrow` is the right access kind for array
-        // callables: PHP invokes them on an instance regardless of the
-        // subject syntax. Once instance-access completion surfaces static
-        // methods too, they will flow through here automatically. Until
-        // then this offers the instance methods, which covers the common
-        // case (controller actions, `$this`/`$obj` handlers).
-        let candidates = vec![class_info];
-        let cursor_offset = position_to_offset(content, position);
-        let current_class = crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
+        self.string_method_name_completions(uri, ctx, cursor_offset, class_info, &ac_ctx.prefix)
+    }
+
+    /// The methods of `class_info` offered for a method name being typed
+    /// inside a string literal (an array callable's, a route action's),
+    /// filtered by the `prefix` already typed.
+    ///
+    /// Reuses the standard member-completion builder so that items have
+    /// the same rich formatting (label details, return type, deprecation
+    /// tags, `data` for lazy documentation resolve) as regular `->` / `::`
+    /// member completions.  The name goes into a string literal rather
+    /// than code, so the snippet insert text (e.g.
+    /// `sort(${1:\$request})$0`) is replaced by the plain method name.
+    ///
+    /// `AccessKind::Arrow` is the right access kind: PHP invokes a callable
+    /// on an instance regardless of the subject syntax. Once
+    /// instance-access completion surfaces static methods too, they will
+    /// flow through here automatically. Until then this offers the instance
+    /// methods, which covers the common case (controller actions,
+    /// `$this`/`$obj` handlers).
+    pub(super) fn string_method_name_completions(
+        &self,
+        uri: &str,
+        ctx: &FileContext,
+        cursor_offset: u32,
+        class_info: Arc<ClassInfo>,
+        prefix: &str,
+    ) -> Option<CompletionResponse> {
         let mut items = super::builder::build_union_completion_items(
-            &candidates,
+            &[class_info],
             AccessKind::Arrow,
-            current_class,
-            &class_loader,
+            crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset),
+            &self.resolved_class_loader(ctx),
             &self.resolved_class_cache,
             uri,
         );
 
-        // Post-process: we are inserting into a string literal, so
-        // replace snippet insert text (e.g. `sort(${1:\$request})$0`)
-        // with the plain method name, and clear snippet-related fields.
-        for item in &mut items {
-            if item.kind == Some(CompletionItemKind::METHOD) {
-                if let Some(ref filter) = item.filter_text {
-                    item.insert_text = Some(filter.clone());
-                }
-                item.insert_text_format = None;
-            }
-        }
-
-        // Filter out non-method items (properties, constants) since
-        // array callables only reference methods.
+        // Only methods: a callable names nothing else.
         items.retain(|item| item.kind == Some(CompletionItemKind::METHOD));
-
-        // Filter by the prefix already typed.
-        if !ac_ctx.prefix.is_empty() {
-            let prefix_lower = ac_ctx.prefix.to_lowercase();
+        if !prefix.is_empty() {
+            let prefix_lower = prefix.to_lowercase();
             items.retain(|item| {
                 item.filter_text
                     .as_ref()
-                    .or(Some(&item.label))
-                    .is_some_and(|t| t.to_lowercase().starts_with(&prefix_lower))
+                    .unwrap_or(&item.label)
+                    .to_lowercase()
+                    .starts_with(&prefix_lower)
             });
         }
-
-        if items.is_empty() {
-            None
-        } else {
-            Some(CompletionResponse::Array(items))
+        for item in &mut items {
+            if let Some(ref filter) = item.filter_text {
+                item.insert_text = Some(filter.clone());
+            }
+            item.insert_text_format = None;
         }
+
+        (!items.is_empty()).then_some(CompletionResponse::Array(items))
     }
 }
 
-/// Resolve a short/relative class name to FQN using use statements
-/// and the namespace from the file context.
+/// Resolve a class name written in the file (`Foo` in `[Foo::class, '…']`)
+/// to its FQN by PHP's rule for names in code: the file's imports, else its
+/// namespace.
 pub(super) fn resolve_class_name_to_fqn(
     backend: &Backend,
     name: &str,
     ctx: &FileContext,
-) -> Option<String> {
-    let clean = name.trim_start_matches('\\');
-    if let Some(fqn) = ctx.use_map.get(clean) {
-        return Some(fqn.clone());
-    }
-    if clean.contains('\\') {
-        return Some(clean.to_string());
-    }
-    if let Some(ref ns) = ctx.namespace {
-        let fqn = format!("{}\\{}", ns, clean);
-        if backend.find_or_load_class(&fqn).is_some() {
-            return Some(fqn);
-        }
-    }
-    if backend.find_or_load_class(clean).is_some() {
-        return Some(clean.to_string());
-    }
-    None
+) -> String {
+    crate::names::resolve_code_class_name(
+        name,
+        ctx.namespace.as_deref(),
+        Some(&ctx.use_map),
+        &ctx.classes,
+        &backend.class_loader(ctx),
+    )
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

@@ -345,6 +345,49 @@ async fn test_static_method_callable_param_inference() {
     );
 }
 
+/// `$class::process(function ($item) { $item->… })` with `$class` holding
+/// the class name, or an instance, infers from the method the same way.
+#[tokio::test]
+async fn test_static_method_callable_param_inference_on_a_value() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_static_value_infer.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Order {\n",
+        "    public function getTotal(): float { return 0.0; }\n",
+        "}\n",
+        "class Processor {\n",
+        "    /**\n",
+        "     * @param callable(Order): void $handler\n",
+        "     */\n",
+        "    public static function handle(callable $handler): void {}\n",
+        "}\n",
+        "class Runner {\n",
+        "    public function run(Processor $processor): void {\n",
+        "        $class = Processor::class;\n",
+        "        $class::handle(function ($order) {\n",
+        "            $order->\n",
+        "        });\n",
+        "        $processor::handle(function ($other) {\n",
+        "            $other->\n",
+        "        });\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 14: `            $order->`, line 17: `            $other->`
+    for (line, character) in [(14, 20), (17, 20)] {
+        let items = complete_at(&backend, &uri, src, line, character).await;
+        let names = method_names(&items);
+        assert!(
+            names.contains(&"getTotal"),
+            "Expected getTotal from inferred Order type on line {line}, got: {:?}",
+            names,
+        );
+    }
+}
+
 // ─── Multiple callable parameters ──────────────────────────────────────────
 
 /// When a method has multiple parameters and the callable is not at
@@ -770,6 +813,45 @@ async fn test_explicit_bare_hint_uses_inferred_generics_for_foreach() {
     );
 }
 
+/// A bare hint naming an unrelated class that only shares the inferred
+/// generic's short name keeps its own type: PHP enforces the hint.
+#[tokio::test]
+async fn test_explicit_hint_with_same_short_name_is_not_replaced() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_same_short_name.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "namespace Vendor {\n",
+        "    class Loaf {}\n",
+        "    /** @template TValue */\n",
+        "    class Collection { public function vendorOnly(): void {} }\n",
+        "}\n",
+        "namespace App {\n",
+        "    class Collection { public function own(): void {} }\n",
+        "    /** @param callable(\\Vendor\\Collection<\\Vendor\\Loaf>): void $cb */\n",
+        "    function takesCollection(callable $cb): void {}\n",
+        "    takesCollection(function (Collection $c) {\n",
+        "        $c->\n",
+        "    });\n",
+        "}\n",
+    );
+
+    // Line 11: `        $c->`
+    let items = complete_at(&backend, &uri, src, 11, 12).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"own"),
+        "Expected own from App\\Collection, got: {:?}",
+        names,
+    );
+    assert!(
+        !names.contains(&"vendorOnly"),
+        "Vendor\\Collection members should not leak in, got: {:?}",
+        names,
+    );
+}
+
 /// Simpler variant: static call chain where the closure param is the
 /// direct target (no foreach indirection). Verifies that
 /// `infer_callable_params_from_receiver` works when the receiver is a
@@ -975,7 +1057,7 @@ async fn test_inline_stubs_chunk_closure_foreach_resolution() {
         "     * @template TKey of array-key\n",
         "     * @template TModel of \\Illuminate\\Database\\Eloquent\\Model\n",
         "     */\n",
-        "    class Collection {\n",
+        "    class Collection extends \\Illuminate\\Support\\Collection {\n",
         "        /** @return TModel|null */\n",
         "        public function first(): mixed { return null; }\n",
         "        public function count(): int { return 0; }\n",
@@ -1076,7 +1158,7 @@ async fn test_example_php_exact_layout_chunk_foreach() {
     let src = concat!(
         "<?php\n",                                                            // 0
         "namespace Demo {\n",                                                 // 1
-        "\n",                                                                 // 2
+        "use Illuminate\\Database\\Eloquent\\Collection;\n",                  // 2
         "class BlogAuthor extends \\Illuminate\\Database\\Eloquent\\Model\n", // 3
         "{\n",                                                                // 4
         "    public function posts(): mixed { return null; }\n",              // 5

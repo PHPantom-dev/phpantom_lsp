@@ -1,0 +1,32 @@
+// test: a `=>` inside an array literal element's own arguments is not read as its key
+// feature: hover
+// expect: Coll<int, M>
+---
+<?php
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Coll {
+    /** @param array<TKey, TValue> $items */
+    public function __construct(public array $items) {}
+}
+
+class M {
+    /** @param array<string, mixed> $attributes */
+    public static function make(array $attributes = []): static { return new static(); }
+}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @param array<TKey, TValue> $value
+ * @return Coll<TKey, TValue>
+ */
+function wrap(array $value): Coll { return new Coll($value); }
+
+function demo(): void {
+    $c = wrap([M::make(['a' => 1])]);
+    $<>c;
+}

@@ -1543,6 +1543,7 @@ async fn test_property_tag_overrides_inherited_non_public_property() {
 
     let base = std::sync::Arc::new(base.into_iter().next().unwrap());
     let loader = move |name: &str| -> Option<std::sync::Arc<phpantom_lsp::ClassInfo>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         (name == "Base").then(|| std::sync::Arc::clone(&base))
     };
     let merged = phpantom_lsp::resolve_class_fully(&child[0], &loader);
@@ -2347,6 +2348,71 @@ async fn test_var_leading_backslash_bypasses_same_short_name_import() {
     assert!(
         !names.iter().any(|n| n == "facadeOnly"),
         "\\Redis must not resolve to the imported facade. Got: {:?}",
+        names
+    );
+}
+
+/// A declared `\Courier` names the global class even when none exists: the
+/// file's import of another `Courier` never stands in for it.
+#[tokio::test]
+async fn test_missing_global_class_is_not_read_through_a_same_short_name_import() {
+    let (backend, _dir) = crate::common::create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Facades/Courier.php",
+            concat!(
+                "<?php\n",
+                "namespace App\\Facades;\n",
+                "class Courier {\n",
+                "    public function facadeOnly(): void {}\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                   // 0
+        "namespace App;\n",                          // 1
+        "use App\\Facades\\Courier;\n",              // 2
+        "class Box {\n",                             // 3
+        "    public function get(): \\Courier {}\n", // 4
+        "}\n",                                       // 5
+        "function run(Box $box): void {\n",          // 6
+        "    $box->get()->\n",                       // 7
+        "}\n",                                       // 8
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 17,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+    let names = result.map(completion_names).unwrap_or_default();
+    assert!(
+        !names.iter().any(|n| n == "facadeOnly"),
+        "\\Courier must not resolve to the imported facade. Got: {:?}",
         names
     );
 }

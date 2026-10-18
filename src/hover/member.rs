@@ -6,13 +6,15 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::Hover;
+use tower_lsp::lsp_types::{Hover, HoverContents};
 
 use crate::Backend;
 use crate::php_type::PhpType;
+use crate::symbol_map::SubjectText;
 use crate::types::*;
 use crate::util::short_name;
 
+use super::HoverSite;
 use super::formatting::*;
 use super::templates::{find_template_info_in_class, find_template_info_in_method_or_class};
 
@@ -185,18 +187,25 @@ fn raw_class_has_member(
     // is only known through the current file's AST and not yet indexed),
     // fall back to assuming the member is declared — this avoids hiding
     // indicators when the project is only partially indexed.
-    let raw = match class_loader(&fqn) {
-        Some(c) => c,
-        None => return true,
-    };
+    match class_loader(&fqn) {
+        Some(raw) => declares_member(&raw, member_name, member_kind),
+        None => true,
+    }
+}
 
+/// Whether `class` itself declares a member with the given name and kind.
+fn declares_member(
+    class: &ClassInfo,
+    member_name: &str,
+    member_kind: &MemberKindForOrigin,
+) -> bool {
     match member_kind {
-        MemberKindForOrigin::Method => raw
+        MemberKindForOrigin::Method => class
             .methods
             .iter()
             .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-        MemberKindForOrigin::Property => raw.properties.iter().any(|p| p.name == member_name),
-        MemberKindForOrigin::Constant => raw.constants.iter().any(|c| c.name == member_name),
+        MemberKindForOrigin::Property => class.properties.iter().any(|p| p.name == member_name),
+        MemberKindForOrigin::Constant => class.constants.iter().any(|c| c.name == member_name),
     }
 }
 
@@ -235,41 +244,16 @@ fn build_origin_lines(
     if declared_on_owner {
         if let Some(ref parent_name) = owner.parent_class
             && let Some(parent) = class_loader(parent_name)
+            && declares_member(&parent, member_name, &member_kind)
         {
-            let has_member = match member_kind {
-                MemberKindForOrigin::Method => parent
-                    .methods
-                    .iter()
-                    .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-                MemberKindForOrigin::Property => {
-                    parent.properties.iter().any(|p| p.name == member_name)
-                }
-                MemberKindForOrigin::Constant => {
-                    parent.constants.iter().any(|c| c.name == member_name)
-                }
-            };
-            if has_member {
-                origins.push(MemberOrigin::Override(short_name(parent_name).to_string()));
-            }
+            origins.push(MemberOrigin::Override(short_name(parent_name).to_string()));
         }
 
         for iface_name in &owner.interfaces {
-            if let Some(iface) = class_loader(iface_name) {
-                let has_member = match member_kind {
-                    MemberKindForOrigin::Method => iface
-                        .methods
-                        .iter()
-                        .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-                    MemberKindForOrigin::Property => {
-                        iface.properties.iter().any(|p| p.name == member_name)
-                    }
-                    MemberKindForOrigin::Constant => {
-                        iface.constants.iter().any(|c| c.name == member_name)
-                    }
-                };
-                if has_member {
-                    origins.push(MemberOrigin::Implements(short_name(iface_name).to_string()));
-                }
+            if let Some(iface) = class_loader(iface_name)
+                && declares_member(&iface, member_name, &member_kind)
+            {
+                origins.push(MemberOrigin::Implements(short_name(iface_name).to_string()));
             }
         }
     }
@@ -305,8 +289,9 @@ pub(crate) enum MemberKindForOrigin {
 /// Find the class that originally declares a member.
 ///
 /// When a member is inherited (not declared on `owner` itself), this
-/// walks up the parent chain and checks traits and mixins to find the
-/// class that actually declares the member.  Returns a fully-resolved
+/// searches the traits, the parent chain and the interfaces in PHP's
+/// precedence order, then the mixins, to find the class that actually
+/// declares the member.  Returns a fully-resolved
 /// `ClassInfo` for the declaring class, or falls back to `owner` when
 /// the declaring class cannot be determined.
 ///
@@ -323,96 +308,18 @@ pub(crate) fn find_declaring_class(
         return Arc::new(owner.clone());
     }
 
-    for trait_name in &owner.used_traits {
-        if let Some(trait_class) = class_loader(trait_name) {
-            let has = match member_kind {
-                MemberKindForOrigin::Method => trait_class
-                    .methods
-                    .iter()
-                    .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-                MemberKindForOrigin::Property => {
-                    trait_class.properties.iter().any(|p| p.name == member_name)
-                }
-                MemberKindForOrigin::Constant => {
-                    trait_class.constants.iter().any(|c| c.name == member_name)
-                }
-            };
-            if has {
-                return trait_class;
-            }
-        }
+    let declares = |class: &ClassInfo| declares_member(class, member_name, member_kind);
+    if let Some((_, declaring)) =
+        crate::inheritance::find_declaring_ancestor(owner, class_loader, &declares)
+    {
+        return declaring;
     }
-
-    let mut ancestor_name = owner.parent_class;
-    let mut depth = 0u32;
-    while let Some(ref name) = ancestor_name {
-        depth += 1;
-        if depth > 20 {
-            break;
-        }
-        if let Some(ancestor) = class_loader(name) {
-            for trait_name in &ancestor.used_traits {
-                if let Some(trait_class) = class_loader(trait_name) {
-                    let has = match member_kind {
-                        MemberKindForOrigin::Method => trait_class
-                            .methods
-                            .iter()
-                            .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-                        MemberKindForOrigin::Property => {
-                            trait_class.properties.iter().any(|p| p.name == member_name)
-                        }
-                        MemberKindForOrigin::Constant => {
-                            trait_class.constants.iter().any(|c| c.name == member_name)
-                        }
-                    };
-                    if has {
-                        return trait_class;
-                    }
-                }
-            }
-
-            let has = match member_kind {
-                MemberKindForOrigin::Method => ancestor
-                    .methods
-                    .iter()
-                    .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-                MemberKindForOrigin::Property => {
-                    ancestor.properties.iter().any(|p| p.name == member_name)
-                }
-                MemberKindForOrigin::Constant => {
-                    ancestor.constants.iter().any(|c| c.name == member_name)
-                }
-            };
-            if has {
-                return ancestor;
-            }
-            ancestor_name = ancestor.parent_class;
-        } else {
-            break;
-        }
-    }
-
-    for mixin_name in &owner.mixins {
-        if let Some(mixin_class) = class_loader(mixin_name) {
-            let has = match member_kind {
-                MemberKindForOrigin::Method => mixin_class
-                    .methods
-                    .iter()
-                    .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-                MemberKindForOrigin::Property => {
-                    mixin_class.properties.iter().any(|p| p.name == member_name)
-                }
-                MemberKindForOrigin::Constant => {
-                    mixin_class.constants.iter().any(|c| c.name == member_name)
-                }
-            };
-            if has {
-                return mixin_class;
-            }
-        }
-    }
-
-    Arc::new(owner.clone())
+    owner
+        .mixins
+        .iter()
+        .filter_map(|name| class_loader(name))
+        .find(|mixin| declares(mixin))
+        .unwrap_or_else(|| Arc::new(owner.clone()))
 }
 
 /// Result of searching for a member on a [`ClassInfo`] for hover purposes.
@@ -427,6 +334,197 @@ pub(super) enum HoverMemberHit {
 }
 
 impl Backend {
+    /// Hover for `$subject->member` / `Subject::member`: the member on
+    /// every class the subject can be, once per declaring class.
+    pub(super) fn hover_member_access(
+        &self,
+        site: &HoverSite,
+        subject_text: &SubjectText,
+        member_name: &str,
+        is_static: bool,
+        is_method_call: bool,
+    ) -> Option<Hover> {
+        let HoverSite {
+            uri,
+            content,
+            offset: cursor_offset,
+            loaders,
+            ..
+        } = *site;
+        let resolved_class_loader = loaders.resolved_class_loader();
+        let rctx = loaders.resolution_ctx_at(content, cursor_offset);
+
+        let access_kind = AccessKind::of_member_access(is_static);
+
+        let source = self.symbol_map_source(uri, content)?;
+        let candidates =
+            ResolvedType::into_arced_classes(crate::type_engine::resolver::resolve_target_classes(
+                subject_text.as_str(source),
+                access_kind,
+                &rctx,
+            ));
+
+        // Collect hover results from all union candidates,
+        // deduplicating by declaring class so that a member
+        // inherited from the same interface/parent is shown
+        // only once.
+        let mut hover_markdowns: Vec<String> = Vec::new();
+        let mut seen_declaring_classes: Vec<String> = Vec::new();
+
+        for target_class in &candidates {
+            // Always use a fully-resolved class so that inherited
+            // docblock types (return types, parameter types,
+            // descriptions) are visible on hover.  The candidate
+            // from `resolve_target_classes` may carry model-specific
+            // scope methods that are not in the FQN-keyed cache, so
+            // fall back to the candidate when the member is not
+            // found on the fully-resolved version.
+            let merged = crate::virtual_members::resolve_class_fully_cached(
+                target_class,
+                &resolved_class_loader,
+                &self.resolved_class_cache,
+            );
+            let find_result = Self::find_member_for_hover(&merged, member_name, is_method_call);
+
+            let (mut member_result, mut owner) = if find_result.is_some() {
+                (find_result, merged.clone())
+            } else {
+                // Fall back to the candidate directly — it may
+                // contain model-specific members (e.g. Eloquent
+                // scope methods injected onto Builder<Model>)
+                // that the FQN-keyed cache does not have.
+                let result = Self::find_member_for_hover(target_class, member_name, is_method_call);
+                (result, target_class.clone())
+            };
+
+            // ── Enrich with call-site generic substitution ──
+            // The merged (cached) class has raw template param
+            // names (e.g. TModel) because the cache is FQN-keyed
+            // and shared across call sites.  The candidate from
+            // resolve_target_classes carries concrete substitutions
+            // (e.g. TModel→BlogAuthor).  When the merged member's
+            // return type still references a template param, swap
+            // it with the candidate's substituted return type and
+            // use the candidate as the owner.
+            if !merged.template_params.is_empty() {
+                let tpl_strings: Vec<String> = merged
+                    .template_params
+                    .iter()
+                    .map(|a| a.to_string())
+                    .collect();
+                match &member_result {
+                    Some(HoverMemberHit::Method(method)) => {
+                        if let Some(ref ret) = method.return_type
+                            && ret.references_any_template_param(&tpl_strings)
+                            && let Some(HoverMemberHit::Method(subst_method)) =
+                                Self::find_member_for_hover(
+                                    target_class,
+                                    member_name,
+                                    is_method_call,
+                                )
+                        {
+                            member_result = Some(HoverMemberHit::Method(subst_method));
+                            owner = target_class.clone();
+                        }
+                    }
+                    Some(HoverMemberHit::Property(prop)) => {
+                        if let Some(ref hint) = prop.type_hint
+                            && hint.references_any_template_param(&tpl_strings)
+                            && let Some(HoverMemberHit::Property(subst_prop)) =
+                                Self::find_member_for_hover(
+                                    target_class,
+                                    member_name,
+                                    is_method_call,
+                                )
+                        {
+                            member_result = Some(HoverMemberHit::Property(subst_prop));
+                            owner = target_class.clone();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            let hover = match member_result {
+                Some(HoverMemberHit::Method(ref method)) => {
+                    let mut method = method.clone();
+                    if let Some((_date_class, date_return_type)) =
+                        Self::configured_laravel_date_return(
+                            &owner,
+                            member_name,
+                            &resolved_class_loader,
+                        )
+                    {
+                        method.return_type = Some(date_return_type);
+                        method.is_inferred_return = true;
+                    }
+                    let declaring = find_declaring_class(
+                        &owner,
+                        member_name,
+                        &MemberKindForOrigin::Method,
+                        &resolved_class_loader,
+                    );
+                    Some((
+                        declaring.fqn().to_string(),
+                        self.hover_for_method(
+                            &method,
+                            &declaring,
+                            &resolved_class_loader,
+                            uri,
+                            content,
+                        ),
+                    ))
+                }
+                Some(HoverMemberHit::Property(ref prop)) => {
+                    let declaring = find_declaring_class(
+                        &owner,
+                        &prop.name,
+                        &MemberKindForOrigin::Property,
+                        &resolved_class_loader,
+                    );
+                    Some((
+                        declaring.fqn().to_string(),
+                        self.hover_for_property(prop, &declaring, &resolved_class_loader),
+                    ))
+                }
+                Some(HoverMemberHit::Constant(ref constant)) => {
+                    let declaring = find_declaring_class(
+                        &owner,
+                        &constant.name,
+                        &MemberKindForOrigin::Constant,
+                        &resolved_class_loader,
+                    );
+                    Some((
+                        declaring.fqn().to_string(),
+                        self.hover_for_constant(constant, &declaring, &resolved_class_loader),
+                    ))
+                }
+                None => None,
+            };
+
+            if let Some((declaring_name, h)) = hover {
+                // Deduplicate: if we already have a hover from this
+                // declaring class, skip it (e.g. both Lamp and Faucet
+                // implement Switchable::turnOff — show once).
+                if seen_declaring_classes.contains(&declaring_name) {
+                    continue;
+                }
+                seen_declaring_classes.push(declaring_name);
+                if let HoverContents::Markup(mc) = h.contents {
+                    hover_markdowns.push(mc.value);
+                }
+            }
+        }
+
+        if hover_markdowns.is_empty() {
+            None
+        } else if hover_markdowns.len() == 1 {
+            Some(make_hover(hover_markdowns.into_iter().next().unwrap()))
+        } else {
+            Some(make_hover(hover_markdowns.join("\n\n---\n\n")))
+        }
+    }
+
     /// Close out a member's hover: append the rendered declaration and,
     /// when the class's provenance is known (a vendor package, a stub),
     /// a line naming it, then join everything into one `Hover`.
@@ -692,20 +790,10 @@ impl Backend {
                 format!("case {};", constant.name)
             }
         } else {
-            let visibility = format_visibility(constant.visibility);
-            let type_hint = constant
-                .type_hint
-                .as_ref()
-                .map(|t| format!(": {}", t))
-                .unwrap_or_default();
-            let value_suffix = constant
-                .value
-                .as_ref()
-                .map(|v| format!(" = {}", v))
-                .unwrap_or_default();
             format!(
-                "{}const {}{}{};",
-                visibility, constant.name, type_hint, value_suffix
+                "{}{}",
+                format_visibility(constant.visibility),
+                constant_declaration(constant)
             )
         };
 

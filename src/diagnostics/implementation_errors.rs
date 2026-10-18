@@ -5,7 +5,6 @@
 //! missing-method detection logic as the "Implement missing methods"
 //! code action (`code_actions::implement_methods::collect_missing_methods`).
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
@@ -52,7 +51,7 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let symbol_map = &ctx.symbol_map;
-        let class_loaders = self.class_loaders(&ctx.file);
+        let class_loaders = self.resolved_class_loaders(&ctx.file);
 
         for span in &symbol_map.spans {
             let class_name = match &span.kind {
@@ -140,106 +139,55 @@ impl Backend {
     }
 }
 
-/// Describe where a missing method was required from (interface or
-/// abstract parent class).
+/// Describe where a missing method was required from: the interface,
+/// parent class, or trait the class names directly that leads to the
+/// declaration.
 fn method_source_description(
     class: &crate::types::ClassInfo,
     method_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> String {
+    use crate::inheritance::{ancestors, find_declaring_ancestor, find_declaring_trait};
+
+    let declares = |c: &crate::types::ClassInfo| c.has_method(method_name);
+    let declares_abstract = |c: &crate::types::ClassInfo| {
+        c.get_method(method_name)
+            .is_some_and(|method| method.is_abstract)
+    };
+
     for iface_name in &class.interfaces {
         if let Some(iface) = class_loader(iface_name)
-            && has_method_in_chain(&iface, method_name, class_loader, &mut HashSet::new())
+            && (declares(&iface)
+                || find_declaring_ancestor(&iface, class_loader, &declares).is_some())
         {
             return format!("interface '{}'", iface_name);
         }
     }
 
-    // Check parent chain for abstract methods.
+    // Check the parent chain, and the traits each parent uses, for abstract
+    // methods.
     if let Some(ref parent_name) = class.parent_class
-        && let Some(parent) = class_loader(parent_name)
-        && has_abstract_method_in_chain(&parent, method_name, class_loader, &mut HashSet::new())
+        && ancestors(class, class_loader).any(|(_, ancestor)| {
+            declares_abstract(&ancestor)
+                || find_declaring_trait(&ancestor.used_traits, class_loader, &declares_abstract)
+                    .is_some()
+        })
     {
         return format!("class '{}'", parent_name);
     }
 
     // Check used traits for abstract methods.
     for trait_name in &class.used_traits {
-        if let Some(trait_info) = class_loader(trait_name)
-            && has_abstract_method_in_chain(
-                &trait_info,
-                method_name,
-                class_loader,
-                &mut HashSet::new(),
-            )
+        if find_declaring_trait(
+            std::slice::from_ref(trait_name),
+            class_loader,
+            &declares_abstract,
+        )
+        .is_some()
         {
             return format!("trait '{}'", trait_name);
         }
     }
 
     "its hierarchy".to_string()
-}
-
-/// Check if a class or its parent chain declares a method (abstract or not).
-fn has_method_in_chain(
-    class: &crate::types::ClassInfo,
-    method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
-    visited: &mut HashSet<String>,
-) -> bool {
-    if !visited.insert(class.name.to_string()) {
-        return false;
-    }
-
-    let lower = method_name.to_lowercase();
-    if class.methods.iter().any(|m| m.name.to_lowercase() == lower) {
-        return true;
-    }
-
-    for iface_name in &class.interfaces {
-        if let Some(iface) = class_loader(iface_name)
-            && has_method_in_chain(&iface, method_name, class_loader, visited)
-        {
-            return true;
-        }
-    }
-
-    if let Some(ref parent_name) = class.parent_class
-        && let Some(parent) = class_loader(parent_name)
-        && has_method_in_chain(&parent, method_name, class_loader, visited)
-    {
-        return true;
-    }
-
-    false
-}
-
-/// Check if a class or its parent chain declares an abstract method.
-fn has_abstract_method_in_chain(
-    class: &crate::types::ClassInfo,
-    method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
-    visited: &mut HashSet<String>,
-) -> bool {
-    if !visited.insert(class.name.to_string()) {
-        return false;
-    }
-
-    let lower = method_name.to_lowercase();
-    if class
-        .methods
-        .iter()
-        .any(|m| m.name.to_lowercase() == lower && m.is_abstract)
-    {
-        return true;
-    }
-
-    if let Some(ref parent_name) = class.parent_class
-        && let Some(parent) = class_loader(parent_name)
-        && has_abstract_method_in_chain(&parent, method_name, class_loader, visited)
-    {
-        return true;
-    }
-
-    false
 }

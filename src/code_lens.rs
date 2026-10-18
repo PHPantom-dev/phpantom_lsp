@@ -804,13 +804,11 @@ impl Backend {
         let (file_uri, file_content) =
             self.find_class_file_content(ancestor_fqn, current_uri, current_content)?;
 
-        let name_offset = ancestor_class.member_name_offset(method_name, "method");
-
         let position = Self::find_member_position(
             &file_content,
             method_name,
             MemberKind::Method,
-            name_offset,
+            ancestor_class,
         )?;
 
         Some(Prototype {

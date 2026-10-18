@@ -10,13 +10,12 @@
 //! - PHP version is >= 7.4.
 
 use mago_span::HasSpan;
-use mago_syntax::cst::access::Access;
-use mago_syntax::cst::call::Call;
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::code_actions::cursor_context::innermost_at;
+use crate::text_position::position_to_byte_offset;
 
 impl Backend {
     /// Collect "Convert to arrow function" code actions for closures at the
@@ -40,330 +39,37 @@ impl Backend {
 
         let cursor_offset = position_to_byte_offset(content, params.range.start) as u32;
 
-        let best = crate::parser::with_parsed_program(
+        let found = crate::parser::with_parsed_program(
             content,
             "convert_to_arrow_function",
-            |program, content| {
-                let mut best: Option<(u32, u32, String)> = None;
-                for stmt in program.statements.iter() {
-                    find_in_statement(stmt, cursor_offset, content, &mut best);
-                }
-                best
-            },
+            |program, content| convertible_closure_at(program, cursor_offset, content),
         );
-
-        let (closure_start, closure_end, replacement) = match best {
-            Some(b) => b,
-            None => return,
+        let Some((span, replacement)) = found else {
+            return;
         };
 
-        let start_pos = offset_to_position(content, closure_start as usize);
-        let end_pos = offset_to_position(content, closure_end as usize);
-
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
-            title: "Convert to arrow function".to_string(),
-            kind: Some(CodeActionKind::new("refactor.rewrite")),
-            diagnostics: None,
-            edit: Some(crate::code_actions::single_edit(
-                doc_uri,
-                Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                replacement,
-            )),
-            command: None,
-            is_preferred: Some(false),
-            disabled: None,
-            data: None,
-        }));
+        out.push(crate::code_actions::rewrite_action(
+            "Convert to arrow function".to_string(),
+            doc_uri,
+            content,
+            (span.start.offset as usize, span.end.offset as usize),
+            replacement,
+            false,
+        ));
     }
 }
 
-// ─── AST walking ────────────────────────────────────────────────────────────
-
-/// Search for a convertible closure at the cursor position within a statement.
-fn find_in_statement(
-    stmt: &Statement<'_>,
+/// The innermost closure under `cursor` that can become an arrow
+/// function, with its span and the arrow function's text.
+fn convertible_closure_at(
+    program: &Program<'_>,
     cursor: u32,
     content: &str,
-    best: &mut Option<(u32, u32, String)>,
-) {
-    let span = stmt.span();
-    if cursor < span.start.offset || cursor > span.end.offset {
-        return;
-    }
-
-    match stmt {
-        Statement::Expression(expr_stmt) => {
-            find_in_expression(expr_stmt.expression, cursor, content, best);
-        }
-        Statement::Return(ret) => {
-            if let Some(expr) = &ret.value {
-                find_in_expression(expr, cursor, content, best);
-            }
-        }
-        Statement::Echo(echo) => {
-            for expr in echo.values.iter() {
-                find_in_expression(expr, cursor, content, best);
-            }
-        }
-        Statement::Block(block) => {
-            for s in block.statements.iter() {
-                find_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::Namespace(ns) => {
-            for s in ns.statements().iter() {
-                find_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::Class(class) => {
-            for member in class.members.iter() {
-                find_in_member(member, cursor, content, best);
-            }
-        }
-        Statement::Trait(tr) => {
-            for member in tr.members.iter() {
-                find_in_member(member, cursor, content, best);
-            }
-        }
-        Statement::Enum(en) => {
-            for member in en.members.iter() {
-                find_in_member(member, cursor, content, best);
-            }
-        }
-        Statement::Interface(iface) => {
-            for member in iface.members.iter() {
-                find_in_member(member, cursor, content, best);
-            }
-        }
-        Statement::Function(func) => {
-            for s in func.body.statements.iter() {
-                find_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::If(if_stmt) => {
-            find_in_expression(if_stmt.condition, cursor, content, best);
-            for s in if_stmt.body.statements().iter() {
-                find_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::While(w) => {
-            find_in_expression(w.condition, cursor, content, best);
-            for s in w.body.statements().iter() {
-                find_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::DoWhile(dw) => {
-            find_in_expression(dw.condition, cursor, content, best);
-            find_in_statement(dw.statement, cursor, content, best);
-        }
-        Statement::For(f) => {
-            for expr in f.initializations.iter() {
-                find_in_expression(expr, cursor, content, best);
-            }
-            for expr in f.conditions.iter() {
-                find_in_expression(expr, cursor, content, best);
-            }
-            for expr in f.increments.iter() {
-                find_in_expression(expr, cursor, content, best);
-            }
-            for s in f.body.statements().iter() {
-                find_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::Foreach(fe) => {
-            find_in_expression(fe.expression, cursor, content, best);
-            for s in fe.body.statements().iter() {
-                find_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::Switch(sw) => {
-            find_in_expression(sw.expression, cursor, content, best);
-            for case in sw.body.cases().iter() {
-                let stmts = match case {
-                    SwitchCase::Expression(e) => &e.statements,
-                    SwitchCase::Default(d) => &d.statements,
-                };
-                for s in stmts.iter() {
-                    find_in_statement(s, cursor, content, best);
-                }
-            }
-        }
-        Statement::Try(tr) => {
-            for s in tr.block.statements.iter() {
-                find_in_statement(s, cursor, content, best);
-            }
-            for catch in tr.catch_clauses.iter() {
-                for s in catch.block.statements.iter() {
-                    find_in_statement(s, cursor, content, best);
-                }
-            }
-            if let Some(finally) = &tr.finally_clause {
-                for s in finally.block.statements.iter() {
-                    find_in_statement(s, cursor, content, best);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Walk class-like members to find closures inside method bodies.
-fn find_in_member(
-    member: &ClassLikeMember<'_>,
-    cursor: u32,
-    content: &str,
-    best: &mut Option<(u32, u32, String)>,
-) {
-    match member {
-        ClassLikeMember::Method(method) => {
-            if let MethodBody::Concrete(body) = &method.body {
-                for s in body.statements.iter() {
-                    find_in_statement(s, cursor, content, best);
-                }
-            }
-        }
-        ClassLikeMember::Property(prop) => match prop {
-            Property::Plain(plain) => {
-                for item in plain.items.iter() {
-                    if let class_like::property::PropertyItem::Concrete(concrete) = item {
-                        find_in_expression(concrete.value, cursor, content, best);
-                    }
-                }
-            }
-            Property::Hooked(hooked) => {
-                if let class_like::property::PropertyItem::Concrete(concrete) = &hooked.item {
-                    find_in_expression(concrete.value, cursor, content, best);
-                }
-            }
-        },
-        ClassLikeMember::Constant(constant) => {
-            for item in constant.items.iter() {
-                find_in_expression(item.value, cursor, content, best);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Walk an expression, checking if it's a convertible closure or recursing.
-fn find_in_expression(
-    expr: &Expression<'_>,
-    cursor: u32,
-    content: &str,
-    best: &mut Option<(u32, u32, String)>,
-) {
-    let span = expr.span();
-    if cursor < span.start.offset || cursor > span.end.offset {
-        return;
-    }
-
-    // Check if this expression IS a closure we can convert.
-    if let Expression::Closure(closure) = expr
-        && let Some(replacement) = try_convert_closure(closure, content)
-    {
-        let start = span.start.offset;
-        let end = span.end.offset;
-        if best.is_none() || (end - start) < (best.as_ref().unwrap().1 - best.as_ref().unwrap().0) {
-            *best = Some((start, end, replacement));
-        }
-    }
-
-    // Recurse into sub-expressions.
-    match expr {
-        Expression::Parenthesized(p) => find_in_expression(p.expression, cursor, content, best),
-        Expression::UnaryPrefix(u) => find_in_expression(u.operand, cursor, content, best),
-        Expression::UnaryPostfix(u) => find_in_expression(u.operand, cursor, content, best),
-        Expression::Binary(b) => {
-            find_in_expression(b.lhs, cursor, content, best);
-            find_in_expression(b.rhs, cursor, content, best);
-        }
-        Expression::Assignment(a) => {
-            find_in_expression(a.lhs, cursor, content, best);
-            find_in_expression(a.rhs, cursor, content, best);
-        }
-        Expression::Conditional(c) => {
-            find_in_expression(c.condition, cursor, content, best);
-            if let Some(then) = c.then {
-                find_in_expression(then, cursor, content, best);
-            }
-            find_in_expression(c.r#else, cursor, content, best);
-        }
-        Expression::Call(call) => match call {
-            Call::Function(fc) => {
-                find_in_expression(fc.function, cursor, content, best);
-                for arg in fc.argument_list.arguments.iter() {
-                    find_in_expression(arg.value(), cursor, content, best);
-                }
-            }
-            Call::Method(mc) => {
-                find_in_expression(mc.object, cursor, content, best);
-                for arg in mc.argument_list.arguments.iter() {
-                    find_in_expression(arg.value(), cursor, content, best);
-                }
-            }
-            Call::NullSafeMethod(mc) => {
-                find_in_expression(mc.object, cursor, content, best);
-                for arg in mc.argument_list.arguments.iter() {
-                    find_in_expression(arg.value(), cursor, content, best);
-                }
-            }
-            Call::StaticMethod(sc) => {
-                find_in_expression(sc.class, cursor, content, best);
-                for arg in sc.argument_list.arguments.iter() {
-                    find_in_expression(arg.value(), cursor, content, best);
-                }
-            }
-        },
-        Expression::Access(access) => match access {
-            Access::Property(pa) => find_in_expression(pa.object, cursor, content, best),
-            Access::NullSafeProperty(pa) => find_in_expression(pa.object, cursor, content, best),
-            Access::StaticProperty(pa) => find_in_expression(pa.class, cursor, content, best),
-            Access::ClassConstant(pa) => find_in_expression(pa.class, cursor, content, best),
-        },
-        Expression::Closure(closure) => {
-            for s in closure.body.statements.iter() {
-                find_in_statement(s, cursor, content, best);
-            }
-        }
-        Expression::ArrowFunction(af) => {
-            find_in_expression(af.expression, cursor, content, best);
-        }
-        Expression::Array(arr) => {
-            for element in arr.elements.iter() {
-                if let array::ArrayElement::KeyValue(kv) = element {
-                    find_in_expression(kv.key, cursor, content, best);
-                    find_in_expression(kv.value, cursor, content, best);
-                } else if let array::ArrayElement::Value(val) = element {
-                    find_in_expression(val.value, cursor, content, best);
-                }
-            }
-        }
-        Expression::LegacyArray(arr) => {
-            for element in arr.elements.iter() {
-                if let array::ArrayElement::KeyValue(kv) = element {
-                    find_in_expression(kv.key, cursor, content, best);
-                    find_in_expression(kv.value, cursor, content, best);
-                } else if let array::ArrayElement::Value(val) = element {
-                    find_in_expression(val.value, cursor, content, best);
-                }
-            }
-        }
-        Expression::ArrayAccess(aa) => {
-            find_in_expression(aa.array, cursor, content, best);
-            find_in_expression(aa.index, cursor, content, best);
-        }
-        Expression::Instantiation(inst) => {
-            if let Some(arg_list) = &inst.argument_list {
-                for a in arg_list.arguments.iter() {
-                    find_in_expression(a.value(), cursor, content, best);
-                }
-            }
-        }
-        _ => {}
-    }
+) -> Option<(mago_span::Span, String)> {
+    innermost_at(program, cursor, |node| match node {
+        Node::Closure(closure) => Some((closure.span(), try_convert_closure(closure, content)?)),
+        _ => None,
+    })
 }
 
 // ─── Conversion logic ───────────────────────────────────────────────────────
@@ -439,13 +145,9 @@ mod tests {
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
 
-        let mut best: Option<(u32, u32, String)> = None;
         // Place cursor inside the closure (after `function`).
         let cursor = php.find("function").unwrap_or(0) as u32 + 1;
-        for stmt in program.statements.iter() {
-            find_in_statement(stmt, cursor, php, &mut best);
-        }
-        best.map(|(_, _, replacement)| replacement)
+        convertible_closure_at(program, cursor, php).map(|(_, replacement)| replacement)
     }
 
     #[test]
@@ -504,5 +206,28 @@ mod tests {
     fn rejected_no_return_value() {
         let php = r#"<?php $f = function() { return; };"#;
         assert!(find_conversion(php).is_none());
+    }
+
+    #[test]
+    fn closure_in_else_branch() {
+        let php = r#"<?php if ($a) { foo(); } else { $f = function($x) { return $x; }; }"#;
+        assert_eq!(find_conversion(php).as_deref(), Some("fn($x) => $x"));
+    }
+
+    #[test]
+    fn closure_in_match_arm() {
+        let php = r#"<?php $f = match ($a) { 1 => function($x) { return $x; }, default => null };"#;
+        assert_eq!(find_conversion(php).as_deref(), Some("fn($x) => $x"));
+    }
+
+    #[test]
+    fn innermost_convertible_closure_wins() {
+        let php = r#"<?php $f = function() { return function($x) { return $x; }; };"#;
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"input.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let cursor = php.rfind("function").unwrap() as u32 + 1;
+        let (_, replacement) = convertible_closure_at(program, cursor, php).unwrap();
+        assert_eq!(replacement, "fn($x) => $x");
     }
 }

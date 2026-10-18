@@ -440,6 +440,30 @@ project-specific definition is more accurate than the generic one.
 from an external stub: the patches exist to fix the embedded copy, and
 a user who supplies their own stub has said what the declaration is.
 
+### Keeping the indices current
+
+A stub package changes mid-session when the user runs `composer update`
+or `composer remove`, and its new declarations have to replace the old
+ones. `rescan_composer_indexes` (`src/indexing/scan.rs`) runs on a
+`composer.lock` change and already rebuilds the vendor class, function
+and constant indices; rebuild the three external stub indices there too,
+from the same `installed.json` read, so a removed package's entries go
+and an updated one's paths are current.
+
+Rebuilding the indices is not enough on its own, because what was already
+parsed from a stub file stays cached: its classes in `uri_classes_index`,
+its functions in `global_functions`, and its constants. Drop everything
+parsed from an external stub in the same rescan (the rescan already clears
+the class store, the negative caches and the resolved-class cache). An
+edit to one stub file has to reach that cache as well, and the file
+watcher reports `file://` URIs, which a `phpantom-ext-stub://` key never
+matches. Either cache the parse under the stub's `file://` URI, so the
+watcher's existing re-parse of a loaded file covers it, or map a change
+under a stub directory back to the `phpantom-ext-stub://` key and evict
+that. The scheme is also what keeps a stub file inside the workspace out
+of analysis and edits (see E3), so the first option needs another way to
+say that.
+
 ### Complexity
 
 High. This inserts a new phase directly into `find_or_load_class`,
@@ -529,6 +553,23 @@ skip-if-present, so higher-priority sources win:
    extension's bundled stubs.
 4. **Embedded stubs.** Final fallback (not in the external index;
    checked separately as the last resolution phase).
+
+### Changing the paths mid-session
+
+`.phpantom.toml` is reloaded while the server runs (`reload_config`), and
+the client can re-send its options (`did_change_configuration`), so the
+stub paths can change mid-session. Both entry points already snapshot
+`DiscoveryInputs` (`src/indexing/reconcile.rs`) and hand it to
+`reconcile_index_for_input_change`; add the resolved stub paths to that
+snapshot rather than comparing them at either site. On a change, rebuild
+the external stub indices from scratch and drop what was parsed from
+them, the way E2's composer rescan does. Adding to the indices the way
+`[indexing] include` does is not enough: a removed include path only
+keeps filling gaps until a restart, but a removed stub path would keep
+overriding the declaration the user just went back to. A stub directory
+outside the workspace gets no file watcher (the gap X18 covers for
+`[indexing] include`), so an edit inside one is only seen after a
+restart.
 
 ### Use cases
 

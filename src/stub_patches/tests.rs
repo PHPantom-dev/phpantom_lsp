@@ -13,29 +13,7 @@ fn empty_class(name: &str) -> ClassInfo {
 fn empty_function(name: &str) -> FunctionInfo {
     FunctionInfo {
         name: atom(name),
-        name_offset: 0,
-        parameters: Vec::new().into(),
-        return_type: None,
-        native_return_type: None,
-        description: None,
-        return_description: None,
-        links: Vec::new(),
-        see_refs: Vec::new(),
-        namespace: None,
-        conditional_return: None,
-        type_assertions: Vec::new(),
-        deprecation_message: None,
-        deprecated_replacement: None,
-        throws: Vec::new(),
-        template_params: Vec::new(),
-        template_param_bounds: Default::default(),
-        template_bindings: Vec::new(),
-        template_param_defaults: Default::default(),
-        is_polyfill: false,
-        overloads: Vec::new(),
-        is_pure: false,
-        is_impure: false,
-        reads_func_args: false,
+        ..Default::default()
     }
 }
 
@@ -85,6 +63,7 @@ fn param(name: &str, type_hint: &str) -> crate::types::ParameterInfo {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     }
 }
 
@@ -398,6 +377,38 @@ fn spl_autoload_register_types_its_callback_parameter() {
         Some(PhpType::parse("?callable(string): void"))
     );
     assert_eq!(func.parameters[1].type_hint, Some(PhpType::parse("bool")));
+}
+
+#[test]
+fn builtins_that_keep_their_callback_mark_it_later_invoked() {
+    use crate::types::CallableInvocation;
+
+    for (name, callback) in [
+        ("set_error_handler", "$callback"),
+        ("set_exception_handler", "$callback"),
+        ("spl_autoload_register", "$callback"),
+        ("register_shutdown_function", "$callback"),
+        ("register_tick_function", "$callback"),
+        ("header_register_callback", "$callback"),
+        ("pcntl_signal", "$handler"),
+    ] {
+        let mut func = empty_function(name);
+        func.parameters = vec![param("$signal", "int"), param(callback, "callable")].into();
+
+        apply_function_stub_patches(&mut func);
+
+        assert_eq!(func.parameters[0].callable_invocation, None, "{name}");
+        assert_eq!(
+            func.parameters[1].callable_invocation,
+            Some(CallableInvocation::Later),
+            "{name}"
+        );
+    }
+
+    let mut func = empty_function("call_user_func");
+    func.parameters = vec![param("$callback", "callable")].into();
+    apply_function_stub_patches(&mut func);
+    assert_eq!(func.parameters[0].callable_invocation, None);
 }
 
 #[test]

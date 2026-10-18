@@ -1,0 +1,16 @@
+// test: a closure that yields returns the global Generator inside a namespace
+// feature: hover
+// expect: Generator<int, int, mixed, void>
+// expect_absent: App\Generator
+---
+<?php
+
+namespace App;
+
+function demo(): void {
+    $numbers = function () {
+        yield 1;
+    };
+    $iterator = $numbers();
+    echo $ite<>rator;
+}

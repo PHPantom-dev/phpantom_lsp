@@ -296,5 +296,35 @@ class Foo {
 
     assert_eq!(edits.len(), 1);
     // Should keep the other attribute but remove Override.
-    assert_eq!(edits[0].new_text, "    #[Deprecated]");
+    assert_eq!(
+        crate::common::apply_edits(content, &edits),
+        "<?php\nclass Foo {\n    #[Deprecated]\n    public function bar(): void {}\n}\n"
+    );
+}
+
+#[test]
+fn removes_override_in_a_crlf_file() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "<?php\r\nclass Foo {\r\n    public function baz(): void {}\r\n\r\n    #[\\Override]\r\n    public function bar(): void {}\r\n}\r\n";
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        5,
+        "Method Foo::bar() has #[\\Override] attribute but does not override any method.",
+        "method.override",
+    );
+
+    let actions = get_code_actions_at(&backend, uri, content, 5, 4);
+    let action = find_action_containing(&actions, "Remove #[Override]")
+        .expect("should offer Remove #[Override] action");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = crate::common::apply_edits(content, &extract_edits(&resolved));
+
+    assert_eq!(
+        result,
+        "<?php\r\nclass Foo {\r\n    public function baz(): void {}\r\n\r\n    public function bar(): void {}\r\n}\r\n"
+    );
 }

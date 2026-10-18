@@ -305,51 +305,6 @@ fn rewrite_shape_key_in(
     }
 }
 
-/// Qualify the unqualified class names in an assertion's type against
-/// the namespace of the file that declared the tag.
-///
-/// `@phpstan-assert-if-true TestMethod $this` on an interface in
-/// `PHPUnit\Event\Code` names `PHPUnit\Event\Code\TestMethod`, the way
-/// PHP resolves every other unqualified name in that file.  The call
-/// site's namespace has nothing to do with it, and the short-name index
-/// that would otherwise find the class covers the project's own files
-/// only — so a tag a vendor package declares on itself resolved to
-/// nothing at all.
-///
-/// A name that does not resolve to a class under the declaring namespace
-/// is left alone, so an already-qualified name and the short-name
-/// fallback both keep working.
-pub(super) fn qualify_assertion_type(
-    asserted: &PhpType,
-    declaring_namespace: Option<&str>,
-    ctx: &ForwardWalkCtx<'_>,
-) -> PhpType {
-    let Some(namespace) = declaring_namespace.filter(|ns| !ns.is_empty()) else {
-        return asserted.clone();
-    };
-    asserted.resolve_names(&|name| {
-        if name.contains('\\') {
-            return name.to_string();
-        }
-        let qualified = format!("{}\\{}", namespace, name);
-        if (ctx.class_loader)(&qualified).is_some() {
-            qualified
-        } else {
-            name.to_string()
-        }
-    })
-}
-
-/// The namespace part of a fully-qualified class name, or `None` for a
-/// class in the global namespace.
-pub(super) fn namespace_of_fqn(fqn: &str) -> Option<String> {
-    let trimmed = fqn.trim_start_matches('\\');
-    trimmed
-        .rfind('\\')
-        .map(|pos| trimmed[..pos].to_string())
-        .filter(|ns| !ns.is_empty())
-}
-
 /// Apply one `@phpstan-assert-if-true` / `-if-false` conclusion to the
 /// scope entry for `target`.
 ///

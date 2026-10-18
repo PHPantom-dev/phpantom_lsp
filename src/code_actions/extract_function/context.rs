@@ -61,24 +61,9 @@ pub(crate) fn find_enclosing_body_statements<'a>(
                     return func.body.statements.iter().collect();
                 }
             }
-            Statement::Class(class) => {
-                if let Some(block) = crate::util::find_enclosing_method_block_in_members(
-                    class.members.iter(),
-                    offset,
-                ) {
-                    return block.statements.iter().collect();
-                }
-            }
-            Statement::Trait(tr) => {
+            _ if let Some(body) = crate::parser::class_like_body(stmt) => {
                 if let Some(block) =
-                    crate::util::find_enclosing_method_block_in_members(tr.members.iter(), offset)
-                {
-                    return block.statements.iter().collect();
-                }
-            }
-            Statement::Enum(en) => {
-                if let Some(block) =
-                    crate::util::find_enclosing_method_block_in_members(en.members.iter(), offset)
+                    crate::util::find_enclosing_method_block_in_members(body.members.iter(), offset)
                 {
                     return block.statements.iter().collect();
                 }
@@ -224,22 +209,10 @@ pub(crate) fn find_class_end_offset(
 ) -> Option<usize> {
     for stmt in statements.iter() {
         match stmt {
-            Statement::Class(class) => {
-                let span = class.span();
+            _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+                let span = stmt.span();
                 if offset >= span.start.offset && offset <= span.end.offset {
-                    return Some(class.right_brace.start.offset as usize);
-                }
-            }
-            Statement::Trait(tr) => {
-                let span = tr.span();
-                if offset >= span.start.offset && offset <= span.end.offset {
-                    return Some(tr.right_brace.start.offset as usize);
-                }
-            }
-            Statement::Enum(en) => {
-                let span = en.span();
-                if offset >= span.start.offset && offset <= span.end.offset {
-                    return Some(en.right_brace.start.offset as usize);
+                    return Some(body.right_brace.start.offset as usize);
                 }
             }
             Statement::Namespace(ns) => {
@@ -260,20 +233,8 @@ pub(crate) fn find_after_class_end(
 ) -> Option<usize> {
     for stmt in statements.iter() {
         match stmt {
-            Statement::Class(class) => {
-                let span = class.span();
-                if offset >= span.start.offset && offset <= span.end.offset {
-                    return Some(span.end.offset as usize);
-                }
-            }
-            Statement::Trait(tr) => {
-                let span = tr.span();
-                if offset >= span.start.offset && offset <= span.end.offset {
-                    return Some(span.end.offset as usize);
-                }
-            }
-            Statement::Enum(en) => {
-                let span = en.span();
+            Statement::Class(_) | Statement::Trait(_) | Statement::Enum(_) => {
+                let span = stmt.span();
                 if offset >= span.start.offset && offset <= span.end.offset {
                     return Some(span.end.offset as usize);
                 }

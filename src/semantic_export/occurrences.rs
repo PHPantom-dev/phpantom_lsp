@@ -123,6 +123,7 @@ pub(super) fn export_span(
             let loader = backend.function_loader_with(
                 context.resolved_names.as_deref(),
                 context.use_map_at(span.start),
+                &context.symbol_imports_at(span.start).functions,
                 context.namespace_at(span.start),
             );
             let function = loader(name, span.start);
@@ -194,6 +195,7 @@ pub(super) fn export_span(
             let loader = backend.constant_loader_with(
                 context.resolved_names.as_deref(),
                 context.use_map_at(span.start),
+                &context.symbol_imports_at(span.start).constants,
                 context.namespace_at(span.start),
             );
             let resolved = loader(name, span.start);

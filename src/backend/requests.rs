@@ -2,10 +2,14 @@
 //! open-file access behind a panic guard, the position/URI handler
 //! wrappers, and the whole-file request coalescer.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::Position;
+
+use parking_lot::Mutex;
 
 use crate::Backend;
 use crate::server::run_blocking_cancel_safe;
@@ -136,7 +140,7 @@ impl Backend {
     /// burst from piling up dozens of un-cancellable full-file scans that
     /// would otherwise saturate every core and stall completion and hover.
     ///
-    /// See [`WholeFileCoalesce`](crate::WholeFileCoalesce) for the rationale.
+    /// See [`WholeFileCoalesce`] for the rationale.
     pub(crate) async fn coalesced_whole_file<T, F>(
         &self,
         kind: &'static str,
@@ -147,7 +151,7 @@ impl Backend {
         T: Clone + Send + Sync + 'static,
         F: FnOnce() -> Result<Option<T>> + Send + 'static,
     {
-        let key = format!("{kind}\u{0}{uri}");
+        let key = WholeFileCoalesce::key(kind, uri);
         let coalesce = &self.whole_file_coalesce;
         let seq = coalesce.stamp(&key);
 
@@ -175,6 +179,84 @@ impl Backend {
             );
         }
         Ok(result)
+    }
+}
+
+/// Request-coalescing state for expensive whole-file requests (semantic
+/// tokens, code lens, document symbols, folding, links).
+///
+/// Editors re-issue these on every keystroke and cancel the superseded ones,
+/// but a `spawn_blocking` computation cannot be aborted once it starts, so a
+/// fast typist piles up many full-file scans (hundreds of ms each) that all
+/// run to completion and saturate every CPU core, starving the cheap
+/// interactive requests (completion, hover) until the user gives up waiting.
+///
+/// This coalesces by `(kind, uri)`: a global sequence stamps each request,
+/// a per-key async lock serialises computation so at most one runs per kind
+/// per file, and any request that finds itself no longer the latest when it
+/// acquires the lock short-circuits to the previous result instead of redoing
+/// the scan. A burst of N requests therefore performs at most two scans (the
+/// one already running plus the newest) rather than N.
+#[derive(Default)]
+pub(crate) struct WholeFileCoalesce {
+    /// Monotonic request counter shared across all keys.
+    seq: AtomicU64,
+    /// Latest request sequence seen per `"{kind}\0{uri}"` key.
+    latest: Mutex<HashMap<String, u64>>,
+    /// Per-key serialisation lock (async, held across the blocking compute).
+    locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Last successfully computed result per key, returned to superseded
+    /// requests so the editor never briefly sees an empty result.
+    last: Mutex<HashMap<String, Arc<dyn std::any::Any + Send + Sync>>>,
+}
+
+impl WholeFileCoalesce {
+    /// Get (or create) the per-key async serialisation lock. Held across the
+    /// blocking compute so at most one computation per key runs at a time.
+    pub(crate) fn key_lock(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.locks.lock();
+        Arc::clone(
+            locks
+                .entry(key.to_string())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+        )
+    }
+
+    /// Stamp a request with the next sequence number and record it as the
+    /// latest for `key`. Returns the stamped sequence.
+    pub(crate) fn stamp(&self, key: &str) -> u64 {
+        let seq = self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.latest.lock().insert(key.to_string(), seq);
+        seq
+    }
+
+    /// Whether `seq` is still the latest request stamped for `key`.
+    pub(crate) fn is_latest(&self, key: &str, seq: u64) -> bool {
+        self.latest.lock().get(key).copied() == Some(seq)
+    }
+
+    /// Read the cached last result for `key`, if any.
+    pub(crate) fn last_result(&self, key: &str) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.last.lock().get(key).cloned()
+    }
+
+    /// Store the last computed result for `key`.
+    pub(crate) fn store_result(&self, key: &str, value: Arc<dyn std::any::Any + Send + Sync>) {
+        self.last.lock().insert(key.to_string(), value);
+    }
+
+    /// Drop everything kept for `uri` (on `did_close`), so the maps do not
+    /// grow across an editing session.
+    pub(crate) fn forget_uri(&self, uri: &str) {
+        let suffix = Self::key("", uri);
+        self.latest.lock().retain(|k, _| !k.ends_with(&suffix));
+        self.locks.lock().retain(|k, _| !k.ends_with(&suffix));
+        self.last.lock().retain(|k, _| !k.ends_with(&suffix));
+    }
+
+    /// The key a `kind` request for `uri` is coalesced under.
+    fn key(kind: &str, uri: &str) -> String {
+        format!("{kind}\u{0}{uri}")
     }
 }
 

@@ -9,6 +9,11 @@
 //! produced by the symbol map or text scanner and returns the
 //! corresponding variant.
 
+use crate::text_scan::{
+    CodeOffsets, ScanStep, find_matching_backward, find_matching_forward, scan_top_level_backward,
+    split_top_level_commas,
+};
+
 // ─── Structured Subject Expression ──────────────────────────────────────────
 
 /// Structured representation of a completion subject expression.
@@ -677,27 +682,11 @@ fn parse_callee(call_body: &str) -> SubjectExpr {
     // Only strip when the opening `(` at position 0 matches the
     // closing `)` at the end (i.e. the entire string is one
     // parenthesized group, not something like `(foo)(bar)`).
-    if call_body.starts_with('(') && call_body.ends_with(')') {
-        let mut depth = 0i32;
-        let bytes = call_body.as_bytes();
-        let mut closes_at_end = false;
-        for (i, &b) in bytes.iter().enumerate() {
-            match b {
-                b'(' => depth += 1,
-                b')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        closes_at_end = i == bytes.len() - 1;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        if closes_at_end {
-            let inner = &call_body[1..call_body.len() - 1];
-            return SubjectExpr::parse(inner);
-        }
+    if call_body.starts_with('(')
+        && find_matching_forward(call_body, 0, b'(', b')') == Some(call_body.len() - 1)
+    {
+        let inner = &call_body[1..call_body.len() - 1];
+        return SubjectExpr::parse(inner);
     }
 
     // ── `new ClassName` ─────────────────────────────────────────
@@ -708,8 +697,8 @@ fn parse_callee(call_body: &str) -> SubjectExpr {
         && !call_body.contains("->")
         && let Some(class_name) = call_body
             .strip_prefix("new ")
-            .map(|s| s.trim().trim_start_matches('\\'))
-            .filter(|s| !s.is_empty())
+            .map(str::trim)
+            .filter(|s| !s.trim_start_matches('\\').is_empty())
     {
         // Strip trailing parens content if any (e.g. from `(new Foo(…))`)
         let clean = class_name
@@ -752,36 +741,26 @@ fn parse_callee(call_body: &str) -> SubjectExpr {
 /// Split a subject at the **last** `->` or `?->` at depth 0.
 ///
 /// Returns `(base, property)` or `None` if no arrow is found.
-/// Arrows inside balanced parentheses are ignored.
+/// Arrows inside brackets or quotes are ignored.
 ///
 /// Scans from the end, so the cost is the length of the last link rather
 /// than of the whole subject: parsing a chain splits it once per link, and
 /// a scan from the front would make that quadratic in the chain's length.
 fn split_last_arrow_raw(subject: &str) -> Option<(&str, &str)> {
     let bytes = subject.as_bytes();
-    let mut depth = 0i32;
-    let mut last_arrow: Option<(usize, usize)> = None;
-
-    let mut i = bytes.len();
-    while i > 1 {
-        i -= 1;
-        match bytes[i] {
-            b')' => depth += 1,
-            b'(' => depth -= 1,
-            b'>' if depth == 0 && bytes[i - 1] == b'-' => {
-                let arrow_start = if i > 1 && bytes[i - 2] == b'?' {
-                    i - 2
-                } else {
-                    i - 1
-                };
-                last_arrow = Some((arrow_start, i + 1));
-                break;
-            }
-            _ => {}
+    let arrow_end = scan_top_level_backward(bytes, |bytes, i| {
+        if bytes[i] == b'>' && i > 0 && bytes[i - 1] == b'-' {
+            ScanStep::Stop
+        } else {
+            ScanStep::Skip(1)
         }
-    }
-
-    let (arrow_start, prop_start) = last_arrow?;
+    })?;
+    let arrow_start = if arrow_end > 1 && bytes[arrow_end - 2] == b'?' {
+        arrow_end - 2
+    } else {
+        arrow_end - 1
+    };
+    let prop_start = arrow_end + 1;
     if prop_start >= subject.len() {
         return None;
     }
@@ -799,23 +778,7 @@ fn split_last_arrow_raw(subject: &str) -> Option<(&str, &str)> {
 /// before `(` and `args_text` is the trimmed content between `(` and `)`.
 pub(crate) fn split_call_subject_raw(subject: &str) -> Option<(&str, &str)> {
     let inner = subject.strip_suffix(')')?;
-    let bytes = inner.as_bytes();
-    let mut depth: u32 = 0;
-    let mut open = None;
-    for i in (0..bytes.len()).rev() {
-        match bytes[i] {
-            b')' => depth += 1,
-            b'(' => {
-                if depth == 0 {
-                    open = Some(i);
-                    break;
-                }
-                depth -= 1;
-            }
-            _ => {}
-        }
-    }
-    let open = open?;
+    let open = find_matching_backward(subject, inner.len(), b'(', b')')?;
     let call_body = &inner[..open];
     let args_text = inner[open + 1..].trim();
     if call_body.is_empty() {
@@ -830,13 +793,12 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
     // Strip outer parentheses, when the opening one is closed by the last
     // character: `(new R())->all()` starts and ends with one, but it is a
     // call on the parenthesised `new`, not the `new` itself.
-    let inner = if s.starts_with('(')
-        && crate::text_scan::find_matching_forward(s, 0, b'(', b')') == Some(s.len() - 1)
-    {
-        &s[1..s.len() - 1]
-    } else {
-        s
-    };
+    let inner =
+        if s.starts_with('(') && find_matching_forward(s, 0, b'(', b')') == Some(s.len() - 1) {
+            &s[1..s.len() - 1]
+        } else {
+            s
+        };
     let rest = inner.trim().strip_prefix("new ")?;
     let rest = rest.trim_start();
     let end = rest
@@ -851,7 +813,7 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
     // (e.g. `new C("foo")` should become `CallExpr { callee: NewExpr, args_text }`).
     if let Some(paren_start) = rest[end..].find('(') {
         let after_class = &rest[end + paren_start..];
-        if let Some(close) = crate::text_scan::find_matching_forward(after_class, 0, b'(', b')') {
+        if let Some(close) = find_matching_forward(after_class, 0, b'(', b')') {
             let remainder = after_class[close + 1..].trim_start();
             if remainder.starts_with("->") {
                 return None;
@@ -871,10 +833,13 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
         }
     }
 
-    let class_name = rest[..end].trim_start_matches('\\');
-    if class_name.is_empty()
-        || class_name == "class"
-        || !class_name
+    // A leading `\` stays: it marks an explicit global reference, which
+    // resolving the bare name inside a namespace would lose.
+    let class_name = &rest[..end];
+    let bare = class_name.strip_prefix('\\').unwrap_or(class_name);
+    if bare.is_empty()
+        || bare == "class"
+        || !bare
             .chars()
             .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
     {
@@ -895,7 +860,7 @@ fn parse_variable_array_access(subject: &str) -> Option<SubjectExpr> {
     let mut rest = &subject[first_bracket..];
 
     while rest.starts_with('[') {
-        let close = rest.find(']')?;
+        let close = find_matching_forward(rest, 0, b'[', b']')?;
         let inner = rest[1..close].trim();
 
         segments.push(classify_bracket_inner(inner));
@@ -953,9 +918,8 @@ fn parse_variable_array_access(subject: &str) -> Option<SubjectExpr> {
         if rest.starts_with('[') {
             let mut new_segments = Vec::new();
             while rest.starts_with('[') {
-                let close = match rest.find(']') {
-                    Some(c) => c,
-                    None => break,
+                let Some(close) = find_matching_forward(rest, 0, b'[', b']') else {
+                    break;
                 };
                 let inner = rest[1..close].trim();
                 new_segments.push(classify_bracket_inner(inner));
@@ -988,8 +952,8 @@ fn parse_call_array_access(subject: &str) -> Option<SubjectExpr> {
     let bytes = subject.as_bytes();
     let mut depth = 0i32;
     let mut split = None;
-    for (i, &b) in bytes.iter().enumerate() {
-        match b {
+    for i in CodeOffsets::new(bytes) {
+        match bytes[i] {
             b'(' => depth += 1,
             b')' => {
                 depth -= 1;
@@ -1015,7 +979,7 @@ fn parse_call_array_access(subject: &str) -> Option<SubjectExpr> {
     let mut segments = Vec::new();
     let mut rest = bracket_part;
     while rest.starts_with('[') {
-        let close = rest.find(']')?;
+        let close = find_matching_forward(rest, 0, b'[', b']')?;
         let inner = rest[1..close].trim();
         segments.push(classify_bracket_inner(inner));
         rest = &rest[close + 1..];
@@ -1041,20 +1005,22 @@ fn parse_call_array_access(subject: &str) -> Option<SubjectExpr> {
 
 /// Parse an inline array literal with index access: `[expr1, expr2][0]`.
 fn parse_inline_array(subject: &str) -> Option<SubjectExpr> {
-    let split_pos = subject.find("][")?;
-    let literal_text = &subject[..split_pos + 1];
-    if !literal_text.starts_with('[') || !literal_text.ends_with(']') {
+    let split_pos = find_matching_forward(subject, 0, b'[', b']')?;
+    if !subject[split_pos + 1..].starts_with('[') {
         return None;
     }
-    let inner = literal_text[1..literal_text.len() - 1].trim();
-    let elements: Vec<String> = inner.split(',').map(|e| e.trim().to_string()).collect();
+    let inner = subject[1..split_pos].trim();
+    let elements: Vec<String> = split_top_level_commas(inner)
+        .into_iter()
+        .map(|e| e.trim().to_string())
+        .collect();
 
     // Parse the bracket segments after the literal.
     let index_part = &subject[split_pos + 1..];
     let mut index_segments = Vec::new();
     let mut rest = index_part;
     while rest.starts_with('[') {
-        let close = rest.find(']')?;
+        let close = find_matching_forward(rest, 0, b'[', b']')?;
         let idx_inner = rest[1..close].trim();
         index_segments.push(classify_bracket_inner(idx_inner));
         rest = &rest[close + 1..];

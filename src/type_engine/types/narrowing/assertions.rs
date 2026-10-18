@@ -123,23 +123,12 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
 /// `static`, and `parent`.  The returned class is the raw parsed class;
 /// callers resolve inheritance separately so that methods declared on an
 /// ancestor (e.g. PHPUnit's `Assert::assertInstanceOf`) are found.
-fn resolve_static_receiver_class(
+pub(super) fn resolve_static_receiver_class(
     class_expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Arc<ClassInfo>> {
-    match class_expr {
-        Expression::Identifier(ident) => {
-            let name = bytes_to_str(ident.value());
-            let fqn = crate::util::resolve_name_via_loader(name, ctx.class_loader);
-            (ctx.class_loader)(&fqn).or_else(|| (ctx.class_loader)(name))
-        }
-        Expression::Self_(_) | Expression::Static(_) => (ctx.class_loader)(&ctx.current_class.name),
-        Expression::Parent(_) => {
-            let parent = ctx.current_class.parent_class.as_ref()?;
-            (ctx.class_loader)(parent)
-        }
-        _ => None,
-    }
+    ctx.written_names()
+        .static_receiver_class(class_expr, ctx.class_loader)
 }
 
 /// Resolve the receiver class of an instance method call (the `$x` in
@@ -148,7 +137,7 @@ fn resolve_static_receiver_class(
 /// `$this` resolves to the enclosing class.  Other variables are resolved
 /// through the forward walker's scope so that, for example,
 /// `$test->assertInstanceOf(...)` narrows correctly.
-fn resolve_instance_receiver_class(
+pub(super) fn resolve_instance_receiver_class(
     object_expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Arc<ClassInfo>> {
@@ -158,7 +147,7 @@ fn resolve_instance_receiver_class(
     // Variable names carry the leading `$` (e.g. `$this`, `$obj`).
     let name = bytes_to_str(dv.name);
     if name == "$this" {
-        return (ctx.class_loader)(&ctx.current_class.name);
+        return (ctx.class_loader)(&ctx.current_class.fqn());
     }
     let resolver = ctx.scope_var_resolver?;
     let first = resolver(name).into_iter().next()?;
@@ -207,14 +196,20 @@ fn build_method_assertion_info<'a>(
 ) -> Option<CallAssertionInfo<'a>> {
     let (method, _) =
         find_assertion_method_in_chain(class, method_name, ctx.class_loader, &mut Vec::new(), 0)?;
-    let extras = method.extras.map(|e| *e).unwrap_or_default();
+    let extras = method.extras.as_deref();
     Some(CallAssertionInfo {
-        assertions: extras.type_assertions,
-        parameters: method.parameters,
+        assertions: extras
+            .map(|e| e.type_assertions.clone())
+            .unwrap_or_default(),
+        parameters: method.parameters.clone(),
         argument_list,
         receiver_key,
-        template_params: extras.template_params,
-        template_bindings: extras.template_bindings,
+        template_params: extras
+            .map(|e| e.template_params.clone())
+            .unwrap_or_default(),
+        template_bindings: extras
+            .map(|e| e.template_bindings.clone())
+            .unwrap_or_default(),
     })
 }
 
@@ -223,8 +218,8 @@ fn build_method_assertion_info<'a>(
 /// chain (in PHP resolution order).  Uses raw class loads only, so it never
 /// mutates the shared resolved-class cache.
 ///
-/// Returns an owned clone of the first matching method that has non-empty
-/// `type_assertions`, paired with the FQN of the class that declared it.
+/// Returns the first matching method that has non-empty `type_assertions`,
+/// paired with the FQN of the class that declared it.
 /// The declaring class is what an unqualified name in the tag resolves
 /// against, which is not necessarily the receiver's own class.  A
 /// `visited` set and `depth` bound guard against cyclic hierarchies.
@@ -234,7 +229,7 @@ pub(in crate::type_engine) fn find_assertion_method_in_chain(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     visited: &mut Vec<Atom>,
     depth: usize,
-) -> Option<(crate::types::MethodInfo, Atom)> {
+) -> Option<(Arc<crate::types::MethodInfo>, Atom)> {
     find_method_in_chain_where(
         class,
         method_name,
@@ -255,12 +250,14 @@ pub(in crate::type_engine) fn find_assertion_method_in_chain(
 fn bind_ancestor_templates(
     class: &ClassInfo,
     ancestor: &ClassInfo,
-    (mut method, declaring): (crate::types::MethodInfo, Atom),
-) -> (crate::types::MethodInfo, Atom) {
+    (method, declaring): (Arc<crate::types::MethodInfo>, Atom),
+) -> (Arc<crate::types::MethodInfo>, Atom) {
     if !ancestor.template_params.is_empty() {
         let subs = crate::inheritance::build_substitution_map(class, ancestor, &Default::default());
         if !subs.is_empty() {
+            let mut method = Arc::unwrap_or_clone(method);
             crate::inheritance::apply_substitution_to_method(&mut method, &subs);
+            return (Arc::new(method), declaring);
         }
     }
     (method, declaring)
@@ -279,7 +276,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
     carries_metadata: &dyn Fn(&crate::types::MethodInfo) -> bool,
     visited: &mut Vec<Atom>,
     depth: usize,
-) -> Option<(crate::types::MethodInfo, Atom)> {
+) -> Option<(Arc<crate::types::MethodInfo>, Atom)> {
     if depth > 15 {
         return None;
     }
@@ -299,7 +296,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
         .find(|m| m.name.eq_ignore_ascii_case(method_name))
         && carries_metadata(method)
     {
-        return Some((method.as_ref().clone(), fqn));
+        return Some((Arc::clone(method), fqn));
     }
 
     // Traits mixed into this class.
@@ -419,7 +416,7 @@ pub(in crate::type_engine) fn scalar_assert_guard_kind(ty: &PhpType) -> Option<T
 pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ClassInfo>,
+    results: &mut Vec<Arc<ClassInfo>>,
     type_guard: &mut Option<(TypeGuardKind, bool)>,
     intersected: &mut bool,
 ) -> bool {
@@ -805,53 +802,23 @@ fn template_argument_at_call(
 
     // Try to extract a class name from the argument expression.
     if let Some(class_name) = extract_class_string_from_expr(arg_expr) {
-        let fqn = crate::util::resolve_name_via_loader(&class_name, ctx.class_loader);
+        let fqn = ctx.written_names().resolve_class(&class_name);
         return Some(PhpType::named(atom(&fqn)));
     }
 
+    // A variable holding a class name, read like any other variable: from
+    // the walker's scope while the walker drives this narrowing, else
+    // walked to at the argument itself, so a later reassignment of the
+    // variable does not fold back into the assertion.
     if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
-        let var_name = bytes_to_str(dv.name).to_string();
-
-        // Prefer the shared forward walker's tracked type for the variable.
-        // When the walker is driving this narrowing it has already processed
-        // the statements leading up to the assert, so a variable holding a
-        // `class-string<Wanted>` value (whether assigned directly, via
-        // null-coalesce, or list-destructured out of a foreach source array)
-        // is in scope with that type.  Reusing it keeps class-string-value
-        // resolution on the single shared pipeline instead of a parallel
-        // special-purpose walk that only recognizes direct assignments.
-        if let Some(scope_resolver) = ctx.scope_var_resolver {
-            for resolved in scope_resolver(&var_name) {
-                if let Some(TypeKind::Named(name)) = resolved
-                    .type_string
-                    .unwrap_class_string_inner()
-                    .map(PhpType::kind)
-                {
-                    return Some(PhpType::named(*name));
-                }
-            }
-        }
-
-        // Fall back to the class-string resolver for consumers without a live
-        // forward-walk scope (e.g. a completion request resolving the subject
-        // directly).  Resolve it at the argument's own offset rather than
-        // `ctx.cursor_offset`: the latter is `u32::MAX` during whole-method
-        // diagnostics walks, which defeats the class-body detection in
-        // `resolve_class_string_targets` (its `cursor <= class_end` bound never
-        // holds), and using the call site is more precise anyway (a later
-        // reassignment of the variable must not fold back into the assertion).
         let targets =
             crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
-                &var_name,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.content,
+                bytes_to_str(dv.name),
                 arg_expr.span().start.offset,
-                ctx.class_loader,
-                ctx.backend,
+                ctx,
             );
-        if let Some(first) = targets.into_iter().next() {
-            return Some(PhpType::named(atom(first.name.as_ref())));
+        if let Some(first) = targets.first() {
+            return Some(PhpType::named(first.fqn()));
         }
     }
 
@@ -992,269 +959,4 @@ pub(in crate::type_engine) fn find_assertion_arg_variables(
             _ => None,
         })
         .collect()
-}
-
-// ── `never` branches of a conditional return type ────────────────────
-
-/// What a call's conditional return type says about the arguments it was
-/// given.
-///
-/// A branch that resolves to `never` cannot be taken, so an argument
-/// value that would select it cannot have reached the call: the call
-/// would not have returned.  That is how PHPStan reads `throw_unless()`
-/// and its family, which declare their effect as
-/// `($condition is false ? never : …)` rather than with an
-/// `@phpstan-assert` tag.
-pub(in crate::type_engine) struct CallReturnInfo<'a> {
-    /// The callee's declared conditional return type, unevaluated.
-    pub(in crate::type_engine) return_type: PhpType,
-    /// The callee's parameter list, for mapping `$param` names to
-    /// positional argument indices.
-    pub(in crate::type_engine) parameters: SharedVec<ParameterInfo>,
-    /// The call-site argument list.
-    pub(in crate::type_engine) argument_list: &'a ArgumentList<'a>,
-}
-
-/// The callee facts behind a call whose declared return type is
-/// conditional, or `None` when it is not one (which is nearly every
-/// call, so this is the cheap early exit for the walker).
-pub(in crate::type_engine) fn extract_conditional_return_call<'a>(
-    call: &'a Call<'a>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<CallReturnInfo<'a>> {
-    match call {
-        Call::Function(func_call) => {
-            let Expression::Identifier(ident) = func_call.function else {
-                return None;
-            };
-            let func_name = bytes_to_str(ident.value()).to_string();
-            let offset = func_call.function.span().start.offset;
-            let func_info = ctx.function_loader()?(&func_name, offset)?;
-            let return_type = func_info.conditional_return?;
-            names_a_conditional(&return_type).then_some(CallReturnInfo {
-                return_type,
-                parameters: func_info.parameters,
-                argument_list: &func_call.argument_list,
-            })
-        }
-        Call::StaticMethod(static_call) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &static_call.method else {
-                return None;
-            };
-            let class = resolve_static_receiver_class(static_call.class, ctx)?;
-            conditional_return_from_chain(
-                &class,
-                bytes_to_str(ident.value),
-                &static_call.argument_list,
-                ctx,
-            )
-        }
-        // `->` and `?->` reach the same method; only the receiver's
-        // nullability differs, which the conditional return does not read.
-        Call::Method(MethodCall {
-            object,
-            method,
-            argument_list,
-            ..
-        })
-        | Call::NullSafeMethod(NullSafeMethodCall {
-            object,
-            method,
-            argument_list,
-            ..
-        }) => instance_conditional_return(object, method, argument_list, ctx),
-    }
-}
-
-/// The conditional return an instance method call carries, for either
-/// arrow.
-fn instance_conditional_return<'a>(
-    object: &Expression<'_>,
-    selector: &ClassLikeMemberSelector<'_>,
-    argument_list: &'a ArgumentList<'a>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<CallReturnInfo<'a>> {
-    let ClassLikeMemberSelector::Identifier(ident) = selector else {
-        return None;
-    };
-    let class = resolve_instance_receiver_class(object, ctx)?;
-    conditional_return_from_chain(&class, bytes_to_str(ident.value), argument_list, ctx)
-}
-
-/// Find the definition of `method_name` whose return type is conditional,
-/// searching the class's own methods, its traits, and its parent chain.
-///
-/// Uses the same raw class loads [`find_assertion_method_in_chain`] does,
-/// for the same reason: this runs inside the forward walker, where a full
-/// inheritance merge would write a partial result into the shared
-/// resolved-class cache.
-fn conditional_return_from_chain<'a>(
-    class: &ClassInfo,
-    method_name: &str,
-    argument_list: &'a ArgumentList<'a>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<CallReturnInfo<'a>> {
-    let (method, _) = find_method_in_chain_where(
-        class,
-        method_name,
-        ctx.class_loader,
-        &|m| m.conditional_return().is_some_and(names_a_conditional),
-        &mut Vec::new(),
-        0,
-    )?;
-    Some(CallReturnInfo {
-        return_type: method.extras?.conditional_return?,
-        parameters: method.parameters,
-        argument_list,
-    })
-}
-
-/// Whether a declared type has a conditional anywhere a `never` branch
-/// could hide.
-///
-/// Only the conditional spine is walked: a conditional nested inside a
-/// generic argument describes what the container holds, not whether the
-/// call returns.
-fn names_a_conditional(ty: &PhpType) -> bool {
-    match ty.kind() {
-        TypeKind::Conditional(cond) => {
-            cond.param.starts_with('$')
-                || names_a_conditional(&cond.then_type)
-                || names_a_conditional(&cond.else_type)
-        }
-        _ => false,
-    }
-}
-
-/// The members of `arg_ty` that cannot have reached this call, because
-/// the branch each of them selects in `return_type` is `never`.
-///
-/// `$dispatcher` typed `Dispatcher|null` handed to a
-/// `($condition is false ? never : ($condition is non-empty-mixed ?
-/// TValue : never))` returns `[null]`: the null member lands on a `never`
-/// branch, so a run that gets past the call did not have one.
-pub(in crate::type_engine) fn never_ruled_out_members(
-    return_type: &PhpType,
-    param_name: &str,
-    arg_ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Vec<PhpType> {
-    let members = split_into_runtime_members(arg_ty);
-    // A type with nothing to choose between says nothing: ruling its only
-    // member out would leave the argument with no type at all, which is a
-    // claim about unreachable code rather than about the value.
-    if members.len() < 2 {
-        return Vec::new();
-    }
-    let ruled_out: Vec<PhpType> = members
-        .iter()
-        .filter(|member| {
-            evaluate_conditional_for(return_type, param_name, member, class_loader)
-                .is_some_and(|result| result.is_never())
-        })
-        .cloned()
-        .collect();
-    // Every member ruled out means the call can never return at all, which
-    // is a statement about the call site rather than about the argument.
-    if ruled_out.len() == members.len() {
-        return Vec::new();
-    }
-    ruled_out
-}
-
-/// The alternatives a value of this type can actually be at runtime.
-///
-/// `?Foo` is `Foo` or `null`, and a `bool` really is `true` or `false`:
-/// splitting it is what lets `throw_unless($flag)` leave `true` behind.
-pub(in crate::type_engine) fn split_into_runtime_members(ty: &PhpType) -> Vec<PhpType> {
-    let mut out = Vec::new();
-    for member in ty.union_members() {
-        match member.kind() {
-            TypeKind::Nullable(inner) => {
-                out.extend(split_into_runtime_members(inner));
-                out.push(PhpType::null());
-            }
-            TypeKind::Named(name) if name == "bool" || name == "boolean" => {
-                out.push(PhpType::true_());
-                out.push(PhpType::false_());
-            }
-            _ => out.push((*member).clone()),
-        }
-    }
-    out.dedup();
-    out
-}
-
-/// Walk the conditional spine of `ty` with `$param` bound to `arg_ty`,
-/// returning the branch it settles on.
-///
-/// `None` when a condition cannot be decided for this member, or when the
-/// spine tests a parameter other than the one being judged: either way
-/// nothing about this member has been proven.
-fn evaluate_conditional_for(
-    ty: &PhpType,
-    param_name: &str,
-    arg_ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<PhpType> {
-    let TypeKind::Conditional(cond) = ty.kind() else {
-        return Some(ty.clone());
-    };
-    if cond.param != param_name {
-        return None;
-    }
-    let mut taken = condition_result_for_member(arg_ty, &cond.condition, class_loader)?;
-    if cond.negated {
-        taken = !taken;
-    }
-    let branch = if taken {
-        &cond.then_type
-    } else {
-        &cond.else_type
-    };
-    evaluate_conditional_for(branch, param_name, arg_ty, class_loader)
-}
-
-/// Decide `$param is <condition>` for one runtime member.
-///
-/// The shared conditional evaluator answers `is true` / `is false` only
-/// for an argument already narrowed to one of them, because a plain
-/// `bool` really may be either.  Here the members have already been split
-/// apart, so a member that cannot be a bool at all settles the condition:
-/// a `null` argument is not `false`, which is what sends
-/// `throw_unless($x)` down its else branch instead of leaving it
-/// undecided.
-fn condition_result_for_member(
-    member: &PhpType,
-    condition: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<bool> {
-    if condition.is_true() || condition.is_false() {
-        if member.is_true() || member.is_false() {
-            return Some(member.is_true() == condition.is_true());
-        }
-        return (!can_hold_a_bool(member)).then_some(false);
-    }
-    // `non-empty-mixed` is PHPStan's spelling of "any truthy value", which
-    // is the condition the throw-helper family is written against.
-    if let TypeKind::Named(name) = condition.kind()
-        && name == "non-empty-mixed"
-    {
-        return member.truthiness();
-    }
-    super::super::conditional::condition_holds_for_type(member, condition, class_loader)
-}
-
-/// Whether a value of this type could be `true` or `false`.
-fn can_hold_a_bool(ty: &PhpType) -> bool {
-    if ty.is_mixed() || ty.is_untyped() {
-        return true;
-    }
-    match ty.kind() {
-        TypeKind::Named(name) => matches!(
-            name.to_ascii_lowercase().as_str(),
-            "bool" | "boolean" | "true" | "false" | "scalar"
-        ),
-        _ => false,
-    }
 }

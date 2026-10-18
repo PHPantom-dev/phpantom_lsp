@@ -1,14 +1,15 @@
-/// Completion target extraction.
-///
-/// This module contains the logic for detecting the access operator (`->` or
-/// `::`) before the cursor and extracting the textual subject to its left
-/// (e.g. `$this`, `self`, `$var`, `$this->prop`, `ClassName`).
-///
-/// The low-level subject extraction helpers (walking backwards through
-/// characters to find variables, call expressions, `::` subjects, etc.)
-/// live in the shared [`crate::type_engine::subject_extraction`] module so they can be
-/// reused by the definition resolver and future features (hover,
-/// references).
+//! Completion target extraction.
+//!
+//! This module contains the logic for detecting the access operator (`->` or
+//! `::`) before the cursor and extracting the textual subject to its left
+//! (e.g. `$this`, `self`, `$var`, `$this->prop`, `ClassName`).
+//!
+//! The low-level subject extraction helpers (walking backwards through
+//! characters to find variables, call expressions, `::` subjects, etc.)
+//! live in the shared [`crate::type_engine::subject_extraction`] module so they can be
+//! reused by the definition resolver and future features (hover,
+//! references).
+
 use tower_lsp::lsp_types::*;
 
 use crate::text_scan::collapse_continuation_lines;

@@ -1,0 +1,17 @@
+// test: pipe into a static method callable resolves to the method's return type
+// feature: completion
+// expect: getTimestamp(
+---
+<?php
+
+class Stamp {
+    public function getTimestamp(): int {}
+
+    public static function fromString(string $input): Stamp {
+        return new Stamp();
+    }
+}
+
+$result = 'now' |> Stamp::fromString(...);
+
+$result-><>

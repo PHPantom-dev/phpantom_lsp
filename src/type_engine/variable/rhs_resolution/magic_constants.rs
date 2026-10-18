@@ -1,4 +1,5 @@
-//! Enclosing function-like and property lookup for magic constants.
+//! The types magic constants hold, and the enclosing function-like and
+//! property lookup they need.
 //!
 //! `__FUNCTION__` and `__METHOD__` need the name of the function, method,
 //! closure, or arrow function that *directly* encloses the magic constant,
@@ -20,6 +21,9 @@ use mago_syntax::walker::Walker;
 
 use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
+use crate::php_type::PhpType;
+use crate::type_engine::resolver::VarResolutionCtx;
+use crate::types::ClassLikeKind;
 
 /// The function-like construct lexically enclosing a magic constant.
 #[derive(Clone)]
@@ -140,4 +144,80 @@ pub(super) fn enclosing_context_at(content: &str, offset: u32) -> EnclosingConte
         }
         state.result.unwrap_or_default()
     })
+}
+
+/// The type a magic constant holds.
+///
+/// Every magic constant's value is known at the point it is written, so
+/// each resolves to the exact literal rather than its base type:
+/// `__LINE__` to the literal line number, `__NAMESPACE__`/`__FUNCTION__`/
+/// `__METHOD__`/`__TRAIT__`/`__PROPERTY__` to the literal string PHP would
+/// substitute there. `__CLASS__` narrows further to `class-string<Foo>`, the way
+/// `Foo::class` does, so the class identity survives into `new $class`
+/// and `class-string` parameters — the named inner type already pins it
+/// exactly. A trait body only knows it will be *some* class name at
+/// runtime (the using class, not the trait), so `__CLASS__` gets a bare
+/// `class-string` there, and code outside any class-like gets the plain
+/// `string` the empty value is.
+pub(super) fn magic_constant_type(
+    magic: &MagicConstant<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> PhpType {
+    match magic {
+        MagicConstant::Line(_) => {
+            let offset = magic.span().start.offset as usize;
+            let line = crate::text_position::offset_to_position(ctx.content, offset).line + 1;
+            PhpType::literal_int(line.to_string())
+        }
+        MagicConstant::Namespace(_) => {
+            PhpType::literal_string_value(ctx.current_class.file_namespace.as_deref().unwrap_or(""))
+        }
+        MagicConstant::Class(_) if ctx.current_class.name.is_empty() => PhpType::string(),
+        MagicConstant::Class(_) if ctx.current_class.kind == ClassLikeKind::Trait => {
+            PhpType::class_string(None)
+        }
+        MagicConstant::Class(_) => {
+            PhpType::class_string(Some(PhpType::named(ctx.current_class.fqn())))
+        }
+        MagicConstant::Trait(_) if ctx.current_class.kind == ClassLikeKind::Trait => {
+            PhpType::literal_string_value(ctx.current_class.fqn())
+        }
+        MagicConstant::Trait(_) => PhpType::literal_string_value(""),
+        MagicConstant::Function(_) => {
+            PhpType::literal_string_value(enclosing_function_display_name(magic, ctx))
+        }
+        MagicConstant::Method(_) => {
+            let name = enclosing_function_display_name(magic, ctx);
+            if name.is_empty() || ctx.current_class.name.is_empty() {
+                PhpType::literal_string_value(name)
+            } else {
+                PhpType::literal_string_value(format!("{}::{}", ctx.current_class.fqn(), name))
+            }
+        }
+        MagicConstant::Property(_) => {
+            let offset = magic.span().start.offset;
+            PhpType::literal_string_value(
+                enclosing_context_at(ctx.content, offset)
+                    .property
+                    .unwrap_or_default(),
+            )
+        }
+        _ => PhpType::string(),
+    }
+}
+
+/// The bare name `__FUNCTION__`/`__METHOD__` substitute for the function,
+/// method, closure, or arrow function directly enclosing `magic` — its
+/// declared name, `{closure}` for an anonymous one, or the empty string
+/// for top-level code outside any function-like construct.
+fn enclosing_function_display_name(
+    magic: &MagicConstant<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> String {
+    let offset = magic.span().start.offset;
+    match enclosing_context_at(ctx.content, offset).function {
+        Some(EnclosingFunction::Named(name)) => name,
+        Some(EnclosingFunction::Closure) => "{closure}".to_string(),
+        None => String::new(),
+    }
 }

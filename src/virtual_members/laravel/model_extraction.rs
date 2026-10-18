@@ -22,8 +22,9 @@ use crate::types::{
     CastSources, FacadeAccessor, LaravelMetadata, MethodInfo, PivotAccessor, PivotRelation,
     model_declaration,
 };
-use crate::util::{short_name, strip_fqn_prefix};
+use crate::util::short_name;
 
+use super::cast_literals::{array_literal_entries, extract_string_literal, parse_casts_array};
 use super::relationships::is_inferable_relationship_short_name;
 use super::{
     extract_pivot_accessor, extract_pivot_using, extract_with_pivot_columns,
@@ -299,136 +300,193 @@ fn extract_customisation(
     None
 }
 
+/// A property item's name without the leading `$`.
+fn property_item_name<'a>(item: &class_like::property::PropertyItem<'a>) -> &'a str {
+    let name = bytes_to_str(item.variable().name);
+    name.strip_prefix('$').unwrap_or(name)
+}
+
+/// The source text `node` spans, if it lies within `content`.
+fn span_text<'c>(node: &impl HasSpan, content: &'c str) -> Option<&'c str> {
+    let span = node.span();
+    content.get(span.start.offset as usize..span.end.offset as usize)
+}
+
+/// The source text of a property item's initializer, `None` for an item
+/// declared without one.
+fn initializer_text<'c>(
+    item: &class_like::property::PropertyItem<'_>,
+    content: &'c str,
+) -> Option<&'c str> {
+    let class_like::property::PropertyItem::Concrete(concrete) = item else {
+        return None;
+    };
+    span_text(concrete.value, content)
+}
+
+/// The plain property items among `members` named `name` (without the
+/// `$`), each with the declaration it belongs to, in source order.
+pub(crate) fn plain_properties<'a>(
+    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    name: &str,
+) -> impl Iterator<
+    Item = (
+        &'a class_like::property::PlainProperty<'a>,
+        &'a class_like::property::PropertyItem<'a>,
+    ),
+> {
+    members
+        .filter_map(|member| match member {
+            class_like::member::ClassLikeMember::Property(
+                class_like::property::Property::Plain(plain),
+            ) => Some(plain),
+            _ => None,
+        })
+        .flat_map(move |plain| {
+            plain
+                .items
+                .iter()
+                .filter(move |item| property_item_name(item) == name)
+                .map(move |item| (plain, item))
+        })
+}
+
+/// The initializer text of the first plain property named `name` (without
+/// the `$`) that has one.
+fn property_initializer_text<'a, 'c>(
+    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    content: &'c str,
+    name: &str,
+) -> Option<&'c str> {
+    plain_properties(members, name).find_map(|(_, item)| initializer_text(item, content))
+}
+
+/// The value of the first top-level `return` in `method`'s body.
+fn first_return_value<'a>(
+    method: &'a class_like::method::Method<'a>,
+) -> Option<&'a Expression<'a>> {
+    let class_like::method::MethodBody::Concrete(block) = &method.body else {
+        return None;
+    };
+    block.statements.iter().find_map(|stmt| match stmt {
+        Statement::Return(ret) => ret.value,
+        _ => None,
+    })
+}
+
+/// The value of the first top-level `return` in the first method named
+/// `name` (case-insensitively).
+pub(crate) fn method_return_value<'a>(
+    mut members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    name: &str,
+) -> Option<&'a Expression<'a>> {
+    let method = members.find_map(|member| match member {
+        class_like::member::ClassLikeMember::Method(method)
+            if method.name.value.eq_ignore_ascii_case(name.as_bytes()) =>
+        {
+            Some(method)
+        }
+        _ => None,
+    })?;
+    first_return_value(method)
+}
+
+/// Where a model's attribute arrays name `attribute`: the offset of the
+/// first character inside the quotes of the string literal, in `$casts`,
+/// `$attributes` or a `casts()` method's returned array as a key, or in
+/// `$fillable`, `$guarded`, `$hidden`, `$visible`, `$appends` or `$dates`
+/// as an entry.
+pub(crate) fn attribute_entry_offset(
+    members: &[class_like::member::ClassLikeMember<'_>],
+    attribute: &str,
+) -> Option<u32> {
+    let names = |literal: Option<&Expression<'_>>| -> Option<u32> {
+        let Some(Expression::Literal(Literal::String(string))) = literal else {
+            return None;
+        };
+        (crate::atom::literal_bytes_to_str(string.value?)? == attribute)
+            .then(|| string.span().start.offset + 1)
+    };
+    let in_array = |array: &Expression<'_>, keyed: bool| {
+        crate::parser::array_literal_elements(array)?
+            .iter()
+            .find_map(|element| {
+                names(if keyed {
+                    crate::parser::array_element_key(element)
+                } else {
+                    crate::parser::array_element_value(element)
+                })
+            })
+    };
+    let property_entry = |name: &str, keyed: bool| {
+        plain_properties(members.iter(), name).find_map(|(_, item)| match item {
+            class_like::property::PropertyItem::Concrete(concrete) => {
+                in_array(concrete.value, keyed)
+            }
+            class_like::property::PropertyItem::Abstract(_) => None,
+        })
+    };
+    property_entry("casts", true)
+        .or_else(|| {
+            method_return_value(members.iter(), "casts").and_then(|ret| in_array(ret, true))
+        })
+        .or_else(|| property_entry("attributes", true))
+        .or_else(|| {
+            [
+                "fillable", "guarded", "hidden", "visible", "appends", "dates",
+            ]
+            .into_iter()
+            .find_map(|name| property_entry(name, false))
+        })
+}
+
 /// Extract the model class explicitly configured on a Laravel factory.
-///
-/// A `SomeModel::class` initializer follows PHP class-name resolution, so
-/// its written name is left for the normal name-resolution pass. A quoted
-/// class name is already a runtime string and is therefore marked absolute
-/// before that pass, preventing the factory's namespace from being prepended.
 fn extract_factory_model<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
 ) -> Option<PhpType> {
-    for member in members {
-        let class_like::member::ClassLikeMember::Property(class_like::property::Property::Plain(
-            plain,
-        )) = member
-        else {
-            continue;
-        };
-
-        // `Factory::modelName()` reads `$this->model`, which a static
-        // property of the same name never answers.
-        if plain.modifiers.iter().any(|modifier| modifier.is_static()) {
-            continue;
-        }
-
-        for item in plain.items.iter() {
-            let var_name = bytes_to_str(item.variable().name);
-            if var_name.strip_prefix('$').unwrap_or(var_name) != "model" {
-                continue;
-            }
-            let class_like::property::PropertyItem::Concrete(concrete) = item else {
-                continue;
-            };
-
-            if let Expression::Access(Access::ClassConstant(access)) = concrete.value
-                && matches!(
-                    &access.constant,
-                    ClassLikeConstantSelector::Identifier(constant)
-                        if bytes_to_str(constant.value).eq_ignore_ascii_case("class")
-                )
-                && let Expression::Identifier(identifier) = access.class
-            {
-                let name = bytes_to_str(identifier.value()).trim();
-                return (!name.is_empty()
-                    && !name.eq_ignore_ascii_case("self")
-                    && !name.eq_ignore_ascii_case("static")
-                    && !name.eq_ignore_ascii_case("parent"))
-                .then(|| PhpType::named(atom(name)));
-            }
-
-            let Expression::Literal(Literal::String(literal)) = concrete.value else {
-                continue;
-            };
-            let Some(name) = literal.value.and_then(literal_bytes_to_str) else {
-                continue;
-            };
-            let name = name.trim();
-            if name.is_empty() {
-                continue;
-            }
-            let absolute = if name.starts_with('\\') {
-                name.to_string()
-            } else {
-                format!("\\{name}")
-            };
-            return Some(PhpType::named(atom(&absolute)));
-        }
-    }
-
-    None
+    // `Factory::modelName()` reads `$this->model`, which a static
+    // property of the same name never answers.
+    plain_properties(members, "model")
+        .filter(|(plain, _)| !plain.modifiers.iter().any(|modifier| modifier.is_static()))
+        .find_map(|(_, item)| class_named_by_default(item))
 }
 
 fn extract_class_property<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     property: &str,
 ) -> Option<PhpType> {
-    for member in members {
-        let class_like::member::ClassLikeMember::Property(class_like::property::Property::Plain(
-            plain,
-        )) = member
-        else {
-            continue;
-        };
-        if !plain.modifiers.iter().any(|modifier| modifier.is_static()) {
-            continue;
-        }
-        for item in plain.items.iter() {
-            if bytes_to_str(item.variable().name).trim_start_matches('$') != property {
-                continue;
-            }
-            let class_like::property::PropertyItem::Concrete(concrete) = item else {
-                continue;
-            };
-            if let Expression::Access(Access::ClassConstant(access)) = concrete.value
-                && matches!(&access.constant, ClassLikeConstantSelector::Identifier(identifier)
-                    if bytes_to_str(identifier.value).eq_ignore_ascii_case("class"))
-                && let Expression::Identifier(identifier) = access.class
-            {
-                return Some(PhpType::named(atom(bytes_to_str(identifier.value()))));
-            }
-            if let Expression::Literal(Literal::String(literal)) = concrete.value
-                && let Some(name) = literal.value.and_then(literal_bytes_to_str)
-            {
-                return Some(PhpType::named(atom(&format!(
-                    "\\{}",
-                    name.trim_start_matches('\\')
-                ))));
-            }
-        }
+    plain_properties(members, property)
+        .filter(|(plain, _)| plain.modifiers.iter().any(|modifier| modifier.is_static()))
+        .find_map(|(_, item)| class_named_by_default(item))
+}
+
+/// The class a property's default value names.
+///
+/// A `SomeModel::class` initializer follows PHP class-name resolution, so
+/// its written name is left for the normal name-resolution pass. A quoted
+/// class name is already a runtime string and is therefore marked absolute
+/// before that pass, preventing the declaring namespace from being prepended.
+fn class_named_by_default(item: &class_like::property::PropertyItem<'_>) -> Option<PhpType> {
+    let class_like::property::PropertyItem::Concrete(concrete) = item else {
+        return None;
+    };
+    if let Some(class) = crate::parser::class_fetch_identifier(concrete.value) {
+        return Some(PhpType::named(atom(bytes_to_str(class.value()))));
     }
-    None
+    let Expression::Literal(Literal::String(literal)) = concrete.value else {
+        return None;
+    };
+    let name = literal_bytes_to_str(literal.value?)?
+        .trim()
+        .trim_start_matches('\\');
+    (!name.is_empty()).then(|| PhpType::named(atom(&format!("\\{name}"))))
 }
 
 fn extract_class_return_from_body<'a>(
-    mut members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     method_name: &str,
 ) -> Option<PhpType> {
-    let method = members.find_map(|member| match member {
-        class_like::member::ClassLikeMember::Method(method)
-            if bytes_to_str(method.name.value).eq_ignore_ascii_case(method_name) =>
-        {
-            Some(method)
-        }
-        _ => None,
-    })?;
-    let class_like::method::MethodBody::Concrete(block) = &method.body else {
-        return None;
-    };
-    let value = block.statements.iter().find_map(|stmt| match stmt {
-        Statement::Return(ret) => ret.value,
-        _ => None,
-    })?;
+    let value = method_return_value(members, method_name)?;
     let name = match value {
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(id) => Some(bytes_to_str(id.value())),
@@ -474,17 +532,12 @@ fn extract_cast_sources<'a>(
                 class_like::property::Property::Plain(plain),
             ) => {
                 for item in plain.items.iter() {
-                    let var_name = bytes_to_str(item.variable().name).to_string();
-                    let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
-                    if stripped != "casts" {
+                    if property_item_name(item) != "casts" {
                         continue;
                     }
                     has_property = true;
                     if let class_like::property::PropertyItem::Concrete(concrete) = item {
-                        let span = concrete.value.span();
-                        let start = span.start.offset as usize;
-                        let end = span.end.offset as usize;
-                        property_text = content.get(start..end);
+                        property_text = span_text(concrete.value, content);
                     }
                 }
             }
@@ -492,14 +545,8 @@ fn extract_cast_sources<'a>(
                 if method.name.value.eq_ignore_ascii_case(b"casts") =>
             {
                 has_method = true;
-                if let class_like::method::MethodBody::Concrete(block) = &method.body
-                    && let Some(value) = block.statements.iter().find_map(|stmt| match stmt {
-                        Statement::Return(ret) => ret.value,
-                        _ => None,
-                    })
-                {
-                    let span = value.span();
-                    method_text = content.get(span.start.offset as usize..span.end.offset as usize);
+                if let Some(value) = first_return_value(method) {
+                    method_text = span_text(value, content);
                 }
             }
             _ => {}
@@ -532,348 +579,22 @@ pub(crate) fn overlay_casts(
     merged
 }
 
-/// The trimmed, non-empty entries of a PHP array literal written as `[…]`.
-///
-/// Commas inside parentheses, brackets, braces, or quotes do not split an
-/// entry, so `AsCollection::using(Custom::class, Item::class)` stays one
-/// value. Text that is not an array literal yields nothing.
-fn array_literal_entries(text: &str) -> impl Iterator<Item = &str> {
-    let inner = text
-        .trim()
-        .strip_prefix('[')
-        .map(|s| s.strip_suffix(']').unwrap_or(s));
-    inner
-        .into_iter()
-        .flat_map(split_top_level_commas)
-        .filter(|segment| !segment.is_empty())
-}
-
-/// Split `text` on commas that are not nested in `()`, `[]`, `{}`, or a
-/// quoted string. Empty segments (a trailing comma) are kept out.
-fn split_top_level_commas(text: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    let mut depth = 0i32;
-    let mut quote: Option<char> = None;
-    let mut i = 0;
-    while i < text.len() {
-        let c = text[i..].chars().next().unwrap_or('\0');
-        let len = c.len_utf8();
-        if let Some(q) = quote {
-            if c == '\\' {
-                i += len + text[i + len..].chars().next().map_or(0, char::len_utf8);
-                continue;
-            }
-            if c == q {
-                quote = None;
-            }
-            i += len;
-            continue;
-        }
-        match c {
-            '\'' | '"' => quote = Some(c),
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth -= 1,
-            ',' if depth == 0 => {
-                let segment = text[start..i].trim();
-                if !segment.is_empty() {
-                    out.push(segment);
-                }
-                start = i + len;
-            }
-            _ => {}
-        }
-        i += len;
-    }
-    let tail = text[start..].trim();
-    if !tail.is_empty() {
-        out.push(tail);
-    }
-    out
-}
-
-/// Parse key-value pairs from a PHP array literal text.
-///
-/// Accepts text starting with `[` and extracts `'key' => 'value'` pairs.
-/// Both single-quoted and double-quoted strings are supported for keys
-/// and values.  Handles multi-line arrays and trailing commas.
-///
-/// Returns a list of `(key, value)` string pairs.
-fn parse_casts_array(text: &str) -> Vec<(String, String)> {
-    let mut results = Vec::new();
-    for segment in array_literal_entries(text) {
-        let Some(arrow_pos) = segment.find("=>") else {
-            continue;
-        };
-        let key = extract_string_literal(segment[..arrow_pos].trim());
-        let value = extract_cast_value(segment[arrow_pos + 2..].trim());
-
-        if let (Some(k), Some(v)) = (key, value)
-            && !k.is_empty()
-            && !v.is_empty()
-        {
-            results.push((k, v));
-        }
-    }
-    results
-}
-
-/// Extract the string content from a PHP string literal.
-///
-/// Strips surrounding quotes (single or double) and returns the inner
-/// text.  Returns `None` if the text is not a quoted string.
-///
-/// Also handles:
-/// - `SomeCast::class` — returns `"SomeCast"`
-/// - `Address::class.':argument'` — strips the concatenated argument
-///   suffix and returns `"Address"`
-fn extract_string_literal(text: &str) -> Option<String> {
-    let t = text.trim();
-    if ((t.starts_with('\'') && t.ends_with('\'')) || (t.starts_with('"') && t.ends_with('"')))
-        && t.len() >= 2
-    {
-        return Some(t[1..t.len() - 1].to_string());
-    }
-    // For class-string cast values like `SomeCast::class` or
-    // `SomeCast::class.':argument'`, extract the class name.
-    // The concatenation dot may have surrounding whitespace, so
-    // look for `::class` and take everything before it.
-    if let Some(class_pos) = t.find("::class") {
-        let before = t[..class_pos].trim();
-        let name = strip_fqn_prefix(before);
-        if !name.is_empty() {
-            return Some(name.to_string());
-        }
-    }
-    None
-}
-
-/// The cast type string a `$casts` / `casts()` value names.
-///
-/// Accepts the forms Eloquent evaluates before it stores a cast:
-/// - a quoted string (`'boolean'`, `'decimal:2'`)
-/// - `SomeCast::class`, including a concatenated argument
-///   (`Address::class.':nullable'`, `AsEnumCollection::class.':'.Status::class`)
-/// - a static call whose return value is that string
-///   (`AsEnumCollection::of(Status::class)`, `AsCollection::using(Custom::class, Item::class)`,
-///   `AsBinary::uuid()`)
-///
-/// A call is stored with its method kept (`AsEnumCollection::of:Status`) so
-/// the type resolver can tell `of()` from `using()` after the class name has
-/// been resolved. Arguments that are not a class constant or a string literal
-/// are dropped: a variable there is not knowable statically.
-fn extract_cast_value(text: &str) -> Option<String> {
-    let t = text.trim().trim_end_matches(';').trim();
-    if let Some(value) = extract_string_literal_quoted(t) {
-        return Some(value);
-    }
-    if let Some(value) = extract_static_cast_call(t) {
-        return Some(value);
-    }
-    extract_class_const_cast(t)
-}
-
-fn extract_string_literal_quoted(text: &str) -> Option<String> {
-    if ((text.starts_with('\'') && text.ends_with('\''))
-        || (text.starts_with('"') && text.ends_with('"')))
-        && text.len() >= 2
-    {
-        return Some(text[1..text.len() - 1].to_string());
-    }
-    None
-}
-
-/// `Class::method(args)` as the cast string the method returns.
-///
-/// `::class` is a constant, not a call, and is left for
-/// [`extract_class_const_cast`].
-fn extract_static_cast_call(text: &str) -> Option<String> {
-    let open = text.find('(')?;
-    let close = text.rfind(')')?;
-    if close < open || !text[close + 1..].trim().is_empty() {
-        return None;
-    }
-    let head = text[..open].trim();
-    let sep = head.rfind("::")?;
-    let class = strip_fqn_prefix(head[..sep].trim());
-    let method = head[sep + 2..].trim();
-    if method == "class" || !is_php_ident(method) || !is_php_class_name(class) {
-        return None;
-    }
-    let args = parse_cast_call_args(&text[open + 1..close]);
-    Some(super::casts::format_cast_reference(
-        class,
-        Some(method),
-        &args,
-    ))
-}
-
-fn parse_cast_call_args(inner: &str) -> Vec<String> {
-    if inner.trim().is_empty() {
-        return Vec::new();
-    }
-    split_top_level_commas(inner)
-        .into_iter()
-        .map(|arg| extract_cast_call_arg(arg).unwrap_or_default())
-        .collect()
-}
-
-fn extract_cast_call_arg(arg: &str) -> Option<String> {
-    let arg = strip_named_argument(arg.trim());
-    if let Some(value) = extract_string_literal_quoted(arg) {
-        return Some(value);
-    }
-    if let Some(class_pos) = arg.find("::class") {
-        let name = strip_fqn_prefix(arg[..class_pos].trim());
-        if is_php_class_name(name) {
-            return Some(name.to_string());
-        }
-    }
-    None
-}
-
-/// `name: value` with a single colon, not the `::` of a class constant.
-fn strip_named_argument(arg: &str) -> &str {
-    if let Some(idx) = arg.find(':')
-        && !arg[..idx].contains(':')
-        && arg.as_bytes().get(idx + 1) != Some(&b':')
-    {
-        let name = arg[..idx].trim();
-        if is_php_ident(name) {
-            return arg[idx + 1..].trim();
-        }
-    }
-    arg
-}
-
-/// `Class::class`, plus any `.'…'` / `.Other::class` concatenations after it.
-///
-/// `Address::class.':nullable'` is `Address:nullable`.
-/// `AsEnumCollection::class.':'.Status::class` is `AsEnumCollection:Status`.
-fn extract_class_const_cast(text: &str) -> Option<String> {
-    let class_pos = text.find("::class")?;
-    let name = strip_fqn_prefix(text[..class_pos].trim());
-    if !is_php_class_name(name) {
-        return None;
-    }
-    let mut result = name.to_string();
-    let mut rest = text[class_pos + "::class".len()..].trim();
-    while let Some(stripped) = rest.strip_prefix('.') {
-        rest = stripped.trim();
-        if let Some(quoted) = leading_quoted(rest) {
-            if let Some(value) = extract_string_literal_quoted(quoted) {
-                result.push_str(&value);
-            }
-            rest = rest[quoted.len()..].trim();
-            continue;
-        }
-        let Some(next) = rest.find("::class") else {
-            break;
-        };
-        let other = strip_fqn_prefix(rest[..next].trim());
-        if !is_php_class_name(other) {
-            break;
-        }
-        result.push_str(other);
-        rest = rest[next + "::class".len()..].trim();
-    }
-    Some(result)
-}
-
-/// The quoted literal `rest` starts with, if it starts with one.
-fn leading_quoted(rest: &str) -> Option<&str> {
-    let quote = rest.chars().next()?;
-    if quote != '\'' && quote != '"' {
-        return None;
-    }
-    let mut chars = rest.char_indices().skip(1);
-    while let Some((idx, c)) = chars.next() {
-        if c == '\\' {
-            chars.next();
-            continue;
-        }
-        if c == quote {
-            return Some(&rest[..=idx]);
-        }
-    }
-    None
-}
-
-fn is_php_ident(name: &str) -> bool {
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
-fn is_php_class_name(name: &str) -> bool {
-    let name = name.strip_prefix('\\').unwrap_or(name);
-    !name.is_empty()
-        && !name.ends_with('\\')
-        && !name.contains("\\\\")
-        && name
-            .split('\\')
-            .all(|segment| !segment.is_empty() && is_php_ident(segment))
-}
-
 /// Extract Eloquent attribute defaults from a class's `$attributes` property.
 ///
 /// Scans the class members for a `$attributes` property with an array
 /// initializer (`protected $attributes = [...]`) and infers PHP types
 /// from the literal default values.
 ///
-/// Returns a list of `(column_name, php_type)` pairs.  For example,
-/// `'role' => 'user'` produces `("role", "string")` and
-/// `'is_active' => true` produces `("is_active", "bool")`.
-fn extract_attributes_definitions<'a>(
-    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
-    content: &str,
-) -> Vec<(String, PhpType)> {
-    extract_attributes(members, content)
-        .into_iter()
-        .map(|(key, php_type, _)| (key, php_type))
-        .collect()
-}
-
-fn extract_attribute_defaults<'a>(
-    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
-    content: &str,
-) -> Vec<(String, String)> {
-    extract_attributes(members, content)
-        .into_iter()
-        .map(|(key, _, value)| (key, value))
-        .collect()
-}
-
+/// Returns a list of `(column_name, php_type, default_text)` triples.  For
+/// example, `'role' => 'user'` produces `("role", "string", "'user'")` and
+/// `'is_active' => true` produces `("is_active", "bool", "true")`.
 fn extract_attributes<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     content: &str,
 ) -> Vec<(String, PhpType, String)> {
-    for member in members {
-        if let class_like::member::ClassLikeMember::Property(
-            class_like::property::Property::Plain(plain),
-        ) = member
-        {
-            for item in plain.items.iter() {
-                let var_name = bytes_to_str(item.variable().name).to_string();
-                let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
-                if stripped != "attributes" {
-                    continue;
-                }
-                if let class_like::property::PropertyItem::Concrete(concrete) = item {
-                    let span = concrete.value.span();
-                    let start = span.start.offset as usize;
-                    let end = span.end.offset as usize;
-                    if let Some(text) = content.get(start..end) {
-                        return parse_attributes_array(text);
-                    }
-                }
-            }
-        }
-    }
-    Vec::new()
+    property_initializer_text(members, content, "attributes")
+        .map(parse_attributes_array)
+        .unwrap_or_default()
 }
 
 /// Parse key-value pairs from a PHP `$attributes` array literal and
@@ -886,26 +607,12 @@ fn extract_attributes<'a>(
 /// Returns a list of `(column_name, php_type)` pairs.
 fn parse_attributes_array(text: &str) -> Vec<(String, PhpType, String)> {
     let mut results = Vec::new();
-    let trimmed = text.trim();
-
-    let inner = if let Some(s) = trimmed.strip_prefix('[') {
-        s.strip_suffix(']').unwrap_or(s)
-    } else {
-        return results;
-    };
-
-    for segment in inner.split(',') {
-        let segment = segment.trim();
-        if segment.is_empty() {
-            continue;
-        }
-
-        let Some(arrow_pos) = segment.find("=>") else {
+    for segment in array_literal_entries(text) {
+        let Some((key_part, value_part)) = crate::text_scan::split_top_level_arrow(segment) else {
             continue;
         };
-
-        let key_part = segment[..arrow_pos].trim();
-        let value_part = segment[arrow_pos + 2..].trim();
+        let key_part = key_part.trim();
+        let value_part = value_part.trim();
 
         let Some(key) = extract_string_literal(key_part) else {
             continue;
@@ -914,12 +621,24 @@ fn parse_attributes_array(text: &str) -> Vec<(String, PhpType, String)> {
             continue;
         }
 
-        if let Some(php_type) = crate::util::infer_type_from_literal(value_part) {
+        if let Some(php_type) = attribute_default_type(value_part) {
             results.push((key, php_type, value_part.to_string()));
         }
     }
 
     results
+}
+
+/// The type an attribute default written as `value` gives its column: the
+/// base type of a scalar literal (`'user'` is a `string`), `null`, or
+/// `array` for an empty `[]`.  A populated array literal gives none.
+fn attribute_default_type(value: &str) -> Option<PhpType> {
+    if value == "[]" {
+        return Some(PhpType::array());
+    }
+    crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(value)
+        .filter(|ty| !ty.is_array_like())
+        .map(|ty| ty.widen_scalar_literals())
 }
 
 /// Extract timestamp configuration from a model class.
@@ -949,43 +668,30 @@ fn extract_timestamp_config<'a>(
                 class_like::property::Property::Plain(plain),
             ) => {
                 for item in plain.items.iter() {
-                    let var_name = bytes_to_str(item.variable().name).to_string();
-                    let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
-                    if stripped != "timestamps" {
+                    if property_item_name(item) != "timestamps" {
                         continue;
                     }
-                    if let class_like::property::PropertyItem::Concrete(concrete) = item {
-                        let span = concrete.value.span();
-                        let start = span.start.offset as usize;
-                        let end = span.end.offset as usize;
-                        if let Some(text) = content.get(start..end) {
-                            let trimmed = text.trim();
-                            if trimmed == "false" {
-                                timestamps = Some(false);
-                            } else if trimmed == "true" {
-                                timestamps = Some(true);
-                            }
-                        }
+                    match initializer_text(item, content).map(str::trim) {
+                        Some("false") => timestamps = Some(false),
+                        Some("true") => timestamps = Some(true),
+                        _ => {}
                     }
                 }
             }
             class_like::member::ClassLikeMember::Constant(constant) => {
                 for item in constant.items.iter() {
-                    let name = bytes_to_str(item.name.value).to_string();
+                    let name = bytes_to_str(item.name.value);
                     if name != "CREATED_AT" && name != "UPDATED_AT" && name != "DELETED_AT" {
                         continue;
                     }
-                    let span = item.value.span();
-                    let start = span.start.offset as usize;
-                    let end = span.end.offset as usize;
-                    let value = content.get(start..end).map(|t| t.trim());
+                    let value = span_text(item.value, content).map(str::trim);
                     let parsed = match value {
                         Some("null") | Some("NULL") => Some(None),
                         Some(v) => extract_string_literal(v).map(Some),
                         None => None,
                     };
                     if let Some(val) = parsed {
-                        match name.as_str() {
+                        match name {
                             "CREATED_AT" => created_at = Some(val),
                             "UPDATED_AT" => updated_at = Some(val),
                             _ => deleted_at = val,
@@ -1045,24 +751,18 @@ fn extract_column_names<'a>(
         ) = member
         {
             for item in plain.items.iter() {
-                let var_name = bytes_to_str(item.variable().name);
-                let stripped = var_name.strip_prefix('$').unwrap_or(var_name);
+                let stripped = property_item_name(item);
                 let Some(&(_, flag)) = targets.iter().find(|(name, _)| *name == stripped) else {
                     continue;
                 };
                 declared |= flag;
-                if let class_like::property::PropertyItem::Concrete(concrete) = item {
-                    let span = concrete.value.span();
-                    let start = span.start.offset as usize;
-                    let end = span.end.offset as usize;
-                    if let Some(text) = content.get(start..end) {
-                        for name in parse_string_list(text) {
-                            if let Some(pos) = names.iter().position(|n| *n == name) {
-                                sources[pos] |= flag;
-                            } else {
-                                names.push(name);
-                                sources.push(flag);
-                            }
+                if let Some(text) = initializer_text(item, content) {
+                    for name in parse_string_list(text) {
+                        if let Some(pos) = names.iter().position(|n| *n == name) {
+                            sources[pos] |= flag;
+                        } else {
+                            names.push(name);
+                            sources.push(flag);
                         }
                     }
                 }
@@ -1076,21 +776,10 @@ fn extract_column_names<'a>(
 /// Whether the class declares a plain property named `target` (without
 /// the `$`), whatever its initializer.
 fn declares_property<'a>(
-    mut members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     target: &str,
 ) -> bool {
-    members.any(|member| {
-        let class_like::member::ClassLikeMember::Property(class_like::property::Property::Plain(
-            plain,
-        )) = member
-        else {
-            return false;
-        };
-        plain.items.iter().any(|item| {
-            let name = bytes_to_str(item.variable().name);
-            name.strip_prefix('$').unwrap_or(name) == target
-        })
-    })
+    plain_properties(members, target).next().is_some()
 }
 
 /// Extract column names from the deprecated `$dates` property array.
@@ -1103,34 +792,15 @@ fn extract_dates_definitions<'a>(
     content: &str,
 ) -> Vec<String> {
     let mut names = Vec::new();
-
-    for member in members {
-        if let class_like::member::ClassLikeMember::Property(
-            class_like::property::Property::Plain(plain),
-        ) = member
-        {
-            for item in plain.items.iter() {
-                let var_name = bytes_to_str(item.variable().name).to_string();
-                let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
-                if stripped != "dates" {
-                    continue;
-                }
-                if let class_like::property::PropertyItem::Concrete(concrete) = item {
-                    let span = concrete.value.span();
-                    let start = span.start.offset as usize;
-                    let end = span.end.offset as usize;
-                    if let Some(text) = content.get(start..end) {
-                        for name in parse_string_list(text) {
-                            if !names.contains(&name) {
-                                names.push(name);
-                            }
-                        }
-                    }
-                }
+    let texts =
+        plain_properties(members, "dates").filter_map(|(_, item)| initializer_text(item, content));
+    for text in texts {
+        for name in parse_string_list(text) {
+            if !names.contains(&name) {
+                names.push(name);
             }
         }
     }
-
     names
 }
 
@@ -1145,39 +815,14 @@ fn extract_facade_accessor<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     content: &str,
 ) -> Option<FacadeAccessor> {
-    let method = members.into_iter().find_map(|member| match member {
-        class_like::member::ClassLikeMember::Method(method)
-            if bytes_to_str(method.name.value).eq_ignore_ascii_case("getFacadeAccessor") =>
-        {
-            Some(method)
-        }
-        _ => None,
-    })?;
-    let class_like::method::MethodBody::Concrete(block) = &method.body else {
-        return None;
-    };
-    let value = block.statements.iter().find_map(|stmt| match stmt {
-        Statement::Return(ret) => ret.value,
-        _ => None,
-    })?;
+    let value = method_return_value(members, "getFacadeAccessor")?;
 
     if let Some((text, _, _)) = super::helpers::extract_string_literal(value, content) {
         return Some(FacadeAccessor::Alias(atom(text)));
     }
-    let Expression::Access(Access::ClassConstant(access)) = value else {
-        return None;
-    };
-    let ClassLikeConstantSelector::Identifier(constant) = &access.constant else {
-        return None;
-    };
-    if !bytes_to_str(constant.value).eq_ignore_ascii_case("class") {
-        return None;
-    }
     // `self::class` / `static::class` name the facade itself, which is
     // never the class it forwards to.
-    let Expression::Identifier(identifier) = access.class else {
-        return None;
-    };
+    let identifier = crate::parser::class_fetch_identifier(value)?;
     let name = bytes_to_str(identifier.value());
     (!name.is_empty()).then(|| FacadeAccessor::Class(atom(name)))
 }
@@ -1192,21 +837,7 @@ fn extract_unique_ids<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     content: &str,
 ) -> Option<Vec<String>> {
-    let method = members.into_iter().find_map(|member| match member {
-        class_like::member::ClassLikeMember::Method(method)
-            if bytes_to_str(method.name.value).eq_ignore_ascii_case("uniqueIds") =>
-        {
-            Some(method)
-        }
-        _ => None,
-    })?;
-    let class_like::method::MethodBody::Concrete(block) = &method.body else {
-        return None;
-    };
-    let value = block.statements.iter().find_map(|stmt| match stmt {
-        Statement::Return(ret) => ret.value,
-        _ => None,
-    })?;
+    let value = method_return_value(members, "uniqueIds")?;
     let elements = match value {
         Expression::Array(arr) => &arr.elements,
         Expression::LegacyArray(arr) => &arr.elements,
@@ -1227,31 +858,9 @@ fn extract_string_property<'a>(
     content: &str,
     target: &str,
 ) -> Option<String> {
-    for member in members {
-        if let class_like::member::ClassLikeMember::Property(
-            class_like::property::Property::Plain(plain),
-        ) = member
-        {
-            for item in plain.items.iter() {
-                let var_name = bytes_to_str(item.variable().name).to_string();
-                let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
-                if stripped != target {
-                    continue;
-                }
-                if let class_like::property::PropertyItem::Concrete(concrete) = item {
-                    let span = concrete.value.span();
-                    let start = span.start.offset as usize;
-                    let end = span.end.offset as usize;
-                    if let Some(text) = content.get(start..end)
-                        && let Some(value) = extract_string_literal(text.trim())
-                    {
-                        return Some(value);
-                    }
-                }
-            }
-        }
-    }
-    None
+    plain_properties(members, target)
+        .filter_map(|(_, item)| initializer_text(item, content))
+        .find_map(|text| extract_string_literal(text.trim()))
 }
 
 /// Parse a PHP array literal containing only string values.
@@ -1574,8 +1183,11 @@ pub(crate) fn extract_laravel_metadata<'a>(
     let belongs_to_many_pivots = extract_pivot_relations(class.members.iter(), content);
     let morph_type_columns = extract_morph_type_columns(class.members.iter(), content);
 
-    let attributes_definitions = extract_attributes_definitions(class.members.iter(), content);
-    let attribute_defaults = extract_attribute_defaults(class.members.iter(), content);
+    let (attributes_definitions, attribute_defaults): (Vec<_>, Vec<_>) =
+        extract_attributes(class.members.iter(), content)
+            .into_iter()
+            .map(|(key, php_type, value)| ((key.clone(), php_type), (key, value)))
+            .unzip();
     if declares_property(class.members.iter(), "attributes") {
         declared |= model_declaration::ATTRIBUTES;
     }
@@ -2021,6 +1633,7 @@ class InterpolatedFactory {
         Backend::resolve_parent_class_names(
             &mut classes,
             &use_map,
+            &HashMap::new(),
             &Some("Database\\Factories".to_string()),
         );
 
@@ -2092,6 +1705,7 @@ class EscapedDoubleQuotedStringFactory {
         Backend::resolve_parent_class_names(
             &mut classes,
             &use_map,
+            &HashMap::new(),
             &Some("Database\\Factories".to_string()),
         );
 
@@ -2184,6 +1798,7 @@ class InvalidEscapeFactory {
             .collect();
         Backend::resolve_parent_class_names(
             &mut classes,
+            &HashMap::new(),
             &HashMap::new(),
             &Some("Database\\Factories".to_string()),
         );

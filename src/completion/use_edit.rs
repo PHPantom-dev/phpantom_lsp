@@ -498,6 +498,28 @@ pub(crate) fn use_import_conflicts(fqn: &str, file_use_map: &HashMap<String, Str
     false
 }
 
+/// Whether writing `fqn` by its short name in a block with `use_map` and
+/// `namespace` needs a new `use` statement: the block neither imports
+/// `fqn` under that name nor declares it in its own namespace.
+pub(crate) fn short_name_needs_import(
+    fqn: &str,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> bool {
+    let short = short_name(fqn);
+    let imported = use_map.iter().any(|(alias, imported)| {
+        alias.eq_ignore_ascii_case(short) && imported.eq_ignore_ascii_case(fqn)
+    });
+    let in_namespace = match namespace {
+        Some(ns) => fqn
+            .strip_prefix(ns.as_str())
+            .and_then(|rest| rest.strip_prefix('\\'))
+            .is_some_and(|rest| !rest.contains('\\')),
+        None => !fqn.contains('\\'),
+    };
+    !imported && !in_namespace
+}
+
 /// Build an `additional_text_edits` entry that inserts a `use` statement
 /// for the given fully-qualified class name at the alphabetically correct
 /// position in the file's existing use block.

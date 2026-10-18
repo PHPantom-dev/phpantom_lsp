@@ -1,5 +1,7 @@
-//! Expanding `@phpstan-type` / `@psalm-type` aliases into the member
-//! signatures that name them.
+//! Type aliases: `@phpstan-type` / `@psalm-type` definitions and
+//! `@phpstan-import-type` imports, resolved to the types they stand for
+//! ([`resolve_type_alias_typed`], [`expand_nested_type_aliases`]) and
+//! expanded into the member signatures that name them.
 //!
 //! An alias is scoped to the class that declares or imports it, but a member
 //! signature is read by every file that uses the class.  Once the signature
@@ -19,11 +21,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::atom::Atom;
-use crate::php_type::PhpType;
-use crate::types::{ClassInfo, ConstantInfo, MethodInfo, PropertyInfo, TypeAliasDef};
-
-use super::resolution::resolve_imported_type_alias;
+use crate::atom::{Atom, atom};
+use crate::class_lookup::find_class_by_fqn;
+use crate::php_type::{PhpType, TypeKind, is_builtin_non_class_type};
+use crate::types::*;
 
 /// Replace every alias of `classes` named in their member signatures with
 /// its definition.
@@ -382,4 +383,322 @@ fn substitute_in_method(method: &mut MethodInfo, aliases: &HashMap<String, PhpTy
             sub(&mut param.param_out_type);
         }
     }
+}
+
+/// Look up a type alias by name and fully expand alias chains.
+///
+/// Returns the fully expanded type definition string if `hint` is a
+/// known alias, or `None` if it is not. Follows up to 10 levels of
+/// alias indirection to handle aliases that reference other aliases.
+///
+/// For imported aliases, the source class is loaded and the original
+/// alias is resolved from its `type_aliases` map.
+///
+/// Pass an empty `owning_class_name` to search all classes without
+/// priority (used by the array-key completion path).
+pub(crate) fn resolve_type_alias_typed(
+    ty: &PhpType,
+    owning_class_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    let mut current = ty.clone();
+    let mut last_resolved: Option<PhpType> = None;
+
+    for _ in 0..10 {
+        // Only bare identifiers can be type aliases.  Skip anything that
+        // looks like a complex type expression to avoid false matches.
+        if !matches!(current.kind(), TypeKind::Named(_)) {
+            break;
+        }
+
+        let expanded =
+            resolve_type_alias_once(&current, owning_class_name, all_classes, class_loader);
+
+        match expanded {
+            Some(php_type) => {
+                current = php_type.clone();
+                last_resolved = Some(php_type);
+            }
+            None => break,
+        }
+    }
+
+    last_resolved
+}
+
+/// Expand every type alias named anywhere inside `ty` (`Shape|null`,
+/// `list<Row>`), or `None` when it names none.
+///
+/// [`resolve_type_alias_typed`] only expands a type that *is* an alias; a
+/// declared type that merely contains one needs this walk.  An alias body
+/// that names another alias is expanded too, up to the same ten levels the
+/// chain lookup allows, so a cycle stops rather than recursing forever.
+pub(crate) fn expand_nested_type_aliases(
+    ty: &PhpType,
+    owning_class_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    // Aliases are declared on a class in the file, so a file that declares
+    // none cannot name one.
+    if all_classes.iter().all(|c| c.type_aliases.is_empty()) {
+        return None;
+    }
+    fn walk(
+        ty: &PhpType,
+        depth: u8,
+        owning_class_name: &str,
+        all_classes: &[Arc<ClassInfo>],
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> PhpType {
+        if depth >= 10 {
+            return ty.clone();
+        }
+        if matches!(ty.kind(), TypeKind::Named(_)) {
+            return match resolve_type_alias_typed(ty, owning_class_name, all_classes, class_loader)
+            {
+                Some(expanded) => walk(
+                    &expanded,
+                    depth + 1,
+                    owning_class_name,
+                    all_classes,
+                    class_loader,
+                ),
+                None => ty.clone(),
+            };
+        }
+        ty.map_children(&|child| walk(child, depth, owning_class_name, all_classes, class_loader))
+    }
+    let expanded = walk(ty, 0, owning_class_name, all_classes, class_loader);
+    (expanded != *ty).then_some(expanded)
+}
+
+/// [`expand_nested_type_aliases`] for a type read off a member of `class`,
+/// which may be declared in another file.
+///
+/// The file-scoped lookup only sees the classes of the file being
+/// analysed, but a member signature names the aliases of the class that
+/// declares it. An inherited or trait-imported member no longer records
+/// that class, so a bare alias name the file cannot resolve is looked up
+/// on `class`, the traits it uses and its ancestors, nearest first.
+pub(crate) fn expand_member_type_aliases(
+    ty: &PhpType,
+    class: &ClassInfo,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    if let Some(expanded) = expand_nested_type_aliases(ty, &class.fqn(), all_classes, class_loader)
+    {
+        return Some(expanded);
+    }
+    let TypeKind::Named(name) = ty.kind() else {
+        return None;
+    };
+    if is_builtin_non_class_type(name) {
+        return None;
+    }
+    let name = atom(name);
+    let mut queue: Vec<Arc<ClassInfo>> = Vec::new();
+    let mut visited = crate::atom::AtomSet::default();
+    let mut loaded_current: Option<Arc<ClassInfo>> = None;
+    let mut index = 0;
+    loop {
+        let current: &ClassInfo = loaded_current.as_deref().unwrap_or(class);
+        if let Some(def) = current.type_aliases.get(&name) {
+            let expanded = expand_type_alias_def(def, all_classes, class_loader)?;
+            return Some(
+                expand_nested_type_aliases(&expanded, &current.fqn(), all_classes, class_loader)
+                    .unwrap_or(expanded),
+            );
+        }
+        for related in current
+            .used_traits
+            .iter()
+            .chain(current.parent_class.iter())
+        {
+            if visited.insert(*related)
+                && let Some(loaded) = class_loader(related)
+            {
+                queue.push(loaded);
+            }
+        }
+        loaded_current = Some(Arc::clone(queue.get(index)?));
+        index += 1;
+    }
+}
+
+/// Single-level alias lookup (no chaining).
+fn resolve_type_alias_once(
+    hint: &PhpType,
+    owning_class_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    let name = match hint.kind() {
+        TypeKind::Named(n) => n.as_str(),
+        _ => return None,
+    };
+
+    let owning_class = find_class_by_fqn(all_classes, owning_class_name);
+
+    if let Some(cls) = owning_class
+        && let Some(def) = cls.type_aliases.get(&atom(name))
+    {
+        return expand_type_alias_def(def, all_classes, class_loader);
+    }
+
+    // Also check all classes in the file — the type alias might be
+    // referenced from a method inside a different class that uses the
+    // owning class's return type.  This is rare but handles the case
+    // where the owning class name is empty (top-level code) or when
+    // the type is used in a context where the owning class is not the
+    // declaring class.
+    for cls in all_classes {
+        if owning_class.is_some_and(|owner| Arc::ptr_eq(owner, cls)) {
+            continue; // Already checked above.
+        }
+        if let Some(def) = cls.type_aliases.get(&atom(name)) {
+            return expand_type_alias_def(def, all_classes, class_loader);
+        }
+    }
+
+    None
+}
+
+/// Expand a [`TypeAliasDef`] into a resolved [`PhpType`].
+///
+/// For local aliases, returns the `PhpType` directly.
+/// For imports, loads the source class and returns the original alias
+/// definition.
+fn expand_type_alias_def(
+    def: &TypeAliasDef,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    match def {
+        TypeAliasDef::Local(php_type) => Some(php_type.clone()),
+        TypeAliasDef::Import {
+            source_class,
+            original_name,
+        } => resolve_imported_type_alias(source_class, original_name, all_classes, class_loader),
+    }
+}
+
+/// Resolve an imported type alias reference.
+///
+/// Loads the source class by `source_class_name` and looks up
+/// `original_name` in its `type_aliases` map.
+pub(crate) fn resolve_imported_type_alias(
+    source_class_name: &str,
+    original_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    let visiting = std::cell::RefCell::new(Vec::new());
+    resolve_imported_alias_in_source(
+        source_class_name,
+        original_name,
+        all_classes,
+        class_loader,
+        &visiting,
+    )
+}
+
+/// [`resolve_imported_type_alias`], with the imports already being
+/// resolved on the way here.
+///
+/// An imported alias is written in its source class's scope, so any alias
+/// its body names (`array{r: RDto}` under `@import-type RDto from R`) is
+/// that class's, not the importer's, and is expanded there. An import of an
+/// import is followed the same way. `visiting` holds the `(class, alias)`
+/// pairs being resolved, so an alias that names itself through a cycle of
+/// imports resolves to `mixed` where it recurs, as PHPStan gives up on a
+/// circular alias. Leaving the name there instead would hand it back to the
+/// caller's own alias walk, which would expand the cycle once more per
+/// level it allows.
+fn resolve_imported_alias_in_source(
+    source_class_name: &str,
+    original_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    visiting: &std::cell::RefCell<Vec<(String, String)>>,
+) -> Option<PhpType> {
+    let lookup = source_class_name
+        .rsplit('\\')
+        .next()
+        .unwrap_or(source_class_name);
+    let source_class = all_classes
+        .iter()
+        .find(|c| c.name == lookup)
+        .cloned()
+        .or_else(|| class_loader(source_class_name))?;
+    let def = source_class.type_aliases.get(&atom(original_name))?;
+
+    let key = (source_class_name.to_string(), original_name.to_string());
+    if visiting.borrow().contains(&key) {
+        return Some(PhpType::mixed());
+    }
+    visiting.borrow_mut().push(key);
+    let resolved = match def {
+        TypeAliasDef::Local(php_type) => Some(expand_aliases_in_source(
+            php_type,
+            &source_class,
+            class_loader,
+            visiting,
+        )),
+        TypeAliasDef::Import {
+            source_class,
+            original_name,
+        } => resolve_imported_alias_in_source(
+            source_class,
+            original_name,
+            &[],
+            class_loader,
+            visiting,
+        ),
+    };
+    visiting.borrow_mut().pop();
+    resolved
+}
+
+/// Expand the aliases `source_class` declares or imports wherever they are
+/// named inside `ty`.
+fn expand_aliases_in_source(
+    ty: &PhpType,
+    source_class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    visiting: &std::cell::RefCell<Vec<(String, String)>>,
+) -> PhpType {
+    if source_class.type_aliases.is_empty() {
+        return ty.clone();
+    }
+    if let TypeKind::Named(name) = ty.kind()
+        && let Some(def) = source_class.type_aliases.get(name)
+    {
+        let expanded = match def {
+            TypeAliasDef::Local(body) => {
+                let key = (source_class.fqn().to_string(), name.to_string());
+                if visiting.borrow().contains(&key) {
+                    return PhpType::mixed();
+                }
+                visiting.borrow_mut().push(key);
+                let expanded = expand_aliases_in_source(body, source_class, class_loader, visiting);
+                visiting.borrow_mut().pop();
+                Some(expanded)
+            }
+            TypeAliasDef::Import {
+                source_class,
+                original_name,
+            } => resolve_imported_alias_in_source(
+                source_class,
+                original_name,
+                &[],
+                class_loader,
+                visiting,
+            ),
+        };
+        return expanded.unwrap_or_else(|| ty.clone());
+    }
+    ty.map_children(&|child| expand_aliases_in_source(child, source_class, class_loader, visiting))
 }

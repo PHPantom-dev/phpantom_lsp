@@ -23,18 +23,20 @@
 
 use std::collections::HashMap;
 
-use mago_syntax::cst::class_like::member::ClassLikeMember;
-use mago_syntax::cst::class_like::method::MethodBody;
-use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::CodeActionData;
-use crate::code_actions::make_code_action_data;
-use crate::completion::use_edit::{analyze_use_block_in, build_use_edit, use_import_conflicts};
+use crate::code_actions::cursor_context::{FunctionKinds, find_enclosing_function};
+use crate::code_actions::phpstan::phpstan_identifier;
+use crate::code_actions::{
+    CodeActionData, FunctionDocblock, function_docblock_at_line, make_code_action_data,
+};
+use crate::completion::use_edit::{
+    analyze_use_block_in, build_use_edit, short_name_needs_import, use_import_conflicts,
+};
 use crate::parser::with_parsed_program;
-use crate::text_position::{byte_range_to_lsp_range, offset_to_position, ranges_overlap};
-use crate::util::{strip_fqn_prefix, strip_trailing_modifiers};
+use crate::text_position::{line_start_byte_offset, offset_to_position};
+use crate::util::strip_fqn_prefix;
 
 /// The PHPStan identifier we match on.
 const CHECKED_EXCEPTION_ID: &str = "missingType.checkedException";
@@ -53,19 +55,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if identifier != CHECKED_EXCEPTION_ID {
@@ -89,36 +83,21 @@ impl Backend {
             let file_use_map = &block.use_map;
             let file_namespace = &block.namespace;
 
-            // Determine what name to use in the @throws tag.  If the
-            // exception is already imported (or in the same namespace),
-            // use the short name.  Otherwise we'll still use the short
-            // name but also add a use import.
-            let already_imported = file_use_map.iter().any(|(alias, fqn)| {
-                alias.eq_ignore_ascii_case(short_name) && fqn.eq_ignore_ascii_case(&exception_fqn)
-            });
-
-            let same_namespace = match &file_namespace {
-                Some(ns) => {
-                    let ns_prefix = format!("{}\\", ns);
-                    let stripped = exception_fqn.strip_prefix(&ns_prefix);
-                    // Same namespace if after stripping the prefix there's
-                    // no further backslash (i.e. it's a direct child).
-                    stripped.is_some_and(|rest| !rest.contains('\\'))
-                }
-                None => !exception_fqn.contains('\\'),
-            };
-
-            let needs_import = !already_imported && !same_namespace;
+            // The @throws tag always uses the short name, adding a use
+            // import when it does not already name the exception.
+            let needs_import =
+                short_name_needs_import(&exception_fqn, file_use_map, file_namespace);
 
             if needs_import && use_import_conflicts(&exception_fqn, file_use_map) {
                 continue;
             }
 
             let diag_line = diag.range.start.line as usize;
-            let docblock_info = match find_enclosing_docblock(content, diag_line) {
-                Some(info) => info,
-                None => continue,
-            };
+            let docblock_info =
+                match function_docblock_at_line(content, diag_line, FunctionKinds::Named) {
+                    Some(info) => info,
+                    None => continue,
+                };
 
             if docblock_already_has_throws(
                 &docblock_info,
@@ -183,29 +162,15 @@ impl Backend {
         let file_use_map = &block.use_map;
         let file_namespace = &block.namespace;
 
-        // Determine if an import is needed.
-        let already_imported = file_use_map.iter().any(|(alias, fqn)| {
-            alias.eq_ignore_ascii_case(short_name) && fqn.eq_ignore_ascii_case(&exception_fqn)
-        });
+        let needs_import = short_name_needs_import(&exception_fqn, file_use_map, file_namespace);
 
-        let same_namespace = match &file_namespace {
-            Some(ns) => {
-                let ns_prefix = format!("{}\\", ns);
-                let stripped = exception_fqn.strip_prefix(&ns_prefix);
-                stripped.is_some_and(|rest| !rest.contains('\\'))
-            }
-            None => !exception_fqn.contains('\\'),
-        };
-
-        let needs_import = !already_imported && !same_namespace;
-
-        let docblock_info = find_enclosing_docblock(content, diagnostic_line)?;
+        let docblock_info =
+            function_docblock_at_line(content, diagnostic_line, FunctionKinds::Named)?;
 
         let mut edits = Vec::new();
 
         // 1. Docblock edit: insert @throws tag.
-        let throws_edit = build_throws_edit(content, &docblock_info, short_name);
-        edits.push(throws_edit);
+        edits.push(docblock_info.add_throws_tag_edit(content, short_name));
 
         // 2. Import edit (if needed).
         if needs_import {
@@ -242,147 +207,6 @@ pub(crate) fn extract_exception_fqn(message: &str) -> Option<String> {
     Some(strip_fqn_prefix(fqn).to_string())
 }
 
-/// Information about an existing docblock (or the position to create one).
-struct DocblockInfo {
-    /// Whether a docblock already exists.
-    has_docblock: bool,
-    /// Byte offset of the `/**` (if exists).
-    start: usize,
-    /// Byte offset just past the `*/` (if exists).
-    end: usize,
-    /// The raw docblock text (if exists).
-    text: String,
-    /// Indentation whitespace of the function/method line.
-    indent: String,
-    /// Byte offset of the start of the function signature line
-    /// (used for inserting a new docblock before it).
-    sig_line_start: usize,
-}
-
-/// Find the enclosing function/method and its docblock by walking
-/// backward from the given line.
-///
-/// We find the function signature by tracking brace depth: from the
-/// diagnostic line we walk backward until we find the opening `{` at
-/// depth -1 (exiting the function body).  Then we look backward past
-/// modifiers to find the docblock.
-fn find_enclosing_docblock(content: &str, diag_line: usize) -> Option<DocblockInfo> {
-    let lines: Vec<&str> = content.lines().collect();
-    if diag_line >= lines.len() {
-        return None;
-    }
-
-    // Convert the diagnostic line to a byte offset to start searching.
-    let mut diag_byte_offset = 0usize;
-    for (i, line) in lines.iter().enumerate() {
-        if i == diag_line {
-            break;
-        }
-        diag_byte_offset += line.len() + 1; // +1 for newline
-    }
-
-    let search_area = content.get(..diag_byte_offset)?;
-
-    // Walk backward tracking brace depth to find the opening `{` of
-    // the enclosing function body.
-    let mut brace_depth = 0i32;
-    let mut func_open_brace: Option<usize> = None;
-
-    for (i, ch) in search_area.char_indices().rev() {
-        match ch {
-            '}' => brace_depth += 1,
-            '{' => {
-                brace_depth -= 1;
-                if brace_depth < 0 {
-                    func_open_brace = Some(i);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let brace_pos = func_open_brace?;
-
-    // Find the `function` keyword before the brace, bounding the backward
-    // scan to the last 2000 bytes so a pathologically long signature (or a
-    // brace found deep into a huge file) can't force an unbounded search.
-    let before_brace = content.get(..brace_pos)?;
-    let mut sig_start = before_brace.len().saturating_sub(2000);
-    while sig_start > 0 && !before_brace.is_char_boundary(sig_start) {
-        sig_start -= 1;
-    }
-    let sig_region = &before_brace[sig_start..];
-    let func_kw_rel = sig_region.rfind("function")?;
-    let func_kw_pos = sig_start + func_kw_rel;
-
-    // Walk backward from `function` past modifier keywords and whitespace
-    // to find where the signature truly starts (for docblock detection).
-    let before_func = content.get(..func_kw_pos)?;
-    let trimmed = before_func.trim_end();
-
-    // Strip trailing modifier keywords (public, protected, private, static,
-    // abstract, final, readonly).
-    let after_mods = strip_trailing_modifiers(trimmed);
-
-    // Determine the byte offset of the start of the signature line
-    // (the first modifier or `function` keyword).
-    let sig_line_byte_start = {
-        let mods_end_pos = after_mods.len();
-        // The first modifier (or the function keyword itself) starts
-        // right after `after_mods` (which is the content before all
-        // modifiers).
-        let first_token_pos = if mods_end_pos < func_kw_pos {
-            // There are modifiers — find the first non-whitespace after mods.
-            content[mods_end_pos..func_kw_pos]
-                .find(|c: char| !c.is_whitespace())
-                .map(|offset| mods_end_pos + offset)
-                .unwrap_or(func_kw_pos)
-        } else {
-            func_kw_pos
-        };
-        // Walk back to the start of this token's line.
-        content[..first_token_pos]
-            .rfind('\n')
-            .map(|p| p + 1)
-            .unwrap_or(0)
-    };
-
-    let indent: String = {
-        let line = &content[sig_line_byte_start..];
-        line.chars()
-            .take_while(|c| c.is_whitespace() && *c != '\n')
-            .collect()
-    };
-
-    // Check for an existing docblock.
-    let after_mods_trimmed = after_mods.trim_end();
-    if after_mods_trimmed.ends_with("*/") {
-        let doc_end_pos = after_mods_trimmed.len();
-        if let Some(rel_open) = after_mods_trimmed.rfind("/**") {
-            let doc_start_pos = rel_open;
-            let text = after_mods_trimmed[doc_start_pos..doc_end_pos].to_string();
-            return Some(DocblockInfo {
-                has_docblock: true,
-                start: doc_start_pos,
-                end: doc_end_pos,
-                text,
-                indent,
-                sig_line_start: sig_line_byte_start,
-            });
-        }
-    }
-
-    Some(DocblockInfo {
-        has_docblock: false,
-        start: 0,
-        end: 0,
-        text: String::new(),
-        indent,
-        sig_line_start: sig_line_byte_start,
-    })
-}
-
 /// Check if the existing docblock already documents a `@throws` for
 /// the given exception type.
 ///
@@ -391,15 +215,15 @@ fn find_enclosing_docblock(content: &str, diag_line: usize) -> Option<DocblockIn
 /// through the use-map so that `@throws RuntimeException` matches
 /// `App\Exceptions\RuntimeException` when the import exists.
 fn docblock_already_has_throws(
-    info: &DocblockInfo,
+    info: &FunctionDocblock,
     exception_fqn: &str,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> bool {
-    if !info.has_docblock {
+    let Some(docblock) = &info.docblock else {
         return false;
-    }
-    let parsed = match crate::docblock::parser::parse_docblock_for_tags(&info.text) {
+    };
+    let parsed = match crate::docblock::parser::parse_docblock_for_tags(docblock.text.trim()) {
         Some(parsed) => parsed,
         None => return false,
     };
@@ -412,120 +236,13 @@ fn docblock_already_has_throws(
         let rest = tag.description.trim();
         if let Some(type_name) = rest.split_whitespace().next() {
             let tag_fqn =
-                crate::util::resolve_to_fqn(type_name, use_map, file_namespace).to_lowercase();
+                crate::names::resolve_to_fqn(type_name, use_map, file_namespace).to_lowercase();
             if tag_fqn == target_fqn {
                 return true;
             }
         }
     }
     false
-}
-
-/// Build a `TextEdit` that inserts a `@throws` tag into the docblock.
-fn build_throws_edit(content: &str, info: &DocblockInfo, short_name: &str) -> TextEdit {
-    if info.has_docblock {
-        insert_throws_into_existing_docblock(content, info, short_name)
-    } else {
-        create_docblock_with_throws(content, info, short_name)
-    }
-}
-
-/// Insert a `@throws` line into an existing docblock.
-///
-/// Strategy: insert before the closing `*/`.  If the last non-empty
-/// docblock line before `*/` is not an `@throws` tag, add a blank
-/// `*` separator line first (unless the docblock is a single-line
-/// `/** ... */`).
-fn insert_throws_into_existing_docblock(
-    content: &str,
-    info: &DocblockInfo,
-    short_name: &str,
-) -> TextEdit {
-    let doc = &info.text;
-    let indent = &info.indent;
-
-    let close_pos = match doc.rfind("*/") {
-        Some(p) => p,
-        None => {
-            // Shouldn't happen, but fall back to replacing the whole docblock.
-            return create_docblock_with_throws(content, info, short_name);
-        }
-    };
-
-    // Check if this is a single-line docblock like `/** summary */`.
-    let open_to_close = &doc[3..close_pos];
-    let is_single_line = !open_to_close.contains('\n');
-
-    if is_single_line {
-        // Convert to multi-line and add @throws.
-        let inner = open_to_close.trim();
-        let mut new_doc = format!("{}/**\n", indent);
-        if !inner.is_empty() {
-            new_doc.push_str(&format!("{} * {}\n", indent, inner));
-            new_doc.push_str(&format!("{} *\n", indent));
-        }
-        new_doc.push_str(&format!("{} * @throws {}\n", indent, short_name));
-        new_doc.push_str(&format!("{} */", indent));
-
-        return TextEdit {
-            range: byte_range_to_lsp_range(content, info.start, info.end),
-            new_text: new_doc,
-        };
-    }
-
-    // Multi-line docblock: insert before `*/`.
-    // Check if we need a blank `*` separator line.
-    let before_close = doc[..close_pos].trim_end();
-    let last_line = before_close.lines().last().unwrap_or("");
-    let last_trimmed = last_line.trim().trim_start_matches('*').trim();
-
-    let needs_separator = !last_trimmed.is_empty()
-        && !last_trimmed.starts_with("@throws")
-        && last_trimmed.starts_with('@');
-
-    // Build the text to insert before the `*/` line.
-    let mut insert_text = String::new();
-    if needs_separator {
-        insert_text.push_str(&format!("{} *\n", indent));
-    }
-    insert_text.push_str(&format!("{} * @throws {}\n", indent, short_name));
-
-    // Find where the `*/` line starts (including leading whitespace).
-    let close_line_start = doc[..close_pos].rfind('\n').map(|p| p + 1).unwrap_or(0);
-    let actual_insert_offset = info.start + close_line_start;
-
-    // We replace from the start of the `*/` line to the same position,
-    // effectively inserting before it.
-    let lsp_pos = offset_to_position(content, actual_insert_offset);
-
-    TextEdit {
-        range: Range {
-            start: lsp_pos,
-            end: lsp_pos,
-        },
-        new_text: insert_text,
-    }
-}
-
-/// Create a new docblock with just a `@throws` tag and insert it before
-/// the function/method signature.
-fn create_docblock_with_throws(_content: &str, info: &DocblockInfo, short_name: &str) -> TextEdit {
-    let indent = &info.indent;
-    let new_doc = format!(
-        "{}/**\n{} * @throws {}\n{} */\n",
-        indent, indent, short_name, indent
-    );
-
-    // Insert at the start of the signature line.
-    let lsp_pos = offset_to_position(_content, info.sig_line_start);
-
-    TextEdit {
-        range: Range {
-            start: lsp_pos,
-            end: lsp_pos,
-        },
-        new_text: new_doc,
-    }
 }
 
 /// Find the line range (start, end) of the enclosing function/method body
@@ -544,109 +261,22 @@ pub(crate) fn find_enclosing_function_line_range(
     diag_line: usize,
 ) -> Option<(usize, usize)> {
     // Convert the diagnostic line to a byte offset (start of line is enough).
-    let mut cursor_offset = 0usize;
-    let mut found = false;
-    for (i, line) in content.lines().enumerate() {
-        if i == diag_line {
-            found = true;
-            break;
-        }
-        cursor_offset += line.len() + 1;
-    }
-    if !found {
-        return None;
-    }
-    let cursor_offset = cursor_offset as u32;
+    content.lines().nth(diag_line)?;
+    let cursor_offset = line_start_byte_offset(content, diag_line) as u32;
 
-    with_parsed_program(
+    let (open, close) = with_parsed_program(
         content,
         "find_enclosing_function_line_range",
-        |program, content| {
-            find_function_range_in_statements(&program.statements, cursor_offset, content)
+        |program, _| {
+            find_enclosing_function(&program.statements, cursor_offset, FunctionKinds::Named)?
+                .body_braces
         },
-    )
-}
-
-/// Walk top-level statements (and namespace children) looking for the
-/// function or method whose body contains `cursor`.
-fn find_function_range_in_statements(
-    statements: &Sequence<'_, Statement<'_>>,
-    cursor: u32,
-    content: &str,
-) -> Option<(usize, usize)> {
-    for stmt in statements.iter() {
-        match stmt {
-            Statement::Namespace(ns) => {
-                if let Some(range) =
-                    find_function_range_in_statements(ns.statements(), cursor, content)
-                {
-                    return Some(range);
-                }
-            }
-            Statement::Function(func) => {
-                let open = func.body.left_brace.start.offset;
-                let close = func.body.right_brace.start.offset;
-                if cursor >= open && cursor <= close {
-                    let open_line = offset_to_position(content, open as usize).line as usize;
-                    let close_line = offset_to_position(content, close as usize).line as usize;
-                    return Some((open_line, close_line));
-                }
-            }
-            Statement::Class(class) => {
-                if let Some(range) =
-                    find_method_range_in_members(class.members.iter(), cursor, content)
-                {
-                    return Some(range);
-                }
-            }
-            Statement::Interface(iface) => {
-                if let Some(range) =
-                    find_method_range_in_members(iface.members.iter(), cursor, content)
-                {
-                    return Some(range);
-                }
-            }
-            Statement::Trait(tr) => {
-                if let Some(range) =
-                    find_method_range_in_members(tr.members.iter(), cursor, content)
-                {
-                    return Some(range);
-                }
-            }
-            Statement::Enum(en) => {
-                if let Some(range) =
-                    find_method_range_in_members(en.members.iter(), cursor, content)
-                {
-                    return Some(range);
-                }
-            }
-            _ => {}
-        }
+    )?;
+    if cursor_offset < open || cursor_offset > close {
+        return None;
     }
-    None
-}
-
-/// Check each method in a class-like's members for a concrete body
-/// containing `cursor`.
-fn find_method_range_in_members<'a>(
-    members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
-    cursor: u32,
-    content: &str,
-) -> Option<(usize, usize)> {
-    for member in members {
-        if let ClassLikeMember::Method(method) = member
-            && let MethodBody::Concrete(block) = &method.body
-        {
-            let open = block.left_brace.start.offset;
-            let close = block.right_brace.start.offset;
-            if cursor >= open && cursor <= close {
-                let open_line = offset_to_position(content, open as usize).line as usize;
-                let close_line = offset_to_position(content, close as usize).line as usize;
-                return Some((open_line, close_line));
-            }
-        }
-    }
-    None
+    let line_of = |offset: u32| offset_to_position(content, offset as usize).line as usize;
+    Some((line_of(open), line_of(close)))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -691,299 +321,180 @@ mod tests {
         assert!(extract_exception_fqn(msg).is_none());
     }
 
-    // ── strip_trailing_modifiers ────────────────────────────────────
-
-    #[test]
-    fn strips_public_static() {
-        assert_eq!(strip_trailing_modifiers("    public static").trim(), "");
-    }
-
-    #[test]
-    fn strips_protected() {
-        assert_eq!(
-            strip_trailing_modifiers("some code\n    protected").trim(),
-            "some code"
-        );
-    }
-
-    #[test]
-    fn does_not_strip_partial_keyword() {
-        // `mypublic` should not be stripped.
-        assert_eq!(strip_trailing_modifiers("mypublic"), "mypublic");
-    }
-
     // ── docblock_already_has_throws ─────────────────────────────────
+
+    /// The docblock of the function holding `line` of `php`.
+    fn docblock_at(php: &str, line: usize) -> FunctionDocblock {
+        function_docblock_at_line(php, line, FunctionKinds::Named).unwrap()
+    }
+
+    /// `php` with the `@throws short_name` edit for the function holding
+    /// `line` applied.
+    fn with_throws(php: &str, line: usize, short_name: &str) -> String {
+        let edit = docblock_at(php, line).add_throws_tag_edit(php, short_name);
+        crate::text_position::apply_text_edits(php, &[edit])
+    }
+
+    fn has_throws(php: &str, line: usize, fqn: &str, use_map: &HashMap<String, String>) -> bool {
+        docblock_already_has_throws(&docblock_at(php, line), fqn, use_map, &None)
+    }
 
     #[test]
     fn detects_existing_throws() {
-        let info = DocblockInfo {
-            has_docblock: true,
-            start: 0,
-            end: 0,
-            text: "/**\n * @throws FooException\n */".to_string(),
-            indent: "    ".to_string(),
-            sig_line_start: 0,
-        };
-        let use_map = HashMap::new();
-        let ns = None;
+        let php = "<?php\n/**\n * @throws FooException\n */\nfunction foo() {\n    throw new FooException();\n}\n";
         // PHPStan reports FQNs; global-namespace class → bare name is the FQN.
-        assert!(docblock_already_has_throws(
-            &info,
-            "FooException",
-            &use_map,
-            &ns
-        ));
+        assert!(has_throws(php, 5, "FooException", &HashMap::new()));
     }
 
     #[test]
     fn detects_existing_throws_case_insensitive() {
-        let info = DocblockInfo {
-            has_docblock: true,
-            start: 0,
-            end: 0,
-            text: "/**\n * @throws fooexception\n */".to_string(),
-            indent: "    ".to_string(),
-            sig_line_start: 0,
-        };
-        let use_map = HashMap::new();
-        let ns = None;
-        assert!(docblock_already_has_throws(
-            &info,
-            "FooException",
-            &use_map,
-            &ns
-        ));
+        let php = "<?php\n/**\n * @throws fooexception\n */\nfunction foo() {\n    throw new FooException();\n}\n";
+        assert!(has_throws(php, 5, "FooException", &HashMap::new()));
     }
 
     #[test]
     fn detects_fqn_throws() {
-        let info = DocblockInfo {
-            has_docblock: true,
-            start: 0,
-            end: 0,
-            text: "/**\n * @throws \\App\\Exceptions\\FooException\n */".to_string(),
-            indent: "    ".to_string(),
-            sig_line_start: 0,
-        };
-        let mut use_map = HashMap::new();
-        use_map.insert(
+        let php = "<?php\n/**\n * @throws \\App\\Exceptions\\FooException\n */\nfunction foo() {\n    throw new FooException();\n}\n";
+        let use_map = HashMap::from([(
             "FooException".to_string(),
             "App\\Exceptions\\FooException".to_string(),
-        );
-        let ns = None;
+        )]);
         // PHPStan reports the FQN `App\Exceptions\FooException`.
-        assert!(docblock_already_has_throws(
-            &info,
+        assert!(has_throws(
+            php,
+            5,
             "App\\Exceptions\\FooException",
-            &use_map,
-            &ns
+            &use_map
         ));
     }
 
     #[test]
     fn no_existing_throws() {
-        let info = DocblockInfo {
-            has_docblock: true,
-            start: 0,
-            end: 0,
-            text: "/**\n * @param string $a\n */".to_string(),
-            indent: "    ".to_string(),
-            sig_line_start: 0,
-        };
-        let use_map = HashMap::new();
-        let ns = None;
-        assert!(!docblock_already_has_throws(
-            &info,
-            "FooException",
-            &use_map,
-            &ns
-        ));
+        let php = "<?php\n/**\n * @param string $a\n */\nfunction foo($a) {\n    throw new FooException();\n}\n";
+        assert!(!has_throws(php, 5, "FooException", &HashMap::new()));
     }
 
     #[test]
     fn no_docblock_no_throws() {
-        let info = DocblockInfo {
-            has_docblock: false,
-            start: 0,
-            end: 0,
-            text: String::new(),
-            indent: "    ".to_string(),
-            sig_line_start: 0,
-        };
-        let use_map = HashMap::new();
-        let ns = None;
-        assert!(!docblock_already_has_throws(
-            &info,
-            "FooException",
-            &use_map,
-            &ns
-        ));
+        let php = "<?php\nfunction foo() {\n    throw new FooException();\n}\n";
+        assert!(!has_throws(php, 2, "FooException", &HashMap::new()));
     }
 
-    // ── find_enclosing_docblock ─────────────────────────────────────
+    // ── Locating the docblock ───────────────────────────────────────
 
     #[test]
     fn finds_existing_docblock() {
         let php = "<?php\nclass Foo {\n    /**\n     * Summary.\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n";
-        // diag_line = 6 (the throw line)
-        let info = find_enclosing_docblock(php, 6).unwrap();
-        assert!(info.has_docblock);
-        assert!(info.text.contains("Summary."));
-        assert_eq!(info.indent, "    ");
+        let docblock = docblock_at(php, 6).docblock.unwrap();
+        assert_eq!(docblock.text, "    /**\n     * Summary.\n     */\n");
     }
 
     #[test]
     fn finds_no_docblock() {
         let php = "<?php\nclass Foo {\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n";
-        // diag_line = 3
-        let info = find_enclosing_docblock(php, 3).unwrap();
-        assert!(!info.has_docblock);
-        assert_eq!(info.indent, "    ");
+        assert!(docblock_at(php, 3).docblock.is_none());
     }
 
-    // ── build_throws_edit (into existing docblock) ──────────────────
-
     #[test]
-    fn inserts_throws_into_multiline_docblock() {
-        let php = "<?php\nclass Foo {\n    /**\n     * Summary.\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n";
-        let info = find_enclosing_docblock(php, 6).unwrap();
-        let edit = build_throws_edit(php, &info, "RuntimeException");
-        assert!(
-            edit.new_text.contains("@throws RuntimeException"),
-            "edit should contain @throws: {:?}",
-            edit.new_text
+    fn a_brace_in_a_string_does_not_hide_the_method() {
+        let php = concat!(
+            "<?php\n",
+            "class Foo {\n",
+            "    public function first(): void {}\n",
+            "\n",
+            "    public function second(): void {\n",
+            "        $close = '}';\n",
+            "        throw new \\RuntimeException();\n",
+            "    }\n",
+            "}\n",
+        );
+        assert_eq!(
+            with_throws(php, 6, "RuntimeException"),
+            concat!(
+                "<?php\n",
+                "class Foo {\n",
+                "    public function first(): void {}\n",
+                "\n",
+                "    /**\n",
+                "     * @throws RuntimeException\n",
+                "     */\n",
+                "    public function second(): void {\n",
+                "        $close = '}';\n",
+                "        throw new \\RuntimeException();\n",
+                "    }\n",
+                "}\n",
+            )
         );
     }
 
     #[test]
-    fn multiline_insert_does_not_double_indent_closing_tag() {
-        // Simulate applying the edit: insert text at the `*/` line start.
-        // The insert must NOT include trailing indent that would double up
-        // with the existing `     */` line.
+    fn a_throw_in_a_closure_is_charged_to_the_method() {
+        let php = concat!(
+            "<?php\n",
+            "class Foo {\n",
+            "    /** Summary. */\n",
+            "    public function bar(): void {\n",
+            "        array_map(function () {\n",
+            "            throw new \\RuntimeException();\n",
+            "        }, []);\n",
+            "    }\n",
+            "}\n",
+        );
+        let docblock = docblock_at(php, 5).docblock.unwrap();
+        assert!(docblock.text.contains("Summary."));
+    }
+
+    // ── add_throws_tag_edit ─────────────────────────────────────────
+
+    #[test]
+    fn inserts_throws_into_multiline_docblock() {
         let php = "<?php\nclass Foo {\n    /**\n     * Summary.\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n";
-        let info = find_enclosing_docblock(php, 6).unwrap();
-        let edit = build_throws_edit(php, &info, "RuntimeException");
-
-        // Apply the edit to the source text.
-        let start = offset_to_position(php, 0); // unused, we apply manually
-        let _ = start;
-        let insert_offset = {
-            let mut off = 0usize;
-            for (i, line) in php.lines().enumerate() {
-                if i == edit.range.start.line as usize {
-                    off += edit.range.start.character as usize;
-                    break;
-                }
-                off += line.len() + 1;
-            }
-            off
-        };
-        let end_offset = {
-            let mut off = 0usize;
-            for (i, line) in php.lines().enumerate() {
-                if i == edit.range.end.line as usize {
-                    off += edit.range.end.character as usize;
-                    break;
-                }
-                off += line.len() + 1;
-            }
-            off
-        };
-        let mut result = String::new();
-        result.push_str(&php[..insert_offset]);
-        result.push_str(&edit.new_text);
-        result.push_str(&php[end_offset..]);
-
-        // The `*/` line should have exactly 4 spaces of indent (matching `/**`).
-        let close_line = result.lines().find(|l| l.trim() == "*/").unwrap();
         assert_eq!(
-            close_line, "     */",
-            "closing */ should be aligned with the docblock (5 chars: 4 spaces + space before */).\nFull result:\n{}",
-            result
+            with_throws(php, 6, "RuntimeException"),
+            "<?php\nclass Foo {\n    /**\n     * Summary.\n     * @throws RuntimeException\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n"
         );
     }
 
     #[test]
     fn inserts_throws_into_single_line_docblock() {
         let php = "<?php\nclass Foo {\n    /** Summary. */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n";
-        let info = find_enclosing_docblock(php, 4).unwrap();
-        let edit = build_throws_edit(php, &info, "RuntimeException");
-        assert!(
-            edit.new_text.contains("@throws RuntimeException"),
-            "edit should contain @throws: {:?}",
-            edit.new_text
-        );
-        assert!(
-            edit.new_text.contains("Summary."),
-            "edit should preserve summary: {:?}",
-            edit.new_text
+        assert_eq!(
+            with_throws(php, 4, "RuntimeException"),
+            "<?php\nclass Foo {\n    /**\n     * Summary.\n     *\n     * @throws RuntimeException\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n"
         );
     }
 
     #[test]
     fn creates_new_docblock_when_none_exists() {
         let php = "<?php\nclass Foo {\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n";
-        let info = find_enclosing_docblock(php, 3).unwrap();
-        let edit = build_throws_edit(php, &info, "RuntimeException");
-        assert!(
-            edit.new_text.contains("/**"),
-            "should create a docblock: {:?}",
-            edit.new_text
-        );
-        assert!(
-            edit.new_text.contains("@throws RuntimeException"),
-            "should contain @throws: {:?}",
-            edit.new_text
-        );
-        // Every line of the new docblock should start with the same indent
-        // as the method signature (4 spaces).
         assert_eq!(
-            edit.new_text, "    /**\n     * @throws RuntimeException\n     */\n",
-            "new docblock should be aligned with the method"
+            with_throws(php, 3, "RuntimeException"),
+            "<?php\nclass Foo {\n    /**\n     * @throws RuntimeException\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n"
         );
     }
 
-    // ── Docblock with existing @throws ──────────────────────────────
+    #[test]
+    fn creates_new_docblock_above_attributes() {
+        let php = "<?php\nclass Foo {\n    #[\\Override]\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n";
+        assert_eq!(
+            with_throws(php, 4, "RuntimeException"),
+            "<?php\nclass Foo {\n    /**\n     * @throws RuntimeException\n     */\n    #[\\Override]\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n"
+        );
+    }
 
     #[test]
     fn appends_after_existing_throws() {
         let php = "<?php\nclass Foo {\n    /**\n     * Summary.\n     *\n     * @throws FooException\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n";
-        let info = find_enclosing_docblock(php, 8).unwrap();
-        let use_map = HashMap::new();
-        let ns = None;
         // PHPStan reports FQN; RuntimeException is global, so bare name is FQN.
-        assert!(!docblock_already_has_throws(
-            &info,
-            "RuntimeException",
-            &use_map,
-            &ns
-        ));
-        let edit = build_throws_edit(php, &info, "RuntimeException");
-        assert!(
-            edit.new_text.contains("@throws RuntimeException"),
-            "should add @throws: {:?}",
-            edit.new_text
+        assert!(!has_throws(php, 8, "RuntimeException", &HashMap::new()));
+        assert_eq!(
+            with_throws(php, 8, "RuntimeException"),
+            "<?php\nclass Foo {\n    /**\n     * Summary.\n     *\n     * @throws FooException\n     * @throws RuntimeException\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n"
         );
     }
-
-    // ── Docblock with @param and @return ────────────────────────────
 
     #[test]
     fn inserts_throws_after_return() {
-        let php = "<?php\nclass Foo {\n    /**\n     * @param string $a\n     *\n     * @return string\n     */\n    public function bar(string $a): string {\n        throw new \\RuntimeException();\n    }\n}\n";
-        let info = find_enclosing_docblock(php, 8).unwrap();
-        let edit = build_throws_edit(php, &info, "RuntimeException");
-        assert!(
-            edit.new_text.contains("@throws RuntimeException"),
-            "should add @throws: {:?}",
-            edit.new_text
-        );
-    }
-
-    #[test]
-    fn inserts_throws_after_return_aligned() {
-        // Reproduce the exact scenario: existing docblock with @return,
-        // insert @throws.  The `*/` must not get double-indented.
         let php = concat!(
             "<?php\nclass Foo {\n",
             "    /**\n",
@@ -994,69 +505,60 @@ mod tests {
             "    }\n",
             "}\n",
         );
-        let info = find_enclosing_docblock(php, 6).unwrap();
-        let edit = build_throws_edit(php, &info, "RuntimeException");
-
-        // Apply the edit to the source text.
-        let insert_offset = {
-            let mut off = 0usize;
-            for (i, line) in php.lines().enumerate() {
-                if i == edit.range.start.line as usize {
-                    off += edit.range.start.character as usize;
-                    break;
-                }
-                off += line.len() + 1;
-            }
-            off
-        };
-        let end_offset = {
-            let mut off = 0usize;
-            for (i, line) in php.lines().enumerate() {
-                if i == edit.range.end.line as usize {
-                    off += edit.range.end.character as usize;
-                    break;
-                }
-                off += line.len() + 1;
-            }
-            off
-        };
-        let mut result = String::new();
-        result.push_str(&php[..insert_offset]);
-        result.push_str(&edit.new_text);
-        result.push_str(&php[end_offset..]);
-
-        let expected = concat!(
-            "<?php\nclass Foo {\n",
-            "    /**\n",
-            "     * @return Response\n",
-            "     *\n",
-            "     * @throws RuntimeException\n",
-            "     */\n",
-            "    public function clientside(): Response {\n",
-            "        throw new \\RuntimeException();\n",
-            "    }\n",
-            "}\n",
-        );
         assert_eq!(
-            result, expected,
-            "inserted @throws must not double-indent the closing */.\nGot:\n{}",
-            result
+            with_throws(php, 6, "RuntimeException"),
+            concat!(
+                "<?php\nclass Foo {\n",
+                "    /**\n",
+                "     * @return Response\n",
+                "     *\n",
+                "     * @throws RuntimeException\n",
+                "     */\n",
+                "    public function clientside(): Response {\n",
+                "        throw new \\RuntimeException();\n",
+                "    }\n",
+                "}\n",
+            )
         );
     }
-
-    // ── Standalone function ─────────────────────────────────────────
 
     #[test]
     fn works_with_standalone_function() {
         let php = "<?php\n/**\n * Does stuff.\n */\nfunction doStuff(): void {\n    throw new \\RuntimeException();\n}\n";
-        let info = find_enclosing_docblock(php, 5).unwrap();
-        assert!(info.has_docblock);
-        let edit = build_throws_edit(php, &info, "RuntimeException");
-        assert!(
-            edit.new_text.contains("@throws RuntimeException"),
-            "should add @throws: {:?}",
-            edit.new_text
+        assert_eq!(
+            with_throws(php, 5, "RuntimeException"),
+            "<?php\n/**\n * Does stuff.\n * @throws RuntimeException\n */\nfunction doStuff(): void {\n    throw new \\RuntimeException();\n}\n"
         );
+    }
+
+    #[test]
+    fn keeps_crlf_line_endings() {
+        // A new docblock, a one-line docblock spread over several lines,
+        // and a tag set apart from the one before it.
+        let cases = [
+            (
+                "<?php\nclass Foo {\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n",
+                3,
+                "<?php\nclass Foo {\n    /**\n     * @throws RuntimeException\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n",
+            ),
+            (
+                "<?php\nclass Foo {\n    /** Summary. */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n",
+                4,
+                "<?php\nclass Foo {\n    /**\n     * Summary.\n     *\n     * @throws RuntimeException\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n",
+            ),
+            (
+                "<?php\nclass Foo {\n    /**\n     * @return Response\n     */\n    public function clientside(): Response {\n        throw new \\RuntimeException();\n    }\n}\n",
+                6,
+                "<?php\nclass Foo {\n    /**\n     * @return Response\n     *\n     * @throws RuntimeException\n     */\n    public function clientside(): Response {\n        throw new \\RuntimeException();\n    }\n}\n",
+            ),
+        ];
+        for (php, line, expected) in cases {
+            let php = php.replace('\n', "\r\n");
+            assert_eq!(
+                with_throws(&php, line, "RuntimeException"),
+                expected.replace('\n', "\r\n")
+            );
+        }
     }
 
     // ── find_enclosing_function_line_range ───────────────────────────

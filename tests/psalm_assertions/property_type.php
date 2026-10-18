@@ -53,7 +53,7 @@ namespace PsalmTest_property_type_2 {
 
 // Test: grandparentReflectedProperties
 namespace PsalmTest_property_type_3 {
-    $a = new DOMElement("foo");
+    $a = new \DOMElement("foo");
     $owner = $a->ownerDocument;
 
     assertType('DOMDocument|null', $owner);
@@ -81,7 +81,7 @@ namespace PsalmTest_property_type_4 {
 
 // Test: setPropertiesOfStdClass
 namespace PsalmTest_property_type_5 {
-    $a = new stdClass();
+    $a = new \stdClass();
     $a->b = "c";
 
     assertType('stdClass', $a);
@@ -89,7 +89,7 @@ namespace PsalmTest_property_type_5 {
 
 // Test: getPropertiesOfSimpleXmlElement
 namespace PsalmTest_property_type_6 {
-    $a = new SimpleXMLElement("<person><child role=\"son\"></child></person>");
+    $a = new \SimpleXMLElement("<person><child role=\"son\"></child></person>");
     $b = $a->b;
 
     assertType('SimpleXMLElement', $a);

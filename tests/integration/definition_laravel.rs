@@ -4717,3 +4717,29 @@ async fn relation_context_callbacks_navigate_to_their_declared_members() {
         );
     }
 }
+
+/// A cast type spelled like the attribute (`'date' => 'datetime'` after a
+/// `'published' => 'date'`) is a value, not the attribute's entry.
+#[tokio::test]
+async fn test_goto_definition_casts_entry_matches_keys_not_values() {
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model {
+    protected $casts = [
+        'published' => 'date',
+        'date' => 'datetime',
+    ];
+    public function demo(): void {
+        $user = new User();
+        $user->date;
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
+    let line = definition_line(&result.expect("`date` has a $casts entry"));
+    assert_eq!(line, 6, "the `'date'` key, not the value on line 5");
+}

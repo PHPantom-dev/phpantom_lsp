@@ -107,6 +107,8 @@ fn morph_columns_reject_untyped_and_missing_models() {
         content: "",
         cursor_offset: 0,
         class_loader: &loader,
+        source_class_loader: &loader,
+        source_imports: None,
         backend: None,
         laravel_macro_this_resolver: None,
         resolved_class_cache: None,

@@ -1,0 +1,24 @@
+// test: a class name assigned in both branches of an if names both classes afterwards
+// feature: hover
+// expect: $fruit = Apple
+// expect: $fruit = Pear
+---
+<?php
+
+class Apple {
+    public static function make(): Apple { return new Apple(); }
+}
+
+class Pear {
+    public static function make(): Pear { return new Pear(); }
+}
+
+function pick(bool $flag): void {
+    if ($flag) {
+        $class = Apple::class;
+    } else {
+        $class = Pear::class;
+    }
+    $fruit = $class::make();
+    echo $fru<>it;
+}

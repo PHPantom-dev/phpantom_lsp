@@ -109,10 +109,10 @@ namespace PsalmTest_return_type_5 {
 // Requires PHP 7.4
 namespace PsalmTest_return_type_6 {
     /**
-     * @param Closure(int, int): bool $op
-     * @return Closure(int): bool
+     * @param \Closure(int, int): bool $op
+     * @return \Closure(int): bool
      */
-    function reflexive(Closure $op): Closure {
+    function reflexive(\Closure $op): \Closure {
         return fn ($x) => $op($x, $x);
     }
 

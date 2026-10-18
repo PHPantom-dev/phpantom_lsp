@@ -24,7 +24,6 @@ use std::sync::Arc;
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
-use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 use tower_lsp::lsp_types::Url;
@@ -390,15 +389,8 @@ fn read_chain<'e, 'a>(
 
 /// The FQN a `Foo::class` or `'Foo'` argument names.
 fn class_name(expr: &Expression<'_>, names: &OwnedResolvedNames) -> Option<String> {
-    if let Expression::Access(Access::ClassConstant(access)) = expr
-        && let ClassLikeConstantSelector::Identifier(constant) = &access.constant
-        && bytes_to_str(constant.value).eq_ignore_ascii_case("class")
-        && let Expression::Identifier(class) = access.class
-    {
-        let fqn = names
-            .get(class.span().start.offset)
-            .unwrap_or_else(|| bytes_to_str(class.value()));
-        return Some(fqn.trim_start_matches('\\').to_string());
+    if let Some(class) = crate::parser::class_fetch_identifier(expr) {
+        return names.class_fqn(class);
     }
     let name = string_value(expr)?;
     Some(name.trim_start_matches('\\').to_string())

@@ -441,3 +441,19 @@ async fn fix_class_case_quick_fix_corrects_use_import() {
     assert_eq!(edits.len(), 1);
     assert_eq!(edits[0].new_text, "App\\Models\\User");
 }
+
+/// A namespace declared on the `<?php` line is still the file's namespace.
+#[test]
+fn a_namespace_on_the_opening_tag_line_is_read() {
+    let (backend, dir) = create_psr4_workspace(COMPOSER, &[]);
+    let (_, diags) = fast_diagnostics(
+        &backend,
+        dir.path(),
+        "src/Models/User.php",
+        "<?php namespace App\\Models;\n\nfinal class User {}\n",
+    );
+    assert!(
+        !has_code(&diags, "namespace_mismatch"),
+        "the namespace matches, got: {diags:?}"
+    );
+}

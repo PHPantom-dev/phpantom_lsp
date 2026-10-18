@@ -242,29 +242,14 @@ pub(super) fn detect_empty_docblock(
 /// Extract the indentation of the first declaration line in `text`,
 /// skipping empty lines and attribute blocks.
 pub(super) fn declaration_indent(text: &str) -> String {
-    let mut attr_depth = 0i32;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if attr_depth > 0 || trimmed.starts_with("#[") {
-            for ch in trimmed.chars() {
-                match ch {
-                    '[' => attr_depth += 1,
-                    ']' => attr_depth -= 1,
-                    _ => {}
-                }
-            }
-            continue;
-        }
-        // First non-empty, non-attribute line — return its indent.
-        return line
-            .chars()
-            .take_while(|c| *c == ' ' || *c == '\t')
-            .collect();
-    }
-    String::new()
+    super::parse_decl::declaration_lines(text)
+        .next()
+        .map(|(line, _)| {
+            line.chars()
+                .take_while(|c| *c == ' ' || *c == '\t')
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Get the text after the `/**` trigger position, skipping the rest of

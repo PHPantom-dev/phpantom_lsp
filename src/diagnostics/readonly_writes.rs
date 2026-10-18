@@ -40,38 +40,34 @@
 //! declared `readonly`; [`ClassInfo::is_readonly`] is what makes those
 //! properties count here.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use mago_span::HasSpan;
 use mago_syntax::cst::access::Access;
 use mago_syntax::cst::array::ArrayElement;
-use mago_syntax::cst::class_like::member::{ClassLikeMember, ClassLikeMemberSelector};
-use mago_syntax::cst::class_like::method::MethodBody;
+use mago_syntax::cst::class_like::member::ClassLikeMemberSelector;
 use mago_syntax::cst::class_like::{AnonymousClass, Class};
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::r#loop::foreach::{ForeachKeyValueTarget, ForeachValueTarget};
-use mago_syntax::cst::sequence::{Sequence, TokenSeparatedSequence};
-use mago_syntax::cst::statement::Statement;
+use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::unary::UnaryPrefixOperator;
 use mago_syntax::cst::unset::Unset;
-use mago_syntax::cst::variable::Variable;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::atom::{Atom, bytes_to_str};
+use crate::atom::Atom;
+use crate::class_lookup::find_class_at_offset;
 use crate::hover::{MemberKindForOrigin, find_declaring_class};
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::symbol_map::SymbolKind;
-use crate::type_engine::resolver::{
-    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome,
-};
+use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind, PropertyInfo};
 use crate::virtual_members::resolve_class_fully_cached;
 
-use super::helpers::{FileDiagnosticContext, find_innermost_enclosing_class, make_diagnostic};
+use super::class_init_facts::{ClassInitFacts, class_init_facts};
+use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
 /// Diagnostic code used for writes to a `readonly` property.
 pub(crate) const INVALID_READONLY_WRITE_CODE: &str = "invalid_readonly_write";
@@ -128,26 +124,6 @@ struct FileWrites {
     /// Per class body, keyed by the left-brace offset so it matches
     /// [`ClassInfo::start_offset`].
     classes: HashMap<u32, ClassInitFacts>,
-}
-
-/// What a class body says about its own readonly initialization.
-#[derive(Default)]
-struct ClassInitFacts {
-    /// Body ranges of `__construct`, `__clone`, and `__unserialize`,
-    /// where a readonly property may legitimately be initialized.
-    initializer_ranges: Vec<(u32, u32)>,
-    /// Properties the constructor is guaranteed to have initialized by
-    /// the time any other method runs: promoted parameters and
-    /// unconditional `$this->name = …` statements in its body.
-    initialized: HashSet<String>,
-}
-
-impl ClassInitFacts {
-    fn covers_initializer(&self, offset: u32) -> bool {
-        self.initializer_ranges
-            .iter()
-            .any(|(start, end)| offset >= *start && offset <= *end)
-    }
 }
 
 // ── AST walk ────────────────────────────────────────────────────────────────
@@ -267,67 +243,6 @@ fn record_destructured(
         };
         record_target(value, WriteForm::Modify, ctx);
     }
-}
-
-fn class_init_facts(members: &Sequence<'_, ClassLikeMember<'_>>) -> ClassInitFacts {
-    let mut facts = ClassInitFacts::default();
-
-    for member in members.iter() {
-        let ClassLikeMember::Method(method) = member else {
-            continue;
-        };
-        let name = bytes_to_str(method.name.value);
-        let is_constructor = name.eq_ignore_ascii_case("__construct");
-        if !is_constructor
-            && !name.eq_ignore_ascii_case("__clone")
-            && !name.eq_ignore_ascii_case("__unserialize")
-        {
-            continue;
-        }
-        let MethodBody::Concrete(block) = &method.body else {
-            continue;
-        };
-        let span = block.span();
-        facts
-            .initializer_ranges
-            .push((span.start.offset, span.end.offset));
-
-        if !is_constructor {
-            continue;
-        }
-
-        for param in method.parameter_list.parameters.iter() {
-            if param.is_promoted_property() {
-                let raw = bytes_to_str(param.variable.name);
-                facts
-                    .initialized
-                    .insert(raw.strip_prefix('$').unwrap_or(raw).to_string());
-            }
-        }
-
-        // Only statements at the top level of the constructor body count:
-        // an assignment inside a branch or a loop may not run, which
-        // leaves the property free to be initialized elsewhere.
-        for statement in block.statements.iter() {
-            if let Statement::Expression(stmt) = statement
-                && let Expression::Assignment(assign) = stmt.expression
-                && assign.operator.is_assign()
-                && let Expression::Access(Access::Property(access)) = assign.lhs
-                && is_this(access.object)
-                && let ClassLikeMemberSelector::Identifier(ident) = &access.property
-            {
-                facts
-                    .initialized
-                    .insert(bytes_to_str(ident.value).to_string());
-            }
-        }
-    }
-
-    facts
-}
-
-fn is_this(expr: &Expression<'_>) -> bool {
-    matches!(expr, Expression::Variable(Variable::Direct(var)) if var.name == b"$this")
 }
 
 // ── Verdicts ────────────────────────────────────────────────────────────────
@@ -458,8 +373,8 @@ impl Backend {
         }
 
         let local_classes = &ctx.file.classes;
-        let class_loaders = self.class_loaders(&ctx.file);
-        let function_loaders = self.function_loaders(&ctx.file);
+        let loaders = self.file_loaders(&ctx.file);
+        let class_loader = loaders.resolved_class_loader();
         let symbol_map = &ctx.symbol_map;
         let Some(source) = symbol_map.source(content) else {
             return;
@@ -483,8 +398,7 @@ impl Backend {
                 continue;
             }
 
-            let current_class = find_innermost_enclosing_class(local_classes, span.start);
-            let class_loader = class_loaders.at(span.start);
+            let current_class = find_class_at_offset(local_classes, span.start);
 
             // A trait body is incomplete by nature: the property it
             // writes may be declared by any host class, and the trait
@@ -518,13 +432,7 @@ impl Backend {
 
             let rctx = ResolutionCtx {
                 is_in_static_method: symbol_map.is_in_static_method(span.start),
-                ..self.resolution_ctx_at(
-                    current_class,
-                    local_classes,
-                    content,
-                    span.start,
-                    CtxLoaders::without_macro_this(class_loader, function_loaders.at(span.start)),
-                )
+                ..loaders.resolution_ctx_at(content, span.start)
             };
             let SubjectOutcome::Resolved(receivers) =
                 resolve_subject_outcome(subject_text, AccessKind::Arrow, &rctx)

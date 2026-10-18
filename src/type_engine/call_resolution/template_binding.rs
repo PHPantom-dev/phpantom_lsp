@@ -1,13 +1,14 @@
-/// Binding a callee's `@template` parameters from the arguments written at
-/// a call site.
-///
-/// Functions, methods, and constructors all bind the same way: each
-/// `@param` that names a template is matched against the argument PHP
-/// routes to it, and what the argument resolves to is read off at the
-/// position the hint names the template. What differs is only what
-/// happens afterwards (filling in the templates nothing bound, or
-/// generalizing a class template's literals), which the entry points
-/// here and their callers take care of.
+//! Binding a callee's `@template` parameters from the arguments written at
+//! a call site.
+//!
+//! Functions, methods, and constructors all bind the same way: each
+//! `@param` that names a template is matched against the argument PHP
+//! routes to it, and what the argument resolves to is read off at the
+//! position the hint names the template. What differs is only what
+//! happens afterwards (filling in the templates nothing bound, or
+//! generalizing a class template's literals), which the entry points
+//! here and their callers take care of.
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,11 +25,12 @@ use crate::type_engine::variable::rhs_resolution::{
 };
 use crate::types::{ClassInfo, MethodInfo, ParameterInfo};
 
+use super::arg_text_types::{array_literal_element_type, array_literal_shape_type};
+use super::constant_operands::type_operator_bound_literal;
 use super::return_types::literal_arg_type;
 use super::template_subs::{
-    array_literal_element_type, array_literal_shape_type, bind_callable_param_template,
-    bind_callable_return_template, callable_bindings_last, generalize_object_template_arg,
-    names_template_directly, type_operator_bound_literal, unify_template, wrapper_arity,
+    bind_callable_param_template, bind_callable_return_template, callable_bindings_last,
+    generalize_object_template_arg, names_template_directly, unify_template, wrapper_arity,
 };
 
 /// The parts of a callee's signature its templates bind through.
@@ -540,10 +542,15 @@ fn wrapper_constructor_template(
     if wrapper_ctor.template_bindings().is_empty() {
         return None;
     }
+    // The argument list is the one that ends the expression: in
+    // `new W($a)->m()` the value is whatever `m()` returns, not a `W`.
     let paren_start = rest.find('(')?;
-    let paren_end = rest.rfind(')')?;
-    let inner_args = rest.get(paren_start + 1..paren_end)?.trim();
-    let wrapper_arg_texts = crate::type_engine::conditional_resolution::split_text_args(inner_args);
+    let paren_end = crate::text_scan::find_matching_forward(rest, paren_start, b'(', b')')?;
+    if !rest[paren_end + 1..].trim().is_empty() {
+        return None;
+    }
+    let inner_args = rest[paren_start + 1..paren_end].trim();
+    let wrapper_arg_texts = crate::text_scan::split_top_level_commas(inner_args);
     let wrapper_subs =
         bind_constructor_template_args(&wrapper_cls, wrapper_ctor, &wrapper_arg_texts, ctx);
     let wrapper_tpl = wrapper_cls.template_params.get(tpl_position)?;

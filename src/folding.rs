@@ -1,9 +1,10 @@
-/// Folding range handler for `textDocument/foldingRange`.
-///
-/// Parses the PHP source, walks the AST to collect foldable regions
-/// (class bodies, function/method bodies, closures, arrays, control-flow
-/// blocks, argument/parameter lists), and scans trivia for doc-block and
-/// consecutive single-line comment ranges.
+//! Folding range handler for `textDocument/foldingRange`.
+//!
+//! Parses the PHP source, walks the AST to collect foldable regions
+//! (class bodies, function/method bodies, closures, arrays, control-flow
+//! blocks, argument/parameter lists), and scans trivia for doc-block and
+//! consecutive single-line comment ranges.
+
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
@@ -220,30 +221,9 @@ fn collect_from_statement(
             }
         }
 
-        Statement::Class(class) => {
-            emit_brace_pair(class.left_brace, class.right_brace, idx, ranges);
-            for member in class.members.iter() {
-                collect_from_class_member(member, idx, ranges);
-            }
-        }
-
-        Statement::Interface(iface) => {
-            emit_brace_pair(iface.left_brace, iface.right_brace, idx, ranges);
-            for member in iface.members.iter() {
-                collect_from_class_member(member, idx, ranges);
-            }
-        }
-
-        Statement::Trait(trait_def) => {
-            emit_brace_pair(trait_def.left_brace, trait_def.right_brace, idx, ranges);
-            for member in trait_def.members.iter() {
-                collect_from_class_member(member, idx, ranges);
-            }
-        }
-
-        Statement::Enum(enum_def) => {
-            emit_brace_pair(enum_def.left_brace, enum_def.right_brace, idx, ranges);
-            for member in enum_def.members.iter() {
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            emit_brace_pair(body.left_brace, body.right_brace, idx, ranges);
+            for member in body.members {
                 collect_from_class_member(member, idx, ranges);
             }
         }
@@ -886,75 +866,51 @@ fn collect_comment_ranges(
             t.kind,
             TriviaKind::DocBlockComment | TriviaKind::MultiLineComment
         ) {
-            let start_pos = idx.position(t.span.start.offset as usize);
-            let end_pos = idx.position(t.span.end.offset as usize);
-            if start_pos.line < end_pos.line {
-                ranges.push(FoldingRange {
-                    start_line: start_pos.line,
-                    start_character: Some(start_pos.character),
-                    end_line: end_pos.line,
-                    end_character: Some(end_pos.character),
-                    kind: Some(FoldingRangeKind::Comment),
-                    collapsed_text: None,
-                });
-            }
+            push_comment_range(idx, t.span.start.offset, t.span.end.offset, ranges);
         }
     }
 
     // ── Consecutive single-line comments (`//` or `#`) ──
     // Group adjacent single-line comment trivia whose lines differ by
     // exactly 1 (allowing interleaved whitespace trivia).
-    let single_line_comments: Vec<&Trivia<'_>> = trivia
-        .iter()
-        .filter(|t| t.kind.is_single_line_comment())
-        .collect();
-
-    if single_line_comments.is_empty() {
+    let mut single_line_comments = trivia.iter().filter(|t| t.kind.is_single_line_comment());
+    let Some(first) = single_line_comments.next() else {
         return;
-    }
+    };
 
-    let mut group_start_offset = single_line_comments[0].span.start.offset;
-    let mut group_end_offset = single_line_comments[0].span.end.offset;
-    let mut group_start_line = idx.position(group_start_offset as usize).line;
+    let mut group_start_offset = first.span.start.offset;
+    let mut group_end_offset = first.span.end.offset;
     let mut group_end_line = idx.position(group_end_offset as usize).line;
 
-    for t in single_line_comments.iter().skip(1) {
+    for t in single_line_comments {
         let cur_line = idx.position(t.span.start.offset as usize).line;
-        if cur_line == group_end_line + 1 {
-            // Extend the current group.
-            group_end_offset = t.span.end.offset;
-            group_end_line = idx.position(group_end_offset as usize).line;
-        } else {
-            // Flush the previous group if it spans multiple lines.
-            if group_start_line < group_end_line {
-                let start_char = idx.position(group_start_offset as usize).character;
-                let end_char = idx.position(group_end_offset as usize).character;
-                ranges.push(FoldingRange {
-                    start_line: group_start_line,
-                    start_character: Some(start_char),
-                    end_line: group_end_line,
-                    end_character: Some(end_char),
-                    kind: Some(FoldingRangeKind::Comment),
-                    collapsed_text: None,
-                });
-            }
-            // Start a new group.
+        if cur_line != group_end_line + 1 {
+            push_comment_range(idx, group_start_offset, group_end_offset, ranges);
             group_start_offset = t.span.start.offset;
-            group_end_offset = t.span.end.offset;
-            group_start_line = cur_line;
-            group_end_line = idx.position(group_end_offset as usize).line;
         }
+        group_end_offset = t.span.end.offset;
+        group_end_line = idx.position(group_end_offset as usize).line;
     }
 
-    // Flush the last group.
-    if group_start_line < group_end_line {
-        let start_char = idx.position(group_start_offset as usize).character;
-        let end_char = idx.position(group_end_offset as usize).character;
+    push_comment_range(idx, group_start_offset, group_end_offset, ranges);
+}
+
+/// Fold the comment text from byte `start` to `end` when it spans more
+/// than one line.
+fn push_comment_range(
+    idx: &crate::text_position::LineIndex<'_>,
+    start: u32,
+    end: u32,
+    ranges: &mut Vec<FoldingRange>,
+) {
+    let start_pos = idx.position(start as usize);
+    let end_pos = idx.position(end as usize);
+    if start_pos.line < end_pos.line {
         ranges.push(FoldingRange {
-            start_line: group_start_line,
-            start_character: Some(start_char),
-            end_line: group_end_line,
-            end_character: Some(end_char),
+            start_line: start_pos.line,
+            start_character: Some(start_pos.character),
+            end_line: end_pos.line,
+            end_character: Some(end_pos.character),
             kind: Some(FoldingRangeKind::Comment),
             collapsed_text: None,
         });

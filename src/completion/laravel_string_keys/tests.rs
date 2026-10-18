@@ -32,7 +32,7 @@ fn the_kinds_completed_elsewhere_offer_no_candidates() {
         LaravelStringKind::ContainerBinding,
     ] {
         assert!(
-            backend.string_key_candidates(&kind, None, "").is_empty(),
+            backend.string_key_candidates(&kind, "").is_empty(),
             "{kind:?} should offer no candidates"
         );
     }
@@ -49,7 +49,7 @@ fn configured_resource_candidates_include_database_roles_and_null_drivers() {
 
     assert_eq!(
         backend
-            .string_key_candidates(&LaravelStringKind::Config, None, "")
+            .string_key_candidates(&LaravelStringKind::Config, "")
             .as_ref(),
         [
             "cache.stores.redis",
@@ -61,31 +61,18 @@ fn configured_resource_candidates_include_database_roles_and_null_drivers() {
         backend
             .string_key_candidates(
                 &LaravelStringKind::ConfigResource(LaravelConfigResource::DatabaseConnection,),
-                Some("database.connections."),
                 "mysql::",
             )
             .as_ref(),
         ["mysql::read", "mysql::write", "mysql::direct"]
     );
-    for (resource, config_prefix, expected) in [
-        (
-            LaravelConfigResource::CacheStore,
-            "cache.stores.",
-            vec!["null", "redis"],
-        ),
-        (
-            LaravelConfigResource::QueueConnection,
-            "queue.connections.",
-            vec!["null", "sync"],
-        ),
+    for (resource, expected) in [
+        (LaravelConfigResource::CacheStore, vec!["null", "redis"]),
+        (LaravelConfigResource::QueueConnection, vec!["null", "sync"]),
     ] {
         assert_eq!(
             backend
-                .string_key_candidates(
-                    &LaravelStringKind::ConfigResource(resource),
-                    Some(config_prefix),
-                    "",
-                )
+                .string_key_candidates(&LaravelStringKind::ConfigResource(resource), "")
                 .as_ref(),
             expected,
         );
@@ -136,10 +123,76 @@ fn detects_route_call() {
 
 #[test]
 fn detects_instance_route_call() {
-    let content = "<?php\n$redirect->route('user.');\n";
+    let content = "<?php\nredirect()->route('user.');\n";
     let ctx = detect_at_end(content, "user.").expect("should detect ->route() context");
     assert!(matches!(ctx.kind, LaravelStringKind::Route));
     assert_eq!(ctx.prefix, "user.");
+}
+
+/// `->route()` names a route only on the URL builders the symbol map
+/// recognises: on a request it reads a route parameter.
+#[test]
+fn rejects_route_on_an_unrelated_receiver() {
+    for call in ["$request->route('id", "$this->redirect()->route('id"] {
+        let content = format!("<?php\n{call}");
+        assert!(
+            detect_at_end(&content, "id").is_none(),
+            "`{call}` does not name a route"
+        );
+    }
+}
+
+/// A string past the first argument is classified by its position, the way
+/// the symbol map reads the finished call.
+#[test]
+fn later_arguments_complete_what_their_position_names() {
+    for (call, expected) in [
+        ("View::renderWhen($ok, 'emails.", LaravelStringKind::View),
+        ("View::renderEach('emails.", LaravelStringKind::View),
+        (
+            "view()->renderUnless($ok, 'emails.",
+            LaravelStringKind::View,
+        ),
+        ("Route::view('/about', 'emails.", LaravelStringKind::View),
+        (
+            "$this->authorizeForUser($user, 'emails.",
+            LaravelStringKind::GateAbility,
+        ),
+        (
+            "$query->whereHasMorph('commentable', ['emails.",
+            LaravelStringKind::MorphAlias,
+        ),
+        (
+            "Comment::whereHasMorph('commentable', 'emails.",
+            LaravelStringKind::MorphAlias,
+        ),
+        (
+            "$request->routeIs('admin.*', 'emails.",
+            LaravelStringKind::Route,
+        ),
+        (
+            "Gate::any(['update', 'emails.",
+            LaravelStringKind::GateAbility,
+        ),
+        ("config()->get('emails.", LaravelStringKind::Config),
+    ] {
+        let content = format!("<?php\n{call}");
+        let ctx =
+            detect_at_end(&content, "emails.").unwrap_or_else(|| panic!("should detect `{call}`"));
+        assert_eq!(ctx.kind, expected, "for `{call}`");
+        assert_eq!(ctx.prefix, "emails.", "for `{call}`");
+    }
+    for call in [
+        "View::make($view, 'emails.",
+        "Route::view('emails.",
+        "$this->authorize($user, 'emails.",
+        "Config::getMany(['app.name' => 'emails.",
+    ] {
+        assert!(
+            detect_at_end(&format!("<?php\n{call}"), "emails.").is_none(),
+            "`{call}` names nothing there"
+        );
+    }
 }
 
 #[test]
@@ -193,6 +246,40 @@ fn detects_the_list_and_environment_call_shapes() {
             .unwrap_or_else(|| panic!("should detect `{call}` as an environment context"));
         assert!(matches!(ctx.kind, LaravelStringKind::Env), "for `{call}`");
         assert_eq!(ctx.prefix, "APP_", "for `{call}`");
+    }
+}
+
+/// A static call completes the names the symbol map recognises in the
+/// finished call, keyed on the class as written.
+#[test]
+fn static_calls_complete_what_the_symbol_map_recognises() {
+    for (call, expected) in [
+        ("View::first(['emails.", LaravelStringKind::View),
+        ("Response::view('emails.", LaravelStringKind::View),
+        (
+            "\\Illuminate\\Support\\Facades\\View::make('emails.",
+            LaravelStringKind::View,
+        ),
+        (
+            "\\Illuminate\\Support\\Env::get('emails.",
+            LaravelStringKind::Env,
+        ),
+        (
+            "Post::getActualClassNameForMorph('emails.",
+            LaravelStringKind::MorphAlias,
+        ),
+    ] {
+        let content = format!("<?php\n{call}");
+        let ctx =
+            detect_at_end(&content, "emails.").unwrap_or_else(|| panic!("should detect `{call}`"));
+        assert_eq!(ctx.kind, expected, "for `{call}`");
+        assert_eq!(ctx.prefix, "emails.", "for `{call}`");
+    }
+    for call in ["Acme\\View::make('emails.", "Facades\\Lang::get('emails."] {
+        assert!(
+            detect_at_end(&format!("<?php\n{call}"), "emails.").is_none(),
+            "`{call}` is not a Laravel facade"
+        );
     }
 }
 
@@ -413,6 +500,23 @@ fn detects_config_static_get() {
 }
 
 #[test]
+fn detects_static_config_typed_getters() {
+    for method in [
+        "string",
+        "integer",
+        "float",
+        "boolean",
+        "array",
+        "collection",
+    ] {
+        let content = format!("<?php\nConfig::{method}('app.name');\n");
+        let ctx = detect_at_end(&content, "app.name")
+            .unwrap_or_else(|| panic!("should detect Config::{method}() context"));
+        assert_eq!(ctx.kind, LaravelStringKind::Config);
+    }
+}
+
+#[test]
 fn detects_static_config_mutators_and_translation_queries() {
     for method in ["prepend", "push"] {
         let content = format!("<?php\nConfig::{method}('app.providers');\n");
@@ -431,28 +535,22 @@ fn detects_static_config_mutators_and_translation_queries() {
 
 #[test]
 fn storage_argument_scanning_preserves_existing_static_contexts() {
-    for (expression, expected_kind, expected_prefix) in [
+    for (expression, value, expected_kind) in [
         (
             "DB::connection('primary')",
+            "primary",
             LaravelStringKind::ConfigResource(LaravelConfigResource::DatabaseConnection),
-            Some("database.connections."),
         ),
         (
             "Model::getActualClassNameForMorph('post')",
+            "post",
             LaravelStringKind::MorphAlias,
-            None,
         ),
     ] {
         let content = format!("<?php\n{expression};\n");
-        let value = if expected_prefix.is_some() {
-            "primary"
-        } else {
-            "post"
-        };
         let ctx = detect_at_end(&content, value)
             .unwrap_or_else(|| panic!("should preserve `{expression}` completion"));
         assert_eq!(ctx.kind, expected_kind);
-        assert_eq!(ctx.config_sub_prefix, expected_prefix);
     }
 }
 
@@ -476,11 +574,6 @@ fn detects_storage_disk_scalar_methods_and_named_arguments() {
             LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
         ));
         assert_eq!(ctx.prefix, "arch", "prefix for `{expression}`");
-        assert_eq!(
-            ctx.config_sub_prefix,
-            Some("filesystems.disks."),
-            "config subtree for `{expression}`"
-        );
     }
 
     for expression in [
@@ -494,7 +587,6 @@ fn detects_storage_disk_scalar_methods_and_named_arguments() {
             ctx.kind,
             LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
         ));
-        assert_eq!(ctx.config_sub_prefix, Some("filesystems.disks."));
     }
 }
 
@@ -803,7 +895,6 @@ fn detects_every_forget_disk_array_value_and_spelling() {
                 LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
             ));
             assert_eq!(ctx.prefix, value);
-            assert_eq!(ctx.config_sub_prefix, Some("filesystems.disks."));
         }
     }
 }
@@ -944,7 +1035,10 @@ use Illuminate\Support\Facades\Storage;
 Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive']);"#;
     let ctx = detect_at_end(nested, "archive")
         .expect("balanced nested expressions must not hide the outer array");
-    assert_eq!(ctx.config_sub_prefix, Some("filesystems.disks."));
+    assert!(matches!(
+        ctx.kind,
+        LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
+    ));
 
     for source in [
         "Storage::disk(:'archive",
@@ -960,7 +1054,7 @@ Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive'
     let code =
         crate::completion::source::code_context::code_context_at(source, source.len()).unwrap();
     let argument = string_argument_context(source, &code, source.len()).unwrap();
-    assert_eq!(argument.named_argument, Some("prénom"));
+    assert_eq!(argument.slot, ArgumentSlot::Named("prénom"));
 
     let escaped_key = r#"'key\'part' => 'archive'"#;
     assert!(string_literal_is_array_key(
@@ -995,8 +1089,7 @@ fn array_context_reports_the_call_parameter_and_key_position() {
         crate::completion::source::code_context::code_context_at(source, source.len()).unwrap();
     let argument = string_argument_context(source, &code, source.len()).unwrap();
     assert_eq!(argument.callable, "$query->whereHasMorph");
-    assert_eq!(argument.argument_index, 1);
-    assert_eq!(argument.named_argument, Some("types"));
+    assert_eq!(argument.slot, ArgumentSlot::Named("types"));
     assert!(matches!(argument.shape, StringArgumentShape::ArrayElement));
 }
 

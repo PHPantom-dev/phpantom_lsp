@@ -139,7 +139,7 @@ pub struct ResolvedCacheInner {
     /// happens to collide with the freed address fails the
     /// `Weak::upgrade` + `ptr_eq` validation and the entry is simply
     /// replaced, so stale entries can never leak a wrong method.
-    substituted_methods: HashMap<(usize, u128), SubstitutedEntry>,
+    substituted_methods: SubstitutedMembers<MethodInfo>,
     /// Interned transformed properties, keyed the same way as
     /// [`substituted_methods`](Self::substituted_methods) (origin
     /// `Arc<PropertyInfo>` identity plus a [`TransformFingerprint`]).
@@ -150,21 +150,20 @@ pub struct ResolvedCacheInner {
     /// generic parent substitutes the same template bounds and so
     /// produces value-identical transformed properties, which interning
     /// collapses to one allocation shared across all of them.
-    substituted_properties: HashMap<(usize, u128), SubstitutedPropertyEntry>,
-    /// Length of [`substituted_methods`](Self::substituted_methods) after
-    /// its last dead-witness sweep.  See [`sweep_dead_witnesses`].
-    substituted_methods_swept_len: usize,
-    /// Same as [`substituted_methods_swept_len`](Self::substituted_methods_swept_len),
-    /// for [`substituted_properties`](Self::substituted_properties).
-    substituted_properties_swept_len: usize,
-    /// Loaded classes with their `@phpstan-import-type` aliases linked into
-    /// their members, keyed by the identity of the class as loaded.
+    substituted_properties: SubstitutedMembers<PropertyInfo>,
+    /// Loaded classes as linked by `Backend::link_loaded_class` (their
+    /// `@phpstan-import-type` aliases linked into their members, and their
+    /// docblock types checked against the native hints), keyed by the
+    /// identity of the class as loaded.
     ///
     /// The [`Weak`] witness retires an entry once its class is re-parsed.
-    /// An edit to a class an import was read from does not re-parse the
-    /// importer, so each entry also lists every class the linking loaded,
-    /// and [`evict_fqn`] drops the entries that list the evicted class.
-    linked_aliases: HashMap<usize, LinkedAliasesEntry>,
+    /// An edit to a class the linking read does not re-parse the linked one,
+    /// so each entry also lists every class the linking loaded, and
+    /// [`evict_fqn`] drops the entries that list the evicted class.
+    linked_classes: HashMap<usize, LinkedClassEntry>,
+    /// Length of [`linked_classes`](Self::linked_classes) after its last
+    /// dead-witness sweep.  See [`sweep_dead_witnesses`].
+    linked_classes_swept_len: usize,
     /// Members of the cached classes, pooled by content so classes that
     /// inherit an identical member share one allocation of it.  See
     /// [`MemberPool`].
@@ -174,14 +173,21 @@ pub struct ResolvedCacheInner {
     member_pool: parking_lot::Mutex<MemberPool>,
 }
 
-/// One class with its imported type aliases linked.  See
-/// [`ResolvedCacheInner::linked_aliases`].
-struct LinkedAliasesEntry {
+/// One class as linked.  See [`ResolvedCacheInner::linked_classes`].
+struct LinkedClassEntry {
     witness: Weak<ClassInfo>,
-    /// The classes the imports were read from, as the linking asked for
-    /// them.
+    /// The FQN of the class.
+    fqn: Atom,
+    /// The classes the linking read, as it asked for them.
     sources: Vec<String>,
-    value: Arc<ClassInfo>,
+    /// The class lookup generation the linking ran at, when one of
+    /// `sources` could not be loaded: indexing it later changes the
+    /// generation, so the entry is only good while that stays the same.
+    /// `None` when every one loaded, which only an edit to one of them can
+    /// change.
+    generation: Option<u64>,
+    /// The linked class, or `None` when linking left the class as loaded.
+    value: Option<Arc<ClassInfo>>,
 }
 
 /// Outcome of [`ResolvedCacheInner::claim_pending`].
@@ -199,42 +205,99 @@ pub(crate) enum PendingClaim {
     OwnedByOtherThread,
 }
 
-/// One interned transformed method: the origin witness plus the shared
-/// transformed value.  See
+/// Interned transformed copies of one kind of member, keyed by the
+/// identity of the original `Arc` plus a [`TransformFingerprint`].  See
 /// [`ResolvedCacheInner::substituted_methods`].
-struct SubstitutedEntry {
-    witness: Weak<MethodInfo>,
-    value: Arc<MethodInfo>,
+struct SubstitutedMembers<T> {
+    entries: HashMap<(usize, u128), SubstitutedEntry<T>>,
+    /// Length of `entries` after its last dead-witness sweep.  See
+    /// [`sweep_dead_witnesses`].
+    swept_len: usize,
 }
 
-/// One interned transformed property: the origin witness plus the shared
-/// transformed value.  See
-/// [`ResolvedCacheInner::substituted_properties`].
-struct SubstitutedPropertyEntry {
-    witness: Weak<PropertyInfo>,
-    value: Arc<PropertyInfo>,
+/// One interned transformed member: the origin witness plus the shared
+/// transformed value.
+struct SubstitutedEntry<T> {
+    witness: Weak<T>,
+    value: Arc<T>,
 }
 
-/// Ceiling on the live entries of each interned-member map (methods and
-/// properties).  A sweep that leaves this many clears the map (the merge
-/// simply stops sharing until it refills), so a map never grows past
-/// twice the cap.  It exists only as a backstop, far above what a full
-/// workspace resolution produces.
+impl<T> Default for SubstitutedMembers<T> {
+    fn default() -> Self {
+        SubstitutedMembers {
+            entries: HashMap::new(),
+            swept_len: 0,
+        }
+    }
+}
+
+impl<T> SubstitutedMembers<T> {
+    /// The member interned for `origin` under the transform identified by
+    /// `fp`.
+    ///
+    /// `None` when no entry exists or when the stored entry's witness no
+    /// longer matches `origin` (the origin died and its address was
+    /// reused): the caller then builds and [inserts](Self::insert) a fresh
+    /// value.
+    fn get(&self, origin: &Arc<T>, fp: u128) -> Option<Arc<T>> {
+        let entry = self.entries.get(&(Arc::as_ptr(origin) as usize, fp))?;
+        let alive = entry.witness.upgrade()?;
+        Arc::ptr_eq(&alive, origin).then(|| Arc::clone(&entry.value))
+    }
+
+    /// Intern a transformed member built from `origin` under `fp`.
+    fn insert(&mut self, origin: &Arc<T>, fp: u128, value: Arc<T>) {
+        sweep_dead_witnesses(&mut self.entries, &mut self.swept_len, |e| {
+            e.witness.strong_count() > 0
+        });
+        self.entries.insert(
+            (Arc::as_ptr(origin) as usize, fp),
+            SubstitutedEntry {
+                witness: Arc::downgrade(origin),
+                value,
+            },
+        );
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.swept_len = 0;
+    }
+
+    /// The approximate bytes of the table's buckets.
+    #[cfg(feature = "mem-audit")]
+    fn bucket_bytes(&self) -> usize {
+        let cap = self.entries.capacity();
+        if cap == 0 {
+            return 0;
+        }
+        let slot = std::mem::size_of::<((usize, u128), SubstitutedEntry<T>)>();
+        ((cap * 8).div_ceil(7).max(4)).next_power_of_two() * (slot + 1)
+    }
+}
+
+/// Ceiling on the live entries of each map [`sweep_dead_witnesses`] keeps
+/// (interned methods and properties, linked classes).  A sweep that leaves
+/// this many clears the map (the merge simply stops sharing until it
+/// refills), so a map never grows past twice the cap.  It exists only as a
+/// backstop, far above what a full workspace resolution produces.
 const SUBSTITUTED_METHODS_CAP: usize = 1 << 20;
 
 /// Smallest interned-member map that is swept for dead witnesses, so a
 /// small map is not rescanned on every few inserts.
 const SUBSTITUTED_SWEEP_FLOOR: usize = 1 << 12;
 
-/// Drop the entries of an interned-member map whose origin has died,
-/// once the map has doubled since its last sweep.
+/// Drop the entries of a map keyed by the identity of an origin (a member,
+/// or a class as loaded) whose origin has died, once the map has doubled
+/// since its last sweep.
 ///
-/// An edit that re-parses a file kills the origins of its members, but
-/// their entries stay in the map: the transformed value is held strongly,
-/// and the `Weak` witness keeps the dead origin's allocation.  Sweeping
-/// at each doubling keeps the cost amortised O(1) per insert.
-fn sweep_dead_witnesses<V>(
-    map: &mut HashMap<(usize, u128), V>,
+/// An edit that re-parses a file kills the origins of its members and
+/// classes, but their entries stay in the map: the transformed value is
+/// held strongly, and the `Weak` witness keeps the dead origin's
+/// allocation.  Sweeping at each doubling keeps the cost amortised O(1)
+/// per insert.
+fn sweep_dead_witnesses<K, V>(
+    map: &mut HashMap<K, V>,
     swept_len: &mut usize,
     alive: impl Fn(&V) -> bool,
 ) {
@@ -259,11 +322,10 @@ impl Default for ResolvedCacheInner {
             laravel_aliases: crate::virtual_members::laravel::new_alias_slot(),
             in_flight: HashSet::new(),
             pending: HashMap::new(),
-            substituted_methods: HashMap::new(),
-            substituted_properties: HashMap::new(),
-            substituted_methods_swept_len: 0,
-            substituted_properties_swept_len: 0,
-            linked_aliases: HashMap::new(),
+            substituted_methods: SubstitutedMembers::default(),
+            substituted_properties: SubstitutedMembers::default(),
+            linked_classes: HashMap::new(),
+            linked_classes_swept_len: 0,
             member_pool: parking_lot::Mutex::default(),
         }
     }
@@ -288,20 +350,8 @@ impl ResolvedCacheInner {
         &HashMap<String, HashSet<ResolvedClassCacheKey>>,
         usize,
     ) {
-        let bucket = |cap: usize, slot: usize| {
-            if cap == 0 {
-                0
-            } else {
-                ((cap * 8).div_ceil(7).max(4)).next_power_of_two() * (slot + 1)
-            }
-        };
-        let substituted = bucket(
-            self.substituted_methods.capacity(),
-            std::mem::size_of::<((usize, u128), SubstitutedEntry)>(),
-        ) + bucket(
-            self.substituted_properties.capacity(),
-            std::mem::size_of::<((usize, u128), SubstitutedPropertyEntry)>(),
-        );
+        let substituted =
+            self.substituted_methods.bucket_bytes() + self.substituted_properties.bucket_bytes();
         (&self.map, &self.fqn_keys, &self.reverse_deps, substituted)
     }
 
@@ -410,14 +460,14 @@ impl ResolvedCacheInner {
     pub fn insert(&mut self, key: ResolvedClassCacheKey, value: Arc<ClassInfo>) {
         // When replacing an existing entry, drop its old reverse-dep edges
         // first so a changed dependency set does not leave stale edges.
-        if let Some(old_deps) = self.map.get(&key).map(|c| dependency_keys(c)) {
+        if let Some(old_deps) = self.map.get(&key).map(|c| dependency_keys(&key, c)) {
             for dep in old_deps {
                 self.unlink_reverse_edge(&dep, &key);
             }
         }
 
         let fqn = key.0.to_string();
-        for dep in dependency_keys(&value) {
+        for dep in dependency_keys(&key, &value) {
             self.reverse_deps
                 .entry(dep)
                 .or_default()
@@ -438,9 +488,8 @@ impl ResolvedCacheInner {
         self.reverse_deps.clear();
         self.substituted_methods.clear();
         self.substituted_properties.clear();
-        self.substituted_methods_swept_len = 0;
-        self.substituted_properties_swept_len = 0;
-        self.linked_aliases.clear();
+        self.linked_classes.clear();
+        self.linked_classes_swept_len = 0;
         self.member_pool.get_mut().clear();
     }
 
@@ -451,145 +500,69 @@ impl ResolvedCacheInner {
         self.member_pool.lock().share_class(class);
     }
 
-    /// The copy of `class` with its imported type aliases linked, when one
-    /// was stored for this very class, with the classes the imports were
-    /// read from.
-    pub(crate) fn get_linked_aliases(
+    /// `class` as linked, when that was stored for this very class and is
+    /// still good at the class lookup `generation`, with the classes the
+    /// linking read.
+    pub(crate) fn get_linked_class(
         &self,
         class: &Arc<ClassInfo>,
+        generation: u64,
     ) -> Option<(Arc<ClassInfo>, &[String])> {
-        let entry = self.linked_aliases.get(&(Arc::as_ptr(class) as usize))?;
+        let entry = self.linked_classes.get(&(Arc::as_ptr(class) as usize))?;
         let alive = entry.witness.upgrade()?;
-        Arc::ptr_eq(&alive, class).then(|| (Arc::clone(&entry.value), entry.sources.as_slice()))
+        if !Arc::ptr_eq(&alive, class) || entry.generation.is_some_and(|g| g != generation) {
+            return None;
+        }
+        let linked = entry.value.as_ref().unwrap_or(class);
+        Some((Arc::clone(linked), entry.sources.as_slice()))
     }
 
-    /// Store the copy of `class` with its imported type aliases linked,
-    /// read from `sources`.
-    pub(crate) fn insert_linked_aliases(
+    /// Store `class` as linked (`None` when linking left it as loaded),
+    /// read from `sources`.  `generation` is the class lookup generation
+    /// the linking ran at when it could not load one of them.
+    pub(crate) fn insert_linked_class(
         &mut self,
         class: &Arc<ClassInfo>,
-        value: Arc<ClassInfo>,
+        value: Option<Arc<ClassInfo>>,
         sources: Vec<String>,
+        generation: Option<u64>,
     ) {
-        if self.linked_aliases.len() >= SUBSTITUTED_METHODS_CAP {
-            self.linked_aliases
-                .retain(|_, e| e.witness.strong_count() > 0);
-        }
-        self.linked_aliases.insert(
+        sweep_dead_witnesses(
+            &mut self.linked_classes,
+            &mut self.linked_classes_swept_len,
+            |e| e.witness.strong_count() > 0,
+        );
+        self.linked_classes.insert(
             Arc::as_ptr(class) as usize,
-            LinkedAliasesEntry {
+            LinkedClassEntry {
                 witness: Arc::downgrade(class),
+                fqn: class.fqn(),
                 sources,
+                generation,
                 value,
             },
         );
     }
 
-    /// Drop every linked-alias entry that read an import from `fqn`,
-    /// returning the FQNs of the classes they belonged to.
-    fn evict_linked_aliases_reading(&mut self, fqn: &str) -> Vec<String> {
-        if self.linked_aliases.is_empty() {
+    /// Drop every linked-class entry that read `fqn`, returning the FQNs
+    /// of the classes they belonged to.
+    fn evict_linked_classes_reading(&mut self, fqn: &str) -> Vec<String> {
+        if self.linked_classes.is_empty() {
             return Vec::new();
         }
         let short = crate::util::short_name(fqn);
         let mut owners = Vec::new();
-        self.linked_aliases.retain(|_, entry| {
+        self.linked_classes.retain(|_, entry| {
             let reads = entry
                 .sources
                 .iter()
                 .any(|s| s.eq_ignore_ascii_case(fqn) || s.eq_ignore_ascii_case(short));
             if reads {
-                owners.push(entry.value.fqn().to_string());
+                owners.push(entry.fqn.to_string());
             }
             !reads
         });
         owners
-    }
-
-    /// Look up an interned transformed method for `origin` under the
-    /// transform identified by `fp`.
-    ///
-    /// Returns `None` when no entry exists or when the stored entry's
-    /// witness no longer matches `origin` (the origin died and its
-    /// address was reused) — the caller then builds and
-    /// [inserts](Self::insert_substituted) a fresh value.
-    pub(crate) fn get_substituted(
-        &self,
-        origin: &Arc<MethodInfo>,
-        fp: u128,
-    ) -> Option<Arc<MethodInfo>> {
-        let key = (Arc::as_ptr(origin) as usize, fp);
-        let entry = self.substituted_methods.get(&key)?;
-        let alive = entry.witness.upgrade()?;
-        if Arc::ptr_eq(&alive, origin) {
-            Some(Arc::clone(&entry.value))
-        } else {
-            None
-        }
-    }
-
-    /// Intern a transformed method built from `origin` under `fp`.
-    pub(crate) fn insert_substituted(
-        &mut self,
-        origin: &Arc<MethodInfo>,
-        fp: u128,
-        value: Arc<MethodInfo>,
-    ) {
-        sweep_dead_witnesses(
-            &mut self.substituted_methods,
-            &mut self.substituted_methods_swept_len,
-            |e| e.witness.strong_count() > 0,
-        );
-        self.substituted_methods.insert(
-            (Arc::as_ptr(origin) as usize, fp),
-            SubstitutedEntry {
-                witness: Arc::downgrade(origin),
-                value,
-            },
-        );
-    }
-
-    /// Look up an interned transformed property for `origin` under the
-    /// transform identified by `fp`.
-    ///
-    /// The witness validation mirrors
-    /// [`get_substituted`](Self::get_substituted): a stale entry whose
-    /// origin died (its address reused) fails `Weak::upgrade` + `ptr_eq`
-    /// and is treated as a miss.
-    pub(crate) fn get_substituted_property(
-        &self,
-        origin: &Arc<PropertyInfo>,
-        fp: u128,
-    ) -> Option<Arc<PropertyInfo>> {
-        let key = (Arc::as_ptr(origin) as usize, fp);
-        let entry = self.substituted_properties.get(&key)?;
-        let alive = entry.witness.upgrade()?;
-        if Arc::ptr_eq(&alive, origin) {
-            Some(Arc::clone(&entry.value))
-        } else {
-            None
-        }
-    }
-
-    /// Intern a transformed property built from `origin` under `fp`.
-    pub(crate) fn insert_substituted_property(
-        &mut self,
-        origin: &Arc<PropertyInfo>,
-        fp: u128,
-        value: Arc<PropertyInfo>,
-    ) {
-        sweep_dead_witnesses(
-            &mut self.substituted_properties,
-            &mut self.substituted_properties_swept_len,
-            |e| e.witness.strong_count() > 0,
-        );
-        self.substituted_properties.insert(
-            (Arc::as_ptr(origin) as usize, fp),
-            SubstitutedPropertyEntry {
-                witness: Arc::downgrade(origin),
-                value,
-            },
-        );
     }
 
     /// Remove `key` from the reverse-dependency edge under `dep`, pruning
@@ -613,7 +586,7 @@ impl ResolvedCacheInner {
         };
         for key in keys {
             if let Some(value) = self.map.remove(&key) {
-                for dep in dependency_keys(&value) {
+                for dep in dependency_keys(&key, &value) {
                     self.unlink_reverse_edge(&dep, &key);
                 }
             }
@@ -797,6 +770,9 @@ pub(crate) mod transform_flags {
     /// Model query factory (`newQuery()` and friends) whose return type
     /// is replaced with the model's own builder.
     pub const QUERY_FACTORY: u8 = 64;
+    /// [`FORWARDS_CALLS_SELF`] for a method declared on the builder, whose
+    /// self-referencing returns are rewritten to the decorator as well.
+    pub const FORWARDS_CALLS_BUILDER_SELF: u8 = 128;
 }
 
 /// Return a transformed copy of `origin`, shared through the active
@@ -818,14 +794,15 @@ pub(crate) fn intern_transformed_method(
     let Some(cache) = active_resolved_class_cache() else {
         return Arc::new(build());
     };
-    if let Some(hit) = cache.read().get_substituted(origin, fp.0) {
+    if let Some(hit) = cache.read().substituted_methods.get(origin, fp.0) {
         return hit;
     }
     let built = build();
     let value = cache.read().member_pool.lock().share_method(built);
     cache
         .write()
-        .insert_substituted(origin, fp.0, Arc::clone(&value));
+        .substituted_methods
+        .insert(origin, fp.0, Arc::clone(&value));
     value
 }
 
@@ -846,14 +823,15 @@ pub(crate) fn intern_transformed_property(
     let Some(cache) = active_resolved_class_cache() else {
         return Arc::new(build());
     };
-    if let Some(hit) = cache.read().get_substituted_property(origin, fp.0) {
+    if let Some(hit) = cache.read().substituted_properties.get(origin, fp.0) {
         return hit;
     }
     let built = build();
     let value = cache.read().member_pool.lock().share_property(built);
     cache
         .write()
-        .insert_substituted_property(origin, fp.0, Arc::clone(&value));
+        .substituted_properties
+        .insert(origin, fp.0, Arc::clone(&value));
     value
 }
 
@@ -879,9 +857,10 @@ pub(crate) fn intern_transformed_property(
 /// The returned vector lists the seed FQN followed by every transitively
 /// evicted dependent, or is empty when nothing matched.
 pub fn evict_fqn(cache: &mut ResolvedCacheInner, fqn: &str) -> Vec<String> {
-    // A class that imported a type alias from `fqn` has it linked into its
-    // members, so it changed along with `fqn` and its dependents go too.
-    let importers = cache.evict_linked_aliases_reading(fqn);
+    // A class whose linking read `fqn` (an imported type alias, or the
+    // ancestors of a docblock class) changed along with `fqn`, and its
+    // dependents go too.
+    let importers = cache.evict_linked_classes_reading(fqn);
     if cache.map.is_empty() {
         return vec![];
     }
@@ -937,7 +916,9 @@ pub fn evict_fqn(cache: &mut ResolvedCacheInner, fqn: &str) -> Vec<String> {
 
 /// Collect the dependency strings a class references through its
 /// `parent_class`, `used_traits`, `interfaces`, `mixins`, and
-/// `casts_definitions`.
+/// `casts_definitions`, plus the classes its generic arguments name: a
+/// specialisation such as `Builder<User>` carries members read from
+/// `User` (its scopes), which go stale when `User` changes.
 ///
 /// Each value is stored verbatim as it appears on the class: it may be a
 /// fully-qualified name (cross-file, post-resolution) or a short name
@@ -947,8 +928,17 @@ pub fn evict_fqn(cache: &mut ResolvedCacheInner, fqn: &str) -> Vec<String> {
 ///
 /// Cast values may carry a `:argument` suffix (e.g. `"DecimalCast:8:2"`);
 /// only the class portion is recorded.
-fn dependency_keys(cls: &ClassInfo) -> Vec<String> {
+fn dependency_keys(key: &ResolvedClassCacheKey, cls: &ClassInfo) -> Vec<String> {
     let mut keys: Vec<String> = Vec::new();
+
+    for arg in &key.1 {
+        if arg.starts_with('\0') {
+            continue;
+        }
+        if let Some(name) = crate::php_type::PhpType::parse(arg).base_name() {
+            keys.push(name.to_string());
+        }
+    }
 
     if let Some(ref parent) = cls.parent_class {
         keys.push(parent.to_string());
@@ -994,5 +984,56 @@ mod tests {
         drop(dead);
         sweep_dead_witnesses(&mut map, &mut swept_len, |w| w.strong_count() > 0);
         assert_eq!(map.len(), SUBSTITUTED_SWEEP_FLOOR + 1);
+    }
+
+    fn class_named(name: &str) -> Arc<ClassInfo> {
+        Arc::new(ClassInfo {
+            name: crate::atom::atom(name),
+            ..ClassInfo::default()
+        })
+    }
+
+    #[test]
+    fn a_linked_class_that_missed_a_class_lasts_one_lookup_generation() {
+        let mut cache = ResolvedCacheInner::default();
+        let complete = class_named("Complete");
+        let missed = class_named("Missed");
+        let linked = class_named("Linked");
+        cache.insert_linked_class(&complete, None, vec!["Read".into()], None);
+        cache.insert_linked_class(&missed, Some(Arc::clone(&linked)), vec![], Some(3));
+
+        let (served, _) = cache.get_linked_class(&complete, 7).unwrap();
+        assert!(Arc::ptr_eq(&served, &complete), "linking left it as loaded");
+        let (served, _) = cache.get_linked_class(&missed, 3).unwrap();
+        assert!(Arc::ptr_eq(&served, &linked));
+        assert!(
+            cache.get_linked_class(&missed, 4).is_none(),
+            "the class index changed since"
+        );
+    }
+
+    #[test]
+    fn a_linked_class_does_not_keep_the_class_it_was_linked_from_alive() {
+        let mut cache = ResolvedCacheInner::default();
+        let class = class_named("Unchanged");
+        let witness = Arc::downgrade(&class);
+        cache.insert_linked_class(&class, None, vec![], None);
+        drop(class);
+        assert_eq!(witness.strong_count(), 0);
+    }
+
+    #[test]
+    fn editing_a_class_the_linking_read_drops_the_linked_class() {
+        let mut cache = ResolvedCacheInner::default();
+        let class = Arc::new(ClassInfo {
+            file_namespace: Some(crate::atom::atom("App")),
+            ..(*class_named("Clock")).clone()
+        });
+        cache.insert_linked_class(&class, None, vec!["App\\Instant".into()], None);
+        assert_eq!(
+            cache.evict_linked_classes_reading("App\\Instant"),
+            vec!["App\\Clock".to_string()]
+        );
+        assert!(cache.get_linked_class(&class, 0).is_none());
     }
 }

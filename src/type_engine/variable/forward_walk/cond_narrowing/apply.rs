@@ -24,10 +24,11 @@ pub(crate) fn apply_class_match_arm_narrowing<'b>(
 ) {
     // The arm runs when any one condition matches, so a condition that
     // names no class lets the subject in whatever its class.
+    let names = ctx.written_names();
     let Some(classes) = expr_arm
         .conditions
         .iter()
-        .map(|c| narrowing::class_match_condition_class(c))
+        .map(|c| narrowing::class_match_condition_class(c, &names))
         .collect::<Option<Vec<PhpType>>>()
     else {
         return;
@@ -44,7 +45,7 @@ pub(crate) fn apply_class_match_arm_narrowing<'b>(
     }
     scope.set(
         subject_var,
-        union.into_iter().map(ResolvedType::from_class).collect(),
+        union.into_iter().map(ResolvedType::from_arc).collect(),
     );
 }
 
@@ -147,24 +148,7 @@ pub(crate) fn narrow_leaf_truthy<'b>(
     // `check() === true` proves what `check()` does.
     apply_bool_comparison_narrowing(condition, true, scope, ctx);
 
-    let mut var_names: Vec<String> = scope_keys_named_by(condition, scope)
-        .iter()
-        .map(|k| k.to_string())
-        .collect();
-    // Include variables from instanceof conditions that may not be in
-    // scope yet (e.g. undeclared variables used in instanceof checks).
-    for name in collect_condition_var_names(condition) {
-        if !var_names.contains(&name) {
-            var_names.push(name);
-        }
-    }
-    // Include property access keys from conditions (e.g. `$a->foo`
-    // from `$a->foo instanceof Foo`) so instanceof narrowing applies.
-    for key in collect_condition_property_keys(condition) {
-        if !var_names.contains(&key) {
-            var_names.push(key);
-        }
-    }
+    let mut var_names = condition_subject_keys(condition, scope);
     // Expand a bare boolean standing for a check (`$isHtml` from
     // `$isHtml = $raw instanceof HtmlString`) into the check itself, and
     // make sure its subject is narrowed below even when the condition
@@ -279,26 +263,11 @@ fn apply_condition_narrowing_inverse_single<'b>(
     seed_property_keys_into_scope(condition, scope, ctx);
 
     let scope_resolver = scope.snapshot_resolver();
-    // Include variables from instanceof conditions that may not be in
-    // scope yet (e.g. `if (!$foobar instanceof Foobar) { break; }`
-    // where `$foobar` was never assigned).  After the guard clause,
-    // `$foobar` must be `Foobar`.
-    let mut var_names: Vec<String> = scope_keys_named_by(condition, scope)
-        .iter()
-        .map(|k| k.to_string())
-        .collect();
-    for name in collect_condition_var_names(condition) {
-        if !var_names.contains(&name) {
-            var_names.push(name);
-        }
-    }
-    // Include property access keys from conditions (e.g. `$a->foo`
-    // from `$a->foo instanceof Foo`) so instanceof narrowing applies.
-    for key in collect_condition_property_keys(condition) {
-        if !var_names.contains(&key) {
-            var_names.push(key);
-        }
-    }
+    let names = ctx.written_names();
+    // A never-assigned subject counts too: after
+    // `if (!$foobar instanceof Foobar) { break; }`, `$foobar` must be
+    // `Foobar`.
+    let mut var_names = condition_subject_keys(condition, scope);
     // A bare boolean standing for a check inverts along with the rest of
     // the condition: `if (!$isHtml) { return; }` leaves `$raw` narrowed
     // to `HtmlString` after the guard.
@@ -328,7 +297,7 @@ fn apply_condition_narrowing_inverse_single<'b>(
             if !union.is_empty() {
                 commit_instanceof_narrowing(
                     var_name,
-                    union.into_iter().map(ResolvedType::from_class).collect(),
+                    union.into_iter().map(ResolvedType::from_arc).collect(),
                     CheckShape::default(),
                     scope,
                     ctx,
@@ -338,7 +307,8 @@ fn apply_condition_narrowing_inverse_single<'b>(
             continue;
         }
 
-        if let Some(classes) = narrowing::try_extract_compound_or_instanceof(condition, var_name)
+        if let Some(classes) =
+            narrowing::try_extract_compound_or_instanceof(condition, var_name, &names)
             && !classes.is_empty()
         {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
@@ -382,14 +352,15 @@ fn apply_condition_narrowing_inverse_single<'b>(
             }
         }
 
-        if let Some(extraction) =
-            narrowing::try_extract_instanceof_with_negation(condition, var_name).or_else(|| {
-                alias_extractions
-                    .iter()
-                    .find(|a| a.subject == *var_name)
-                    .map(|a| a.extraction.clone())
-            })
-        {
+        if let Some(extraction) = narrowing::try_extract_instanceof_with_negation(
+            condition, var_name, &names,
+        )
+        .or_else(|| {
+            alias_extractions
+                .iter()
+                .find(|a| a.subject == *var_name)
+                .map(|a| a.extraction.clone())
+        }) {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
             if extraction.negated {
                 // Inverse of negated instanceof → positive instanceof,
@@ -629,7 +600,7 @@ pub(crate) fn condition_arm_narrowing<'b>(
             !types.is_empty()
                 && seeded
                     .get(name)
-                    .is_none_or(|before| narrowing_changed_types(before, types))
+                    .is_none_or(|before| !same_types(before, types))
         })
         .map(|(name, types)| (name.to_string(), types))
         .collect();
@@ -702,6 +673,7 @@ pub(crate) fn build_var_ctx<'a>(
     scope_resolver: &'a dyn Fn(&str) -> Vec<ResolvedType>,
 ) -> VarResolutionCtx<'a> {
     VarResolutionCtx {
+        source_imports: ctx.source_imports,
         backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
@@ -715,6 +687,7 @@ pub(crate) fn build_var_ctx<'a>(
             ctx.content,
             ctx.cursor_offset,
             ctx.class_loader,
+            ctx.source_class_loader,
         )
     }
 }

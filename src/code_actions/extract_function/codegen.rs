@@ -58,7 +58,7 @@ pub(crate) fn build_docblock_for_extraction(
 ) -> String {
     let mut tags: Vec<String> = Vec::new();
     let shorten = |ty: &PhpType| {
-        ty.resolve_names(&|n| crate::util::shorten_from_fqn(n, use_map, file_namespace))
+        ty.resolve_names(&|n| crate::names::shorten_from_fqn(n, use_map, file_namespace))
     };
 
     // Collect @param tags that need enrichment.
@@ -171,48 +171,31 @@ pub(crate) fn build_extracted_definition(info: &ExtractionInfo) -> String {
     let param_list = build_param_list(&info.params);
     let return_type = build_return_type(info);
 
-    match info.target {
-        ExtractionTarget::Method => {
-            out.push_str(&info.member_indent);
-            out.push_str("private ");
-            if info.is_static {
-                out.push_str("static ");
-            }
-            out.push_str("function ");
-            out.push_str(&info.name);
-            out.push('(');
-            out.push_str(&param_list);
-            out.push(')');
-            if !return_type.is_empty() {
-                out.push_str(": ");
-                out.push_str(&return_type);
-            }
-            out.push('\n');
-            out.push_str(&info.member_indent);
-            out.push_str("{\n");
-        }
-        ExtractionTarget::Function => {
-            out.push_str(&info.member_indent);
-            out.push_str("function ");
-            out.push_str(&info.name);
-            out.push('(');
-            out.push_str(&param_list);
-            out.push(')');
-            if !return_type.is_empty() {
-                out.push_str(": ");
-                out.push_str(&return_type);
-            }
-            out.push('\n');
-            out.push_str(&info.member_indent);
-            out.push_str("{\n");
+    out.push_str(&info.member_indent);
+    if info.target == ExtractionTarget::Method {
+        out.push_str("private ");
+        if info.is_static {
+            out.push_str("static ");
         }
     }
+    out.push_str("function ");
+    out.push_str(&info.name);
+    out.push('(');
+    out.push_str(&param_list);
+    out.push(')');
+    if !return_type.is_empty() {
+        out.push_str(": ");
+        out.push_str(&return_type);
+    }
+    out.push('\n');
+    out.push_str(&info.member_indent);
+    out.push_str("{\n");
 
     // Rewrite guard returns in the body if needed.
     let body_text = match &info.return_strategy {
         ReturnStrategy::VoidGuards => {
             // Bare `return;` → `return false;` (false = early exit).
-            rewrite_guard_returns(&info.body, None)
+            rewrite_guard_returns(&info.body, |value| value.is_none(), "false")
         }
         ReturnStrategy::UniformGuards(value) => {
             let lower = value.to_lowercase();
@@ -222,13 +205,20 @@ pub(crate) fn build_extracted_definition(info: &ExtractionInfo) -> String {
             } else {
                 // Non-boolean uniform value (e.g. `null`, `0`, `'error'`):
                 // rewrite `return <value>;` → `return false;`.
-                rewrite_guard_returns(&info.body, Some(value))
+                let value = value.trim();
+                rewrite_guard_returns(
+                    &info.body,
+                    |returned| {
+                        returned.is_some_and(|returned| returned.eq_ignore_ascii_case(value))
+                    },
+                    "false",
+                )
             }
         }
         ReturnStrategy::NullGuardWithValue(void_guards) if *void_guards => {
             // Bare `return;` → `return null;` so the extracted
             // function returns null on guard-fire.
-            rewrite_void_returns_to_null(&info.body)
+            rewrite_guard_returns(&info.body, |value| value.is_none(), "null")
         }
         _ => info.body.clone(),
     };
@@ -324,137 +314,42 @@ pub(crate) fn build_extracted_definition(info: &ExtractionInfo) -> String {
     out
 }
 
-/// Rewrite guard-clause return statements in the body text.
+/// Rewrite each `return` the selected statements in `body` own, and that
+/// `is_guard` picks by the value it returns (`None` for a bare `return;`),
+/// to `return <value>;`.
 ///
-/// For `VoidGuards` (`uniform_value` is `None`): bare `return;` becomes
-/// `return false;`.
-///
-/// For `UniformGuards` with a non-boolean value (`uniform_value` is
-/// `Some`): `return <value>;` becomes `return false;`.
-///
-/// This operates on source text rather than AST to keep things simple.
-/// It matches `return` followed by optional whitespace and either `;`
-/// (void) or the uniform value and `;`.
-///
-/// See also [`rewrite_void_returns_to_null`] for the
-/// `NullGuardWithValue(true)` case.
-pub(crate) fn rewrite_guard_returns(body: &str, uniform_value: Option<&str>) -> String {
-    match uniform_value {
-        None => {
-            // VoidGuards: rewrite bare `return;` to `return false;`.
-            // We need to be careful not to match `return $x;` etc.
-            // Strategy: find `return` followed by optional whitespace
-            // then `;`, with no expression in between.
-            let mut result = String::with_capacity(body.len());
-            let mut remaining = body;
-            while let Some(pos) = remaining.find("return") {
-                // Check that this is a keyword boundary (not part of
-                // `$returnValue` etc.).
-                let before_ok = pos == 0
-                    || !remaining.as_bytes()[pos - 1].is_ascii_alphanumeric()
-                        && remaining.as_bytes()[pos - 1] != b'_'
-                        && remaining.as_bytes()[pos - 1] != b'$';
-                if !before_ok {
-                    result.push_str(&remaining[..pos + 6]);
-                    remaining = &remaining[pos + 6..];
-                    continue;
-                }
-                let after = &remaining[pos + 6..];
-                let trimmed = after.trim_start();
-                if trimmed.starts_with(';') {
-                    // Bare `return;` → `return false;`
-                    result.push_str(&remaining[..pos]);
-                    result.push_str("return false");
-                    // Skip past `return` + whitespace, keep the `;`.
-                    let ws_len = after.len() - trimmed.len();
-                    remaining = &remaining[pos + 6 + ws_len..];
-                } else {
-                    result.push_str(&remaining[..pos + 6]);
-                    remaining = &remaining[pos + 6..];
-                }
-            }
-            result.push_str(remaining);
-            result
-        }
-        Some(value) => {
-            // UniformGuards with non-boolean value: rewrite
-            // `return <value>;` to `return false;`.
-            let mut result = String::with_capacity(body.len());
-            let mut remaining = body;
-            while let Some(pos) = remaining.find("return") {
-                let before_ok = pos == 0
-                    || !remaining.as_bytes()[pos - 1].is_ascii_alphanumeric()
-                        && remaining.as_bytes()[pos - 1] != b'_'
-                        && remaining.as_bytes()[pos - 1] != b'$';
-                if !before_ok {
-                    result.push_str(&remaining[..pos + 6]);
-                    remaining = &remaining[pos + 6..];
-                    continue;
-                }
-                let after = &remaining[pos + 6..];
-                let trimmed = after.trim_start();
-                // Check if the return expression matches the uniform
-                // value (case-insensitive for keywords like `null`).
-                let value_trimmed = value.trim();
-                if trimmed.len() >= value_trimmed.len() {
-                    let candidate = &trimmed[..value_trimmed.len()];
-                    let after_value = trimmed[value_trimmed.len()..].trim_start();
-                    if candidate.eq_ignore_ascii_case(value_trimmed) && after_value.starts_with(';')
-                    {
-                        // `return <value>;` → `return false;`
-                        result.push_str(&remaining[..pos]);
-                        result.push_str("return false");
-                        // Skip past `return <ws> <value> <ws>`, keep `;`.
-                        let consumed = (trimmed.as_ptr() as usize - after.as_ptr() as usize)
-                            + value_trimmed.len()
-                            + (after_value.as_ptr() as usize
-                                - trimmed[value_trimmed.len()..].as_ptr() as usize);
-                        remaining = &remaining[pos + 6 + consumed..];
-                        continue;
-                    }
-                }
-                result.push_str(&remaining[..pos + 6]);
-                remaining = &remaining[pos + 6..];
-            }
-            result.push_str(remaining);
-            result
-        }
-    }
-}
+/// A return inside a nested function or closure belongs to it and is left
+/// alone, and so is anything that only reads like a return: a string, a
+/// comment, or an identifier such as `$returnValue`.
+pub(crate) fn rewrite_guard_returns(
+    body: &str,
+    is_guard: impl Fn(Option<&str>) -> bool,
+    value: &str,
+) -> String {
+    // The body is whole statements, so it parses on its own behind an
+    // opening tag.
+    const OPEN_TAG: &str = "<?php\n";
+    let source = format!("{OPEN_TAG}{body}");
+    let mut sites =
+        crate::parser::with_parsed_program(&source, "extract_function", |program, content| {
+            collect_own_returns(content, program.statements.iter())
+                .into_iter()
+                .filter(|own| is_guard(own.value))
+                .map(|own| own.after_keyword)
+                .collect::<Vec<_>>()
+        });
+    sites.sort_by_key(|site| site.start);
 
-/// Rewrite bare `return;` to `return null;` in the body text.
-///
-/// Used by `NullGuardWithValue(true)` — void guard clauses that are
-/// extracted alongside a computed value.  The extracted function must
-/// return `null` (not void) to signal "guard fired" to the caller.
-pub(crate) fn rewrite_void_returns_to_null(body: &str) -> String {
-    let mut result = String::with_capacity(body.len());
-    let mut remaining = body;
-    while let Some(pos) = remaining.find("return") {
-        let before_ok = pos == 0
-            || !remaining.as_bytes()[pos - 1].is_ascii_alphanumeric()
-                && remaining.as_bytes()[pos - 1] != b'_'
-                && remaining.as_bytes()[pos - 1] != b'$';
-        if !before_ok {
-            result.push_str(&remaining[..pos + 6]);
-            remaining = &remaining[pos + 6..];
-            continue;
-        }
-        let after = &remaining[pos + 6..];
-        let trimmed = after.trim_start();
-        if trimmed.starts_with(';') {
-            // Bare `return;` → `return null;`
-            result.push_str(&remaining[..pos]);
-            result.push_str("return null");
-            let ws_len = after.len() - trimmed.len();
-            remaining = &remaining[pos + 6 + ws_len..];
-        } else {
-            result.push_str(&remaining[..pos + 6]);
-            remaining = &remaining[pos + 6..];
-        }
+    let mut out = String::with_capacity(body.len() + sites.len() * (value.len() + 1));
+    let mut copied = 0;
+    for site in sites {
+        out.push_str(&body[copied..site.start - OPEN_TAG.len()]);
+        out.push(' ');
+        out.push_str(value);
+        copied = site.end - OPEN_TAG.len();
     }
-    result.push_str(remaining);
-    result
+    out.push_str(&body[copied..]);
+    out
 }
 
 /// Build the parameter list string for the function signature.

@@ -1,18 +1,76 @@
 //! Laravel-specific call return types.
 //!
 //! Every function here refines what a call resolves to for one Laravel
-//! API (the auth guards, request input accessors, validated shapes, and
-//! the configured date class); the generic resolution in the parent
-//! module answers everything else.
+//! API (the container, auth guards, request input accessors, validated
+//! shapes, views, and the configured date class); the generic resolution
+//! in the parent module answers everything else.
 
 use std::sync::Arc;
 
+use crate::Backend;
 use crate::atom::atom;
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::conditional_resolution::split_text_args;
+use crate::text_scan::split_top_level_commas;
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::{AccessKind, ClassInfo, ResolvedType};
+
+/// The class a Laravel helper function call returns when it is more
+/// specific than the declared return type: a container string binding,
+/// the configured date class, or the concrete view.
+pub(super) fn laravel_helper_call_class(
+    func_name: &str,
+    text_args: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<Arc<ClassInfo>> {
+    // ── Laravel container string binding ────────────────
+    // `app('blade.compiler')` / `resolve('cache')` bind a plain string to a
+    // concrete class.  The class-string form (`app(User::class)`) is
+    // handled by the conditional return type; only a literal string
+    // binding is intercepted here, resolved via the framework's own alias
+    // table.
+    let normalized_func = func_name.trim_start_matches('\\');
+    if matches!(normalized_func, "app" | "resolve")
+        && let Some(binding) = Backend::extract_first_arg_text(text_args)
+        && let Some(name) = crate::util::unescape_php_string_literal(binding.trim())
+        && let Some(cls) = (ctx.class_loader)(&name)
+    {
+        return Some(cls);
+    }
+
+    // ── now() / today() → configured Laravel date class ──
+    // The global `now()`/`today()` helpers are declared to return
+    // `CarbonInterface`, but they actually instantiate the concrete class
+    // selected by Laravel's date factory. Resolving to the interface loses
+    // the concrete type and produces spurious mismatches when a chained
+    // call is assigned to a `DateTime`/`DateTimeImmutable` declaration.
+    // Map both to the concrete class.  Only applies when the class is
+    // loadable (i.e. inside a Laravel project).
+    //
+    // Not strictly sound (the declared type is the interface), but it is
+    // what the Laravel PHPStan extensions infer too, and the ecosystem is
+    // written against it.  See the matching note in `rhs_resolution.rs`.
+    if matches!(
+        normalized_func,
+        "now" | "today" | "Illuminate\\Support\\now" | "Illuminate\\Support\\today"
+    ) && let Some(cls) =
+        (ctx.class_loader)(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
+    {
+        return Some(cls);
+    }
+
+    // ── view('name') → concrete Illuminate\View\View ─────
+    if crate::virtual_members::laravel::view_helper_returns_view(
+        normalized_func,
+        Backend::extract_first_arg_text(text_args)
+            .as_deref()
+            .unwrap_or(""),
+    ) && let Some(cls) = (ctx.class_loader)(crate::virtual_members::laravel::VIEW_FQN)
+    {
+        return Some(cls);
+    }
+    None
+}
 
 /// Resolve a `user()` call on an auth entry point to the model type
 /// configured for the guard named at the call site.
@@ -108,7 +166,7 @@ pub(super) fn resolve_request_accessor_at_call(
         &mut Vec::new(),
         0,
     )?;
-    let args = split_text_args(text_args);
+    let args = split_top_level_commas(text_args);
     let bound = crate::call_args::bind_text_args_to_params(&method.parameters, &args);
     let default_type = || {
         let text = bound.get(1)?.as_deref()?;
@@ -146,7 +204,7 @@ pub(super) fn resolve_validated_shape_at_call(
 
     let call = validated_shape::shape_bearing_method(method_name)?;
     let receiver = owners.iter().find_map(|rt| rt.class_info.as_ref())?;
-    let mut args = split_text_args(text_args);
+    let mut args = split_top_level_commas(text_args);
     for arg in &mut args {
         *arg = crate::call_args::text_arg_value(arg);
     }
@@ -205,7 +263,7 @@ fn auth_guard_name(base: &SubjectExpr, user_args: &str) -> Option<String> {
 /// Returns `None` when there are no arguments or the first argument is
 /// not a single-quoted or double-quoted string literal.
 fn first_string_literal_arg(args_text: &str) -> Option<String> {
-    let first = split_text_args(args_text).into_iter().next()?;
+    let first = split_top_level_commas(args_text).into_iter().next()?;
     crate::text_scan::unquote_php_string(crate::call_args::text_arg_value(first))
         .map(str::to_string)
 }
@@ -297,6 +355,8 @@ mod auth_guard_tests {
             content: "",
             cursor_offset: 0,
             class_loader: &class_loader,
+            source_class_loader: &class_loader,
+            source_imports: None,
             backend: None,
             laravel_macro_this_resolver: None,
             resolved_class_cache: None,

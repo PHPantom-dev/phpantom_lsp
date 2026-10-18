@@ -6,7 +6,7 @@
 //! inserts the attribute above the method declaration.
 
 use crate::common::{
-    create_test_backend, extract_edits, find_action_containing, get_code_actions_at,
+    apply_edits, create_test_backend, extract_edits, find_action_containing, get_code_actions_at,
     inject_phpstan_diag, resolve_action,
 };
 use tower_lsp::lsp_types::*;
@@ -149,4 +149,31 @@ class MyCollection implements \Countable {
         "should insert before existing attributes"
     );
     assert!(edits[0].new_text.contains("#[\\ReturnTypeWillChange]"));
+}
+
+#[test]
+fn inserts_a_crlf_line_in_a_crlf_file() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "<?php\r\nclass MyCollection implements \\Countable {\r\n    public function count(): int { return 0; }\r\n}\r\n";
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        2,
+        "Return type (int) of method MyCollection::count() should be covariant with return type (int) of method Countable::count()",
+        "method.tentativeReturnType",
+    );
+
+    let actions = get_code_actions_at(&backend, uri, content, 2, 4);
+    let action =
+        find_action_containing(&actions, "ReturnTypeWillChange").expect("should offer action");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edits(content, &extract_edits(&resolved));
+
+    assert_eq!(
+        result,
+        "<?php\r\nclass MyCollection implements \\Countable {\r\n    #[\\ReturnTypeWillChange]\r\n    public function count(): int { return 0; }\r\n}\r\n"
+    );
 }

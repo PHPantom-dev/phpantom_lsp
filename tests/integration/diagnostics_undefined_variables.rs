@@ -501,6 +501,21 @@ function other(): void {
     );
 }
 
+#[test]
+fn var_annotation_applies_in_a_crlf_file() {
+    // Every line before the annotation ends in `\r\n`; counting them as
+    // one byte each would place the annotation in an earlier function.
+    let mut php = String::from("<?php\r\n");
+    for i in 0..40 {
+        php.push_str(&format!("function f{i}(): void {{}}\r\n"));
+    }
+    php.push_str(
+        "function test(): void {\r\n    /** @var string $name */\r\n    echo $name;\r\n}\r\n",
+    );
+    let diags = undefined_var_diagnostics(&php);
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Closures
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2170,6 +2185,71 @@ class Svc {
 }
 
 #[test]
+fn namespaced_function_byref_param_shadows_the_global_function() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+namespace {
+    function fill(?string $out): void {}
+}
+namespace App {
+    function fill(?string &$out): void {
+        $out = 'hello';
+    }
+    function demo(): void {
+        fill($result);
+        echo $result;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "`fill()` in namespace App calls `App\\fill`, whose by-ref param defines $result. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn byref_param_of_a_global_class_needs_an_import_in_a_namespace() {
+    let php = |import: &str| {
+        format!(
+            r#"<?php
+namespace {{
+    class Helper {{
+        public static function fill(?string &$out): void {{
+            $out = 'hello';
+        }}
+    }}
+}}
+namespace App {{
+    {import}
+    function demo(): void {{
+        Helper::fill($result);
+        echo $result;
+    }}
+}}
+"#
+        )
+    };
+
+    let imported = undefined_var_diagnostics(&php("use Helper;"));
+    assert!(
+        imported.is_empty(),
+        "the imported global class's by-ref param defines $result. Got: {:?}",
+        imported,
+    );
+
+    // Without the import `Helper` is `App\Helper`, which does not exist, so
+    // nothing says `$result` is written.
+    let unimported = undefined_var_diagnostics(&php(""));
+    assert!(
+        unimported.iter().any(|d| d.message.contains("$result")),
+        "an unimported global class does not answer for `Helper`. Got: {:?}",
+        unimported,
+    );
+}
+
+#[test]
 fn no_diagnostic_for_namespaced_static_method_byref_param() {
     let diags = undefined_var_diagnostics(
         r#"<?php
@@ -2402,4 +2482,23 @@ class Person {
         diags,
     );
     assert!(diags[0].message.contains("$local"));
+}
+
+/// A parameter named inside a closure type is part of the type, not the
+/// variable the `@var` tag declares.
+#[test]
+fn a_closure_types_parameter_in_var_does_not_define_it() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    /** @var \Closure(int $x): void $cb */
+    $cb = fn (int $y) => null;
+    echo $x;
+}
+"#,
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("$x")),
+        "`$x` is only a parameter of the closure type, got: {diags:?}"
+    );
 }

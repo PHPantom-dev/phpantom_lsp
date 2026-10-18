@@ -47,9 +47,10 @@ impl ThrowPoints {
         let mut collect = Collect {
             ctx,
             scope,
+            outer_scopes: Vec::new(),
             points: self,
         };
-        ThrowPointWalker.walk_statement(stmt, &mut collect);
+        walk_throw_sites(stmt, &mut collect);
     }
 
     /// Whether an exception the body throws can land in `catch`.
@@ -62,15 +63,12 @@ impl ThrowPoints {
         }
         let hint = extract_hint_type(&catch.hint);
         hint.union_members().into_iter().any(|member| {
-            let Some(name) = member.base_name() else {
+            // The name as written: `base_name` would drop the leading `\` of
+            // `catch (\RuntimeException $e)`, turning it namespace-relative.
+            let crate::php_type::TypeKind::Named(name) = member.kind() else {
                 return true;
             };
-            let catch_name = crate::util::resolve_source_class_name(
-                name,
-                ctx.current_class.file_namespace.as_deref(),
-                ctx.all_classes,
-                ctx.class_loader,
-            );
+            let catch_name = ctx.written_names().resolve_class(name);
             self.explicit
                 .iter()
                 .any(|thrown| may_catch(&catch_name, thrown, ctx))
@@ -144,16 +142,14 @@ fn may_catch(catch_name: &str, thrown: &str, ctx: &ForwardWalkCtx<'_>) -> bool {
 /// A backslash-free name there is a global class, so it must not go
 /// through the current file's `use` map the way a name typed in source does.
 fn load_fqn(name: &str, ctx: &ForwardWalkCtx<'_>) -> Option<Arc<ClassInfo>> {
-    if name.contains('\\') {
-        (ctx.class_loader)(name)
-    } else {
-        (ctx.class_loader)(&format!("__fqn__\\{name}")).or_else(|| (ctx.class_loader)(name))
-    }
+    crate::class_lookup::load_resolved_name(name, ctx.class_loader)
 }
 
 struct Collect<'c, 'w> {
     ctx: &'c ForwardWalkCtx<'w>,
     scope: Option<&'c ScopeState>,
+    /// The scopes an immediately invoked closure's body set aside.
+    outer_scopes: Vec<Option<&'c ScopeState>>,
     points: &'c mut ThrowPoints,
 }
 
@@ -163,7 +159,7 @@ impl Collect<'_, '_> {
     fn classes_of(&self, expr: &Expression<'_>) -> Option<Vec<String>> {
         match expr {
             Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
-                Some(vec![self.ctx.current_class.name.to_string()])
+                Some(vec![self.ctx.current_class.fqn().to_string()])
             }
             Expression::Variable(Variable::Direct(dv)) => {
                 let types = self.scope?.get(bytes_to_str(dv.name));
@@ -222,96 +218,85 @@ impl Collect<'_, '_> {
             expr,
             self.ctx.current_class,
             self.ctx.all_classes,
-            self.ctx.class_loader,
+            self.ctx.source_class_loader,
+            self.ctx.source_imports,
         )
     }
 }
 
-struct ThrowPointWalker;
+/// Where the code of a statement can raise an exception, as reported by
+/// [`walk_throw_sites`]: everything that runs where the statement is
+/// written, and nothing that only runs once something calls it.
+pub(crate) trait ThrowSiteSink<'ast, 'arena> {
+    fn function_call(&mut self, call: &'ast FunctionCall<'arena>);
+    fn method_call(
+        &mut self,
+        object: &'ast Expression<'arena>,
+        method: &'ast ClassLikeMemberSelector<'arena>,
+    );
+    fn static_method_call(&mut self, call: &'ast StaticMethodCall<'arena>);
+    fn instantiation(&mut self, new: &'ast Instantiation<'arena>);
+    fn throw(&mut self, throw: &'ast Throw<'arena>);
+    /// Code that can raise any exception at all: an anonymous class, the
+    /// `yield` a generator can be handed an exception at, an `include`.
+    fn any_exception(&mut self);
+    /// The body of an immediately invoked closure starts: it has variables
+    /// of its own, so none of the enclosing scope applies inside it.
+    fn enter_invoked_closure(&mut self) {}
+    fn leave_invoked_closure(&mut self) {}
+    /// A `try` statement, before its blocks are walked.
+    fn try_statement(&mut self, _try: &'ast Try<'arena>) {}
+}
 
-impl<'ast, 'arena, 'c, 'w> Walker<'ast, 'arena, Collect<'c, 'w>> for ThrowPointWalker {
-    // Code in a closure, a nested declaration or an anonymous class body
-    // does not run where it is written; calling it is the throw point.
-    fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut Collect<'c, 'w>) {}
-    fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, _: &mut Collect<'c, 'w>) {}
-    fn walk_function(&self, _: &'ast Function<'arena>, _: &mut Collect<'c, 'w>) {}
-    fn walk_class(&self, _: &'ast Class<'arena>, _: &mut Collect<'c, 'w>) {}
-    fn walk_interface(&self, _: &'ast Interface<'arena>, _: &mut Collect<'c, 'w>) {}
-    fn walk_trait(&self, _: &'ast Trait<'arena>, _: &mut Collect<'c, 'w>) {}
-    fn walk_enum(&self, _: &'ast Enum<'arena>, _: &mut Collect<'c, 'w>) {}
+/// Report to `sink` where the code of `statement` can raise an exception.
+///
+/// Code in a closure, a nested declaration or an anonymous class body does
+/// not run where it is written; calling it is the throw point.  An
+/// immediately invoked closure runs on the spot, so its body is walked.
+pub(crate) fn walk_throw_sites<'ast, 'arena, S: ThrowSiteSink<'ast, 'arena>>(
+    statement: &'ast Statement<'arena>,
+    sink: &mut S,
+) {
+    ThrowSiteWalker.walk_statement(statement, sink);
+}
 
-    fn walk_anonymous_class(&self, _: &'ast AnonymousClass<'arena>, c: &mut Collect<'c, 'w>) {
-        c.points.implicit = true;
-    }
-
-    fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, c: &mut Collect<'c, 'w>) {
-        let mut callee = call.function;
-        while let Expression::Parenthesized(p) = callee {
-            callee = p.expression;
-        }
-        // An immediately invoked closure throws what its body throws.  The
-        // body has its own variables, so none of the outer scope applies.
-        match callee {
-            Expression::Closure(closure) => {
-                let outer = c.scope.take();
-                for stmt in closure.body.statements.iter() {
-                    self.walk_statement(stmt, c);
-                }
-                c.scope = outer;
-                return;
-            }
-            Expression::ArrowFunction(arrow) => {
-                let outer = c.scope.take();
-                self.walk_expression(arrow.expression, c);
-                c.scope = outer;
-                return;
-            }
-            _ => {}
-        }
+impl<'ast, 'arena> ThrowSiteSink<'ast, 'arena> for Collect<'_, '_> {
+    fn function_call(&mut self, call: &'ast FunctionCall<'arena>) {
         let (Expression::Identifier(ident), Some(fl)) =
-            (call.function, c.ctx.loaders.function_loader)
+            (call.function, self.ctx.loaders.function_loader)
         else {
-            c.points.implicit = true;
+            self.points.implicit = true;
             return;
         };
         match fl(
             bytes_to_str(ident.value()),
             call.function.span().start.offset,
         ) {
-            Some(func) => c.points.add_declared(&func.throws),
-            None => c.points.implicit = true,
+            Some(func) => self.points.add_declared(&func.throws),
+            None => self.points.implicit = true,
         }
     }
 
-    fn walk_in_method_call(&self, call: &'ast MethodCall<'arena>, c: &mut Collect<'c, 'w>) {
-        let classes = c.classes_of(call.object);
-        c.add_method_call(classes, &call.method);
-    }
-
-    fn walk_in_null_safe_method_call(
-        &self,
-        call: &'ast NullSafeMethodCall<'arena>,
-        c: &mut Collect<'c, 'w>,
+    fn method_call(
+        &mut self,
+        object: &'ast Expression<'arena>,
+        method: &'ast ClassLikeMemberSelector<'arena>,
     ) {
-        let classes = c.classes_of(call.object);
-        c.add_method_call(classes, &call.method);
+        let classes = self.classes_of(object);
+        self.add_method_call(classes, method);
     }
 
-    fn walk_in_static_method_call(
-        &self,
-        call: &'ast StaticMethodCall<'arena>,
-        c: &mut Collect<'c, 'w>,
-    ) {
-        let classes = c.class_name(call.class).map(|name| vec![name]);
-        c.add_method_call(classes, &call.method);
+    fn static_method_call(&mut self, call: &'ast StaticMethodCall<'arena>) {
+        let classes = self.class_name(call.class).map(|name| vec![name]);
+        self.add_method_call(classes, &call.method);
     }
 
-    fn walk_in_instantiation(&self, new: &'ast Instantiation<'arena>, c: &mut Collect<'c, 'w>) {
-        let Some(merged) = c
+    fn instantiation(&mut self, new: &'ast Instantiation<'arena>) {
+        let Some(merged) = self
             .class_name(new.class)
-            .and_then(|name| c.merged_class(&name))
+            .and_then(|name| self.merged_class(&name))
         else {
-            c.points.implicit = true;
+            self.points.implicit = true;
             return;
         };
         let Some(constructor) = merged.get_method("__construct") else {
@@ -320,37 +305,111 @@ impl<'ast, 'arena, 'c, 'w> Walker<'ast, 'arena, Collect<'c, 'w>> for ThrowPointW
         // An exception's constructor only stores its arguments, which is
         // what lets `throw new Foo()` throw just `Foo`.
         if constructor.throws().is_empty()
-            && crate::class_lookup::is_subtype_of(&merged, "Throwable", c.ctx.class_loader)
+            && crate::class_lookup::is_subtype_of(&merged, "Throwable", self.ctx.class_loader)
         {
             return;
         }
-        c.points.add_declared(constructor.throws());
+        self.points.add_declared(constructor.throws());
     }
 
-    fn walk_in_throw(&self, throw: &'ast Throw<'arena>, c: &mut Collect<'c, 'w>) {
+    fn throw(&mut self, throw: &'ast Throw<'arena>) {
         let classes = match throw.exception {
-            Expression::Instantiation(new) => c.class_name(new.class).map(|name| vec![name]),
-            other => c.classes_of(other),
+            Expression::Instantiation(new) => self.class_name(new.class).map(|name| vec![name]),
+            other => self.classes_of(other),
         };
         match classes {
             Some(classes) => {
                 for name in classes {
-                    match (c.ctx.class_loader)(&name) {
-                        Some(cls) => c.points.add_class(cls.fqn().to_string()),
-                        None => c.points.implicit = true,
+                    match (self.ctx.class_loader)(&name) {
+                        Some(cls) => self.points.add_class(cls.fqn().to_string()),
+                        None => self.points.implicit = true,
                     }
                 }
             }
-            None => c.points.implicit = true,
+            None => self.points.implicit = true,
         }
     }
 
-    // A generator can be handed any exception at the `yield` it paused on.
-    fn walk_in_yield(&self, _: &'ast Yield<'arena>, c: &mut Collect<'c, 'w>) {
-        c.points.implicit = true;
+    fn any_exception(&mut self) {
+        self.points.implicit = true;
     }
 
-    fn walk_in_construct(&self, construct: &'ast Construct<'arena>, c: &mut Collect<'c, 'w>) {
+    fn enter_invoked_closure(&mut self) {
+        self.outer_scopes.push(self.scope.take());
+    }
+
+    fn leave_invoked_closure(&mut self) {
+        self.scope = self.outer_scopes.pop().flatten();
+    }
+}
+
+struct ThrowSiteWalker;
+
+impl<'ast, 'arena, S: ThrowSiteSink<'ast, 'arena>> Walker<'ast, 'arena, S> for ThrowSiteWalker {
+    fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut S) {}
+    fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, _: &mut S) {}
+    fn walk_function(&self, _: &'ast Function<'arena>, _: &mut S) {}
+    fn walk_class(&self, _: &'ast Class<'arena>, _: &mut S) {}
+    fn walk_interface(&self, _: &'ast Interface<'arena>, _: &mut S) {}
+    fn walk_trait(&self, _: &'ast Trait<'arena>, _: &mut S) {}
+    fn walk_enum(&self, _: &'ast Enum<'arena>, _: &mut S) {}
+
+    fn walk_anonymous_class(&self, _: &'ast AnonymousClass<'arena>, sink: &mut S) {
+        sink.any_exception();
+    }
+
+    fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, sink: &mut S) {
+        let mut callee = call.function;
+        while let Expression::Parenthesized(p) = callee {
+            callee = p.expression;
+        }
+        // An immediately invoked closure throws what its body throws.
+        match callee {
+            Expression::Closure(closure) => {
+                sink.enter_invoked_closure();
+                for stmt in closure.body.statements.iter() {
+                    self.walk_statement(stmt, sink);
+                }
+                sink.leave_invoked_closure();
+            }
+            Expression::ArrowFunction(arrow) => {
+                sink.enter_invoked_closure();
+                self.walk_expression(arrow.expression, sink);
+                sink.leave_invoked_closure();
+            }
+            _ => sink.function_call(call),
+        }
+    }
+
+    fn walk_in_method_call(&self, call: &'ast MethodCall<'arena>, sink: &mut S) {
+        sink.method_call(call.object, &call.method);
+    }
+
+    fn walk_in_null_safe_method_call(&self, call: &'ast NullSafeMethodCall<'arena>, sink: &mut S) {
+        sink.method_call(call.object, &call.method);
+    }
+
+    fn walk_in_static_method_call(&self, call: &'ast StaticMethodCall<'arena>, sink: &mut S) {
+        sink.static_method_call(call);
+    }
+
+    fn walk_in_instantiation(&self, new: &'ast Instantiation<'arena>, sink: &mut S) {
+        sink.instantiation(new);
+    }
+
+    fn walk_in_throw(&self, throw: &'ast Throw<'arena>, sink: &mut S) {
+        sink.throw(throw);
+    }
+
+    fn walk_in_try(&self, try_statement: &'ast Try<'arena>, sink: &mut S) {
+        sink.try_statement(try_statement);
+    }
+
+    fn walk_in_yield(&self, _: &'ast Yield<'arena>, sink: &mut S) {
+        sink.any_exception();
+    }
+
+    fn walk_in_construct(&self, construct: &'ast Construct<'arena>, sink: &mut S) {
         if matches!(
             construct,
             Construct::Include(_)
@@ -358,7 +417,7 @@ impl<'ast, 'arena, 'c, 'w> Walker<'ast, 'arena, Collect<'c, 'w>> for ThrowPointW
                 | Construct::Require(_)
                 | Construct::RequireOnce(_)
         ) {
-            c.points.implicit = true;
+            sink.any_exception();
         }
     }
 }

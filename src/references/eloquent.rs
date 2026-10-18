@@ -15,7 +15,6 @@ use super::*;
 use std::cell::OnceCell;
 
 use crate::atom::{Atom, AtomMap};
-use crate::class_lookup::find_class_at_offset;
 use crate::php_type::{PhpType, TypeKind};
 use crate::references::member_scope::MemberScope;
 use crate::symbol_map::SymbolKind;
@@ -45,13 +44,12 @@ impl Backend {
         offset: u32,
         member_name: &str,
     ) -> Option<EloquentMagicMember> {
-        let classes = self.symbols.uri_classes_index.read().get(uri).cloned()?;
-        let class = find_class_at_offset(&classes, offset)?;
+        let class = self.class_at_offset(uri, offset)?;
         let method = class.get_method(member_name)?;
         let kind = MagicMemberKind::of(method)?;
         let use_name = kind.use_name(&method.name)?;
         let class_loader = |name: &str| self.find_or_load_class(name);
-        if !extends_eloquent_model(class, &class_loader) {
+        if !extends_eloquent_model(&class, &class_loader) {
             return None;
         }
         Some(EloquentMagicMember {
@@ -249,7 +247,7 @@ impl Backend {
         };
         let mut names = Vec::new();
         collect_first_type_arguments(&subject_type, &mut names);
-        self.class_names_to_fqns(names, ctx, span.start)
+        Self::class_names_to_fqns(names)
     }
 }
 

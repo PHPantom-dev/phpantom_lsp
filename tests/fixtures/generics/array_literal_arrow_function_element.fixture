@@ -1,0 +1,27 @@
+// test: an arrow function element of an array literal has no key
+// feature: hover
+// expect: Coll<int, Closure
+---
+<?php
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Coll {
+    /** @param array<TKey, TValue> $items */
+    public function __construct(public array $items) {}
+}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @param array<TKey, TValue> $value
+ * @return Coll<TKey, TValue>
+ */
+function wrap(array $value): Coll { return new Coll($value); }
+
+function demo(): void {
+    $c = wrap([fn (int $x): int => $x]);
+    $<>c;
+}

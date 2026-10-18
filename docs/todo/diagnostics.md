@@ -191,7 +191,7 @@ PHP 8.4's asymmetric visibility needs the same distinction. A
 `public private(set)` or `public protected(set)` property, plain or
 promoted (and static, since PHP 8.5), can be read from anywhere but
 written only from inside its scope. `PropertyInfo` records a single
-visibility (`extract_visibility` in `parser/mod.rs` keeps the first
+visibility (`extract_visibility` in `parser/params.rs` keeps the first
 modifier it finds), so a write from outside goes unreported, and
 completion offers the property in write positions too.
 
@@ -383,7 +383,7 @@ variable needs a type for the single case, which is
 
 Found running the php-typing-conformance suite
 (`regressions_backed_enum_value_narrowing.php`). A quick fix to add the
-missing arms is [H16](phpstan-actions.md#h16-matchunhandled--add-missing-match-arms) (`match.unhandled`), which could
+missing arms is [H16](phpstan-actions.md#h16-matchunhandled-add-missing-match-arms) (`match.unhandled`), which could
 then attach to this diagnostic instead of only PHPStan's.
 
 ## D26. Reading a typed property that nothing initialises is not reported

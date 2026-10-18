@@ -122,19 +122,27 @@ pub(crate) fn extract_macro_registrations(
 pub(crate) fn macro_closure_this_target(content: &str, cursor_offset: u32) -> Option<String> {
     memchr::memmem::find(content.as_bytes(), b"macro(")?;
 
-    let arena = mago_allocator::LocalArena::new();
-    let file_id = FileId::new(b"input.php");
-    let program = parse_file_content(&arena, file_id, content.as_bytes());
-    let resolved = NameResolver::new(&arena).resolve(program);
-    let owned = OwnedResolvedNames::from_resolved(&resolved);
-
-    let mut calls: Vec<&StaticMethodCall<'_>> = Vec::new();
-    collect_macro_calls(Node::Program(program), &mut calls);
-
-    calls.into_iter().find_map(|call| {
-        let target = resolve_target_fqn(call.class, &owned)?;
-        let closure_expr = call.argument_list.arguments.iter().nth(1)?.value();
-        cursor_inside_closure_body(closure_expr, cursor_offset).then_some(target)
+    crate::parser::with_parsed_program(content, "macro_closure_this_target", |program, _| {
+        let mut calls: Vec<&StaticMethodCall<'_>> = Vec::new();
+        collect_macro_calls(Node::Program(program), &mut calls);
+        calls.retain(|call| {
+            call.argument_list
+                .arguments
+                .iter()
+                .nth(1)
+                .is_some_and(|arg| cursor_inside_closure_body(arg.value(), cursor_offset))
+        });
+        if calls.is_empty() {
+            return None;
+        }
+        // Names are resolved only once the cursor is known to sit in a
+        // macro closure.
+        let arena = mago_allocator::LocalArena::new();
+        let resolved = NameResolver::new(&arena).resolve(program);
+        let owned = OwnedResolvedNames::from_resolved(&resolved);
+        calls
+            .into_iter()
+            .find_map(|call| resolve_target_fqn(call.class, &owned))
     })
 }
 
@@ -205,16 +213,7 @@ fn resolve_mixin_argument_fqn(
 ) -> Option<String> {
     match expr {
         Expression::Instantiation(inst) => resolve_target_fqn(inst.class, resolved),
-        Expression::Access(Access::ClassConstant(access))
-            if matches!(
-                &access.constant,
-                ClassLikeConstantSelector::Identifier(constant)
-                    if bytes_to_str(constant.value).eq_ignore_ascii_case("class")
-            ) =>
-        {
-            resolve_target_fqn(access.class, resolved)
-        }
-        _ => None,
+        _ => resolve_target_fqn(crate::parser::class_fetch_target(expr)?, resolved),
     }
 }
 
@@ -366,27 +365,16 @@ fn build_mixin_macro(
     }
 
     // The macro's signature comes from the closure the method returns.
-    let closure_expr = returned_closure(body)?;
-    let (parameter_list, return_type_hint) = closure_signature(closure_expr)?;
-    let closure_text = expr_source_text(Some(closure_expr), content);
-
-    let parameters =
-        crate::parser::extract_parameters(parameter_list, Some(content), php_version, None);
-    let return_type = return_type_hint.map(|rth| crate::parser::extract_hint_type(&rth.hint));
-
-    let mut synthesized = MethodInfo::virtual_method_typed(name, return_type.as_ref());
-    synthesized.parameters = parameters.into();
-    synthesized.native_return_type = return_type;
-    synthesized.is_macro = true;
-
-    Some(MacroRegistration {
-        target: target_fqn.to_string(),
-        method: synthesized,
-        name_offset: method.name.span.start.offset,
-        closure_text,
-        closure_offset: Some(closure_expr.span().start.offset),
-        definition_uri: Some(mixin_uri.to_string()),
-    })
+    let mut registration = closure_macro(
+        name,
+        target_fqn.to_string(),
+        method.name.span.start.offset,
+        returned_closure(body)?,
+        content,
+        php_version,
+    )?;
+    registration.definition_uri = Some(mixin_uri.to_string());
+    Some(registration)
 }
 
 /// Build a macro from a trait mixin method whose own signature is used directly
@@ -481,13 +469,8 @@ pub(crate) fn extract_date_factory_class(content: &str) -> Option<String> {
                 )
             })
             && let Some(arg) = call.argument_list.arguments.first()
-            && let Expression::Access(Access::ClassConstant(access)) = arg.value()
-            && matches!(
-                &access.constant,
-                ClassLikeConstantSelector::Identifier(constant)
-                    if bytes_to_str(constant.value).eq_ignore_ascii_case("class")
-            )
-            && let Some(class) = resolve_target_fqn(access.class, resolved)
+            && let Some(class) = crate::parser::class_fetch_target(arg.value())
+            && let Some(class) = resolve_target_fqn(class, resolved)
         {
             *configured = Some(class);
         }
@@ -952,31 +935,7 @@ fn build_instance_registration(
     content: &str,
     php_version: Option<PhpVersion>,
 ) -> Option<MacroRegistration> {
-    let mut args = mc.argument_list.arguments.iter();
-    let name_arg = args.next()?.value();
-    let name = macro_name(name_arg)?;
-    let name_offset = name_arg.span().start.offset;
-    let closure_expr = args.next()?.value();
-    let (parameter_list, return_type_hint) = closure_signature(closure_expr)?;
-    let closure_text = expr_source_text(Some(closure_expr), content);
-
-    let parameters =
-        crate::parser::extract_parameters(parameter_list, Some(content), php_version, None);
-    let return_type = return_type_hint.map(|rth| crate::parser::extract_hint_type(&rth.hint));
-
-    let mut method = MethodInfo::virtual_method_typed(&name, return_type.as_ref());
-    method.parameters = parameters.into();
-    method.native_return_type = return_type;
-    method.is_macro = true;
-
-    Some(MacroRegistration {
-        target: target.to_string(),
-        method,
-        name_offset,
-        closure_text,
-        closure_offset: Some(closure_expr.span().start.offset),
-        definition_uri: None,
-    })
+    registration_from_arguments(&mc.argument_list, target.to_string(), content, php_version)
 }
 
 /// Build a [`MacroRegistration`] from a `Target::macro('name', closure)` call,
@@ -988,20 +947,47 @@ fn build_registration(
     php_version: Option<PhpVersion>,
 ) -> Option<MacroRegistration> {
     let target = resolve_target_fqn(smc.class, resolved)?;
+    registration_from_arguments(&smc.argument_list, target, content, php_version)
+}
 
-    let mut args = smc.argument_list.arguments.iter();
+/// The macro a `macro('name', closure)` call's arguments register on
+/// `target`.
+fn registration_from_arguments(
+    argument_list: &ArgumentList<'_>,
+    target: String,
+    content: &str,
+    php_version: Option<PhpVersion>,
+) -> Option<MacroRegistration> {
+    let mut args = argument_list.arguments.iter();
     let name_arg = args.next()?.value();
     let name = macro_name(name_arg)?;
-    let name_offset = name_arg.span().start.offset;
     let closure_expr = args.next()?.value();
-    let (parameter_list, return_type_hint) = closure_signature(closure_expr)?;
-    let closure_text = expr_source_text(Some(closure_expr), content);
+    closure_macro(
+        &name,
+        target,
+        name_arg.span().start.offset,
+        closure_expr,
+        content,
+        php_version,
+    )
+}
 
+/// The macro `name` whose signature is that of `closure_expr`, or `None`
+/// when that is not a closure or arrow function.
+fn closure_macro(
+    name: &str,
+    target: String,
+    name_offset: u32,
+    closure_expr: &Expression<'_>,
+    content: &str,
+    php_version: Option<PhpVersion>,
+) -> Option<MacroRegistration> {
+    let (parameter_list, return_type_hint) = closure_signature(closure_expr)?;
     let parameters =
         crate::parser::extract_parameters(parameter_list, Some(content), php_version, None);
     let return_type = return_type_hint.map(|rth| crate::parser::extract_hint_type(&rth.hint));
 
-    let mut method = MethodInfo::virtual_method_typed(&name, return_type.as_ref());
+    let mut method = MethodInfo::virtual_method_typed(name, return_type.as_ref());
     method.parameters = parameters.into();
     method.native_return_type = return_type;
     method.is_macro = true;
@@ -1010,7 +996,7 @@ fn build_registration(
         target,
         method,
         name_offset,
-        closure_text,
+        closure_text: expr_source_text(Some(closure_expr), content),
         closure_offset: Some(closure_expr.span().start.offset),
         definition_uri: None,
     })
@@ -1026,7 +1012,8 @@ pub(super) fn expr_source_text(expr: Option<&Expression<'_>>, content: &str) -> 
 
 /// Resolve a class-name identifier expression to a fully-qualified name via
 /// the file's resolved `use` statements.  `self`/`static`/`parent` are
-/// skipped (a relative target carries no concrete FQN here).
+/// expression kinds of their own and give `None` (a relative target carries
+/// no concrete FQN here).
 pub(super) fn resolve_target_fqn(
     class: &Expression<'_>,
     resolved: &OwnedResolvedNames,
@@ -1034,18 +1021,7 @@ pub(super) fn resolve_target_fqn(
     let Expression::Identifier(ident) = class else {
         return None;
     };
-    let raw = bytes_to_str(ident.value());
-    if matches!(
-        raw.to_ascii_lowercase().as_str(),
-        "self" | "static" | "parent"
-    ) {
-        return None;
-    }
-    let offset = ident.span().start.offset;
-    if let Some(fqn) = resolved.get(offset) {
-        return Some(fqn.trim_start_matches('\\').to_string());
-    }
-    (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string())
+    resolved.class_fqn(ident)
 }
 
 /// The text of a plain single- or double-quoted string literal, or `None`
@@ -1118,7 +1094,7 @@ pub(crate) fn parse_provider_class_list(content: &str) -> Vec<String> {
     let owned = OwnedResolvedNames::from_resolved(&resolved);
 
     let mut out = Vec::new();
-    if let Some(providers_value) = find_return_array_entry(program, "providers") {
+    if let Some(providers_value) = super::array_file::returned_array_entry(program, "providers") {
         collect_class_consts(Node::Expression(providers_value), &owned, &mut out);
     } else {
         collect_class_consts(Node::Program(program), &owned, &mut out);
@@ -1141,32 +1117,6 @@ pub(crate) fn parse_provider_referenced_classes(content: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     collect_provider_method_refs(Node::Program(program), &owned, &mut seen, &mut out);
     out
-}
-
-/// The value expression of a top-level `return [ 'key' => … ]` array entry.
-fn find_return_array_entry<'ast, 'arena>(
-    program: &'ast Program<'arena>,
-    key: &str,
-) -> Option<&'ast Expression<'arena>> {
-    for stmt in program.statements.iter() {
-        if let Statement::Return(ret) = stmt
-            && let Some(Expression::Array(arr)) = ret.value
-        {
-            for (k, v) in arr.elements.iter().filter_map(|e| match e {
-                ArrayElement::KeyValue(kv) => Some((kv.key, kv.value)),
-                _ => None,
-            }) {
-                if matches!(
-                    k,
-                    Expression::Literal(Literal::String(s))
-                        if s.value.is_some_and(|val| val == key.as_bytes())
-                ) {
-                    return Some(v);
-                }
-            }
-        }
-    }
-    None
 }
 
 fn collect_provider_method_refs(
@@ -1198,13 +1148,7 @@ fn collect_class_refs(
         Node::Instantiation(instantiation) => {
             push_resolved_expr_fqn(instantiation.class, resolved, seen, out)
         }
-        Node::ClassConstantAccess(access)
-            if matches!(
-                &access.constant,
-                ClassLikeConstantSelector::Identifier(id)
-                    if bytes_to_str(id.value).eq_ignore_ascii_case("class")
-            ) =>
-        {
+        Node::ClassConstantAccess(access) if crate::parser::is_class_fetch(access) => {
             push_resolved_expr_fqn(access.class, resolved, seen, out)
         }
         _ => {}
@@ -1220,28 +1164,9 @@ fn push_resolved_expr_fqn(
     seen: &mut HashSet<String>,
     out: &mut Vec<String>,
 ) {
-    let Expression::Identifier(ident) = expr else {
-        return;
-    };
-    let raw = bytes_to_str(ident.value());
-    if matches!(
-        raw.to_ascii_lowercase().as_str(),
-        "self" | "static" | "parent"
-    ) {
-        return;
-    }
-    let Some(fqn) = resolved.get(ident.span().start.offset) else {
-        if raw.is_empty() {
-            return;
-        }
-        let raw = raw.trim_start_matches('\\').to_string();
-        if seen.insert(raw.clone()) {
-            out.push(raw);
-        }
-        return;
-    };
-    let fqn = fqn.trim_start_matches('\\').to_string();
-    if seen.insert(fqn.clone()) {
+    if let Some(fqn) = resolve_target_fqn(expr, resolved)
+        && seen.insert(fqn.clone())
+    {
         out.push(fqn);
     }
 }
@@ -1251,24 +1176,10 @@ fn push_resolved_expr_fqn(
 /// `self`/`static`/`parent` are skipped (no concrete FQN).
 fn collect_class_consts(node: Node<'_, '_>, resolved: &OwnedResolvedNames, out: &mut Vec<String>) {
     if let Node::ClassConstantAccess(cca) = node
-        && let ClassLikeConstantSelector::Identifier(id) = &cca.constant
-        && bytes_to_str(id.value).eq_ignore_ascii_case("class")
-        && let Expression::Identifier(ident) = cca.class
+        && crate::parser::is_class_fetch(cca)
+        && let Some(fqn) = resolve_target_fqn(cca.class, resolved)
     {
-        let raw = bytes_to_str(ident.value());
-        if !matches!(
-            raw.to_ascii_lowercase().as_str(),
-            "self" | "static" | "parent"
-        ) {
-            let offset = ident.span().start.offset;
-            let fqn = resolved
-                .get(offset)
-                .map(|f| f.trim_start_matches('\\').to_string())
-                .or_else(|| (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string()));
-            if let Some(fqn) = fqn {
-                out.push(fqn);
-            }
-        }
+        out.push(fqn);
     }
     node.visit_children(|child| collect_class_consts(child, resolved, out));
 }

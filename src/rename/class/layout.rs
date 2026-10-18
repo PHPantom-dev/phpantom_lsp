@@ -222,7 +222,7 @@ impl Backend {
             return None;
         }
 
-        let classes = self.get_classes_for_uri(&def_uri_str)?;
+        let classes = self.shared_classes_for_uri(&def_uri_str)?;
         if classes.len() != 1 {
             return None;
         }

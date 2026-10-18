@@ -982,10 +982,21 @@ async fn test_throws_psr4_auto_import() {
     // RuntimeException is NOT imported (used with FQN in code) — should get import edit
     let rte = smart.iter().find(|i| i.label == "@throws RuntimeException");
     assert!(rte.is_some(), "Should suggest RuntimeException");
-    // RuntimeException in namespace App\Services needs an import if used as short name
-    // But it was thrown with \RuntimeException (FQN), the short name extraction gives "RuntimeException"
-    // In namespace context, an import edit will be generated for App\Services\RuntimeException
-    // which may not be ideal but is the expected behavior for unresolved types
+    // `\RuntimeException` is the global class, so the short name in the tag
+    // needs `use RuntimeException;`, never one for the file's namespace.
+    let edits = rte.unwrap().additional_text_edits.as_deref().unwrap_or(&[]);
+    assert!(
+        edits
+            .iter()
+            .any(|e| e.new_text.contains("use RuntimeException;")),
+        "Should import the global RuntimeException. Got: {edits:?}"
+    );
+    assert!(
+        !edits
+            .iter()
+            .any(|e| e.new_text.contains("App\\Services\\RuntimeException")),
+        "Must not import a namespaced RuntimeException. Got: {edits:?}"
+    );
 }
 
 /// When a function has no throws, only the generic @throws fallback appears.

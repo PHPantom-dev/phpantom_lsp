@@ -8,7 +8,7 @@
 //! fabricated "Config key" hovers, go-to-definition jumps, or find-references
 //! results against a `config/*.php` file that happens to sit on disk.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{create_psr4_workspace, position_after};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -108,20 +108,6 @@ async fn setup_storage_homonym() -> (phpantom_lsp::Backend, tempfile::TempDir, U
         .await;
 
     (backend, dir, uri)
-}
-
-fn position_after(content: &str, unique_prefix: &str) -> Position {
-    let offset = content
-        .find(unique_prefix)
-        .unwrap_or_else(|| panic!("missing `{unique_prefix}`"))
-        + unique_prefix.len();
-    let before = &content[..offset];
-    Position::new(
-        before.bytes().filter(|byte| *byte == b'\n').count() as u32,
-        before
-            .rsplit_once('\n')
-            .map_or(before.len(), |(_, tail)| tail.len()) as u32,
-    )
 }
 
 /// Lands inside the `'app.name'` string literal on the first `config()`

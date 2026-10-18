@@ -2,7 +2,9 @@ use super::*;
 use crate::atom::atom;
 use crate::php_type::PhpType;
 use crate::test_fixtures::{make_class, make_method, no_loader};
-use crate::types::{ClassLikeKind, PropertySource, Visibility};
+use crate::types::{
+    ClassLikeKind, MAX_INHERITANCE_DEPTH, MAX_TRAIT_DEPTH, PropertySource, Visibility,
+};
 use crate::virtual_members::laravel::LaravelModelProvider;
 use crate::virtual_members::laravel::database_schema::{SchemaIndex, parse_schema_dump};
 use crate::virtual_members::{VirtualMemberProvider, VirtualMembers, new_resolved_class_cache};

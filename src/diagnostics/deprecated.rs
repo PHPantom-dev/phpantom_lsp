@@ -23,18 +23,14 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
-use crate::type_engine::resolver::{
-    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome,
-};
+use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::AccessKind;
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_cached};
 
-use super::helpers::{
-    FileDiagnosticContext, find_enclosing_method_name, find_innermost_enclosing_class,
-    make_tagged_diagnostic, resolve_to_fqn,
-};
+use super::helpers::{FileDiagnosticContext, find_enclosing_method_name, make_tagged_diagnostic};
 use super::subject_cache::SubjectCacheKey;
 
 impl Backend {
@@ -86,10 +82,8 @@ impl Backend {
         let file_resolved_names = &ctx.file.resolved_names;
         let local_classes = &ctx.file.classes;
 
-        let class_loaders = self.class_loaders(&ctx.file);
-        let function_loaders = self.function_loaders(&ctx.file);
-        let laravel_macro_this_resolvers =
-            class_loaders.map(|class_loader| self.laravel_macro_this_resolver(class_loader));
+        let loaders = self.file_loaders(&ctx.file);
+        let resolved_class_loader = loaders.resolved_class_loader();
         let cache = &self.resolved_class_cache;
 
         // A map extracted from different text than `content` describes a
@@ -99,6 +93,32 @@ impl Backend {
             return;
         };
 
+        // Flag one deprecated use, unless it sits in code that is itself
+        // deprecated.
+        let report = |out: &mut Vec<Diagnostic>,
+                      start: u32,
+                      end: u32,
+                      symbol: &str,
+                      class: Option<&str>,
+                      msg: &str,
+                      see_refs: &[String]| {
+            if is_within_deprecated_scope(
+                self,
+                local_classes,
+                resolved_class_loader,
+                cache,
+                content,
+                start,
+            ) {
+                return;
+            }
+            if let Some(range) =
+                self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
+            {
+                out.push(deprecated_diagnostic(range, symbol, class, msg, see_refs));
+            }
+        };
+
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
             if !super::incremental::reports_site(span.start) {
@@ -106,7 +126,6 @@ impl Backend {
             }
             let file_use_map = ctx.file.use_map_at(span.start);
             let file_namespace = ctx.file.namespace_at(span.start);
-            let class_loader = class_loaders.at(span.start);
             match &span.kind {
                 // ── Class references (type hints, new Foo, extends, etc.) ─
                 SymbolKind::ClassReference {
@@ -123,44 +142,24 @@ impl Backend {
                     if matches!(context, ClassRefContext::UseImport) {
                         continue;
                     }
-                    // Prefer mago-names byte-offset lookup when available —
-                    // it applies PHP's full name resolution rules.  Fall
-                    // back to the legacy resolve_to_fqn helper otherwise.
                     let resolved_name = if *is_fqn {
                         name.to_string()
-                    } else if let Some(rn) = file_resolved_names {
-                        rn.get(span.start)
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| resolve_to_fqn(name, file_use_map, file_namespace))
                     } else {
-                        resolve_to_fqn(name, file_use_map, file_namespace)
+                        ctx.file.resolve_name_at(name, span.start)
                     };
 
                     if let Some(cls) = self.find_or_load_class(&resolved_name)
                         && let Some(msg) = &cls.deprecation_message
-                        && !is_within_deprecated_scope(
-                            self,
-                            local_classes,
-                            class_loader,
-                            cache,
-                            content,
-                            span.start,
-                        )
-                        && let Some(range) = self.offset_range_to_lsp_range(
-                            uri,
-                            content,
-                            span.start as usize,
-                            span.end as usize,
-                        )
                     {
-                        let class_fqn = cls.fqn();
-                        out.push(deprecated_diagnostic(
-                            range,
-                            &class_fqn,
+                        report(
+                            out,
+                            span.start,
+                            span.end,
+                            &cls.fqn(),
                             None,
                             msg,
                             &cls.see_refs,
-                        ));
+                        );
                     }
                 }
 
@@ -172,16 +171,16 @@ impl Backend {
                     is_method_call,
                     ..
                 } => {
-                    let function_loader = function_loaders.at(span.start);
                     let subject_ctx =
                         crate::type_engine::subject_resolution::SubjectResolutionCtx {
                             local_classes,
                             use_map: file_use_map,
                             namespace: file_namespace,
                             content,
-                            class_loader,
+                            class_loader: resolved_class_loader,
+                            source_class_loader: loaders.class_loader_at(span.start),
                             backend: Some(self),
-                            function_loader,
+                            function_loader: loaders.function_loader_at(span.start),
                         };
 
                     // Resolve the subject type to a class.
@@ -200,17 +199,12 @@ impl Backend {
                     let base_class = match base_class {
                         Some(c) => c,
                         None if subject_str.starts_with('$') => {
-                            let enclosing_class =
-                                find_innermost_enclosing_class(local_classes, span.start);
+                            let enclosing_class = find_class_at_offset(local_classes, span.start);
 
-                            let access_kind = if *is_static {
-                                AccessKind::DoubleColon
-                            } else {
-                                AccessKind::Arrow
-                            };
+                            let access_kind = AccessKind::of_member_access(*is_static);
 
                             let cache_key = SubjectCacheKey::build(
-                                symbol_map,
+                                ctx,
                                 enclosing_class,
                                 subject_str.trim(),
                                 access_kind,
@@ -220,17 +214,7 @@ impl Backend {
                             let cached = var_type_cache.entry(cache_key).or_insert_with(|| {
                                 let rctx = ResolutionCtx {
                                     is_in_static_method: symbol_map.is_in_static_method(span.start),
-                                    ..self.resolution_ctx_at(
-                                        enclosing_class,
-                                        local_classes,
-                                        content,
-                                        span.start,
-                                        CtxLoaders::new(
-                                            class_loader,
-                                            function_loader,
-                                            laravel_macro_this_resolvers.at(span.start),
-                                        ),
-                                    )
+                                    ..loaders.resolution_ctx_at(content, span.start)
                                 };
 
                                 resolve_variable_subject(subject_str, access_kind, &rctx)
@@ -254,104 +238,49 @@ impl Backend {
                     // Builder<Model>).  The FQN-keyed cache cannot
                     // distinguish between generic instantiations, so a
                     // cached entry may lack these members.
-                    let resolved = resolve_class_fully_cached(&base_class, class_loader, cache);
+                    let resolved =
+                        resolve_class_fully_cached(&base_class, resolved_class_loader, cache);
 
-                    if *is_method_call {
-                        // Check method deprecation — try base_class first
-                        // (preserves scope methods), fall back to resolved.
-                        if let Some(method) = base_class
+                    // A method, or a property and then a static constant of
+                    // that name.  Each is looked up on base_class first,
+                    // which preserves scope methods, then on resolved.
+                    let deprecated = if *is_method_call {
+                        base_class
                             .get_method(member_name)
                             .or_else(|| resolved.get_method(member_name))
-                            && let Some(msg) = method.deprecation_message()
-                            && !is_within_deprecated_scope(
-                                self,
-                                local_classes,
-                                class_loader,
-                                cache,
-                                content,
-                                span.start,
-                            )
-                            && let Some(range) = self.offset_range_to_lsp_range(
-                                uri,
-                                content,
-                                span.start as usize,
-                                span.end as usize,
-                            )
-                        {
-                            let class_fqn = resolved.fqn();
-                            out.push(deprecated_diagnostic(
-                                range,
-                                member_name,
-                                Some(&class_fqn),
-                                msg,
-                                method.see_refs(),
-                            ));
-                        }
+                            .and_then(|method| {
+                                Some((method.deprecation_message()?, method.see_refs()))
+                            })
                     } else {
-                        // Property or constant access — try base_class
-                        // first (same rationale as above), fall back to
-                        // resolved.
-                        if let Some(prop) = base_class
+                        base_class
                             .properties
                             .iter()
                             .find(|p| p.name == *member_name)
                             .or_else(|| resolved.properties.iter().find(|p| p.name == *member_name))
-                            && let Some(msg) = &prop.deprecation_message
-                            && !is_within_deprecated_scope(
-                                self,
-                                local_classes,
-                                class_loader,
-                                cache,
-                                content,
-                                span.start,
-                            )
-                            && let Some(range) = self.offset_range_to_lsp_range(
-                                uri,
-                                content,
-                                span.start as usize,
-                                span.end as usize,
-                            )
-                        {
-                            let class_fqn = resolved.fqn();
-                            out.push(deprecated_diagnostic(
-                                range,
-                                member_name,
-                                Some(&class_fqn),
-                                msg,
-                                &prop.see_refs,
-                            ));
-                            continue;
-                        }
-
-                        // Try constant (static access like Foo::BAR)
-                        if *is_static
-                            && let Some(constant) =
-                                resolved.constants.iter().find(|c| c.name == *member_name)
-                            && let Some(msg) = &constant.deprecation_message
-                            && !is_within_deprecated_scope(
-                                self,
-                                local_classes,
-                                class_loader,
-                                cache,
-                                content,
-                                span.start,
-                            )
-                            && let Some(range) = self.offset_range_to_lsp_range(
-                                uri,
-                                content,
-                                span.start as usize,
-                                span.end as usize,
-                            )
-                        {
-                            let class_fqn = resolved.fqn();
-                            out.push(deprecated_diagnostic(
-                                range,
-                                member_name,
-                                Some(&class_fqn),
-                                msg,
-                                &constant.see_refs,
-                            ));
-                        }
+                            .and_then(|prop| {
+                                Some((prop.deprecation_message.as_deref()?, &prop.see_refs[..]))
+                            })
+                            .or_else(|| {
+                                let constant = resolved
+                                    .constants
+                                    .iter()
+                                    .find(|c| *is_static && c.name == *member_name)?;
+                                Some((
+                                    constant.deprecation_message.as_deref()?,
+                                    &constant.see_refs[..],
+                                ))
+                            })
+                    };
+                    if let Some((msg, see_refs)) = deprecated {
+                        report(
+                            out,
+                            span.start,
+                            span.end,
+                            member_name,
+                            Some(&resolved.fqn()),
+                            msg,
+                            see_refs,
+                        );
                     }
                 }
 
@@ -370,30 +299,19 @@ impl Backend {
                         file_resolved_names.as_deref(),
                         span.start,
                         file_use_map,
+                        &ctx.file.symbol_imports_at(span.start).functions,
                         file_namespace,
                     ) && let Some(msg) = &func_info.deprecation_message
-                        && !is_within_deprecated_scope(
-                            self,
-                            local_classes,
-                            class_loader,
-                            cache,
-                            content,
-                            span.start,
-                        )
-                        && let Some(range) = self.offset_range_to_lsp_range(
-                            uri,
-                            content,
-                            span.start as usize,
-                            span.end as usize,
-                        )
                     {
-                        out.push(deprecated_diagnostic(
-                            range,
+                        report(
+                            out,
+                            span.start,
+                            span.end,
                             name,
                             None,
                             msg,
                             &func_info.see_refs,
-                        ));
+                        );
                     }
                 }
 
@@ -471,7 +389,7 @@ fn is_within_deprecated_scope(
     content: &str,
     offset: u32,
 ) -> bool {
-    let Some(enclosing) = find_innermost_enclosing_class(local_classes, offset) else {
+    let Some(enclosing) = find_class_at_offset(local_classes, offset) else {
         return false;
     };
     if enclosing.deprecation_message.is_some() {

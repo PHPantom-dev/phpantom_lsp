@@ -17,7 +17,8 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::code_actions::cursor_context::innermost_at;
+use crate::text_position::position_to_byte_offset;
 use crate::types::PhpVersion;
 
 // ─── Detection types ────────────────────────────────────────────────────────
@@ -57,24 +58,13 @@ impl Backend {
 
         let php_version = self.php_version();
 
-        // Walk the entire AST looking for ternary expressions that
-        // contain the cursor. We collect the innermost match.
-        let best =
+        let found =
             crate::parser::with_parsed_program(content, "simplify_null", |program, content| {
-                let mut best: Option<(Simplification, u32, u32)> = None;
-                for stmt in program.statements.iter() {
-                    find_in_statement(stmt, cursor_offset, content, php_version, &mut best);
-                }
-                best
+                simplifiable_ternary_at(program, cursor_offset, content, php_version)
             });
-
-        let (simplification, ternary_start, ternary_end) = match best {
-            Some(b) => b,
-            None => return,
+        let Some((span, simplification)) = found else {
+            return;
         };
-
-        let start_pos = offset_to_position(content, ternary_start as usize);
-        let end_pos = offset_to_position(content, ternary_end as usize);
 
         let (title, replacement) = match &simplification {
             Simplification::NullCoalescing { lhs, rhs } => {
@@ -85,442 +75,32 @@ impl Backend {
             }
         };
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(crate::code_actions::rewrite_action(
             title,
-            kind: Some(CodeActionKind::new("refactor.rewrite")),
-            diagnostics: None,
-            edit: Some(crate::code_actions::single_edit(
-                doc_uri,
-                Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                replacement,
-            )),
-            command: None,
-            is_preferred: Some(true),
-            disabled: None,
-            data: None,
-        }));
+            doc_uri,
+            content,
+            (span.start.offset as usize, span.end.offset as usize),
+            replacement,
+            true,
+        ));
     }
 }
 
-// ─── AST walking ────────────────────────────────────────────────────────────
-
-/// Walk a statement looking for ternary expressions at the cursor.
-fn find_in_statement(
-    stmt: &Statement<'_>,
+/// The innermost ternary under `cursor` that `??` or `?->` can replace,
+/// with its span.
+fn simplifiable_ternary_at(
+    program: &Program<'_>,
     cursor: u32,
     content: &str,
     php_version: PhpVersion,
-    best: &mut Option<(Simplification, u32, u32)>,
-) {
-    match stmt {
-        Statement::Expression(expr_stmt) => {
-            find_in_expression(expr_stmt.expression, cursor, content, php_version, best);
-        }
-        Statement::Return(ret) => {
-            if let Some(expr) = &ret.value {
-                find_in_expression(expr, cursor, content, php_version, best);
-            }
-        }
-        Statement::Echo(echo) => {
-            for expr in echo.values.iter() {
-                find_in_expression(expr, cursor, content, php_version, best);
-            }
-        }
-        Statement::Block(block) => {
-            for s in block.statements.iter() {
-                find_in_statement(s, cursor, content, php_version, best);
-            }
-        }
-        Statement::Namespace(ns) => {
-            for s in ns.statements().iter() {
-                find_in_statement(s, cursor, content, php_version, best);
-            }
-        }
-        Statement::Class(class) => {
-            for member in class.members.iter() {
-                find_in_member(member, cursor, content, php_version, best);
-            }
-        }
-        Statement::Trait(tr) => {
-            for member in tr.members.iter() {
-                find_in_member(member, cursor, content, php_version, best);
-            }
-        }
-        Statement::Enum(en) => {
-            for member in en.members.iter() {
-                find_in_member(member, cursor, content, php_version, best);
-            }
-        }
-        Statement::Interface(iface) => {
-            for member in iface.members.iter() {
-                find_in_member(member, cursor, content, php_version, best);
-            }
-        }
-        Statement::Function(func) => {
-            for s in func.body.statements.iter() {
-                find_in_statement(s, cursor, content, php_version, best);
-            }
-        }
-        Statement::If(if_stmt) => {
-            find_in_expression(if_stmt.condition, cursor, content, php_version, best);
-            find_in_if_body(&if_stmt.body, cursor, content, php_version, best);
-        }
-        Statement::While(w) => {
-            find_in_expression(w.condition, cursor, content, php_version, best);
-            find_in_while_body(&w.body, cursor, content, php_version, best);
-        }
-        Statement::DoWhile(dw) => {
-            find_in_expression(dw.condition, cursor, content, php_version, best);
-            find_in_statement(dw.statement, cursor, content, php_version, best);
-        }
-        Statement::For(f) => {
-            for expr in f.initializations.iter() {
-                find_in_expression(expr, cursor, content, php_version, best);
-            }
-            for expr in f.conditions.iter() {
-                find_in_expression(expr, cursor, content, php_version, best);
-            }
-            for expr in f.increments.iter() {
-                find_in_expression(expr, cursor, content, php_version, best);
-            }
-            find_in_for_body(&f.body, cursor, content, php_version, best);
-        }
-        Statement::Foreach(fe) => {
-            find_in_expression(fe.expression, cursor, content, php_version, best);
-            find_in_foreach_body(&fe.body, cursor, content, php_version, best);
-        }
-        Statement::Switch(sw) => {
-            find_in_expression(sw.expression, cursor, content, php_version, best);
-            for case in sw.body.cases().iter() {
-                let stmts = match case {
-                    SwitchCase::Expression(e) => &e.statements,
-                    SwitchCase::Default(d) => &d.statements,
-                };
-                for s in stmts.iter() {
-                    find_in_statement(s, cursor, content, php_version, best);
-                }
-            }
-        }
-        Statement::Try(tr) => {
-            for s in tr.block.statements.iter() {
-                find_in_statement(s, cursor, content, php_version, best);
-            }
-            for catch in tr.catch_clauses.iter() {
-                for s in catch.block.statements.iter() {
-                    find_in_statement(s, cursor, content, php_version, best);
-                }
-            }
-            if let Some(finally) = &tr.finally_clause {
-                for s in finally.block.statements.iter() {
-                    find_in_statement(s, cursor, content, php_version, best);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Walk an if-statement body (handles both statement and colon-delimited forms).
-fn find_in_if_body(
-    body: &IfBody<'_>,
-    cursor: u32,
-    content: &str,
-    php_version: PhpVersion,
-    best: &mut Option<(Simplification, u32, u32)>,
-) {
-    match body {
-        IfBody::Statement(body) => {
-            find_in_statement(body.statement, cursor, content, php_version, best);
-            for clause in body.else_if_clauses.iter() {
-                find_in_expression(clause.condition, cursor, content, php_version, best);
-                find_in_statement(clause.statement, cursor, content, php_version, best);
-            }
-            if let Some(else_clause) = &body.else_clause {
-                find_in_statement(else_clause.statement, cursor, content, php_version, best);
-            }
-        }
-        IfBody::ColonDelimited(body) => {
-            for s in body.statements.iter() {
-                find_in_statement(s, cursor, content, php_version, best);
-            }
-            for clause in body.else_if_clauses.iter() {
-                find_in_expression(clause.condition, cursor, content, php_version, best);
-                for s in clause.statements.iter() {
-                    find_in_statement(s, cursor, content, php_version, best);
-                }
-            }
-            if let Some(else_clause) = &body.else_clause {
-                for s in else_clause.statements.iter() {
-                    find_in_statement(s, cursor, content, php_version, best);
-                }
-            }
-        }
-    }
-}
-
-fn find_in_while_body(
-    body: &WhileBody<'_>,
-    cursor: u32,
-    content: &str,
-    php_version: PhpVersion,
-    best: &mut Option<(Simplification, u32, u32)>,
-) {
-    match body {
-        WhileBody::Statement(s) => {
-            find_in_statement(s, cursor, content, php_version, best);
-        }
-        WhileBody::ColonDelimited(b) => {
-            for s in b.statements.iter() {
-                find_in_statement(s, cursor, content, php_version, best);
-            }
-        }
-    }
-}
-
-fn find_in_for_body(
-    body: &ForBody<'_>,
-    cursor: u32,
-    content: &str,
-    php_version: PhpVersion,
-    best: &mut Option<(Simplification, u32, u32)>,
-) {
-    match body {
-        ForBody::Statement(s) => {
-            find_in_statement(s, cursor, content, php_version, best);
-        }
-        ForBody::ColonDelimited(b) => {
-            for s in b.statements.iter() {
-                find_in_statement(s, cursor, content, php_version, best);
-            }
-        }
-    }
-}
-
-fn find_in_foreach_body(
-    body: &ForeachBody<'_>,
-    cursor: u32,
-    content: &str,
-    php_version: PhpVersion,
-    best: &mut Option<(Simplification, u32, u32)>,
-) {
-    match body {
-        ForeachBody::Statement(s) => {
-            find_in_statement(s, cursor, content, php_version, best);
-        }
-        ForeachBody::ColonDelimited(b) => {
-            for s in b.statements.iter() {
-                find_in_statement(s, cursor, content, php_version, best);
-            }
-        }
-    }
-}
-
-/// Walk a class-like member looking for ternary expressions.
-fn find_in_member(
-    member: &class_like::member::ClassLikeMember<'_>,
-    cursor: u32,
-    content: &str,
-    php_version: PhpVersion,
-    best: &mut Option<(Simplification, u32, u32)>,
-) {
-    match member {
-        class_like::member::ClassLikeMember::Method(method) => {
-            if let class_like::method::MethodBody::Concrete(body) = &method.body {
-                for s in body.statements.iter() {
-                    find_in_statement(s, cursor, content, php_version, best);
-                }
-            }
-        }
-        class_like::member::ClassLikeMember::Property(prop) => match prop {
-            Property::Plain(plain) => {
-                for item in plain.items.iter() {
-                    if let class_like::property::PropertyItem::Concrete(concrete) = item {
-                        find_in_expression(concrete.value, cursor, content, php_version, best);
-                    }
-                }
-            }
-            Property::Hooked(hooked) => {
-                if let class_like::property::PropertyItem::Concrete(concrete) = &hooked.item {
-                    find_in_expression(concrete.value, cursor, content, php_version, best);
-                }
-            }
-        },
-        class_like::member::ClassLikeMember::Constant(constant) => {
-            for item in constant.items.iter() {
-                find_in_expression(item.value, cursor, content, php_version, best);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Walk an expression looking for simplifiable ternary patterns at
-/// the cursor position. Updates `best` with the innermost match.
-fn find_in_expression(
-    expr: &Expression<'_>,
-    cursor: u32,
-    content: &str,
-    php_version: PhpVersion,
-    best: &mut Option<(Simplification, u32, u32)>,
-) {
-    let span = expr.span();
-    let start = span.start.offset;
-    let end = span.end.offset;
-
-    // Only descend if the cursor is within this expression.
-    if cursor < start || cursor > end {
-        return;
-    }
-
-    // Check if this is a simplifiable ternary.
-    if let Expression::Conditional(cond) = expr
-        && let Some(simplification) = try_simplify_ternary(cond, content, php_version)
-    {
-        // Prefer the innermost (smallest span) match.
-        let span_size = end - start;
-        let should_update = match best {
-            Some((_, bs, be)) => span_size < (*be - *bs),
-            None => true,
-        };
-        if should_update {
-            *best = Some((simplification, start, end));
-        }
-    }
-
-    // Recurse into sub-expressions regardless so we find nested ternaries.
-    walk_sub_expressions(expr, cursor, content, php_version, best);
-}
-
-fn walk_sub_expressions(
-    expr: &Expression<'_>,
-    cursor: u32,
-    content: &str,
-    php_version: PhpVersion,
-    best: &mut Option<(Simplification, u32, u32)>,
-) {
-    match expr {
-        Expression::Parenthesized(p) => {
-            find_in_expression(p.expression, cursor, content, php_version, best);
-        }
-        Expression::Binary(bin) => {
-            find_in_expression(bin.lhs, cursor, content, php_version, best);
-            find_in_expression(bin.rhs, cursor, content, php_version, best);
-        }
-        Expression::UnaryPrefix(u) => {
-            find_in_expression(u.operand, cursor, content, php_version, best);
-        }
-        Expression::UnaryPostfix(u) => {
-            find_in_expression(u.operand, cursor, content, php_version, best);
-        }
-        Expression::Conditional(cond) => {
-            find_in_expression(cond.condition, cursor, content, php_version, best);
-            if let Some(then) = cond.then {
-                find_in_expression(then, cursor, content, php_version, best);
-            }
-            find_in_expression(cond.r#else, cursor, content, php_version, best);
-        }
-        Expression::Assignment(a) => {
-            find_in_expression(a.lhs, cursor, content, php_version, best);
-            find_in_expression(a.rhs, cursor, content, php_version, best);
-        }
-        Expression::Call(call) => match call {
-            Call::Function(fc) => {
-                find_in_expression(fc.function, cursor, content, php_version, best);
-                for arg in fc.argument_list.arguments.iter() {
-                    find_in_expression(arg.value(), cursor, content, php_version, best);
-                }
-            }
-            Call::Method(mc) => {
-                find_in_expression(mc.object, cursor, content, php_version, best);
-                for arg in mc.argument_list.arguments.iter() {
-                    find_in_expression(arg.value(), cursor, content, php_version, best);
-                }
-            }
-            Call::NullSafeMethod(mc) => {
-                find_in_expression(mc.object, cursor, content, php_version, best);
-                for arg in mc.argument_list.arguments.iter() {
-                    find_in_expression(arg.value(), cursor, content, php_version, best);
-                }
-            }
-            Call::StaticMethod(sc) => {
-                find_in_expression(sc.class, cursor, content, php_version, best);
-                for arg in sc.argument_list.arguments.iter() {
-                    find_in_expression(arg.value(), cursor, content, php_version, best);
-                }
-            }
-        },
-        Expression::Access(access) => match access {
-            Access::Property(pa) => {
-                find_in_expression(pa.object, cursor, content, php_version, best);
-            }
-            Access::NullSafeProperty(pa) => {
-                find_in_expression(pa.object, cursor, content, php_version, best);
-            }
-            Access::StaticProperty(pa) => {
-                find_in_expression(pa.class, cursor, content, php_version, best);
-            }
-            Access::ClassConstant(pa) => {
-                find_in_expression(pa.class, cursor, content, php_version, best);
-            }
-        },
-        Expression::Array(arr) => {
-            for element in arr.elements.iter() {
-                if let array::ArrayElement::KeyValue(kv) = element {
-                    find_in_expression(kv.key, cursor, content, php_version, best);
-                    find_in_expression(kv.value, cursor, content, php_version, best);
-                } else if let array::ArrayElement::Value(val) = element {
-                    find_in_expression(val.value, cursor, content, php_version, best);
-                }
-            }
-        }
-        Expression::LegacyArray(arr) => {
-            for element in arr.elements.iter() {
-                if let array::ArrayElement::KeyValue(kv) = element {
-                    find_in_expression(kv.key, cursor, content, php_version, best);
-                    find_in_expression(kv.value, cursor, content, php_version, best);
-                } else if let array::ArrayElement::Value(val) = element {
-                    find_in_expression(val.value, cursor, content, php_version, best);
-                }
-            }
-        }
-        Expression::Construct(construct) => match construct {
-            Construct::Isset(isset) => {
-                for val in isset.values.iter() {
-                    find_in_expression(val, cursor, content, php_version, best);
-                }
-            }
-            Construct::Empty(empty) => {
-                find_in_expression(empty.value, cursor, content, php_version, best);
-            }
-            Construct::Eval(eval) => {
-                find_in_expression(eval.value, cursor, content, php_version, best);
-            }
-            Construct::Print(print) => {
-                find_in_expression(print.value, cursor, content, php_version, best);
-            }
-            _ => {}
-        },
-        Expression::Instantiation(inst) => {
-            if let Some(arg_list) = &inst.argument_list {
-                for a in arg_list.arguments.iter() {
-                    find_in_expression(a.value(), cursor, content, php_version, best);
-                }
-            }
-        }
-        Expression::Literal(_)
-        | Expression::Variable(_)
-        | Expression::Identifier(_)
-        | Expression::Self_(_)
-        | Expression::Static(_)
-        | Expression::Parent(_) => {}
-        _ => {
-            // For expression kinds we don't explicitly handle, skip.
-            // We've covered the most common nesting cases above.
-        }
-    }
+) -> Option<(mago_span::Span, Simplification)> {
+    innermost_at(program, cursor, |node| match node {
+        Node::Conditional(ternary) => Some((
+            ternary.span(),
+            try_simplify_ternary(ternary, content, php_version)?,
+        )),
+        _ => None,
+    })
 }
 
 // ─── Pattern matching ───────────────────────────────────────────────────────
@@ -806,11 +386,8 @@ mod tests {
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
 
-        let mut best: Option<(Simplification, u32, u32)> = None;
-        for stmt in program.statements.iter() {
-            find_in_statement(stmt, offset, php, php_version, &mut best);
-        }
-        best
+        simplifiable_ternary_at(program, offset, php, php_version)
+            .map(|(span, s)| (s, span.start.offset, span.end.offset))
     }
 
     fn php80() -> PhpVersion {
@@ -981,6 +558,22 @@ mod tests {
         let offset = php.find("$x !==").unwrap() as u32;
         let (s, _, _) = find_simplification(php, offset, php80()).unwrap();
         assert_eq!(replacement_text(&s), "$x ?? 'default'");
+    }
+
+    #[test]
+    fn nested_in_arrow_function_argument() {
+        let php = "<?php\n$names = array_map(fn($u) => $u !== null ? $u->name : null, $users);";
+        let offset = php.find("$u !==").unwrap() as u32;
+        let (s, _, _) = find_simplification(php, offset, php80()).unwrap();
+        assert_eq!(replacement_text(&s), "$u?->name");
+    }
+
+    #[test]
+    fn nested_in_match_arm_and_else_branch() {
+        let php = "<?php\nif ($a) {\n} else {\n    $r = match ($k) { 1 => isset($x) ? $x : 0, default => 1 };\n}";
+        let offset = php.find("isset").unwrap() as u32;
+        let (s, _, _) = find_simplification(php, offset, php80()).unwrap();
+        assert_eq!(replacement_text(&s), "$x ?? 0");
     }
 
     #[test]

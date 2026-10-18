@@ -348,3 +348,36 @@ fn extracts_variable_name_from_simple_assignment() {
     let info = parse_declaration_info("    $count = 42;\n");
     assert_eq!(info.variable_name.as_deref(), Some("$count"));
 }
+
+// ── Attributes ──────────────────────────────────────────────────────
+
+#[test]
+fn reads_the_declaration_after_an_attribute_on_its_line() {
+    let text = "    #[\\Override] #[Pure] public function test(array $items): array {}\n";
+    assert!(matches!(
+        classify_declaration(text),
+        DocblockContext::FunctionOrMethod
+    ));
+    let info = parse_declaration_info(text);
+    assert_eq!(info.method_name.as_deref(), Some("test"));
+    assert_eq!(
+        info.params,
+        [(Some(PhpType::parse("array")), "$items".to_string())]
+    );
+    assert_eq!(super::super::trigger::declaration_indent(text), "    ");
+}
+
+#[test]
+fn skips_an_attribute_spanning_lines() {
+    let text =
+        "    #[Route(\n        methods: ['GET'],\n    )]\n    public function index(): void {}\n";
+    assert!(matches!(
+        classify_declaration(text),
+        DocblockContext::FunctionOrMethod
+    ));
+    assert_eq!(
+        parse_declaration_info(text).method_name.as_deref(),
+        Some("index")
+    );
+    assert_eq!(super::super::trigger::declaration_indent(text), "    ");
+}

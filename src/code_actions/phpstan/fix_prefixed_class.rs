@@ -38,8 +38,9 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::text_position::{byte_offset_to_utf16_col, ranges_overlap};
+use crate::text_position::byte_offset_to_utf16_col;
 
 use super::split_phpstan_tip;
 
@@ -75,19 +76,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if identifier != CLASS_PREFIXED_ID {
@@ -308,7 +301,7 @@ fn find_occurrence(line: &str, name: &str) -> Option<usize> {
 /// A diagnostic is stale when the vendor-prefixed class name no longer
 /// appears on the diagnostic line (in either bare or FQN form).
 ///
-/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/mod.rs`.
+/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/stale.rs`.
 pub(crate) fn is_fix_prefixed_class_stale(content: &str, diag_line: usize, message: &str) -> bool {
     let prefixed = match extract_prefixed_name(message) {
         Some(name) => name,

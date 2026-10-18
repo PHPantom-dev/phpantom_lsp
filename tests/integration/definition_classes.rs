@@ -1289,3 +1289,43 @@ namespace B {
         );
     }
 }
+
+/// An unimported class name inside a namespace is that namespace's class,
+/// in code and in a docblock, so with no such class go-to-definition does
+/// not jump to a global class of the same short name.
+#[tokio::test]
+async fn test_goto_definition_does_not_fall_back_to_a_global_class() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///no_global_fallback.php").unwrap();
+    let text = r#"<?php
+namespace {
+    class Foo {}
+}
+namespace App {
+    /** @param Foo $f */
+    function a(Foo $f): void {}
+    function b(\Foo $f): void {}
+}
+"#;
+    open_php(&backend, &uri, text).await;
+
+    for (line, character) in [(5, 16), (6, 15)] {
+        let locations = crate::common::definition_locations(
+            goto_definition_at(&backend, &uri, line, character).await,
+        );
+        assert!(
+            locations.iter().all(|l| l.range.start.line != 2),
+            "`Foo` on line {line} names `App\\Foo`, got {locations:?}"
+        );
+    }
+    let locations =
+        crate::common::definition_locations(goto_definition_at(&backend, &uri, 7, 17).await);
+    assert_eq!(
+        locations
+            .iter()
+            .map(|l| l.range.start.line)
+            .collect::<Vec<_>>(),
+        vec![2],
+        "`\\Foo` is the global class"
+    );
+}

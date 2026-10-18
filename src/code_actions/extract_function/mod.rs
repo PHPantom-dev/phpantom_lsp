@@ -29,7 +29,7 @@ pub(crate) use crate::code_actions::{
 pub(crate) use crate::completion::phpdoc::generation::enrichment_plain;
 pub(crate) use crate::php_type::PhpType;
 pub(crate) use crate::scope_collector::ScopeMap;
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::text_position::offset_to_position;
 pub(crate) use crate::type_engine::resolver::Loaders;
 pub(crate) use crate::types::ClassInfo;
 
@@ -65,17 +65,10 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        // Only activate when the selection is non-empty.
-        if params.range.start == params.range.end {
+        let Some((start, end)) = crate::code_actions::selected_byte_range(content, params.range)
+            .and_then(|(start, end)| trim_selection(content, start, end))
+        else {
             return;
-        }
-
-        let start_offset = position_to_byte_offset(content, params.range.start);
-        let end_offset = position_to_byte_offset(content, params.range.end);
-
-        let (start, end) = match trim_selection(content, start_offset, end_offset) {
-            Some(range) => range,
-            None => return,
         };
 
         if !selection_covers_complete_statements(content, start, end) {
@@ -169,10 +162,8 @@ impl Backend {
         let range = &data.range;
 
         // ── Re-validate the selection (content may have changed) ────
-        let start_offset = position_to_byte_offset(content, range.start);
-        let end_offset = position_to_byte_offset(content, range.end);
-
-        let (start, end) = trim_selection(content, start_offset, end_offset)?;
+        let (start, end) = crate::code_actions::selected_byte_range(content, *range)
+            .and_then(|(start, end)| trim_selection(content, start, end))?;
 
         if !selection_covers_complete_statements(content, start, end) {
             return None;
@@ -209,21 +200,33 @@ impl Backend {
         // ── Enclosing context ───────────────────────────────────────
         let enclosing = find_enclosing_context(content, start as u32, uses_this)?;
 
+        // ── Return types ────────────────────────────────────────────
+        let enclosing_returns = if matches!(
+            return_strategy,
+            ReturnStrategy::TrailingReturn
+                | ReturnStrategy::SentinelNull
+                | ReturnStrategy::NullGuardWithValue(_)
+        ) {
+            enclosing_return_types(content, start as u32)
+        } else {
+            EnclosingReturnTypes::none()
+        };
+        let trailing_return_type = enclosing_returns.native;
+
         // ── Naming ──────────────────────────────────────────────────
         let body_line_start_for_naming = find_line_start(content, start);
         let body_text_for_naming = &content[body_line_start_for_naming..end];
-        let pre_trailing_return_type = if matches!(return_strategy, ReturnStrategy::TrailingReturn)
-        {
-            resolve_enclosing_return_type(content, start as u32)
-        } else {
-            PhpType::untyped()
-        };
+        let untyped = PhpType::untyped();
         let naming_ctx = NamingContext {
             enclosing_name: &enclosing.enclosing_name,
             return_strategy: &return_strategy,
             body_text: body_text_for_naming,
             return_var_names: &classification.return_values,
-            trailing_return_type: &pre_trailing_return_type,
+            trailing_return_type: if matches!(return_strategy, ReturnStrategy::TrailingReturn) {
+                &trailing_return_type
+            } else {
+                &untyped
+            },
         };
         let fn_name = generate_function_name(content, &enclosing, &naming_ctx);
 
@@ -255,26 +258,12 @@ impl Backend {
         let body_line_start = find_line_start(content, start);
         let body_text = content[body_line_start..end].to_string();
 
-        // ── Return type resolution ──────────────────────────────────
-        let trailing_return_type = if matches!(
-            return_strategy,
-            ReturnStrategy::TrailingReturn
-                | ReturnStrategy::SentinelNull
-                | ReturnStrategy::NullGuardWithValue(_)
-        ) {
-            resolve_enclosing_return_type(content, start as u32)
-        } else {
-            PhpType::untyped()
-        };
-
-        let enclosing_docblock_return: Option<PhpType> = if matches!(
-            return_strategy,
-            ReturnStrategy::TrailingReturn | ReturnStrategy::SentinelNull
-        ) {
-            crate::docblock::find_enclosing_return_type(content, start)
-        } else {
-            None
-        };
+        let enclosing_docblock_return = enclosing_returns.docblock.filter(|_| {
+            matches!(
+                return_strategy,
+                ReturnStrategy::TrailingReturn | ReturnStrategy::SentinelNull
+            )
+        });
 
         // ── PHPDoc generation ───────────────────────────────────────
         let return_type_for_docblock = build_return_type_hint_for_docblock(
@@ -289,7 +278,7 @@ impl Backend {
             &typed_returns,
         );
         let ctx = self.file_context_at(uri, start as u32);
-        let class_loader = self.class_loader(&ctx);
+        let class_loader = self.resolved_class_loader(&ctx);
         let docblock = build_docblock_for_extraction(
             &typed_params,
             &return_type_for_docblock,

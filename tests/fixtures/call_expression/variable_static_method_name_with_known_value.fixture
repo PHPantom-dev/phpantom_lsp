@@ -1,0 +1,14 @@
+// test: a variable static method name holding a known string calls that method
+// feature: completion
+// expect: format(
+---
+<?php
+class DateTime {
+    public function format(string $f): string {}
+}
+class Factory {
+    public static function create(): DateTime {}
+}
+$name = 'create';
+$result = Factory::$name();
+$result-><>

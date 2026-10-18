@@ -2276,29 +2276,10 @@ fn replace_deprecated_function_call_action_offered() {
                 "file:///stubs.php".to_string(),
                 FunctionInfo {
                     name: atom("read_exif_data"),
-                    name_offset: 0,
-                    parameters: vec![].into(),
                     return_type: Some(PhpType::parse("array")),
-                    native_return_type: None,
-                    description: None,
-                    return_description: None,
-                    links: vec![],
-                    see_refs: vec![],
-                    namespace: None,
-                    conditional_return: None,
-                    type_assertions: vec![],
                     deprecation_message: Some("since PHP 7.2".to_string()),
                     deprecated_replacement: Some("exif_read_data(%parametersList%)".to_string()),
-                    template_params: vec![],
-                    template_bindings: vec![],
-                    template_param_defaults: Default::default(),
-                    template_param_bounds: Default::default(),
-                    throws: vec![],
-                    is_polyfill: false,
-                    overloads: vec![],
-                    is_pure: false,
-                    is_impure: false,
-                    reads_func_args: false,
+                    ..Default::default()
                 },
             ),
         );
@@ -2364,6 +2345,72 @@ fn replace_deprecated_function_call_action_offered() {
         "Replacement should contain the original argument, got: {}",
         text_edit.new_text
     );
+}
+
+#[test]
+fn replace_deprecated_function_named_through_a_class_import() {
+    use phpantom_lsp::types::FunctionInfo;
+
+    let backend = create_test_backend();
+    let uri = "file:///test_replace_imported_func.php";
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use Lib\\Exif;\n",
+        "Exif\\read_data('photo.jpg');\n",
+    );
+
+    {
+        let mut fmap = backend.global_functions().write();
+        fmap.insert(
+            "Lib\\Exif\\read_data".to_string(),
+            (
+                "file:///lib.php".to_string(),
+                FunctionInfo {
+                    name: atom("read_data"),
+                    namespace: Some("Lib\\Exif".to_string()),
+                    return_type: Some(PhpType::parse("array")),
+                    deprecation_message: Some("since 2.0".to_string()),
+                    deprecated_replacement: Some("\\Lib\\Exif\\read(%parametersList%)".to_string()),
+                    ..Default::default()
+                },
+            ),
+        );
+    }
+
+    backend.update_ast(uri, text);
+
+    let params = CodeActionParams {
+        text_document: TextDocumentIdentifier {
+            uri: uri.parse().unwrap(),
+        },
+        range: Range {
+            start: Position::new(3, 0),
+            end: Position::new(3, 14),
+        },
+        context: CodeActionContext {
+            diagnostics: vec![],
+            only: None,
+            trigger_kind: None,
+        },
+        work_done_progress_params: WorkDoneProgressParams {
+            work_done_token: None,
+        },
+        partial_result_params: PartialResultParams {
+            partial_result_token: None,
+        },
+    };
+
+    let actions = backend.handle_code_action(uri, text, &params);
+    let replace_actions = find_actions_containing(&actions, "Replace");
+    let edit = replace_actions
+        .first()
+        .and_then(|action| action.edit.as_ref())
+        .and_then(|edit| edit.changes.as_ref())
+        .and_then(|changes| changes.values().next())
+        .and_then(|edits| edits.first())
+        .expect("Should offer a 'Replace' code action with an edit");
+    assert_eq!(edit.new_text, "\\Lib\\Exif\\read('photo.jpg')");
 }
 
 // ─── No replacement action when no replacement template ─────────────────────
@@ -3343,6 +3390,58 @@ function demo(): void {
     assert_eq!(
         diags[0].range.start.line, 14,
         "The deprecation should land on the second call. Got: {:?}",
+        diags,
+    );
+}
+
+/// The same call on a variable of the same class, written in two
+/// `namespace` blocks that import different classes, returns a different
+/// class in each.
+#[test]
+fn same_variable_chain_in_two_namespace_blocks_resolves_per_block() {
+    let backend = create_test_backend();
+    let uri = "file:///namespace_blocks.php";
+    let diags = deprecated_diagnostics(
+        &backend,
+        uri,
+        r#"<?php
+namespace X {
+    class Foo { public function old(): void {} }
+}
+namespace Y {
+    class Foo {
+        /** @deprecated Use something else */
+        public function old(): void {}
+    }
+}
+namespace Lib {
+    class Container {
+        /**
+         * @template T of object
+         * @param class-string<T> $class
+         * @return T
+         */
+        public function get(string $class): object { return new $class(); }
+    }
+}
+namespace A {
+    use X\Foo;
+    $c = new \Lib\Container();
+    $c->get(Foo::class)->old();
+}
+namespace B {
+    use Y\Foo;
+    $c = new \Lib\Container();
+    $c->get(Foo::class)->old();
+}
+"#,
+    );
+
+    let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
+    assert_eq!(
+        lines,
+        vec![28],
+        "Only block B's `Foo` is the deprecated one. Got: {:?}",
         diags,
     );
 }

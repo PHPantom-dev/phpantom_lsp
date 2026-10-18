@@ -200,7 +200,7 @@ impl Backend {
                     // span doesn't encode static-ness.  Check the
                     // uri_classes_index to determine the correct flag.
                     let is_static = self
-                        .get_classes_for_uri(uri)
+                        .shared_classes_for_uri(uri)
                         .iter()
                         .flat_map(|classes| classes.iter())
                         .flat_map(|c| c.properties.iter())
@@ -378,12 +378,7 @@ impl Backend {
             SymbolKind::SelfStaticParent(ssp_kind) => {
                 // `$this` is a file-local variable, not a cross-file class search.
                 if *ssp_kind == SelfStaticParentKind::This {
-                    return self.find_this_references(
-                        uri,
-                        content,
-                        span_start,
-                        include_declaration,
-                    );
+                    return self.find_this_references(uri, content, span_start);
                 }
 
                 // For real self/static/parent keywords, resolve to the class FQN.

@@ -11,11 +11,57 @@ use tower_lsp::lsp_types::Hover;
 
 use crate::Backend;
 use crate::php_type::PhpType;
+use crate::symbol_map::{SymbolSpan, VarDefKind};
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FileContext, FunctionInfo};
 
+use super::HoverSite;
 use super::formatting::{make_hover, namespace_line};
 
 impl Backend {
+    /// Hover for a `$variable` the symbol map found, except at a
+    /// definition whose type is already on screen.
+    pub(super) fn hover_variable_symbol(
+        &self,
+        site: &HoverSite,
+        symbol: &SymbolSpan,
+        name: &str,
+    ) -> Option<Hover> {
+        let HoverSite {
+            uri,
+            content,
+            offset: cursor_offset,
+            ctx,
+            ..
+        } = *site;
+        // Suppress hover when the cursor is on a variable at its
+        // definition site where the type is already visible in
+        // the signature (properties, static/global declarations).
+        // For parameters, assignments, foreach bindings, and catch
+        // bindings, hover is useful to show the resolved type and
+        // any docblock descriptions.
+        if let Some(def_kind) = self.lookup_var_def_kind_at(uri, name, cursor_offset)
+            && (!matches!(
+                def_kind,
+                VarDefKind::Assignment
+                    | VarDefKind::CompoundAssignment
+                    | VarDefKind::Parameter
+                    | VarDefKind::Foreach
+                    | VarDefKind::Catch
+                    | VarDefKind::ArrayDestructuring
+                    | VarDefKind::ListDestructuring
+            ) || (def_kind == VarDefKind::Parameter
+                && self.is_promoted_property_param(uri, symbol.start)))
+        {
+            // A constructor-promoted parameter declares a property,
+            // not a local variable, so it follows the same
+            // "already visible on screen" rule as any other
+            // property declaration.
+            return None;
+        }
+        self.hover_variable(name, uri, content, cursor_offset, site.current_class(), ctx)
+    }
+
     /// Produce hover information for a variable.
     pub(super) fn hover_variable(
         &self,
@@ -67,6 +113,8 @@ impl Backend {
         }
 
         let class_loader = self.class_loader(ctx);
+
+        let resolved_class_loader = self.resolved_class_loader(ctx);
         let function_loader = self.function_loader(ctx);
         let constant_loader = self.constant_loader(ctx);
         let config_resolver = |key: &str| self.resolve_config_type(key);
@@ -82,16 +130,18 @@ impl Backend {
         // parameters (e.g. `Generator<int, Pencil>`) and scalar types
         // (e.g. `int`) that the ClassInfo-based path would lose.
         if let Some(resolved_type) =
-            crate::type_engine::variable::resolution::resolve_variable_php_type(
-                &var_name,
-                content,
+            crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
+                var_name: &var_name,
                 cursor_offset,
+                content,
                 current_class,
-                &ctx.classes,
-                &class_loader,
-                Some(self),
+                all_classes: &ctx.classes,
+                class_loader: &resolved_class_loader,
+                source_class_loader: &class_loader,
+                source_imports: Some(&ctx.use_map),
+                backend: Some(self),
                 loaders,
-            )
+            })
         {
             // When the type is a template parameter, show its variance
             // and bound (e.g. "**template-covariant** `TNode` of `AstNode`")
@@ -102,7 +152,7 @@ impl Backend {
             let hover_body = build_variable_hover_body(
                 &var_name,
                 &resolved_type,
-                &class_loader,
+                &resolved_class_loader,
                 template_line.as_deref(),
             );
             return Some(make_hover(hover_body));

@@ -100,6 +100,23 @@ pub(super) fn format_visibility(vis: Visibility) -> &'static str {
     }
 }
 
+/// A class constant's declaration without its visibility,
+/// `const NAME: type = value;`, leaving out the type and the value when
+/// they are not known.
+pub(super) fn constant_declaration(constant: &ConstantInfo) -> String {
+    let mut out = format!("const {}", constant.name);
+    if let Some(type_hint) = &constant.type_hint {
+        out.push_str(": ");
+        out.push_str(&type_hint.to_string());
+    }
+    if let Some(value) = &constant.value {
+        out.push_str(" = ");
+        out.push_str(value);
+    }
+    out.push(';');
+    out
+}
+
 /// Format a parameter list using native PHP type hints only.
 ///
 /// Used inside `<?php` code blocks so the displayed declaration matches

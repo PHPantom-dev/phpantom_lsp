@@ -1,4 +1,5 @@
 use super::*;
+use crate::code_actions::helpers::find_identical_occurrences;
 
 // ── Name generation tests ───────────────────────────────────────
 

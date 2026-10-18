@@ -159,3 +159,10 @@ impl<T> From<Vec<T>> for SharedVec<T> {
         SharedVec(Arc::new(v))
     }
 }
+
+impl<T> FromIterator<T> for SharedVec<T> {
+    #[inline]
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        SharedVec(Arc::new(iter.into_iter().collect()))
+    }
+}

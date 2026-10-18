@@ -2,6 +2,38 @@
 
 use super::*;
 
+/// The result of resolving a single type reference.
+///
+/// Carries the full PHPStan-style type string (preserving generics,
+/// shapes, scalars, unions) alongside the resolved [`ClassInfo`] when
+/// the type names a class-like.  Consumers pick whichever
+/// representation they need without re-resolving.
+///
+/// This is the core type of the unified type resolution engine.
+/// Instead of maintaining parallel resolvers that return `Vec<ClassInfo>`
+/// (losing the type string) or `Option<String>` (losing the class info),
+/// every expression resolver returns `Vec<ResolvedType>` and each
+/// consumer reads the field it needs.
+#[derive(Clone, Debug)]
+pub struct ResolvedType {
+    /// Structured type expression, e.g. `TypeKind::Generic("Collection", [PhpType::named("int"), PhpType::named("User")])`.
+    ///
+    /// Call `.to_string()` when a display string is needed.
+    pub type_string: PhpType,
+
+    /// Resolved class info, present when the base type names a
+    /// class/interface/trait/enum.  `None` for scalars, shapes
+    /// where the base is `array`, and unresolvable types.
+    pub class_info: Option<Arc<ClassInfo>>,
+
+    /// How many models an Eloquent factory value builds.
+    ///
+    /// [`FactoryCount::Unknown`] for every type that is not a factory,
+    /// which is what the constructors set.  See the enum's own
+    /// documentation for why the state travels with the value.
+    pub factory_count: FactoryCount,
+}
+
 impl ResolvedType {
     /// Create a `ResolvedType` from a [`ClassInfo`], using its name as
     /// the type string.
@@ -400,7 +432,7 @@ impl ResolvedType {
             .collect()
     }
 
-    /// Run a narrowing function that operates on `&mut Vec<ClassInfo>`
+    /// Run a narrowing function that operates on `&mut Vec<Arc<ClassInfo>>`
     /// against a `Vec<ResolvedType>`, preserving type strings.
     ///
     /// Narrowing functions (instanceof, assert, custom type guards)
@@ -426,11 +458,11 @@ impl ResolvedType {
     /// `mixed` component) intact.
     pub(crate) fn apply_narrowing(
         results: &mut Vec<ResolvedType>,
-        f: impl FnOnce(&mut Vec<ClassInfo>) -> bool,
+        f: impl FnOnce(&mut Vec<Arc<ClassInfo>>) -> bool,
     ) {
-        let mut classes: Vec<ClassInfo> = results
+        let mut classes: Vec<Arc<ClassInfo>> = results
             .iter()
-            .filter_map(|rt| rt.class_info.as_ref().map(|arc| arc.as_ref().clone()))
+            .filter_map(|rt| rt.class_info.clone())
             .collect();
         let definite = f(&mut classes);
 
@@ -507,7 +539,7 @@ impl ResolvedType {
                 .iter()
                 .any(|rt| rt.class_info.as_ref().is_some_and(|c| c.fqn() == cls.fqn()))
             {
-                results.push(ResolvedType::from_class(cls));
+                results.push(ResolvedType::from_arc(cls));
                 added_new = true;
             }
         }
@@ -638,10 +670,11 @@ impl ResolvedType {
     /// broader sibling that already covers it wins here.
     ///
     /// `mixed_absorbs_siblings` controls whether a bare `mixed` entry may
-    /// cover (and so drop) any narrower sibling. A real scope join needs
-    /// this: `if ($mixed instanceof Foo) { … }` with no `else` must not
-    /// leave `Foo` sitting beside `mixed` once the branch's proof no
-    /// longer applies (`ScopeState::merge_branch` passes `true`). A
+    /// cover (and so drop) any narrower sibling, and an `object` entry any
+    /// class. A real scope join needs this: `if ($mixed instanceof Foo)
+    /// { … }` with no `else` must not leave `Foo` sitting beside `mixed`
+    /// once the branch's proof no longer applies, and the same goes for
+    /// `object` (`ScopeState::merge_branch` passes `true`). A
     /// ternary/match-arm value merge must not (pass `false`): the
     /// narrower arm's value is one this expression can actually produce,
     /// not a proof that stopped holding.
@@ -669,7 +702,8 @@ impl ResolvedType {
                 if types[j] != types[i]
                     && (types[j].is_subset_of(&types[i])
                         || array_snapshot_covered_by(&types[j], &types[i])
-                        || intersection_covered_by(&types[j], &types[i]))
+                        || intersection_covered_by(&types[j], &types[i])
+                        || (mixed_absorbs_siblings && object_covers(&types[i], &types[j])))
                 {
                     keep[j] = false;
                 }
@@ -917,6 +951,19 @@ fn intersection_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
         return false;
     };
     parts.iter().any(|part| part.is_subset_of(cover))
+}
+
+/// Whether `cover` holds an `object` alternative that every value of
+/// `covered` already falls under, e.g. `object|null` over `Foo`.
+///
+/// [`PhpType::is_subset_of`] matches alternatives by spelling, so it never
+/// sees a class as part of `object`.
+fn object_covers(cover: &PhpType, covered: &PhpType) -> bool {
+    cover
+        .union_members()
+        .iter()
+        .any(|member| member.is_object())
+        && covered.is_subtype_of(cover)
 }
 
 /// Whether `ty` is the bare `self` keyword.

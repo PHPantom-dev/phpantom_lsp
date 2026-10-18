@@ -93,8 +93,6 @@ impl Locals {
         self.map.keys()
     }
 
-    /// Visit the keys the two maps do not share an entry for; see
-    /// [`AtomTrie::diff`].
     /// Whether any key holds a different entry here than in `other`.
     ///
     /// Entries are compared by identity, so this is cheap between a scope
@@ -106,6 +104,8 @@ impl Locals {
             .is_break()
     }
 
+    /// Visit the keys the two maps do not share an entry for; see
+    /// [`AtomTrie::diff`].
     pub fn diff<'a, B>(
         &'a self,
         other: &'a Self,

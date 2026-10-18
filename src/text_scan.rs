@@ -112,6 +112,17 @@ pub(crate) fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
+/// Whether the word `keyword` ends at `pos` (exclusive) in `bytes`, with
+/// no identifier byte on either side of it.
+pub(crate) fn keyword_ends_at(bytes: &[u8], pos: usize, keyword: &[u8]) -> bool {
+    let Some(start) = pos.checked_sub(keyword.len()) else {
+        return false;
+    };
+    &bytes[start..pos] == keyword
+        && (start == 0 || !is_ident_byte(bytes[start - 1]))
+        && bytes.get(pos).is_none_or(|&b| !is_ident_byte(b))
+}
+
 /// Walk `bytes` backward from `pos`, stopping at the first byte that is
 /// not an identifier character, and return that stopping offset.
 ///
@@ -125,14 +136,25 @@ pub(crate) fn scan_ident_backward(bytes: &[u8], pos: usize) -> usize {
     i
 }
 
+/// Whether `text` is one whole quoted string literal (`'…'` or `"…"`)
+/// rather than an expression that merely starts and ends with a quote,
+/// such as `'a' . 'b'` or `'a' === 'b'`.
+pub(crate) fn is_whole_string_literal(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() >= 2
+        && matches!(bytes[0], b'\'' | b'"')
+        && skip_string_forward(bytes, 0) == bytes.len()
+        && bytes[bytes.len() - 1] == bytes[0]
+        && !is_escaped(bytes, bytes.len() - 1)
+}
+
 /// Remove surrounding single or double quotes from a PHP string literal.
 ///
 /// `"'hello'"` → `Some("hello")`, `"\"world\""` → `Some("world")`,
-/// `"bare"` → `None`.
+/// `"bare"` → `None`, and so is an expression that only starts and ends
+/// with a quote (`"'a' . 'b'"`).
 pub(crate) fn unquote_php_string(raw: &str) -> Option<&str> {
-    raw.strip_prefix('\'')
-        .and_then(|r| r.strip_suffix('\''))
-        .or_else(|| raw.strip_prefix('"').and_then(|r| r.strip_suffix('"')))
+    is_whole_string_literal(raw).then(|| &raw[1..raw.len() - 1])
 }
 
 /// Decode a PHP string literal's source spelling (including its
@@ -286,14 +308,23 @@ pub(crate) fn decode_php_string_literal(raw: &str) -> Option<Cow<'_, str>> {
 /// caller asking about many offsets in the same text should scan it once
 /// into [`NamespaceDecls`] instead.
 pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> {
+    namespace_name_after(content, namespace_decl_at(content, offset)? + KEYWORD.len())
+}
+
+/// Return the offset of the `namespace` keyword whose declaration is in
+/// force at `offset`, found the way [`namespace_at_offset`] finds it, or
+/// `None` before the first declaration.
+///
+/// Every `namespace` block of a file starts at a different one, so this
+/// tells the blocks apart even where two of them declare the same name.
+pub(crate) fn namespace_decl_at(content: &str, offset: usize) -> Option<usize> {
     let bytes = content.as_bytes();
     let mut end = offset.min(bytes.len());
     while let Some(pos) = memchr::memmem::rfind(&bytes[..end], KEYWORD) {
         end = pos;
-        if !is_namespace_statement(bytes, pos, KEYWORD.len()) {
-            continue;
+        if is_namespace_statement(bytes, pos, KEYWORD.len()) {
+            return Some(pos);
         }
-        return namespace_name_after(content, pos + KEYWORD.len());
     }
     None
 }
@@ -330,14 +361,23 @@ impl NamespaceDecls {
     /// The namespace in force at `offset` in `content`, which must be the
     /// text these declarations were scanned from.
     pub(crate) fn at<'a>(&self, content: &'a str, offset: usize) -> Option<&'a str> {
-        let end = offset.min(content.len());
+        let (_, name) = self.decls[self.index_at(offset.min(content.len()))?];
+        name.map(|(start, end)| &content[start..end])
+    }
+
+    /// The offset of the `namespace` keyword whose declaration is in force
+    /// at `offset`; see [`namespace_decl_at`].
+    pub(crate) fn decl_at(&self, offset: usize) -> Option<usize> {
+        Some(self.decls[self.index_at(offset)?].0)
+    }
+
+    /// The index of the declaration in force at `offset`, if any.
+    fn index_at(&self, offset: usize) -> Option<usize> {
         // The backward scan only sees a keyword that ends at or before
         // `offset`.
-        let before = self
-            .decls
-            .partition_point(|&(pos, _)| pos + KEYWORD.len() <= end);
-        let (_, name) = self.decls.get(before.checked_sub(1)?)?;
-        name.map(|(start, end)| &content[start..end])
+        self.decls
+            .partition_point(|&(pos, _)| pos + KEYWORD.len() <= offset)
+            .checked_sub(1)
     }
 }
 
@@ -414,52 +454,20 @@ fn namespace_name_after(content: &str, after_keyword: usize) -> Option<&str> {
     (len > 0).then(|| &content[start..start + len])
 }
 
-/// Find the first `;` in `s` that is not nested inside `()`, `[]`,
-/// `{}`, or string literals.
+/// Find the first `;` in `s` that is not inside a quote, a comment, or a
+/// bracket (see [`scan_top_level`]): the end of the statement `s` starts
+/// in.
 ///
 /// Returns the byte offset of the semicolon, or `None` if no
-/// top-level semicolon exists.  Used by multiple completion modules
-/// to delimit the right-hand side of assignment statements.
+/// top-level semicolon exists.
 pub(crate) fn find_semicolon_balanced(s: &str) -> Option<usize> {
-    let mut depth_paren = 0i32;
-    let mut depth_bracket = 0i32;
-    let mut depth_brace = 0i32;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut prev_char = '\0';
-
-    for (i, ch) in s.char_indices() {
-        if in_single_quote {
-            if ch == '\'' && prev_char != '\\' {
-                in_single_quote = false;
-            }
-            prev_char = ch;
-            continue;
+    scan_top_level(s.as_bytes(), |bytes, i| {
+        if bytes[i] == b';' {
+            ScanStep::Stop
+        } else {
+            ScanStep::Skip(1)
         }
-        if in_double_quote {
-            if ch == '"' && prev_char != '\\' {
-                in_double_quote = false;
-            }
-            prev_char = ch;
-            continue;
-        }
-        match ch {
-            '\'' => in_single_quote = true,
-            '"' => in_double_quote = true,
-            '(' => depth_paren += 1,
-            ')' => depth_paren -= 1,
-            '[' => depth_bracket += 1,
-            ']' => depth_bracket -= 1,
-            '{' => depth_brace += 1,
-            '}' => depth_brace -= 1,
-            ';' if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 => {
-                return Some(i);
-            }
-            _ => {}
-        }
-        prev_char = ch;
-    }
-    None
+    })
 }
 
 /// Find the position of the closing delimiter that matches the opening
@@ -531,6 +539,54 @@ pub(crate) fn find_unmatched_close_bytes(
     None
 }
 
+/// The byte offsets of `bytes` that are code: not inside a quote
+/// (`'…'` or `"…"`, with backslash escapes) or a PHP comment (see
+/// [`skip_php_comment`]).
+///
+/// A scanner that consumes a whole token at the offset it was handed can
+/// jump past it with [`skip_to`](Self::skip_to).
+pub(crate) struct CodeOffsets<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> CodeOffsets<'a> {
+    pub(crate) fn new(bytes: &'a [u8]) -> Self {
+        CodeOffsets { bytes, pos: 0 }
+    }
+
+    /// Resume the scan at `pos`, which must not be inside a quote or a
+    /// comment.
+    pub(crate) fn skip_to(&mut self, pos: usize) {
+        self.pos = self.pos.max(pos);
+    }
+}
+
+impl Iterator for CodeOffsets<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        while self.pos < self.bytes.len() {
+            let pos = self.pos;
+            if let Some(past) = skip_php_comment(self.bytes, pos) {
+                self.pos = past;
+            } else if matches!(self.bytes[pos], b'\'' | b'"') {
+                self.pos = skip_string_forward(self.bytes, pos);
+            } else {
+                self.pos = pos + 1;
+                return Some(pos);
+            }
+        }
+        None
+    }
+}
+
+/// Whether the word `keyword` starts at `pos` in `bytes`, with no
+/// identifier byte on either side of it.
+pub(crate) fn keyword_starts_at(bytes: &[u8], pos: usize, keyword: &[u8]) -> bool {
+    bytes[pos..].starts_with(keyword) && keyword_ends_at(bytes, pos + keyword.len(), keyword)
+}
+
 /// What a top-level scan makes of the byte it is looking at.
 pub(crate) enum ScanStep {
     /// Step over this many bytes without interpreting them further.
@@ -594,6 +650,157 @@ pub(crate) fn scan_top_level(
     None
 }
 
+/// [`scan_top_level`] backward: walk `bytes` from its end toward its start,
+/// calling `at_depth_zero` on every byte that is not inside a quote or a
+/// bracket pair whose closer the walk has already passed.
+///
+/// The opening brackets around the end of `bytes`, which nothing after them
+/// closes, are offered to the visitor too: they are what a scan for the
+/// call or array the end sits in is looking for. Quoting (`'…'` and `"…"`,
+/// with backslash escapes) is handled here, but comments are not, since
+/// reading backward a comment cannot be told from code; the text being
+/// scanned is the code before a cursor, which a caller has already placed
+/// outside any string.
+///
+/// `Skip(n)` moves on to the byte `n` before the visited one. Returns the
+/// offset the visitor stopped at, or `None` when it aborted or the scan ran
+/// out of text.
+pub(crate) fn scan_top_level_backward(
+    bytes: &[u8],
+    mut at_depth_zero: impl FnMut(&[u8], usize) -> ScanStep,
+) -> Option<usize> {
+    let mut depth: u32 = 0;
+    let mut i = bytes.len();
+    while i > 0 {
+        i -= 1;
+        match bytes[i] {
+            quote @ (b'\'' | b'"') => {
+                // Walk back to the quote that opens this literal.
+                while i > 0 {
+                    i -= 1;
+                    if bytes[i] == quote && !is_escaped(bytes, i) {
+                        break;
+                    }
+                }
+                continue;
+            }
+            b')' | b']' | b'}' => {
+                depth += 1;
+                continue;
+            }
+            b'(' | b'[' | b'{' if depth > 0 => {
+                depth -= 1;
+                continue;
+            }
+            _ if depth > 0 => continue,
+            _ => {}
+        }
+        match at_depth_zero(bytes, i) {
+            ScanStep::Skip(n) => i = i.saturating_sub(n.max(1) - 1),
+            ScanStep::Stop => return Some(i),
+            ScanStep::Abort => return None,
+        }
+    }
+    None
+}
+
+/// The byte offsets of the commas at the top level of `text`: the ones not
+/// inside a quote, a comment, or a bracket (see [`scan_top_level`]).
+pub(crate) fn top_level_commas(text: &str) -> impl Iterator<Item = usize> + '_ {
+    let bytes = text.as_bytes();
+    let mut start = 0;
+    std::iter::from_fn(move || {
+        // Each pass restarts at depth zero just past a top-level comma,
+        // which is outside every string, comment and bracket by
+        // construction.
+        let comma = start
+            + scan_top_level(bytes.get(start..)?, |bytes, i| {
+                if bytes[i] == b',' {
+                    ScanStep::Stop
+                } else {
+                    ScanStep::Skip(1)
+                }
+            })?;
+        start = comma + 1;
+        Some(comma)
+    })
+}
+
+/// Split `text` at its [top-level commas](top_level_commas), the way an
+/// argument list or an array literal separates its entries.
+///
+/// A trailing comma, which PHP allows after the last argument or element,
+/// leaves no empty entry behind, and blank text has no entries at all.
+pub(crate) fn split_top_level_commas(text: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for comma in top_level_commas(text) {
+        parts.push(&text[start..comma]);
+        start = comma + 1;
+    }
+    let last = &text[start..];
+    if !last.trim().is_empty() {
+        parts.push(last);
+    }
+    parts
+}
+
+/// Split an array literal element on its key separator: the first `=>`
+/// that is not inside a nested bracket, a quoted string, or a comment.
+///
+/// An element that is itself an arrow function (`fn ($x) => $x`, also
+/// `static fn`) has no key, so its own `=>` is not taken as one.
+pub(crate) fn split_top_level_arrow(item: &str) -> Option<(&str, &str)> {
+    let index = scan_top_level(item.as_bytes(), |bytes, i| {
+        if bytes[i..].starts_with(b"=>") {
+            ScanStep::Stop
+        } else {
+            ScanStep::Skip(1)
+        }
+    })?;
+    let key = item[..index].trim_start();
+    let key = key
+        .strip_prefix("static")
+        .filter(|rest| rest.starts_with(|c: char| c.is_ascii_whitespace()))
+        .map_or(key, str::trim_start);
+    let is_arrow_fn = key
+        .strip_prefix("fn")
+        .is_some_and(|rest| rest.trim_start().starts_with('('));
+    if is_arrow_fn {
+        return None;
+    }
+    Some((&item[..index], &item[index + 2..]))
+}
+
+/// Whether the byte at `index` is preceded by an odd number of
+/// backslashes, and so escaped.
+pub(crate) fn is_escaped(bytes: &[u8], index: usize) -> bool {
+    let mut backslashes = 0;
+    let mut j = index;
+    while j > 0 && bytes[j - 1] == b'\\' {
+        backslashes += 1;
+        j -= 1;
+    }
+    backslashes % 2 == 1
+}
+
+/// The offset of the unescaped quote that opens the string literal
+/// `cursor` sits in, looking no further back than the start of the line:
+/// a string argument being typed does not span lines.
+pub(crate) fn open_quote_before(content: &str, cursor: usize) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut i = cursor.min(bytes.len());
+    while i > 0 {
+        i -= 1;
+        match bytes[i] {
+            b'\'' | b'"' if !is_escaped(bytes, i) => return Some(i),
+            b'\n' => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Find the position of the opening delimiter that matches the closing
 /// delimiter at `close_pos`, scanning backward.
 ///
@@ -631,17 +838,8 @@ pub(crate) fn find_matching_backward(
                 if pos > 0 {
                     pos -= 1;
                     while pos > 0 {
-                        if bytes[pos] == quote {
-                            // Check for escape — count preceding backslashes
-                            let mut bs = 0;
-                            let mut check = pos;
-                            while check > 0 && bytes[check - 1] == b'\\' {
-                                bs += 1;
-                                check -= 1;
-                            }
-                            if bs % 2 == 0 {
-                                break; // unescaped quote — string start
-                            }
+                        if bytes[pos] == quote && !is_escaped(bytes, pos) {
+                            break; // unescaped quote — string start
                         }
                         pos -= 1;
                     }
@@ -913,7 +1111,7 @@ fn declare_statement_end(bytes: &[u8], from: usize) -> Option<usize> {
 
 /// The offset of the first byte at or after `at` that is neither
 /// whitespace nor part of a comment.
-fn skip_php_trivia(bytes: &[u8], mut at: usize) -> usize {
+pub(crate) fn skip_php_trivia(bytes: &[u8], mut at: usize) -> usize {
     loop {
         while bytes.get(at).is_some_and(u8::is_ascii_whitespace) {
             at += 1;

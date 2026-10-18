@@ -116,30 +116,17 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             };
             // Resolve the receiver to a class, handling `self`, `static`,
             // `parent`, and subclass names.
-            let receiver = match static_call.class {
-                Expression::Identifier(ident) => {
-                    let name = bytes_to_str(ident.value());
-                    let fqn = crate::util::resolve_name_via_loader(name, ctx.class_loader);
-                    (ctx.class_loader)(&fqn).or_else(|| (ctx.class_loader)(name))
-                }
-                Expression::Self_(_) | Expression::Static(_) => {
-                    (ctx.class_loader)(&ctx.current_class.name)
-                }
-                Expression::Parent(_) => match ctx.current_class.parent_class.as_ref() {
-                    Some(parent) => (ctx.class_loader)(parent),
-                    None => return,
-                },
-                _ => return,
-            };
-            let class_info = match receiver {
-                Some(ci) => ci,
-                None => return,
+            let Some(class_info) = ctx
+                .written_names()
+                .static_receiver_class(static_call.class, ctx.class_loader)
+            else {
+                return;
             };
             // Search the trait/parent chain so assertions declared on an
             // ancestor (e.g. PHPUnit's `Assert`) are found.  Uses raw class
             // loads only, avoiding a full merge that would poison the shared
             // resolved-class cache mid-walk.
-            let (method, declaring_fqn) = match narrowing::find_assertion_method_in_chain(
+            let (method, _) = match narrowing::find_assertion_method_in_chain(
                 &class_info,
                 &method_name,
                 ctx.class_loader,
@@ -149,7 +136,6 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 Some(found) => found,
                 None => return,
             };
-            let declaring_namespace = namespace_of_fqn(&declaring_fqn);
             let skip_negations =
                 negations_are_disjunctive(method.type_assertions(), function_returned_true);
             for assertion in method.type_assertions() {
@@ -183,7 +169,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 let resolved_assert_type = if asserted_type.contains_self_ref() {
                     asserted_type.replace_self(&class_info.fqn())
                 } else {
-                    qualify_assertion_type(&asserted_type, declaring_namespace.as_deref(), ctx)
+                    asserted_type
                 };
                 for arg_var in &arg_vars {
                     apply_assertion_to_key(
@@ -233,7 +219,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 // Search the trait/parent chain for the method's assertions
                 // using raw class loads only (a full merge would poison the
                 // shared resolved-class cache mid-walk).
-                let (method, declaring_fqn) = match narrowing::find_assertion_method_in_chain(
+                let (method, _) = match narrowing::find_assertion_method_in_chain(
                     &receiver,
                     &method_name,
                     ctx.class_loader,
@@ -243,7 +229,6 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     Some(found) => found,
                     None => continue,
                 };
-                let declaring_namespace = namespace_of_fqn(&declaring_fqn);
                 // The assertions name the receiver class's own templates
                 // (`Ok<TOk> $this`), which a `Result<int, string>` receiver
                 // fills in.
@@ -287,7 +272,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     let resolved_type = if asserted_type.contains_self_ref() {
                         asserted_type.replace_self(&receiver.fqn())
                     } else {
-                        qualify_assertion_type(&asserted_type, declaring_namespace.as_deref(), ctx)
+                        asserted_type
                     };
                     if assertion.param_name == "$this" {
                         // Narrows the receiver variable itself.

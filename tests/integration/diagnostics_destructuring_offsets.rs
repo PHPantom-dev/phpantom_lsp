@@ -153,7 +153,7 @@ function demo(array $either, ?array $maybe): void {
 fn inline_var_docblock_types_the_destructure() {
     let php = r#"<?php
 function demo(): void {
-    /** @var array<string, int> $data */
+    /** @var array<string, int> */
     [$a] = load();
 }
 "#;
@@ -161,6 +161,40 @@ function demo(): void {
         messages(php),
         vec!["Offset 0 does not exist on array<string, int>"]
     );
+}
+
+#[test]
+fn inline_var_docblock_naming_the_rhs_types_the_destructure() {
+    let php = r#"<?php
+function demo($data): void {
+    /** @var array<string, int> $data */
+    [$a] = $data;
+}
+"#;
+    assert_eq!(
+        messages(php),
+        vec!["Offset 0 does not exist on array<string, int>"]
+    );
+}
+
+#[test]
+fn inline_var_docblock_naming_destructured_variables_leaves_the_rhs_alone() {
+    let php = r#"<?php
+class Scope {}
+
+/** @return array{array<string, Scope>, array<string, string>} */
+function cached(): array { return [[], []]; }
+
+function demo(): void {
+    $cached = cached();
+    /**
+     * @var array<string, Scope> $map
+     * @var array<string, string> $hashes
+     */
+    [$map, $hashes] = $cached;
+}
+"#;
+    assert!(messages(php).is_empty(), "{:?}", messages(php));
 }
 
 #[test]

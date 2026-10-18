@@ -84,18 +84,79 @@ pub(crate) fn activate_memo<T: Default + 'static>(
 
 // ─── Bounded, re-entrant, memoized inference ────────────────────────────────
 
+/// The kinds of bounded body-walking inference, each with a depth budget
+/// of its own.
+#[derive(Clone, Copy)]
+pub(crate) enum BoundedInference {
+    /// Reading a method body for the type it returns.
+    BodyReturn = 0,
+    /// Reading a callee body for what it leaves in a by-reference
+    /// parameter.
+    OutParam = 1,
+}
+
+/// How deep each [`BoundedInference`] kind is nested on this thread,
+/// indexed by kind.
+type InferenceDepths = [u8; 2];
+
+thread_local! {
+    /// The nesting depth of every [`BoundedInference`] kind on this thread.
+    static INFERENCE_DEPTHS: std::cell::Cell<InferenceDepths> =
+        const { std::cell::Cell::new([0; 2]) };
+
+    /// Bumped whenever an inference is cut short (by a depth cap or the
+    /// cycle guard) or is answered from a memo entry that was. A frame
+    /// that sees it move while its own `compute` runs knows its result
+    /// was shaped by a cut somewhere below it.
+    static INFERENCE_CUTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many inferences of `kind` are walking a body on this thread.
+pub(crate) fn inference_depth(kind: BoundedInference) -> u8 {
+    INFERENCE_DEPTHS.with(|d| d.get()[kind as usize])
+}
+
+fn note_inference_cut() {
+    INFERENCE_CUTS.with(|c| c.set(c.get().wrapping_add(1)));
+}
+
+/// One answer in a bounded-inference memo.
+#[derive(Clone)]
+pub(crate) struct Memoized<V> {
+    value: V,
+    /// `None` when nothing below the computation was cut short, so the
+    /// answer holds for every caller. Otherwise the nesting depths it was
+    /// computed at: a cut-off reading only holds for a caller with no more
+    /// budget than it had, i.e. one nested at least as deep in every kind.
+    cut_at: Option<InferenceDepths>,
+}
+
+/// A bounded-inference memo: its answers by key.
+pub(crate) type BoundedMemo<K, V> = std::collections::HashMap<K, Memoized<V>>;
+
+impl<V> Memoized<V> {
+    fn serves(&self, depths: InferenceDepths) -> bool {
+        self.cut_at
+            .is_none_or(|at| at.iter().zip(depths).all(|(&at, now)| now >= at))
+    }
+}
+
 /// Run `compute` under the memo / depth-cap / cycle-guard protocol every
-/// bounded body-walking inference in this engine follows: serve a
-/// completed answer straight from the memo, refuse to go deeper than
-/// `max_depth`, refuse to re-enter the same `visited_key`, then remember
-/// what `compute` returns under `memo_key` for the next caller that asks
-/// the same question.
+/// bounded body-walking inference in this engine follows: serve an answer
+/// straight from the memo when it holds for this caller, refuse to go
+/// deeper than `max_depth`, refuse to re-enter the same `visited_key`,
+/// then remember what `compute` returns under `memo_key` for the next
+/// caller that asks the same question.
 ///
 /// The memo is checked before the depth cap so a deep call chain still
-/// benefits from a result computed at a shallower depth. Only a
-/// *completed* run is memoized — the cap and the cycle guard both return
-/// early without storing, so a cut-off `V::default()` can never shadow a
-/// later caller's own unbounded reading of the same key.
+/// benefits from a result computed at a shallower depth. A result that a
+/// cut anywhere below it shaped is remembered together with the depths it
+/// was computed at, and only served to callers nested at least as deep: a
+/// caller with more budget left would have read further, so it computes
+/// its own answer instead of inheriting the truncated one. Each key is
+/// therefore computed at most once per depth it is reached at, which keeps
+/// pathological files (where the cap is hit constantly) from re-walking
+/// the same bodies.
 ///
 /// `visited_key` is typically a strict subset of `memo_key` (e.g. a
 /// method identity without the call-site argument types that decide the
@@ -103,15 +164,12 @@ pub(crate) fn activate_memo<T: Default + 'static>(
 /// method calling itself with a different argument on every hop still
 /// re-enters the same key and stops at the depth cap, rather than never
 /// re-entering and recursing forever.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn memoized_bounded_inference<MemoKey, VisitedKey, V>(
-    memo: &'static std::thread::LocalKey<
-        std::cell::RefCell<Option<std::collections::HashMap<MemoKey, V>>>,
-    >,
+    memo: &'static std::thread::LocalKey<std::cell::RefCell<Option<BoundedMemo<MemoKey, V>>>>,
     visited: &'static std::thread::LocalKey<
         std::cell::RefCell<std::collections::HashSet<VisitedKey>>,
     >,
-    depth: &'static std::thread::LocalKey<std::cell::Cell<u8>>,
+    kind: BoundedInference,
     max_depth: u8,
     memo_key: MemoKey,
     visited_key: VisitedKey,
@@ -122,37 +180,50 @@ where
     VisitedKey: Eq + std::hash::Hash + Clone,
     V: Clone + Default,
 {
-    let memoized = memo.with(|c| c.borrow().as_ref().and_then(|m| m.get(&memo_key).cloned()));
-    if let Some(cached) = memoized {
+    let depths = INFERENCE_DEPTHS.with(std::cell::Cell::get);
+    let memoized = memo.with(|c| {
+        c.borrow()
+            .as_ref()
+            .and_then(|m| m.get(&memo_key))
+            .filter(|entry| entry.serves(depths))
+            .map(|entry| (entry.value.clone(), entry.cut_at.is_some()))
+    });
+    if let Some((cached, was_cut)) = memoized {
+        if was_cut {
+            note_inference_cut();
+        }
         return cached;
     }
 
-    let d = depth.with(std::cell::Cell::get);
+    let d = depths[kind as usize];
     if d >= max_depth {
+        note_inference_cut();
         return V::default();
     }
 
     let already_visiting = visited.with(|set| !set.borrow_mut().insert(visited_key.clone()));
     if already_visiting {
+        note_inference_cut();
         return V::default();
     }
-    depth.with(|c| c.set(d + 1));
+    let mut nested = depths;
+    nested[kind as usize] = d + 1;
+    INFERENCE_DEPTHS.with(|c| c.set(nested));
 
-    // Restores the depth and releases the key on drop, so a panic inside
+    // Restores the depths and releases the key on drop, so a panic inside
     // `compute` (caught by the request handler, which keeps the thread)
     // does not leave this key answering nothing for the thread's life.
     struct Restore<VisitedKey: Eq + std::hash::Hash + 'static> {
         visited: &'static std::thread::LocalKey<
             std::cell::RefCell<std::collections::HashSet<VisitedKey>>,
         >,
-        depth: &'static std::thread::LocalKey<std::cell::Cell<u8>>,
-        previous_depth: u8,
+        previous_depths: InferenceDepths,
         key: Option<VisitedKey>,
     }
     impl<VisitedKey: Eq + std::hash::Hash + 'static> Drop for Restore<VisitedKey> {
         fn drop(&mut self) {
-            let previous = self.previous_depth;
-            self.depth.with(|c| c.set(previous));
+            let previous = self.previous_depths;
+            INFERENCE_DEPTHS.with(|c| c.set(previous));
             if let Some(key) = self.key.take() {
                 self.visited.with(|set| {
                     set.borrow_mut().remove(&key);
@@ -162,17 +233,24 @@ where
     }
     let restore = Restore {
         visited,
-        depth,
-        previous_depth: d,
+        previous_depths: depths,
         key: Some(visited_key),
     };
 
+    let cuts_before = INFERENCE_CUTS.with(std::cell::Cell::get);
     let result = compute();
+    let was_cut = INFERENCE_CUTS.with(std::cell::Cell::get) != cuts_before;
 
     drop(restore);
     memo.with(|c| {
         if let Some(m) = c.borrow_mut().as_mut() {
-            m.insert(memo_key, result.clone());
+            m.insert(
+                memo_key,
+                Memoized {
+                    value: result.clone(),
+                    cut_at: was_cut.then_some(depths),
+                },
+            );
         }
     });
     result

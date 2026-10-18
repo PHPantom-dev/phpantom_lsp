@@ -1,7 +1,7 @@
 //! "Create missing view" quick-fix for an unresolved view name.
 //!
 //! `view('name')` / `View::make('name')` resolve against Blade templates on
-//! disk; `invalid_laravel_view` (`diagnostics/mod.rs`) fires when a name
+//! disk; `invalid_laravel_view` (`diagnostics/laravel_string_keys.rs`) fires when a name
 //! matches none of them. This offers to create the missing `.blade.php`
 //! file at the location Laravel would actually look for it, under the
 //! project's configured view roots (or the matching package namespace's

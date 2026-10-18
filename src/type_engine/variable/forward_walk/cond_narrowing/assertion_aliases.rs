@@ -21,7 +21,9 @@ pub(crate) fn record_assertion_variable<'b>(
     lhs_name: &str,
     rhs: &'b Expression<'b>,
     scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
 ) {
+    let names = ctx.written_names();
     let mut checks: Vec<VarAssertion> = Vec::new();
     for operand in collect_and_chain_operands(rhs) {
         let mut subjects = collect_condition_var_names(operand);
@@ -32,7 +34,7 @@ pub(crate) fn record_assertion_variable<'b>(
             if subject == lhs_name {
                 continue;
             }
-            if let Some(mut classes) = or_chain_alternatives(operand, &subject) {
+            if let Some(mut classes) = or_chain_alternatives(operand, &subject, &names) {
                 let class_type = classes.remove(0);
                 checks.push(VarAssertion {
                     subject: atom(&subject),
@@ -45,7 +47,7 @@ pub(crate) fn record_assertion_variable<'b>(
                 break;
             }
             if let Some(extraction) =
-                narrowing::try_extract_instanceof_with_negation(operand, &subject)
+                narrowing::try_extract_instanceof_with_negation(operand, &subject, &names)
             {
                 checks.push(VarAssertion {
                     subject: atom(&subject),
@@ -70,19 +72,28 @@ pub(crate) fn record_assertion_variable<'b>(
 /// some other value, or a negated one, leaves the disjunction proving
 /// nothing about `subject`, and collecting only the legs that do match
 /// would claim a narrowing the chain never made.
-fn or_chain_alternatives(expr: &Expression<'_>, subject: &str) -> Option<Vec<PhpType>> {
-    fn walk(expr: &Expression<'_>, subject: &str, out: &mut Vec<PhpType>) -> bool {
+fn or_chain_alternatives(
+    expr: &Expression<'_>,
+    subject: &str,
+    names: &WrittenNames<'_>,
+) -> Option<Vec<PhpType>> {
+    fn walk(
+        expr: &Expression<'_>,
+        subject: &str,
+        names: &WrittenNames<'_>,
+        out: &mut Vec<PhpType>,
+    ) -> bool {
         match expr {
-            Expression::Parenthesized(inner) => walk(inner.expression, subject, out),
+            Expression::Parenthesized(inner) => walk(inner.expression, subject, names, out),
             Expression::Binary(bin)
                 if matches!(
                     bin.operator,
                     BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
                 ) =>
             {
-                walk(bin.lhs, subject, out) && walk(bin.rhs, subject, out)
+                walk(bin.lhs, subject, names, out) && walk(bin.rhs, subject, names, out)
             }
-            _ => match narrowing::try_extract_instanceof_with_negation(expr, subject) {
+            _ => match narrowing::try_extract_instanceof_with_negation(expr, subject, names) {
                 Some(extraction) if !extraction.negated => {
                     if !out.contains(&extraction.class_type) {
                         out.push(extraction.class_type);
@@ -102,7 +113,7 @@ fn or_chain_alternatives(expr: &Expression<'_>, subject: &str) -> Option<Vec<Php
         return None;
     }
     let mut classes = Vec::new();
-    (walk(expr, subject, &mut classes) && classes.len() > 1).then_some(classes)
+    (walk(expr, subject, names, &mut classes) && classes.len() > 1).then_some(classes)
 }
 
 /// Every class an alias check allows, its own first.

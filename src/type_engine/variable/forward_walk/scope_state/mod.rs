@@ -10,6 +10,7 @@ mod trie;
 
 pub(crate) use class_unions::*;
 pub(crate) use locals::Locals;
+pub(crate) use merge::{resolved_types_differ, same_types};
 pub(crate) use proof_map::ProofMap;
 pub(crate) use proofs::*;
 pub(crate) use trie::AtomTrie;

@@ -12,7 +12,6 @@ use tower_lsp::lsp_types::{Location, Range};
 
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, VarDefKind};
 use crate::text_position::LineIndex;
-use crate::types::ClassInfo;
 
 impl Backend {
     /// Find all references to a variable within its enclosing scope.
@@ -160,13 +159,7 @@ impl Backend {
             }
         }
 
-        locations.sort_by(|a, b| {
-            a.range
-                .start
-                .line
-                .cmp(&b.range.start.line)
-                .then(a.range.start.character.cmp(&b.range.start.character))
-        });
+        sort_locations_for_references(&mut locations);
 
         locations
     }
@@ -246,9 +239,7 @@ impl Backend {
             // inside the scope) sees an outer variable only through `use`,
             // which the rule above already handled.
             for &(scope_start, _scope_end) in &symbol_map.scopes {
-                if reachable.contains(&scope_start)
-                    || !symbol_map.arrow_fn_scopes.contains(&scope_start)
-                {
+                if reachable.contains(&scope_start) || !symbol_map.is_arrow_fn_scope(scope_start) {
                     continue;
                 }
                 let parent = symbol_map.find_enclosing_scope(scope_start.saturating_sub(1));
@@ -288,15 +279,14 @@ impl Backend {
     /// regular variables, `$this` is **not** scoped to the enclosing
     /// method: `$this` in method A and `$this` in method B inside the
     /// same class both refer to the same object, so they should all
-    /// appear in the results.
+    /// appear in the results.  `$this` has no declaration site, so the
+    /// request's `includeDeclaration` does not apply.
     pub(super) fn find_this_references(
         &self,
         uri: &str,
         content: &str,
         cursor_offset: u32,
-        include_declaration: bool,
     ) -> Vec<Location> {
-        let _ = include_declaration; // $this has no "declaration site"
         let mut locations = Vec::new();
 
         let maps = self.symbol_maps.read();
@@ -306,14 +296,7 @@ impl Backend {
         };
 
         // Determine the class body the cursor is in.
-        let ctx_classes: Vec<Arc<ClassInfo>> = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let current_class = crate::class_lookup::find_class_at_offset(&ctx_classes, cursor_offset);
+        let current_class = self.class_at_offset(uri, cursor_offset);
         let (class_start, class_end) = match current_class {
             Some(cc) => (cc.start_offset, cc.end_offset),
             None => return locations,
@@ -349,13 +332,7 @@ impl Backend {
             }
         }
 
-        locations.sort_by(|a, b| {
-            a.range
-                .start
-                .line
-                .cmp(&b.range.start.line)
-                .then(a.range.start.character.cmp(&b.range.start.character))
-        });
+        sort_locations_for_references(&mut locations);
 
         locations
     }

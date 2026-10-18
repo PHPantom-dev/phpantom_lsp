@@ -249,27 +249,11 @@ fn static_class_of(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Option<Ar
     match expr {
         Expression::Parenthesized(inner) => static_class_of(inner.expression, ctx),
         Expression::Access(Access::ClassConstant(access)) => {
-            let ClassLikeConstantSelector::Identifier(constant) = &access.constant else {
-                return None;
-            };
-            if !bytes_to_str(constant.value).eq_ignore_ascii_case("class") {
+            if !crate::parser::is_class_fetch(access) {
                 return None;
             }
-            match access.class {
-                Expression::Self_(_) | Expression::Static(_) => {
-                    (ctx.class_loader)(&ctx.current_class.name)
-                }
-                Expression::Parent(_) => {
-                    let parent = ctx.current_class.parent_class.as_ref()?;
-                    (ctx.class_loader)(parent)
-                }
-                Expression::Identifier(ident) => {
-                    let name = bytes_to_str(ident.value());
-                    let fqn = crate::util::resolve_name_via_loader(name, ctx.class_loader);
-                    (ctx.class_loader)(&fqn).or_else(|| (ctx.class_loader)(name))
-                }
-                _ => None,
-            }
+            ctx.written_names()
+                .static_receiver_class(access.class, ctx.class_loader)
         }
         _ => string_literal_value(expr).and_then(|name| (ctx.class_loader)(&name)),
     }

@@ -1301,6 +1301,13 @@ pub async fn markup_hover_at(backend: &Backend, uri: &Url, line: u32, character:
         .unwrap_or_else(|| panic!("expected a hover at {line}:{character}"))
 }
 
+/// The hover a couple of characters into the first occurrence of `needle`
+/// in `content`, a document that is already open as `uri`.
+pub async fn hover_on(backend: &Backend, uri: &Url, content: &str, needle: &str) -> String {
+    let position = position_of(content, needle);
+    markup_hover_at(backend, uri, position.line, position.character + 2).await
+}
+
 /// The items among `items` whose kind is `kind`.
 pub fn items_of_kind(items: &[CompletionItem], kind: CompletionItemKind) -> Vec<&CompletionItem> {
     items.iter().filter(|i| i.kind == Some(kind)).collect()
@@ -1430,6 +1437,21 @@ pub fn definition_locations(response: Option<GotoDefinitionResponse>) -> Vec<Loc
             })
             .collect(),
     }
+}
+
+/// The go-to-definition targets a couple of characters into the first
+/// occurrence of `needle` in `content`, a document that is already open as
+/// `uri`.
+pub async fn definitions_at(
+    backend: &Backend,
+    uri: &Url,
+    content: &str,
+    needle: &str,
+) -> Vec<Location> {
+    let position = position_of(content, needle);
+    definition_locations(
+        goto_definition_at(backend, uri, position.line, position.character + 2).await,
+    )
 }
 
 /// The URI of the first target of a go-to-definition response.

@@ -1,0 +1,14 @@
+// test: a destructured variable no `@var` names still takes its element of the value
+// feature: hover
+// expect: list<int>
+---
+<?php
+
+/** @return array{list<int>, array<string, mixed>} */
+function cached(): array { return [[], []]; }
+
+function demo(): void {
+    /** @var array<string, string> $hashes */
+    [$ids, $hashes] = cached();
+    $<>ids;
+}

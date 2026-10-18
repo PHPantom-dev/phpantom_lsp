@@ -6,9 +6,13 @@
 //! 1. **Add `@phpstan-consistent-constructor`** to the class docblock
 //!    (preferred). Creates a new docblock if none exists.
 //! 2. **Add `final` to class** — insert `final` before the `class`
-//!    keyword on the class declaration line.
-//! 3. **Add `final` to constructor** — insert `final` before the
-//!    visibility modifier (or `function` keyword) on `__construct`.
+//!    keyword. Not offered for an abstract class.
+//! 3. **Add `final` to constructor** — insert `final` before the first
+//!    modifier (or `function` keyword) of `__construct`.
+//!
+//! The class is the innermost class-like declaration around the
+//! diagnostic in the parsed file; inside a trait, interface, enum or
+//! anonymous class no fix is offered.
 //!
 //! **Trigger:** A PHPStan diagnostic with identifier `new.static`
 //! overlaps the cursor.
@@ -22,14 +26,26 @@
 //! `edit`.  Phase 2 (`resolve_new_static`) computes the workspace edit
 //! on demand when the user picks an action.
 
+use mago_span::HasSpan;
+use mago_syntax::cst::ModifierSequenceExt;
+use mago_syntax::cst::Node;
+use mago_syntax::cst::class_like::member::ClassLikeMember;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::{CodeActionData, indent_of_line_at, make_code_action_data};
-use crate::text_position::{offset_to_position, ranges_overlap};
+use crate::atom::bytes_to_str;
+use crate::code_actions::cursor_context::innermost_at;
+use crate::code_actions::docblock_edit::ClassDocblock;
+use crate::code_actions::phpstan::phpstan_identifier;
+use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::text_position::{line_start_byte_offset, offset_to_position};
 
 /// The PHPStan identifier we match on.
 const NEW_STATIC_ID: &str = "new.static";
+
+/// The tag that tells PHPStan every subclass keeps the constructor's
+/// signature.
+const CONSISTENT_CONSTRUCTOR_TAG: &str = "@phpstan-consistent-constructor";
 
 /// The three sub-actions the user can pick.
 const ACTION_ADD_TAG: &str = "phpstan.newStatic.addTag";
@@ -51,19 +67,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if identifier != NEW_STATIC_ID {
@@ -79,11 +87,11 @@ impl Backend {
             // Check staleness: if the class is already final, the
             // constructor is already final, or the docblock already
             // contains `@phpstan-consistent-constructor`, skip.
-            if is_already_fixed(content, &class_info) {
+            if is_already_fixed(&class_info) {
                 continue;
             }
 
-            let class_name = class_info.class_name.as_deref().unwrap_or("class");
+            let class_name = &class_info.name;
 
             // ── Action 1: Add @phpstan-consistent-constructor (preferred) ──
             {
@@ -108,7 +116,8 @@ impl Backend {
             }
 
             // ── Action 2: Add `final` to class ─────────────────────────
-            {
+            // An abstract class cannot be final.
+            if !class_info.is_abstract {
                 let title = format!("Add final to class {}", class_name);
                 let extra = serde_json::json!({
                     "diagnostic_message": diag.message,
@@ -171,12 +180,12 @@ impl Backend {
 
         let class_info = find_enclosing_class(content, diag_line)?;
 
-        if is_already_fixed(content, &class_info) {
+        if is_already_fixed(&class_info) {
             return None;
         }
 
         let edits = match sub_action {
-            ACTION_ADD_TAG => build_add_tag_edit(content, &class_info),
+            ACTION_ADD_TAG => Some(build_add_tag_edit(content, &class_info)),
             ACTION_FINAL_CLASS => build_final_class_edit(content, &class_info),
             ACTION_FINAL_CONSTRUCTOR => build_final_constructor_edit(content, &class_info),
             _ => return None,
@@ -191,393 +200,100 @@ impl Backend {
 
 // ── Data structures ─────────────────────────────────────────────────────────
 
-/// Information about the enclosing class declaration.
-struct EnclosingClassInfo {
-    /// The class name, if we could extract it.
-    class_name: Option<String>,
+/// The class declaration a `new static()` is written in.
+struct EnclosingClass {
+    name: String,
 
-    /// Byte offset of the start of the line containing the `class`
-    /// keyword (or `abstract class`, `readonly class`, etc.).
-    class_line_start: usize,
+    /// Byte offset of the `class` keyword.
+    keyword_offset: usize,
 
-    /// Byte offset of the `class` keyword itself.
-    class_keyword_offset: usize,
-
-    /// Whether the class already has `abstract` modifier.
     is_abstract: bool,
 
-    /// Information about the existing class docblock, if any.
-    docblock: Option<ClassDocblock>,
+    is_final: bool,
 
-    /// Information about the constructor, if found.
-    constructor: Option<ConstructorInfo>,
+    /// Whether the class docblock already carries
+    /// `@phpstan-consistent-constructor`.
+    has_consistent_constructor_tag: bool,
+
+    /// The class docblock, or where a new one goes.
+    docblock: ClassDocblock,
+
+    /// The constructor the class declares, if any.
+    constructor: Option<Constructor>,
 }
 
-/// An existing docblock above the class declaration.
-struct ClassDocblock {
-    /// Byte offset of `/**`.
-    start: usize,
-    /// Byte offset just past `*/`.
-    end: usize,
-    /// The raw docblock text.
-    text: String,
-}
-
-/// Information about the `__construct` method in the class.
-struct ConstructorInfo {
-    /// Byte offset of the first token on the constructor declaration
-    /// line (the visibility modifier or `function` keyword).
+/// The `__construct` method a class declares.
+struct Constructor {
+    /// Byte offset of the declaration's first modifier, or of its
+    /// `function` keyword when it has none.
     decl_start: usize,
-    /// Whether `final` is already present on the constructor.
-    has_final: bool,
+    is_final: bool,
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Find the enclosing class declaration by walking backward from the
-/// diagnostic line.
+/// The class whose body holds the first non-blank character of
+/// `diag_line`.
 ///
-/// The `new static()` diagnostic always fires inside a method body.
-/// Since PHP classes can't be nested (except anonymous classes, which
-/// PHPStan treats differently), the most recent `class` keyword found
-/// scanning backward from the diagnostic is the enclosing class.
-fn find_enclosing_class(content: &str, diag_line: usize) -> Option<EnclosingClassInfo> {
-    let lines: Vec<&str> = content.lines().collect();
-    if diag_line >= lines.len() {
-        return None;
-    }
+/// `None` when the innermost class-like there is not a named class: a
+/// `new static()` in a trait is checked against the classes that use it,
+/// which the trait itself cannot fix, and an anonymous class, interface or
+/// enum is never the right one to edit either.
+fn find_enclosing_class(content: &str, diag_line: usize) -> Option<EnclosingClass> {
+    let line_start = line_start_byte_offset(content, diag_line);
+    let line = content.get(line_start..)?.lines().next()?;
+    let offset = line_start + line.find(|c: char| !c.is_whitespace())?;
 
-    // Convert the diagnostic line to a byte offset.
-    let diag_byte_offset: usize = lines.iter().take(diag_line).map(|l| l.len() + 1).sum();
-
-    let search_area = &content[..diag_byte_offset.min(content.len())];
-
-    // Find the last `class` keyword that looks like a class declaration.
-    // We scan backward for `class ` preceded by a valid context.
-    let class_kw_offset = find_class_keyword_before(search_area)?;
-
-    let class_line_start = content[..class_kw_offset]
-        .rfind('\n')
-        .map(|p| p + 1)
-        .unwrap_or(0);
-
-    // Extract the class name: the word immediately after `class `.
-    let after_class = &content[class_kw_offset + "class".len()..];
-    let class_name = after_class
-        .trim_start()
-        .split(|c: char| !c.is_alphanumeric() && c != '_')
-        .next()
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
-
-    let before_class = content[class_line_start..class_kw_offset].trim();
-    let is_abstract = before_class.split_whitespace().any(|w| w == "abstract");
-
-    let docblock = find_class_docblock(content, class_line_start);
-    let constructor = find_constructor(content, class_kw_offset);
-
-    Some(EnclosingClassInfo {
-        class_name,
-        class_line_start,
-        class_keyword_offset: class_kw_offset,
-        is_abstract,
-        docblock,
-        constructor,
-    })
-}
-
-/// Find the byte offset of the `class` keyword in a class declaration,
-/// searching backward from the end of `region`.
-///
-/// Skips anonymous classes (`new class`) and the `class` keyword inside
-/// `::class` expressions.
-fn find_class_keyword_before(region: &str) -> Option<usize> {
-    let target = "class";
-    let target_len = target.len();
-    let bytes = region.as_bytes();
-
-    let mut search_end = region.len();
-
-    loop {
-        // Find the last occurrence of "class" before search_end.
-        let haystack = &region[..search_end];
-        let pos = haystack.rfind(target)?;
-
-        // Verify it's a standalone keyword.
-        let before_ok = if pos == 0 {
-            true
-        } else {
-            let prev = bytes[pos - 1];
-            prev.is_ascii_whitespace() || prev == b'\n'
-        };
-
-        let after_pos = pos + target_len;
-        let after_ok = if after_pos >= bytes.len() {
-            true
-        } else {
-            let next = bytes[after_pos];
-            next.is_ascii_whitespace() || next == b'('
-        };
-
-        if before_ok && after_ok {
-            // Reject `::class` (class constant access).
-            if pos >= 2 && &region[pos - 2..pos] == "::" {
-                search_end = pos;
-                continue;
+    crate::parser::with_parsed_program(content, "find_enclosing_class", |program, content| {
+        let class = innermost_at(program, offset as u32, |node| match node {
+            Node::Class(class) => Some(Some(class)),
+            Node::AnonymousClass(_) | Node::Trait(_) | Node::Interface(_) | Node::Enum(_) => {
+                Some(None)
             }
+            _ => None,
+        })??;
 
-            // Reject `new class` (anonymous class).
-            let before_trimmed = region[..pos].trim_end();
-            if before_trimmed.ends_with("new") {
-                search_end = pos;
-                continue;
-            }
+        let has_consistent_constructor_tag =
+            crate::symbol_map::docblock::get_docblock_text_with_offset(
+                program.trivia.as_slice(),
+                content,
+                class,
+            )
+            .is_some_and(|(text, _)| text.contains(CONSISTENT_CONSTRUCTOR_TAG));
 
-            return Some(pos);
-        }
-
-        // Not a valid match, keep searching.
-        if pos == 0 {
-            return None;
-        }
-        search_end = pos;
-    }
-}
-
-/// Find the class-level docblock above the class declaration.
-///
-/// Walks backward from `class_line_start` past any attribute lines
-/// to find a `/** ... */` docblock.
-fn find_class_docblock(content: &str, class_line_start: usize) -> Option<ClassDocblock> {
-    // Find the content before the class line.
-    let before = content.get(..class_line_start)?;
-    let trimmed = before.trim_end();
-
-    // Walk backward past attribute lines (`#[...]`).
-    let mut check = trimmed;
-    loop {
-        let line_start = check.rfind('\n').map(|p| p + 1).unwrap_or(0);
-        let last_line = check[line_start..].trim();
-        if last_line.starts_with("#[") {
-            // This is an attribute line, skip it.
-            if line_start == 0 {
-                check = "";
-                break;
-            }
-            check = check[..line_start].trim_end();
-        } else {
-            break;
-        }
-    }
-
-    // Now check if the remaining content ends with `*/`.
-    let check = check.trim_end();
-    if !check.ends_with("*/") {
-        return None;
-    }
-
-    // Find the matching `/**`.
-    let doc_end = check.len();
-    let doc_start = check.rfind("/**")?;
-
-    let text = check[doc_start..doc_end].to_string();
-
-    Some(ClassDocblock {
-        start: doc_start,
-        end: doc_end,
-        text,
-    })
-}
-
-/// Find the `__construct` method within the class body starting from
-/// the class keyword offset.
-fn find_constructor(content: &str, class_kw_offset: usize) -> Option<ConstructorInfo> {
-    // Find the opening brace of the class body.
-    let after_class = &content[class_kw_offset..];
-    let open_brace_rel = after_class.find('{')?;
-    let body_start = class_kw_offset + open_brace_rel + 1;
-
-    // Search forward within the class body for `__construct`.
-    // We need to track brace depth to stay within the class body
-    // and not descend into method bodies.
-    let body = &content[body_start..];
-    let mut depth: i32 = 0;
-    let mut i = 0;
-    let body_bytes = body.as_bytes();
-
-    while i < body_bytes.len() {
-        match body_bytes[i] {
-            b'{' => depth += 1,
-            b'}' => {
-                if depth == 0 {
-                    // End of class body.
-                    break;
-                }
-                depth -= 1;
-            }
-            b'_' if depth == 0 => {
-                // Check for `__construct` at depth 0 (class member level).
-                let remaining = &body[i..];
-                if remaining.starts_with("__construct")
-                    && (i + "__construct".len() >= body.len()
-                        || !body_bytes[i + "__construct".len()].is_ascii_alphanumeric()
-                            && body_bytes[i + "__construct".len()] != b'_')
-                {
-                    // Found `__construct`.  Walk backward to find the
-                    // start of the declaration (modifiers, `function`).
-                    let construct_abs = body_start + i;
-                    return Some(build_constructor_info(content, construct_abs));
-                }
-            }
-            b'/' if depth == 0
-                // Skip string literals and comments to avoid false matches.
-                && i + 1 < body_bytes.len() =>
+        let constructor = class.members.iter().find_map(|member| match member {
+            ClassLikeMember::Method(method)
+                if method.name.value.eq_ignore_ascii_case(b"__construct") =>
             {
-                if body_bytes[i + 1] == b'/' {
-                    // Single-line comment: skip to end of line.
-                    while i < body_bytes.len() && body_bytes[i] != b'\n' {
-                        i += 1;
-                    }
-                    continue;
-                } else if body_bytes[i + 1] == b'*' {
-                    // Multi-line comment: skip to `*/`.
-                    i += 2;
-                    while i + 1 < body_bytes.len() {
-                        if body_bytes[i] == b'*' && body_bytes[i + 1] == b'/' {
-                            i += 2;
-                            break;
-                        }
-                        i += 1;
-                    }
-                    continue;
-                }
+                let first = method
+                    .modifiers
+                    .first()
+                    .map_or(method.function.span(), |modifier| modifier.span());
+                Some(Constructor {
+                    decl_start: first.start.offset as usize,
+                    is_final: method.modifiers.iter().any(|m| m.is_final()),
+                })
             }
-            b'\'' | b'"' if depth == 0 => {
-                // Skip string literals.
-                let quote = body_bytes[i];
-                i += 1;
-                while i < body_bytes.len() {
-                    if body_bytes[i] == b'\\' {
-                        i += 2;
-                        continue;
-                    }
-                    if body_bytes[i] == quote {
-                        break;
-                    }
-                    i += 1;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
+            _ => None,
+        });
 
-    None
+        Some(EnclosingClass {
+            name: bytes_to_str(class.name.value).to_string(),
+            keyword_offset: class.class.span.start.offset as usize,
+            is_abstract: class.modifiers.contains_abstract(),
+            is_final: class.modifiers.contains_final(),
+            has_consistent_constructor_tag,
+            docblock: ClassDocblock::of(program, content, class),
+            constructor,
+        })
+    })
 }
 
-/// Build a `ConstructorInfo` from the byte offset of `__construct`.
-fn build_constructor_info(content: &str, construct_offset: usize) -> ConstructorInfo {
-    // Walk backward from `__construct` to find `function`, then past
-    // modifiers to the start of the declaration line.
-    let before = &content[..construct_offset];
-    let trimmed = before.trim_end();
-
-    // There should be a `function` keyword right before `__construct`.
-    let func_end = trimmed.len();
-    let has_function = trimmed.ends_with("function");
-
-    let before_func = if has_function {
-        &trimmed[..func_end - "function".len()]
-    } else {
-        trimmed
-    };
-
-    let before_func_trimmed = before_func.trim_end();
-
-    // Check for modifiers before `function`.
-    let modifiers_text = {
-        let line_start = before_func_trimmed.rfind('\n').map(|p| p + 1).unwrap_or(0);
-        &before_func_trimmed[line_start..]
-    };
-
-    let has_final = modifiers_text.split_whitespace().any(|w| w == "final");
-
-    // Walk backward past attribute lines to find the true declaration start.
-    // The declaration start is the first line of attributes, modifiers,
-    // or the `function` keyword.
-    let func_kw_offset = if has_function {
-        func_end - "function".len()
-    } else {
-        construct_offset
-    };
-
-    // Find the line start of the last non-blank content before `function`.
-    let before_kw = &content[..func_kw_offset];
-    let modifier_line_start = before_kw.trim_end().rfind('\n').map(|p| p + 1).unwrap_or(0);
-
-    // `trim_end()` bridges past blank lines, so that line start can belong
-    // to text that has nothing to do with the constructor — the class's own
-    // `{` on its own line, or the `class Foo {` of a single-line class.
-    // Only treat the run before `function` as the declaration's modifiers
-    // when every word in it really is one; otherwise `function` itself is
-    // where the declaration starts.
-    let leading = &content[modifier_line_start..func_kw_offset];
-    let starts_at_modifier = !leading.trim().is_empty()
-        && leading
-            .split_whitespace()
-            .all(|w| METHOD_MODIFIERS.contains(&w));
-
-    let decl_start = if starts_at_modifier {
-        // Skip the line's indentation to land on the first modifier.
-        let first_non_ws = content[modifier_line_start..]
-            .find(|c: char| !c.is_whitespace())
-            .unwrap_or(0);
-        modifier_line_start + first_non_ws
-    } else {
-        func_kw_offset
-    };
-
-    ConstructorInfo {
-        decl_start,
-        has_final,
-    }
-}
-
-/// Modifier keywords that may precede `function` in a method declaration.
-/// `final` is included so an existing one is recognised as a modifier
-/// rather than as unrelated text.
-const METHOD_MODIFIERS: [&str; 6] = [
-    "public",
-    "protected",
-    "private",
-    "static",
-    "abstract",
-    "final",
-];
-
-/// Check if the diagnostic is already fixed (stale).
-fn is_already_fixed(content: &str, info: &EnclosingClassInfo) -> bool {
-    // 1. Class has `final` keyword.
-    let before_class = content[info.class_line_start..info.class_keyword_offset].trim();
-    if before_class.split_whitespace().any(|w| w == "final") {
-        return true;
-    }
-
-    // 2. Constructor has `final` keyword.
-    if let Some(ref ctor) = info.constructor
-        && ctor.has_final
-    {
-        return true;
-    }
-
-    // 3. Docblock contains `@phpstan-consistent-constructor`.
-    if let Some(ref doc) = info.docblock
-        && doc.text.contains("@phpstan-consistent-constructor")
-    {
-        return true;
-    }
-
-    false
+/// Whether one of the fixes is already in place.
+fn is_already_fixed(info: &EnclosingClass) -> bool {
+    info.is_final
+        || info.has_consistent_constructor_tag
+        || info.constructor.as_ref().is_some_and(|ctor| ctor.is_final)
 }
 
 /// Check if the diagnostic should be considered stale based on the
@@ -586,181 +302,48 @@ fn is_already_fixed(content: &str, info: &EnclosingClassInfo) -> bool {
 /// Called from `is_stale_phpstan_diagnostic` to eagerly clear the
 /// diagnostic after the user applies one of the fixes.
 pub(crate) fn is_new_static_stale(content: &str, diag_line: usize) -> bool {
-    let Some(class_info) = find_enclosing_class(content, diag_line) else {
-        return false;
-    };
-    is_already_fixed(content, &class_info)
+    find_enclosing_class(content, diag_line).is_some_and(|info| is_already_fixed(&info))
 }
 
 // ── Edit builders ───────────────────────────────────────────────────────────
 
-/// Build edits to add `@phpstan-consistent-constructor` to the class
-/// docblock.
-fn build_add_tag_edit(content: &str, info: &EnclosingClassInfo) -> Option<Vec<TextEdit>> {
-    let tag = "@phpstan-consistent-constructor";
-
-    if let Some(ref doc) = info.docblock {
-        // Insert the tag into the existing docblock.
-        // Find the position just before the closing `*/`.
-        let doc_content = &doc.text;
-        let closing = doc_content.rfind("*/")?;
-
-        // Determine the indentation from the docblock.
-        let indent = indent_of_line_at(content, doc.start);
-
-        let insert_offset = doc.start + closing;
-        let insert_pos = offset_to_position(content, insert_offset);
-
-        // Check if there's already content on the `*/` line.
-        let before_closing = &doc_content[..closing];
-        let needs_newline =
-            !before_closing.ends_with('\n') && !before_closing.trim_end().ends_with('*');
-
-        let new_text = if doc_content.contains('\n') {
-            // Multi-line docblock: add ` * @tag\n<indent> ` before `*/`.
-            if needs_newline {
-                format!("\n{} * {}\n{} ", indent, tag, indent)
-            } else {
-                format!("{} * {}\n{} ", indent, tag, indent)
-            }
-        } else {
-            // Single-line docblock like `/** @var Foo */`.
-            // Convert to multi-line.
-            // Replace the entire docblock.
-            let inner = doc_content
-                .trim_start_matches("/**")
-                .trim_end_matches("*/")
-                .trim();
-
-            let replacement = if inner.is_empty() {
-                format!("/**\n{} * {}\n{} */", indent, tag, indent)
-            } else {
-                format!(
-                    "/**\n{} * {}\n{} * {}\n{} */",
-                    indent, inner, indent, tag, indent
-                )
-            };
-
-            let start_pos = offset_to_position(content, doc.start);
-            let end_pos = offset_to_position(content, doc.end);
-
-            return Some(vec![TextEdit {
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                new_text: replacement,
-            }]);
-        };
-
-        Some(vec![TextEdit {
-            range: Range {
-                start: insert_pos,
-                end: insert_pos,
-            },
-            new_text,
-        }])
-    } else {
-        // No existing docblock — create a new one.
-        let indent = extract_line_indent(content, info.class_line_start);
-
-        let docblock = format!("/**\n{} * {}\n{} */\n{}", indent, tag, indent, indent);
-
-        // Insert before the class declaration line.  We need to find
-        // the true start of the line, accounting for attributes above.
-        let insert_offset = find_declaration_start_with_attrs(content, info.class_line_start);
-        let insert_pos = offset_to_position(content, insert_offset);
-
-        Some(vec![TextEdit {
-            range: Range {
-                start: insert_pos,
-                end: insert_pos,
-            },
-            new_text: docblock,
-        }])
-    }
+/// Build the edit that adds `@phpstan-consistent-constructor` to the class
+/// docblock, creating one when the class has none.
+fn build_add_tag_edit(content: &str, info: &EnclosingClass) -> Vec<TextEdit> {
+    vec![
+        info.docblock
+            .add_tag_edit(content, CONSISTENT_CONSTRUCTOR_TAG),
+    ]
 }
 
 /// Build edits to add `final` before the `class` keyword.
-fn build_final_class_edit(content: &str, info: &EnclosingClassInfo) -> Option<Vec<TextEdit>> {
+fn build_final_class_edit(content: &str, info: &EnclosingClass) -> Option<Vec<TextEdit>> {
     // Don't add `final` to an abstract class — that's a PHP error.
     if info.is_abstract {
         return None;
     }
-
-    let insert_pos = offset_to_position(content, info.class_keyword_offset);
-
-    Some(vec![TextEdit {
-        range: Range {
-            start: insert_pos,
-            end: insert_pos,
-        },
-        new_text: "final ".to_string(),
-    }])
+    Some(vec![insert_final_at(content, info.keyword_offset)])
 }
 
-/// Build edits to add `final` before the constructor's visibility
-/// modifier or `function` keyword.
-fn build_final_constructor_edit(content: &str, info: &EnclosingClassInfo) -> Option<Vec<TextEdit>> {
+/// Build edits to add `final` before the constructor's first modifier or
+/// `function` keyword.
+fn build_final_constructor_edit(content: &str, info: &EnclosingClass) -> Option<Vec<TextEdit>> {
     let ctor = info.constructor.as_ref()?;
-
-    if ctor.has_final {
+    if ctor.is_final {
         return None;
     }
+    Some(vec![insert_final_at(content, ctor.decl_start)])
+}
 
-    let insert_pos = offset_to_position(content, ctor.decl_start);
-
-    Some(vec![TextEdit {
+fn insert_final_at(content: &str, offset: usize) -> TextEdit {
+    let pos = offset_to_position(content, offset);
+    TextEdit {
         range: Range {
-            start: insert_pos,
-            end: insert_pos,
+            start: pos,
+            end: pos,
         },
         new_text: "final ".to_string(),
-    }])
-}
-
-// ── Utility helpers ─────────────────────────────────────────────────────────
-
-/// Extract the indentation of the line starting at `line_start`.
-fn extract_line_indent(content: &str, line_start: usize) -> String {
-    content[line_start..]
-        .chars()
-        .take_while(|c| c.is_whitespace() && *c != '\n')
-        .collect()
-}
-
-/// Walk backward from `class_line_start` past any attribute lines to
-/// find the true start of the class declaration (for docblock insertion).
-fn find_declaration_start_with_attrs(content: &str, class_line_start: usize) -> usize {
-    let lines: Vec<&str> = content[..class_line_start].lines().collect();
-
-    let mut target = class_line_start;
-    let mut idx = lines.len();
-
-    loop {
-        if idx == 0 {
-            break;
-        }
-        idx -= 1;
-        let trimmed = lines[idx].trim();
-        if trimmed.is_empty() {
-            break;
-        }
-        if trimmed.starts_with("#[") {
-            // Attribute line — include it.
-            target = content[..target]
-                .rfind('\n')
-                .map(|p| {
-                    // Find the start of this attribute line.
-                    content[..p].rfind('\n').map(|pp| pp + 1).unwrap_or(0)
-                })
-                .unwrap_or(0);
-        } else {
-            break;
-        }
     }
-
-    target
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -769,49 +352,17 @@ fn find_declaration_start_with_attrs(content: &str, class_line_start: usize) -> 
 mod tests {
     use super::*;
 
-    // ── find_class_keyword_before ───────────────────────────────────
-
-    #[test]
-    fn finds_simple_class() {
-        let src = "<?php\nclass Foo {\n";
-        let pos = find_class_keyword_before(src).unwrap();
-        assert_eq!(&src[pos..pos + 5], "class");
-    }
-
-    #[test]
-    fn finds_abstract_class() {
-        let src = "<?php\nabstract class Bar {\n";
-        let pos = find_class_keyword_before(src).unwrap();
-        assert_eq!(&src[pos..pos + 5], "class");
-    }
-
-    #[test]
-    fn skips_double_colon_class() {
-        let src = "<?php\n$x = Foo::class;\nclass Bar {\n";
-        let pos = find_class_keyword_before(src).unwrap();
-        // Should find `class Bar`, not `Foo::class`.
-        let after = &src[pos + 6..];
-        assert!(after.starts_with("Bar"));
-    }
-
-    #[test]
-    fn skips_anonymous_class() {
-        let src = "<?php\n$x = new class {};\nclass Baz {\n";
-        let pos = find_class_keyword_before(src).unwrap();
-        let after = &src[pos + 6..];
-        assert!(after.starts_with("Baz"));
-    }
-
-    #[test]
-    fn returns_none_when_no_class() {
-        let src = "<?php\nfunction foo() {}\n";
-        assert!(find_class_keyword_before(src).is_none());
-    }
-
-    #[test]
-    fn skips_only_double_colon_class() {
-        let src = "<?php\n$x = Foo::class;";
-        assert!(find_class_keyword_before(src).is_none());
+    /// Apply `edits` (non-overlapping) to `src`.
+    fn apply(src: &str, edits: &[TextEdit]) -> String {
+        let mut edits: Vec<&TextEdit> = edits.iter().collect();
+        edits.sort_by_key(|e| std::cmp::Reverse((e.range.start.line, e.range.start.character)));
+        let mut result = src.to_string();
+        for edit in edits {
+            let start = lsp_pos_to_byte(&result, &edit.range.start);
+            let end = lsp_pos_to_byte(&result, &edit.range.end);
+            result.replace_range(start..end, &edit.new_text);
+        }
+        result
     }
 
     // ── find_enclosing_class ────────────────────────────────────────
@@ -822,7 +373,7 @@ mod tests {
             "<?php\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
         // `new static()` is on line 3.
         let info = find_enclosing_class(src, 3).unwrap();
-        assert_eq!(info.class_name.as_deref(), Some("Foo"));
+        assert_eq!(info.name, "Foo");
         assert!(!info.is_abstract);
     }
 
@@ -830,8 +381,66 @@ mod tests {
     fn detects_abstract_class() {
         let src = "<?php\nabstract class Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 3).unwrap();
-        assert_eq!(info.class_name.as_deref(), Some("Foo"));
+        assert_eq!(info.name, "Foo");
         assert!(info.is_abstract);
+    }
+
+    #[test]
+    fn skips_class_constant_and_anonymous_class_before_the_class() {
+        let src = "<?php\n$x = Foo::class;\n$y = new class {};\nclass Baz {\n    public function bar() {\n        new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 5).unwrap();
+        assert_eq!(info.name, "Baz");
+    }
+
+    #[test]
+    fn none_outside_a_class() {
+        let src = "<?php\nfunction foo() {\n    new static();\n}\n";
+        assert!(find_enclosing_class(src, 2).is_none());
+    }
+
+    /// The word `class` in a comment or string inside the method is not
+    /// the declaration; the edits must land on the real `class` keyword.
+    #[test]
+    fn ignores_class_word_in_comment_and_string() {
+        let src = "<?php\nclass Foo {\n    public function bar() {\n        // the class is final\n        $s = 'class Nope';\n        return new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 5).unwrap();
+        assert_eq!(info.name, "Foo");
+
+        let edits = build_final_class_edit(src, &info).unwrap();
+        let result = apply(src, &edits);
+        assert!(result.contains("\nfinal class Foo {\n"));
+        assert!(result.contains("// the class is final\n"));
+        assert!(result.contains("'class Nope'"));
+
+        let edits = build_add_tag_edit(src, &info);
+        assert_eq!(
+            apply(src, &edits),
+            "<?php\n/**\n * @phpstan-consistent-constructor\n */\nclass Foo {\n    public function bar() {\n        // the class is final\n        $s = 'class Nope';\n        return new static();\n    }\n}\n",
+        );
+    }
+
+    /// A `new static()` in a trait must not reach back to a class declared
+    /// earlier in the file.
+    #[test]
+    fn trait_does_not_edit_preceding_class() {
+        let src = "<?php\nclass Foo {\n}\ntrait Bar {\n    public function make() {\n        return new static();\n    }\n}\n";
+        assert!(find_enclosing_class(src, 5).is_none());
+        assert!(!is_new_static_stale(src, 5));
+    }
+
+    /// A `new static()` in an anonymous class does not belong to the class
+    /// whose method creates it.
+    #[test]
+    fn anonymous_class_does_not_edit_outer_class() {
+        let src = "<?php\nclass Foo {\n    public function bar() {\n        return new class {\n            public function baz() {\n                return new static();\n            }\n        };\n    }\n}\n";
+        assert!(find_enclosing_class(src, 5).is_none());
+    }
+
+    #[test]
+    fn finds_class_after_earlier_class_in_file() {
+        let src = "<?php\nclass First {\n}\nclass Second {\n    public function bar() {\n        new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 5).unwrap();
+        assert_eq!(info.name, "Second");
     }
 
     #[test]
@@ -839,7 +448,7 @@ mod tests {
         let src = "<?php\nclass Foo {\n    public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 4).unwrap();
         assert!(info.constructor.is_some());
-        assert!(!info.constructor.as_ref().unwrap().has_final);
+        assert!(!info.constructor.as_ref().unwrap().is_final);
     }
 
     #[test]
@@ -847,7 +456,7 @@ mod tests {
         let src = "<?php\nclass Foo {\n    final public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 4).unwrap();
         assert!(info.constructor.is_some());
-        assert!(info.constructor.as_ref().unwrap().has_final);
+        assert!(info.constructor.as_ref().unwrap().is_final);
     }
 
     /// The insertion point for `final ` must land on the constructor, not
@@ -858,7 +467,7 @@ mod tests {
         let src = "<?php\nclass Foo\n{\n    function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 5).unwrap();
         let ctor = info.constructor.as_ref().unwrap();
-        assert!(!ctor.has_final);
+        assert!(!ctor.is_final);
         assert_eq!(&src[ctor.decl_start..ctor.decl_start + 8], "function");
     }
 
@@ -876,60 +485,41 @@ mod tests {
     fn constructor_start_skips_same_line_attribute() {
         let src = "<?php\nclass Foo\n{\n    #[Attr] public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 5).unwrap();
-        let ctor = info.constructor.as_ref().unwrap();
-        assert_eq!(&src[ctor.decl_start..ctor.decl_start + 8], "function");
+        let edits = build_final_constructor_edit(src, &info).unwrap();
+        assert!(
+            apply(src, &edits).contains("    #[Attr] final public function __construct() {}\n")
+        );
     }
 
-    // ── find_class_docblock ─────────────────────────────────────────
+    // ── class docblock ──────────────────────────────────────────────
 
     #[test]
     fn finds_existing_docblock() {
-        let src = "<?php\n/** Some doc */\nclass Foo {\n}\n";
-        let class_line_start = src.find("class").unwrap();
-        let line_start = src[..class_line_start]
-            .rfind('\n')
-            .map(|p| p + 1)
-            .unwrap_or(0);
-        let doc = find_class_docblock(src, line_start);
-        assert!(doc.is_some());
-        assert!(doc.unwrap().text.contains("Some doc"));
+        let src = "<?php\n/** Some doc */\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 4).unwrap();
+        assert!(info.docblock.docblock.unwrap().text.contains("Some doc"));
     }
 
     #[test]
     fn finds_multiline_docblock() {
-        let src = "<?php\n/**\n * Some doc\n */\nclass Foo {\n}\n";
-        let class_line_start = src.find("class").unwrap();
-        let line_start = src[..class_line_start]
-            .rfind('\n')
-            .map(|p| p + 1)
-            .unwrap_or(0);
-        let doc = find_class_docblock(src, line_start);
-        assert!(doc.is_some());
-        assert!(doc.unwrap().text.contains("Some doc"));
+        let src = "<?php\n/**\n * Some doc\n */\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 6).unwrap();
+        assert!(info.docblock.docblock.unwrap().text.contains("Some doc"));
     }
 
     #[test]
     fn no_docblock_when_none_present() {
-        let src = "<?php\nclass Foo {\n}\n";
-        let class_line_start = src.find("class").unwrap();
-        let line_start = src[..class_line_start]
-            .rfind('\n')
-            .map(|p| p + 1)
-            .unwrap_or(0);
-        let doc = find_class_docblock(src, line_start);
-        assert!(doc.is_none());
+        let src =
+            "<?php\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 3).unwrap();
+        assert!(info.docblock.docblock.is_none());
     }
 
     #[test]
     fn finds_docblock_with_attributes_between() {
-        let src = "<?php\n/**\n * Some doc\n */\n#[SomeAttr]\nclass Foo {\n}\n";
-        let class_line_start = {
-            let pos = src.find("class Foo").unwrap();
-            src[..pos].rfind('\n').map(|p| p + 1).unwrap_or(0)
-        };
-        let doc = find_class_docblock(src, class_line_start);
-        assert!(doc.is_some());
-        assert!(doc.unwrap().text.contains("Some doc"));
+        let src = "<?php\n/**\n * Some doc\n */\n#[SomeAttr]\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 7).unwrap();
+        assert!(info.docblock.docblock.unwrap().text.contains("Some doc"));
     }
 
     // ── is_already_fixed ────────────────────────────────────────────
@@ -938,28 +528,28 @@ mod tests {
     fn not_fixed_initially() {
         let src = "<?php\nclass Foo {\n    public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 4).unwrap();
-        assert!(!is_already_fixed(src, &info));
+        assert!(!is_already_fixed(&info));
     }
 
     #[test]
     fn fixed_when_class_is_final() {
         let src = "<?php\nfinal class Foo {\n    public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 4).unwrap();
-        assert!(is_already_fixed(src, &info));
+        assert!(is_already_fixed(&info));
     }
 
     #[test]
     fn fixed_when_constructor_is_final() {
         let src = "<?php\nclass Foo {\n    final public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 4).unwrap();
-        assert!(is_already_fixed(src, &info));
+        assert!(is_already_fixed(&info));
     }
 
     #[test]
     fn fixed_when_docblock_has_tag() {
         let src = "<?php\n/**\n * @phpstan-consistent-constructor\n */\nclass Foo {\n    public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 6).unwrap();
-        assert!(is_already_fixed(src, &info));
+        assert!(is_already_fixed(&info));
     }
 
     // ── is_new_static_stale ─────────────────────────────────────────
@@ -977,26 +567,32 @@ mod tests {
         assert!(!is_new_static_stale(src, 3));
     }
 
+    /// A final class earlier in the file says nothing about the class the
+    /// `new static()` is in.
+    #[test]
+    fn not_stale_because_of_an_earlier_final_class() {
+        let src = "<?php\nfinal class First {\n}\nclass Second {\n    public function bar() {\n        new static();\n    }\n}\n";
+        assert!(!is_new_static_stale(src, 5));
+    }
+
     // ── build_add_tag_edit ──────────────────────────────────────────
 
     #[test]
     fn adds_tag_to_existing_multiline_docblock() {
         let src = "<?php\n/**\n * Some class\n */\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 6).unwrap();
-        let edits = build_add_tag_edit(src, &info).unwrap();
+        let edits = build_add_tag_edit(src, &info);
         assert_eq!(edits.len(), 1);
-        assert!(
-            edits[0]
-                .new_text
-                .contains("@phpstan-consistent-constructor")
-        );
+        assert!(apply(src, &edits).starts_with(
+            "<?php\n/**\n * Some class\n * @phpstan-consistent-constructor\n */\nclass Foo {\n"
+        ));
     }
 
     #[test]
     fn adds_tag_to_single_line_docblock() {
         let src = "<?php\n/** Some class */\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 4).unwrap();
-        let edits = build_add_tag_edit(src, &info).unwrap();
+        let edits = build_add_tag_edit(src, &info);
         assert_eq!(edits.len(), 1);
         // Should convert to multi-line.
         let new = &edits[0].new_text;
@@ -1010,12 +606,32 @@ mod tests {
         let src =
             "<?php\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 3).unwrap();
-        let edits = build_add_tag_edit(src, &info).unwrap();
+        let edits = build_add_tag_edit(src, &info);
         assert_eq!(edits.len(), 1);
-        let new = &edits[0].new_text;
-        assert!(new.contains("/**\n"));
-        assert!(new.contains("@phpstan-consistent-constructor"));
-        assert!(new.contains("*/"));
+        assert!(
+            apply(src, &edits)
+                .starts_with("<?php\n/**\n * @phpstan-consistent-constructor\n */\nclass Foo {\n")
+        );
+    }
+
+    #[test]
+    fn add_tag_to_class_with_attributes() {
+        let src = "<?php\n#[SomeAttr]\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 4).unwrap();
+        let edits = build_add_tag_edit(src, &info);
+        assert!(apply(src, &edits).starts_with(
+            "<?php\n/**\n * @phpstan-consistent-constructor\n */\n#[SomeAttr]\nclass Foo {\n"
+        ));
+    }
+
+    #[test]
+    fn indented_class_keeps_indent() {
+        let src = "<?php\nnamespace App;\n\n    class Foo {\n        public function bar() {\n            new static();\n        }\n    }\n";
+        let info = find_enclosing_class(src, 5).unwrap();
+        let edits = build_add_tag_edit(src, &info);
+        assert!(apply(src, &edits).contains(
+            "\n    /**\n     * @phpstan-consistent-constructor\n     */\n    class Foo {\n"
+        ));
     }
 
     // ── build_final_class_edit ──────────────────────────────────────
@@ -1027,100 +643,14 @@ mod tests {
         let info = find_enclosing_class(src, 3).unwrap();
         let edits = build_final_class_edit(src, &info).unwrap();
         assert_eq!(edits.len(), 1);
-        assert_eq!(edits[0].new_text, "final ");
+        assert!(apply(src, &edits).contains("final class Foo"));
     }
 
     #[test]
     fn does_not_add_final_to_abstract_class() {
         let src = "<?php\nabstract class Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 3).unwrap();
-        let result = build_final_class_edit(src, &info);
-        assert!(result.is_none());
-    }
-
-    // ── build_final_constructor_edit ────────────────────────────────
-
-    #[test]
-    fn inserts_final_before_constructor() {
-        let src = "<?php\nclass Foo {\n    public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
-        let info = find_enclosing_class(src, 4).unwrap();
-        let edits = build_final_constructor_edit(src, &info).unwrap();
-        assert_eq!(edits.len(), 1);
-        assert_eq!(edits[0].new_text, "final ");
-    }
-
-    #[test]
-    fn no_edit_when_constructor_already_final() {
-        let src = "<?php\nclass Foo {\n    final public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
-        let info = find_enclosing_class(src, 4).unwrap();
-        let result = build_final_constructor_edit(src, &info);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn no_edit_when_no_constructor() {
-        let src =
-            "<?php\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
-        let info = find_enclosing_class(src, 3).unwrap();
-        let result = build_final_constructor_edit(src, &info);
-        assert!(result.is_none());
-    }
-
-    // ── Integration: collect + resolve ──────────────────────────────
-
-    #[test]
-    fn verify_add_tag_edit_result() {
-        let src = "<?php\n/**\n * My class\n */\nclass Foo {\n    public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
-        let info = find_enclosing_class(src, 7).unwrap();
-        let edits = build_add_tag_edit(src, &info).unwrap();
-        assert_eq!(edits.len(), 1);
-
-        // Apply the edit to verify the result.
-        let edit = &edits[0];
-        let start_offset = lsp_pos_to_byte(src, &edit.range.start);
-        let end_offset = lsp_pos_to_byte(src, &edit.range.end);
-        let mut result = String::new();
-        result.push_str(&src[..start_offset]);
-        result.push_str(&edit.new_text);
-        result.push_str(&src[end_offset..]);
-
-        assert!(result.contains("@phpstan-consistent-constructor"));
-        assert!(result.contains("My class"));
-    }
-
-    #[test]
-    fn verify_final_class_edit_result() {
-        let src =
-            "<?php\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
-        let info = find_enclosing_class(src, 3).unwrap();
-        let edits = build_final_class_edit(src, &info).unwrap();
-
-        let edit = &edits[0];
-        let start_offset = lsp_pos_to_byte(src, &edit.range.start);
-        let end_offset = lsp_pos_to_byte(src, &edit.range.end);
-        let mut result = String::new();
-        result.push_str(&src[..start_offset]);
-        result.push_str(&edit.new_text);
-        result.push_str(&src[end_offset..]);
-
-        assert!(result.contains("final class Foo"));
-    }
-
-    #[test]
-    fn verify_final_constructor_edit_result() {
-        let src = "<?php\nclass Foo {\n    public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
-        let info = find_enclosing_class(src, 4).unwrap();
-        let edits = build_final_constructor_edit(src, &info).unwrap();
-
-        let edit = &edits[0];
-        let start_offset = lsp_pos_to_byte(src, &edit.range.start);
-        let end_offset = lsp_pos_to_byte(src, &edit.range.end);
-        let mut result = String::new();
-        result.push_str(&src[..start_offset]);
-        result.push_str(&edit.new_text);
-        result.push_str(&src[end_offset..]);
-
-        assert!(result.contains("final public function __construct"));
+        assert!(build_final_class_edit(src, &info).is_none());
     }
 
     #[test]
@@ -1132,28 +662,34 @@ mod tests {
         assert_eq!(edits[0].new_text, "final ");
 
         // Verify the edit inserts before `class`, not before `readonly`.
-        let edit = &edits[0];
-        let start_offset = lsp_pos_to_byte(src, &edit.range.start);
+        let start_offset = lsp_pos_to_byte(src, &edits[0].range.start);
         assert_eq!(&src[start_offset..start_offset + 5], "class");
+    }
+
+    // ── build_final_constructor_edit ────────────────────────────────
+
+    #[test]
+    fn inserts_final_before_constructor() {
+        let src = "<?php\nclass Foo {\n    public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 4).unwrap();
+        let edits = build_final_constructor_edit(src, &info).unwrap();
+        assert_eq!(edits.len(), 1);
+        assert!(apply(src, &edits).contains("final public function __construct"));
+    }
+
+    #[test]
+    fn no_edit_when_constructor_already_final() {
+        let src = "<?php\nclass Foo {\n    final public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 4).unwrap();
+        assert!(build_final_constructor_edit(src, &info).is_none());
     }
 
     #[test]
     fn constructor_with_no_visibility() {
         let src = "<?php\nclass Foo {\n    function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 4).unwrap();
-        assert!(info.constructor.is_some());
         let edits = build_final_constructor_edit(src, &info).unwrap();
-        assert_eq!(edits[0].new_text, "final ");
-    }
-
-    #[test]
-    fn add_tag_to_class_with_attributes() {
-        let src = "<?php\n#[SomeAttr]\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
-        let info = find_enclosing_class(src, 3).unwrap();
-        let edits = build_add_tag_edit(src, &info).unwrap();
-        assert_eq!(edits.len(), 1);
-        let new = &edits[0].new_text;
-        assert!(new.contains("@phpstan-consistent-constructor"));
+        assert!(apply(src, &edits).contains("    final function __construct() {}\n"));
     }
 
     #[test]
@@ -1165,16 +701,6 @@ mod tests {
         assert!(build_final_constructor_edit(src, &info).is_none());
         // The collect phase guards on `class_info.constructor.is_some()`,
         // so the "Add final to constructor" action is never offered.
-    }
-
-    #[test]
-    fn indented_class_keeps_indent() {
-        let src = "<?php\nnamespace App;\n\n    class Foo {\n        public function bar() {\n            new static();\n        }\n    }\n";
-        let info = find_enclosing_class(src, 5).unwrap();
-        let edits = build_add_tag_edit(src, &info).unwrap();
-        let new = &edits[0].new_text;
-        // The docblock should have the same indent as the class.
-        assert!(new.contains("@phpstan-consistent-constructor"));
     }
 
     // ── Test helper ─────────────────────────────────────────────────

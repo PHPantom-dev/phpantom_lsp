@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use super::markers;
 use super::signature::{echo_delimiters, is_echo_start, matching_paren};
 use crate::text_scan::find;
 
@@ -299,16 +300,6 @@ pub enum CustomForm {
     /// The `@endadmin` of a `Blade::if()` family.
     End,
 }
-
-/// The marker call a custom directive lowers to.
-///
-/// Deliberately not the generic `blade_directive`: that marker's calls are
-/// counted in document order to pair a component tag's bound attributes with
-/// the expressions they pass (`super::component_tags`), so a directive
-/// emitting one would shift every pairing after it. Returning `bool` lets
-/// the same marker stand inside the condition a `Blade::if()` family
-/// compiles to.
-pub const CUSTOM_MARKER: &str = "blade_custom_directive";
 
 /// One name a template can write, and what the preprocessor does with it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1142,19 +1133,19 @@ pub fn translate_directive(directive: &str) -> String {
         "break" => "break;".to_string(),
         "default" => "default:".to_string(),
         "extends" | "extendsFirst" | "include" | "includeIf" | "includeWhen" | "includeUnless"
-        | "includeFirst" => "blade_view_directive".to_string(),
+        | "includeFirst" => markers::VIEW.to_string(),
         // `@component` renders its view from the data it is passed alone,
         // where the `@include` family hands the child `get_defined_vars()`,
         // so the unused-variable check must be able to tell them apart.
-        "component" | "componentFirst" => "blade_component_directive".to_string(),
+        "component" | "componentFirst" => markers::COMPONENT.to_string(),
         // `@each` renders its partial once per entry of a collection, with
         // only the item and the key in scope.  The arguments after the view
         // name therefore mean something entirely different from every other
         // render directive's data array, so it gets a marker of its own.
-        "each" => "blade_each_directive".to_string(),
+        "each" => markers::EACH.to_string(),
         "slot" | "props" | "aware" | "class" | "style" | "checked" | "selected" | "disabled"
         | "readonly" | "required" | "json" | "dump" | "js" | "vite" | "fonts" | "dd" => {
-            "blade_directive".to_string()
+            markers::DIRECTIVE.to_string()
         }
         // `@lang('key')` and `@choice('key', $n)` compile to
         // `app('translator')->get('key')` / `->choice('key', $n)`, so they
@@ -1184,8 +1175,8 @@ pub fn translate_directive(directive: &str) -> String {
         // sharing `blade_directive` with everything else: their first
         // argument is an ability name, and symbol extraction recognises it
         // by the callee it is passed to.
-        "can" | "cannot" | "canany" => "if (blade_can_directive".to_string(),
-        "elsecan" | "elsecannot" | "elsecanany" => "elseif (blade_can_directive".to_string(),
+        "can" | "cannot" | "canany" => format!("if ({}", markers::CAN),
+        "elsecan" | "elsecannot" | "elsecanany" => format!("elseif ({}", markers::CAN),
         "endsection" | "endpush" | "endprepend" | "endcomponent" | "endcomponentFirst"
         | "endslot" | "stop" | "show" | "append" | "overwrite" => "".to_string(),
         _ => format!("/* @{directive} */"),

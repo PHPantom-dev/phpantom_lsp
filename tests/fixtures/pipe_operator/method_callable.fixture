@@ -1,0 +1,20 @@
+// test: pipe into a method callable resolves to the method's return type
+// feature: completion
+// expect: getTimestamp(
+---
+<?php
+
+class Stamp {
+    public function getTimestamp(): int {}
+}
+
+class StampFactory {
+    public function fromString(string $input): Stamp {
+        return new Stamp();
+    }
+}
+
+$factory = new StampFactory();
+$result = 'now' |> $factory->fromString(...);
+
+$result-><>

@@ -11,8 +11,10 @@
 //! - `tag_kind`: Vendor-agnostic tag classification (`TagKind`), folding
 //!   `@psalm-`/`@phpstan-` prefixed tags together with their bare form.
 //! - `tags`: Core PHPDoc tag extraction (`@return`, `@var`, `@param`,
-//!   `@mixin`, `@deprecated`, `@phpstan-assert`, docblock text retrieval,
-//!   and type override logic).
+//!   `@mixin`, `@deprecated`, `@phpstan-assert`, docblock text retrieval).
+//! - `type_override`: Choosing between a docblock type and a native type
+//!   hint.
+//! - `lines`: Reading one docblock line as source text.
 //! - `templates`: Template, generics, and type alias tag extraction
 //!   (`@template`, `@extends`, `@implements`, `@use`, `@phpstan-type`,
 //!   `@phpstan-import-type`, and `class-string<T>` conditional synthesis).
@@ -24,10 +26,12 @@
 //! - `shapes`: Array shape and object shape parsing
 
 mod conditional;
+mod lines;
 pub(crate) mod parser;
 mod tag_kind;
 mod tags;
 pub(crate) mod templates;
+mod type_override;
 mod virtual_members;
 
 // Type sub-modules.
@@ -46,6 +50,7 @@ pub(crate) use tag_kind::tag_kind;
 pub use tag_kind::{TagKind, TagVendor};
 
 // Core tags
+pub(crate) use tags::merge_param_docblock_into_parameters;
 pub use tags::{
     declares_impure, declares_pure, extract_all_param_tags, extract_all_param_tags_from_info,
     extract_deprecation_message, extract_deprecation_message_from_info,
@@ -61,15 +66,19 @@ pub use tags::{
     extract_self_out_type_from_info, extract_throws_tags, extract_throws_tags_from_info,
     extract_type_assertions, extract_type_assertions_from_info, extract_var_type,
     extract_var_type_from_info, extract_var_type_with_name, extract_var_type_with_name_from_info,
-    find_enclosing_return_type, find_inline_var_docblock, find_iterable_raw_type_in_source,
-    find_var_raw_type_in_source, get_docblock_info_for_node, get_docblock_text_for_node,
-    has_deprecated_tag, has_deprecated_tag_from_info, resolve_effective_type_typed,
-    resolve_effective_type_with_template_bounds, sanitise_and_parse_docblock_type,
+    get_docblock_info_for_node, get_docblock_text_for_node, has_deprecated_tag,
+    has_deprecated_tag_from_info, sanitise_and_parse_docblock_type,
+};
+
+// Docblock vs. native type selection
+pub(crate) use type_override::is_compatible_refinement_typed;
+pub use type_override::{
+    resolve_effective_type_typed, resolve_effective_type_with_template_bounds,
     should_override_type_typed,
 };
-pub(crate) use tags::{
-    find_var_tag, is_compatible_refinement_typed, merge_param_docblock_into_parameters,
-};
+
+// Docblock lines as source text
+pub(crate) use lines::{find_var_tag, strip_docblock_line_delimiters};
 
 // Template / generics / type alias tags
 pub use templates::{

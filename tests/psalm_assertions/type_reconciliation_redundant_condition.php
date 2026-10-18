@@ -5,8 +5,8 @@
 
 // Test: ignoreIssueAndAssign
 namespace PsalmTest_type_reconciliation_redundant_condition_1 {
-    function foo(): stdClass {
-        return new stdClass;
+    function foo(): \stdClass {
+        return new \stdClass;
     }
 
     $b = null;

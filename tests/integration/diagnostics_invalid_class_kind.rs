@@ -559,4 +559,30 @@ function test(Foo|MyTrait $x) {}
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
         assert!(diags[0].message.contains("MyTrait"));
     }
+
+    /// A stored ancestor is the class it names, not whatever the checking
+    /// file imports under the same short name.
+    #[test]
+    fn catch_subclass_of_global_class_shadowed_by_import_no_diagnostic() {
+        let diags = collect(
+            r#"<?php
+namespace {
+    class BaseError extends \Exception {}
+}
+namespace Lib {
+    class BaseError {}
+}
+namespace App {
+    use Lib\BaseError;
+    class AppError extends \BaseError {}
+    function attempt(): void {
+        try {
+        } catch (AppError $e) {
+        }
+    }
+}
+"#,
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    }
 }

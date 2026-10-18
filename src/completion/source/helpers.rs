@@ -24,6 +24,9 @@ use std::sync::Arc;
 
 use crate::completion::source::code_context::CodeContext;
 use crate::php_type::{PhpType, TypeKind};
+use crate::text_scan::{
+    CodeOffsets, is_escaped, keyword_starts_at, split_top_level_arrow, split_top_level_commas,
+};
 use crate::types::{BracketSegment, ClassInfo};
 
 use crate::type_engine::resolver::ResolutionCtx;
@@ -74,17 +77,6 @@ pub(crate) fn enclosing_array_key_call<'a>(
         callee: callee.to_ascii_lowercase(),
         before_callee: before_callee.trim_end(),
     })
-}
-
-/// Whether the byte at `index` is preceded by an odd number of backslashes.
-fn is_escaped(bytes: &[u8], index: usize) -> bool {
-    let mut backslashes = 0;
-    let mut j = index;
-    while j > 0 && bytes[j - 1] == b'\\' {
-        backslashes += 1;
-        j -= 1;
-    }
-    backslashes % 2 == 1
 }
 
 /// The value of a call's first argument when it is a plain string literal,
@@ -138,7 +130,7 @@ pub(crate) fn trailing_class_name(s: &str) -> &str {
 /// signature without tripping over the modifier.  `static fn ($x) => …` is
 /// an ordinary closure literal; a caller that stops at the modifier reads
 /// it as "not a closure" and silently binds no template from it.
-fn closure_literal_parts(text: &str) -> Option<(bool, &str)> {
+pub(crate) fn closure_literal_parts(text: &str) -> Option<(bool, &str)> {
     let trimmed = text.trim();
     let trimmed = trimmed
         .strip_prefix("static")
@@ -243,139 +235,55 @@ pub(crate) fn infer_generator_type_from_closure_yields(text: &str) -> Option<Php
     let body_start = trimmed.find('{')?;
     let body = &trimmed[body_start + 1..];
 
-    // Scan for `yield` at any depth within the closure body,
-    // but skip nested function/closure definitions.
-    let mut depth = 0i32;
-    // When inside a nested `function` closure, holds the outer brace depth
-    // at which that closure was declared.  Yields/returns are ignored until
-    // `depth` returns to this level.  `None` while scanning the outer body.
-    let mut nested_fn_base: Option<i32> = None;
     let mut value_type: Option<PhpType> = None;
     let mut key_type: Option<PhpType> = None;
     let mut found_yield = false;
     let mut return_type: Option<PhpType> = None;
-    let bytes = body.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
 
-    while i < len {
-        let c = bytes[i];
-        match c {
-            b'{' => depth += 1,
-            b'}' => {
-                if depth == 0 {
-                    break; // end of closure body
-                }
-                depth -= 1;
-                if nested_fn_base.is_some_and(|base| depth <= base) {
-                    nested_fn_base = None;
-                }
-            }
-            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
-                // Skip line comments.
-                while i < len && bytes[i] != b'\n' {
-                    i += 1;
-                }
-                continue;
-            }
-            b'\'' | b'"' => {
-                // Skip string literals.
-                let quote = c;
-                i += 1;
-                while i < len && bytes[i] != quote {
-                    if bytes[i] == b'\\' {
-                        i += 1; // skip escaped char
-                    }
-                    i += 1;
-                }
-            }
-            // Detect nested `function` closures so yields inside them
-            // (which belong to a different generator) are ignored until
-            // brace depth returns to the declaration level.  Arrow `fn`
-            // closures are single-expression and cannot contain `yield`,
-            // so they need no special handling.
-            b'f' if nested_fn_base.is_none()
-                && body[i..].starts_with("function")
-                && body
-                    .as_bytes()
-                    .get(i + 8)
-                    .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_') =>
-            {
-                // Remember the depth at which the nested closure was
-                // declared; its `{`/`}` are counted normally by the
-                // braces arms, and we resume scanning once we return here.
-                nested_fn_base = Some(depth);
-            }
-            b'y' if nested_fn_base.is_none()
-                && body[i..].starts_with("yield")
-                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_')
-                && i + 5 < len
-                && !bytes[i + 5].is_ascii_alphanumeric()
-                && bytes[i + 5] != b'_' =>
-            {
+    for (keyword, after) in own_body_keywords(body) {
+        let rest = body[after..].trim_start();
+        match keyword {
+            BodyKeyword::Yield => {
                 found_yield = true;
-                let after_yield = body[i + 5..].trim_start();
-
-                // Skip `yield from` — that delegates to another iterator.
-                if after_yield.starts_with("from")
-                    && after_yield
-                        .as_bytes()
-                        .get(4)
-                        .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_')
-                {
-                    i += 5;
+                // `yield from` delegates to another iterator.
+                if keyword_starts_at(rest.as_bytes(), 0, b"from") {
                     continue;
                 }
-
-                // Check for `yield $key => $value` vs bare `yield $value`.
-                if let Some(semi_pos) = find_statement_end(after_yield) {
-                    let yield_expr = after_yield[..semi_pos].trim();
-                    if let Some(arrow_pos) = find_fat_arrow_outside_parens(yield_expr) {
-                        // yield $key => $value
-                        let key_text = yield_expr[..arrow_pos].trim();
-                        let val_text = yield_expr[arrow_pos + 2..].trim();
-                        if key_type.is_none() {
-                            key_type = infer_type_from_simple_expr(key_text);
-                        }
-                        if value_type.is_none() {
-                            value_type = infer_type_from_simple_expr(val_text);
-                        }
-                    } else {
-                        // bare yield $value — key is int
-                        if key_type.is_none() {
-                            key_type = Some(PhpType::int());
-                        }
-                        if value_type.is_none() {
-                            value_type = infer_type_from_simple_expr(yield_expr);
-                        }
+                let Some(end) = find_statement_end(rest) else {
+                    continue;
+                };
+                let yield_expr = rest[..end].trim();
+                let (key, value) = match split_top_level_arrow(yield_expr) {
+                    Some((key_text, value_text)) => {
+                        (infer_type_from_simple_expr(key_text), value_text)
                     }
+                    // A bare `yield $value` is keyed by position.
+                    None => (Some(PhpType::int()), yield_expr),
+                };
+                if key_type.is_none() {
+                    key_type = key;
+                }
+                if value_type.is_none() {
+                    value_type = infer_type_from_simple_expr(value);
                 }
             }
-            b'r' if nested_fn_base.is_none()
-                && body[i..].starts_with("return")
-                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_')
-                && i + 6 < len
-                && !bytes[i + 6].is_ascii_alphanumeric()
-                && bytes[i + 6] != b'_' =>
-            {
-                let after_return = body[i + 6..].trim_start();
-                if let Some(semi_pos) = find_statement_end(after_return) {
-                    let return_expr = after_return[..semi_pos].trim();
-                    let inferred = if return_expr.is_empty() {
-                        PhpType::void()
-                    } else {
-                        infer_type_from_simple_expr(return_expr).unwrap_or_else(PhpType::mixed)
-                    };
-                    return_type = Some(match return_type.take() {
-                        Some(existing) if existing.equivalent(&inferred) => existing,
-                        Some(existing) => PhpType::union(vec![existing, inferred]),
-                        None => inferred,
-                    });
-                }
+            BodyKeyword::Return => {
+                let Some(end) = find_statement_end(rest) else {
+                    continue;
+                };
+                let return_expr = rest[..end].trim();
+                let inferred = if return_expr.is_empty() {
+                    PhpType::void()
+                } else {
+                    infer_type_from_simple_expr(return_expr).unwrap_or_else(PhpType::mixed)
+                };
+                return_type = Some(match return_type.take() {
+                    Some(existing) if existing.equivalent(&inferred) => existing,
+                    Some(existing) => PhpType::union(vec![existing, inferred]),
+                    None => inferred,
+                });
             }
-            _ => {}
         }
-        i += 1;
     }
 
     if !found_yield {
@@ -430,103 +338,87 @@ pub(crate) fn extract_closure_body_expr_text(text: &str) -> Option<&str> {
     }
 }
 
-/// Find the first `return EXPR` at the closure body's own brace depth,
-/// skipping `return`s inside nested `function` closures.  Returns the
-/// expression text without the trailing `;`.
+/// Find the first `return EXPR` the closure body owns (see
+/// [`own_body_keywords`]).  Returns the expression text without the
+/// trailing `;`.
 fn find_first_return_expr(body: &str) -> Option<&str> {
+    let (_, after) =
+        own_body_keywords(body).find(|(keyword, _)| *keyword == BodyKeyword::Return)?;
+    let rest = body[after..].trim_start();
+    let expr = rest[..find_statement_end(rest)?].trim();
+    if expr.is_empty() { None } else { Some(expr) }
+}
+
+/// A statement keyword found by [`own_body_keywords`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BodyKeyword {
+    Yield,
+    Return,
+}
+
+/// The `yield` and `return` keywords a function body owns, each with the
+/// offset just past it, given the text just past the body's opening `{`.
+///
+/// Quotes and comments are skipped, and so is everything inside a nested
+/// `function` closure, whose keywords belong to it.  Arrow `fn` closures
+/// are single-expression and cannot hold either keyword.  The scan ends
+/// at the body's closing `}`.
+fn own_body_keywords(body: &str) -> impl Iterator<Item = (BodyKeyword, usize)> + '_ {
     let bytes = body.as_bytes();
-    let len = bytes.len();
-    let mut depth = 0i32;
-    // When inside a nested `function` closure, holds the brace depth at
-    // which it was declared; `return`s are ignored until we return there.
-    let mut nested_fn_base: Option<i32> = None;
-    let mut i = 0;
-
-    while i < len {
-        let c = bytes[i];
-        match c {
-            b'{' => depth += 1,
-            b'}' => {
-                if depth == 0 {
-                    break; // end of closure body
+    let mut offsets = CodeOffsets::new(bytes);
+    let mut depth = 0u32;
+    // While inside a nested `function` closure, the brace depth it was
+    // declared at; scanning for keywords resumes once the depth is back.
+    let mut nested_fn_base: Option<u32> = None;
+    let keyword_at = |i: usize, keyword: &[u8]| {
+        keyword_starts_at(bytes, i, keyword) && (i == 0 || bytes[i - 1] != b'$')
+    };
+    std::iter::from_fn(move || {
+        while let Some(i) = offsets.next() {
+            let found = match bytes[i] {
+                b'{' => {
+                    depth += 1;
+                    continue;
                 }
-                depth -= 1;
-                if nested_fn_base.is_some_and(|base| depth <= base) {
-                    nested_fn_base = None;
-                }
-            }
-            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
-                while i < len && bytes[i] != b'\n' {
-                    i += 1;
-                }
-                continue;
-            }
-            b'\'' | b'"' => {
-                let quote = c;
-                i += 1;
-                while i < len && bytes[i] != quote {
-                    if bytes[i] == b'\\' {
-                        i += 1;
+                b'}' => {
+                    depth = depth.checked_sub(1)?;
+                    if nested_fn_base.is_some_and(|base| depth <= base) {
+                        nested_fn_base = None;
                     }
-                    i += 1;
+                    continue;
                 }
-            }
-            b'f' if nested_fn_base.is_none()
-                && body[i..].starts_with("function")
-                && bytes
-                    .get(i + 8)
-                    .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_')
-                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_') =>
-            {
-                nested_fn_base = Some(depth);
-            }
-            b'r' if nested_fn_base.is_none()
-                && body[i..].starts_with("return")
-                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_')
-                && i + 6 < len
-                && !bytes[i + 6].is_ascii_alphanumeric()
-                && bytes[i + 6] != b'_' =>
-            {
-                let after_return = body[i + 6..].trim_start();
-                let semi = find_statement_end(after_return)?;
-                let expr = after_return[..semi].trim();
-                return if expr.is_empty() { None } else { Some(expr) };
-            }
-            _ => {}
+                _ if nested_fn_base.is_some() => continue,
+                b'f' if keyword_at(i, b"function") => {
+                    nested_fn_base = Some(depth);
+                    continue;
+                }
+                b'y' if keyword_at(i, b"yield") => (BodyKeyword::Yield, i + 5),
+                b'r' if keyword_at(i, b"return") => (BodyKeyword::Return, i + 6),
+                _ => continue,
+            };
+            offsets.skip_to(found.1);
+            return Some(found);
         }
-        i += 1;
-    }
-    None
+        None
+    })
+    .fuse()
 }
 
-/// Find the end of a statement (`;` or `}`) at brace/paren depth 0.
+/// Find the end of a statement: the first `;`, or the closer of an
+/// enclosing bracket, outside quotes, comments and nested brackets.
 fn find_statement_end(s: &str) -> Option<usize> {
-    let mut depth = 0i32;
-    for (i, c) in s.char_indices() {
-        match c {
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => {
-                if depth == 0 {
-                    return Some(i);
-                }
-                depth -= 1;
-            }
-            ';' if depth == 0 => return Some(i),
-            _ => {}
-        }
-    }
-    None
-}
-
-/// Find `=>` outside parentheses/brackets in a yield expression.
-fn find_fat_arrow_outside_parens(s: &str) -> Option<usize> {
-    let mut depth = 0i32;
     let bytes = s.as_bytes();
-    for i in 0..bytes.len().saturating_sub(1) {
+    let mut depth = 0u32;
+    for i in CodeOffsets::new(bytes) {
         match bytes[i] {
             b'(' | b'[' | b'{' => depth += 1,
-            b')' | b']' | b'}' => depth -= 1,
-            b'=' if depth == 0 && bytes[i + 1] == b'>' => return Some(i),
+            b')' | b']' | b'}' => {
+                let Some(outer) = depth.checked_sub(1) else {
+                    return Some(i);
+                };
+                depth = outer;
+            }
+            b';' if depth == 0 => return Some(i),
             _ => {}
         }
     }
@@ -621,9 +513,8 @@ pub(crate) fn extract_closure_params_from_text(
         return Some(vec![]);
     }
 
-    // Split by commas at depth 0 (respecting nested parens/generics).
     let mut result = Vec::new();
-    for param in split_params_at_depth_zero(params_text) {
+    for param in split_top_level_commas(params_text) {
         let param = param.trim();
         if param.is_empty() {
             continue;
@@ -664,27 +555,6 @@ pub(crate) fn extract_closure_params_from_text(
     }
 
     Some(result)
-}
-
-/// Split a parameter list string by commas at depth zero, respecting
-/// nested parentheses and angle brackets.
-fn split_params_at_depth_zero(text: &str) -> Vec<&str> {
-    let mut result = Vec::new();
-    let mut depth = 0i32;
-    let mut start = 0;
-    for (i, c) in text.char_indices() {
-        match c {
-            '(' | '<' | '[' => depth += 1,
-            ')' | '>' | ']' => depth -= 1,
-            ',' if depth == 0 => {
-                result.push(&text[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    result.push(&text[start..]);
-    result
 }
 
 /// Resolve the return type of a first-class callable expression, given
@@ -773,7 +643,8 @@ pub(crate) fn try_chained_array_access_with_candidates<'a>(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
-    let current_class_name = current_class.map(|c| c.name.as_str()).unwrap_or("");
+    let current_class_fqn = current_class.map(ClassInfo::fqn);
+    let current_class_name = current_class_fqn.as_deref().unwrap_or("");
 
     for candidate in candidates {
         if let Some(result) = walk_array_segments(
@@ -809,7 +680,7 @@ fn walk_array_segments(
     // `array{name: string, pen: Pen}`.  Without expansion the
     // segment walk would fail to extract shape values.
     let mut current = if let TypeKind::Named(_) = base_type.kind() {
-        if let Some(expanded) = crate::type_engine::type_resolution::resolve_type_alias_typed(
+        if let Some(expanded) = crate::type_engine::types::aliases::resolve_type_alias_typed(
             base_type,
             current_class_name,
             all_classes,
@@ -870,7 +741,7 @@ fn walk_array_segments(
 
         // After each segment, the resulting type might itself be an
         // alias (e.g. a shape value defined as another alias).
-        if let Some(expanded) = crate::type_engine::type_resolution::resolve_type_alias_typed(
+        if let Some(expanded) = crate::type_engine::types::aliases::resolve_type_alias_typed(
             &current,
             current_class_name,
             all_classes,
@@ -1144,6 +1015,37 @@ mod tests {
         let args = generator_args("function () { yield 1 => 'a'; }");
         assert_eq!(args[0], PhpType::int());
         assert_eq!(args[1], PhpType::string());
+    }
+
+    #[test]
+    fn yield_scan_skips_quotes_and_comments() {
+        // A `=>` inside the yielded string is not a key separator, and a
+        // `;` inside it does not end the statement.
+        let args = generator_args("function () { yield 'a => b; c'; }");
+        assert_eq!(args[0], PhpType::int());
+        assert_eq!(args[1], PhpType::string());
+
+        // `yield` in a `#` or block comment is not a yield.
+        assert_eq!(
+            infer_generator_type_from_closure_yields(
+                "function () {\n # yield 1;\n /* yield 2; */ return 1; }"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn yielded_arrow_function_is_not_a_keyed_yield() {
+        let args = generator_args("function () { yield fn($x) => $x; }");
+        assert_eq!(args[0], PhpType::int());
+    }
+
+    #[test]
+    fn param_default_with_comma_in_string_stays_one_param() {
+        assert_eq!(
+            extract_closure_param_type_from_text("fn(string $sep = ',', int $n) => 1", 1),
+            Some(PhpType::parse("int"))
+        );
     }
 
     #[test]

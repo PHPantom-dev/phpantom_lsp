@@ -9,7 +9,7 @@ namespace PsalmTest_generator_1 {
      * @param  int  $start
      * @param  int  $limit
      * @param  int  $step
-     * @return Generator<int>
+     * @return \Generator<int>
      */
     function xrange($start, $limit, $step = 1) {
         for ($i = $start; $i <= $limit; $i += $step) {
@@ -32,8 +32,8 @@ namespace PsalmTest_generator_1 {
 
 // Test: generatorReturnType
 namespace PsalmTest_generator_2 {
-    /** @return Generator<int, stdClass> */
-    function g():Generator { yield new stdClass; }
+    /** @return \Generator<int, \stdClass> */
+    function g():\Generator { yield new \stdClass; }
 
     $g = g();
 
@@ -43,36 +43,36 @@ namespace PsalmTest_generator_2 {
 // Test: generatorDelegation
 namespace PsalmTest_generator_3 {
     /**
-     * @return Generator<int, int, mixed, int>
+     * @return \Generator<int, int, mixed, int>
      */
-    function count_to_ten(): Generator {
+    function count_to_ten(): \Generator {
         yield 1;
         yield 2;
         yield from [3, 4];
-        yield from new ArrayIterator([5, 6]);
+        yield from new \ArrayIterator([5, 6]);
         yield from seven_eight();
         return yield from nine_ten();
     }
 
     /**
-     * @return Generator<int, int>
+     * @return \Generator<int, int>
      */
-    function seven_eight(): Generator {
+    function seven_eight(): \Generator {
         yield 7;
         yield from eight();
     }
 
     /**
-     * @return Generator<int,int>
+     * @return \Generator<int,int>
      */
-    function eight(): Generator {
+    function eight(): \Generator {
         yield 8;
     }
 
     /**
-     * @return Generator<int,int, mixed, int>
+     * @return \Generator<int,int, mixed, int>
      */
-    function nine_ten(): Generator {
+    function nine_ten(): \Generator {
         yield 9;
         return 10;
     }
@@ -90,14 +90,14 @@ namespace PsalmTest_generator_3 {
 // Test: fillTemplatesForIteratorFromGenerator
 namespace PsalmTest_generator_4 {
     /**
-     * @return Generator<int, string>
+     * @return \Generator<int, string>
      */
-    function generator(): Generator
+    function generator(): \Generator
     {
         yield "test";
     }
 
-    $iterator = new NoRewindIterator(generator());
+    $iterator = new \NoRewindIterator(generator());
 
     assertType('NoRewindIterator<int, string, Generator<int, string, mixed, mixed>>', $iterator);
 }

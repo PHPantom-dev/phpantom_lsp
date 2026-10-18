@@ -357,6 +357,9 @@ fn try_enter_closure_body<'b>(
     let mut closure_scope = ScopeState::new();
 
     seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());
+    if !invoked_immediately {
+        widen_by_ref_captures_by_later_writes(closure, &mut closure_scope, scope, ctx);
+    }
 
     // Seed with parameter types, using callable inference when available.
     let inferred = inferred_params.unwrap_or(&[]);

@@ -19803,6 +19803,42 @@ async fn test_loop_body_assignment_visible_inside_while() {
     }
 }
 
+/// Same scenario with a do-while loop, whose later iterations start from
+/// what the previous one assigned below the cursor.
+#[tokio::test]
+async fn test_loop_body_assignment_visible_inside_do_while() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///loop_carried_do_while_inside.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Record {\n",
+        "    public function save(): void {}\n",
+        "}\n",
+        "class Svc {\n",
+        "    public function run(): void {\n",
+        "        $prev = null;\n",
+        "        do {\n",
+        "            if ($prev !== null) {\n",
+        "                $prev->\n",
+        "            }\n",
+        "            $prev = new Record();\n",
+        "        } while (rand(0, 1));\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = crate::common::complete_at(&backend, &uri, text, 9, 23).await;
+    let names: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+    assert!(
+        names.contains(&"save"),
+        "Should include Record's save() from loop-carried assignment in do-while, got: {names:?}"
+    );
+}
+
 /// Same scenario with a for loop.
 #[tokio::test]
 async fn test_loop_body_assignment_visible_inside_for() {

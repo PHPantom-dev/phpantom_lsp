@@ -505,13 +505,13 @@ impl Backend {
                 // and NOT a class constant.  We check the uri_classes_index to see
                 // whether the offset matches a method or constant name.
                 let is_method = self
-                    .get_classes_for_uri(uri)
+                    .shared_classes_for_uri(uri)
                     .iter()
                     .flat_map(|classes| classes.iter())
                     .flat_map(|c| c.methods.iter())
                     .any(|m| m.name_offset != 0 && m.name_offset == span.start);
                 let is_constant = self
-                    .get_classes_for_uri(uri)
+                    .shared_classes_for_uri(uri)
                     .iter()
                     .flat_map(|classes| classes.iter())
                     .flat_map(|c| c.constants.iter())

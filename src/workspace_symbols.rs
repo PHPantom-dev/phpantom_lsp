@@ -118,7 +118,7 @@ fn match_tier(name: &str, query_lower: &str) -> Option<MatchTier> {
             Some(MatchTier::Exact)
         } else if ascii_starts_with_ignore_case(name, query_lower) {
             Some(MatchTier::Prefix)
-        } else if ascii_contains_ignore_case(name, query_lower) {
+        } else if crate::ci_map::contains_folded(name, query_lower) {
             Some(MatchTier::Substring)
         } else {
             None
@@ -146,20 +146,6 @@ fn ascii_eq_ignore_case(s: &str, lower: &str) -> bool {
 fn ascii_starts_with_ignore_case(s: &str, prefix_lower: &str) -> bool {
     s.len() >= prefix_lower.len()
         && s.as_bytes()[..prefix_lower.len()].eq_ignore_ascii_case(prefix_lower.as_bytes())
-}
-
-/// Case-insensitive substring check for ASCII strings, without allocating.
-fn ascii_contains_ignore_case(s: &str, needle_lower: &str) -> bool {
-    let s = s.as_bytes();
-    let needle = needle_lower.as_bytes();
-    if needle.is_empty() {
-        return true;
-    }
-    if s.len() < needle.len() {
-        return false;
-    }
-    s.windows(needle.len())
-        .any(|w| w.eq_ignore_ascii_case(needle))
 }
 
 /// Match tier for a property name, which the user may search for with or
@@ -653,12 +639,5 @@ mod tests {
     fn ascii_starts_with_ignore_case_matches() {
         assert!(ascii_starts_with_ignore_case("FooBar", "foo"));
         assert!(!ascii_starts_with_ignore_case("Foo", "foobar"));
-    }
-
-    #[test]
-    fn ascii_contains_ignore_case_matches() {
-        assert!(ascii_contains_ignore_case("MyFooBar", "foo"));
-        assert!(!ascii_contains_ignore_case("MyBar", "foo"));
-        assert!(ascii_contains_ignore_case("Anything", ""));
     }
 }

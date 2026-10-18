@@ -40,7 +40,10 @@ impl Backend {
     ///
     /// Only the most recent file is kept: if the user switches files or
     /// saves rapidly, earlier requests are superseded.
-    fn schedule_external_tool(tool: &crate::ExternalToolWorker, uri: String) {
+    fn schedule_external_tool(
+        tool: &crate::backend::external_tool_worker::ExternalToolWorker,
+        uri: String,
+    ) {
         *tool.pending_uri.lock() = Some(uri);
         tool.notify.notify_one();
     }
@@ -72,7 +75,7 @@ impl Backend {
     /// `label` names the tool in timeout and panic messages.
     async fn external_tool_worker(
         &self,
-        tool: &crate::ExternalToolWorker,
+        tool: &crate::backend::external_tool_worker::ExternalToolWorker,
         label: &'static str,
         prepare: impl Fn(&Config, &Path) -> Option<ExternalToolRun>,
     ) {

@@ -11,7 +11,7 @@ use crate::types::{ClassInfo, ResolvedType};
 use mago_syntax::cst::*;
 
 use super::super::conditional::extract_class_string_from_expr;
-use crate::type_engine::resolver::VarResolutionCtx;
+use crate::type_engine::resolver::{VarResolutionCtx, WrittenNames};
 
 use super::*;
 
@@ -39,7 +39,7 @@ pub(in crate::type_engine) fn apply_instanceof_inclusion(
     ty: &PhpType,
     exact: bool,
     ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ClassInfo>,
+    results: &mut Vec<Arc<ClassInfo>>,
 ) -> bool {
     include_resolved_classes(
         super::resolve::resolve_narrowing_target(ty, ctx),
@@ -54,9 +54,9 @@ fn include_resolved_classes(
     resolved: Vec<Arc<ClassInfo>>,
     exact: bool,
     ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ClassInfo>,
+    results: &mut Vec<Arc<ClassInfo>>,
 ) -> bool {
-    let narrowed: Vec<ClassInfo> = resolved.into_iter().map(Arc::unwrap_or_clone).collect();
+    let narrowed = resolved;
     if narrowed.is_empty() {
         // No class for the check to name, and a class list has no way to
         // hold one it cannot load.  Callers that track type strings go
@@ -70,7 +70,7 @@ fn include_resolved_classes(
     // if results = [Zoo] and we narrow to ZooBase, Zoo extends ZooBase
     // so Zoo is already more specific — keep it.
     if !exact {
-        let already_subtypes: Vec<ClassInfo> = results
+        let already_subtypes: Vec<Arc<ClassInfo>> = results
             .iter()
             .filter(|r| {
                 narrowed.iter().any(|n| {
@@ -133,7 +133,7 @@ fn include_resolved_classes(
     // replace with the narrowed type.
     results.clear();
     for cls in narrowed {
-        ClassInfo::push_unique(results, cls);
+        ClassInfo::push_unique_arc(results, cls);
     }
     true
 }
@@ -153,7 +153,7 @@ fn include_resolved_classes(
 pub(in crate::type_engine) fn apply_instanceof_exclusion(
     ty: &PhpType,
     ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ClassInfo>,
+    results: &mut Vec<Arc<ClassInfo>>,
 ) -> bool {
     exclude_resolved_classes(
         super::resolve::resolve_narrowing_target(ty, ctx),
@@ -166,9 +166,9 @@ pub(in crate::type_engine) fn apply_instanceof_exclusion(
 fn exclude_resolved_classes(
     resolved: Vec<Arc<ClassInfo>>,
     ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ClassInfo>,
+    results: &mut Vec<Arc<ClassInfo>>,
 ) -> bool {
-    let excluded: Vec<ClassInfo> = resolved.into_iter().map(Arc::unwrap_or_clone).collect();
+    let excluded = resolved;
     if !excluded.is_empty() {
         results.retain(|r| {
             !excluded.iter().any(|e| {
@@ -380,9 +380,12 @@ pub(in crate::type_engine) fn try_extract_dynamic_instanceof<'b>(
 pub(in crate::type_engine) fn try_extract_instanceof<'b>(
     expr: &'b Expression<'b>,
     var_name: &str,
+    names: &WrittenNames<'_>,
 ) -> Option<PhpType> {
     match expr {
-        Expression::Parenthesized(inner) => try_extract_instanceof(inner.expression, var_name),
+        Expression::Parenthesized(inner) => {
+            try_extract_instanceof(inner.expression, var_name, names)
+        }
         Expression::Binary(bin) if bin.operator.is_instanceof() => {
             // LHS must be our variable or property access
             let lhs_name = expr_to_subject_key(bin.lhs)?;
@@ -392,7 +395,7 @@ pub(in crate::type_engine) fn try_extract_instanceof<'b>(
             // RHS is the class name
             match bin.rhs {
                 Expression::Identifier(ident) => {
-                    Some(PhpType::named(atom(bytes_to_str(ident.value()))))
+                    Some(names.class_type(bytes_to_str(ident.value())))
                 }
                 Expression::Self_(_) => Some(PhpType::named(atom("self"))),
                 Expression::Static(_) => Some(PhpType::named(atom("static"))),
@@ -441,22 +444,23 @@ pub(in crate::type_engine) struct InstanceofExtraction {
 pub(in crate::type_engine) fn try_extract_instanceof_with_negation<'b>(
     expr: &'b Expression<'b>,
     var_name: &str,
+    names: &WrittenNames<'_>,
 ) -> Option<InstanceofExtraction> {
     match expr {
         Expression::Parenthesized(inner) => {
-            try_extract_instanceof_with_negation(inner.expression, var_name)
+            try_extract_instanceof_with_negation(inner.expression, var_name, names)
         }
         Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
             // `!expr` — recurse so that `!!expr` (double negation) and
             // deeper chains like `!!!expr` are handled correctly: each
             // `!` flips the negation flag.
-            try_extract_instanceof_with_negation(prefix.operand, var_name).map(|mut e| {
+            try_extract_instanceof_with_negation(prefix.operand, var_name, names).map(|mut e| {
                 e.negated = !e.negated;
                 e
             })
         }
         _ => {
-            try_extract_instanceof(expr, var_name)
+            try_extract_instanceof(expr, var_name, names)
                 .map(|cls_type| InstanceofExtraction {
                     class_type: cls_type,
                     negated: false,
@@ -465,7 +469,7 @@ pub(in crate::type_engine) fn try_extract_instanceof_with_negation<'b>(
                 })
                 .or_else(|| {
                     // `is_a($var, ClassName::class)` — equivalent to instanceof
-                    try_extract_is_a(expr, var_name).map(|(cls_type, allow_string)| {
+                    try_extract_is_a(expr, var_name, names).map(|(cls_type, allow_string)| {
                         InstanceofExtraction {
                             class_type: cls_type,
                             negated: false,
@@ -477,14 +481,14 @@ pub(in crate::type_engine) fn try_extract_instanceof_with_negation<'b>(
                 .or_else(|| {
                     // `get_class($var) === ClassName::class` or
                     // `$var::class === ClassName::class` — exact class match
-                    try_extract_class_identity_check(expr, var_name).map(|(cls_type, neg)| {
-                        InstanceofExtraction {
+                    try_extract_class_identity_check(expr, var_name, names).map(
+                        |(cls_type, neg)| InstanceofExtraction {
                             class_type: cls_type,
                             negated: neg,
                             exact: true,
                             allow_string: false,
-                        }
-                    })
+                        },
+                    )
                 })
         }
     }
@@ -497,7 +501,11 @@ pub(in crate::type_engine) fn try_extract_instanceof_with_negation<'b>(
 /// is literally `true`: `is_a($x, Foo::class, true)` also passes when `$x`
 /// is a `class-string<Foo>`, so a string alternative on the subject must
 /// survive the narrowing rather than being replaced by `Foo` alone.
-fn try_extract_is_a<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<(PhpType, bool)> {
+fn try_extract_is_a<'b>(
+    expr: &'b Expression<'b>,
+    var_name: &str,
+    names: &WrittenNames<'_>,
+) -> Option<(PhpType, bool)> {
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
         other => other,
@@ -528,8 +536,7 @@ fn try_extract_is_a<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<(Php
             Argument::Named(named) => named.value,
         };
         let allow_string = args.get(2).is_some_and(|arg| argument_value(arg).is_true());
-        extract_class_string_from_expr(second_expr)
-            .map(|n| (PhpType::named(atom(n.as_ref())), allow_string))
+        extract_class_string_from_expr(second_expr).map(|n| (names.class_type(&n), allow_string))
     } else {
         None
     }
@@ -577,6 +584,7 @@ pub(in crate::type_engine) fn argument_value<'b>(arg: &'b Argument<'b>) -> &'b E
 fn try_extract_class_identity_check<'b>(
     expr: &'b Expression<'b>,
     var_name: &str,
+    names: &WrittenNames<'_>,
 ) -> Option<(PhpType, bool)> {
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
@@ -590,10 +598,10 @@ fn try_extract_class_identity_check<'b>(
         };
         // Try both orders: class-check == ClassName::class and
         // ClassName::class == class-check
-        if let Some(cls) = match_class_identity_pair(bin.lhs, bin.rhs, var_name) {
+        if let Some(cls) = match_class_identity_pair(bin.lhs, bin.rhs, var_name, names) {
             return Some((cls, negated));
         }
-        if let Some(cls) = match_class_identity_pair(bin.rhs, bin.lhs, var_name) {
+        if let Some(cls) = match_class_identity_pair(bin.rhs, bin.lhs, var_name, names) {
             return Some((cls, negated));
         }
     }
@@ -609,11 +617,12 @@ fn match_class_identity_pair<'b>(
     lhs: &'b Expression<'b>,
     rhs: &'b Expression<'b>,
     var_name: &str,
+    names: &WrittenNames<'_>,
 ) -> Option<PhpType> {
     if class_identity_subject_key(lhs).as_deref() != Some(var_name) {
         return None;
     }
-    extract_class_string_from_expr(rhs).map(|n| PhpType::named(atom(n.as_ref())))
+    extract_class_string_from_expr(rhs).map(|n| names.class_type(&n))
 }
 
 /// The subject an expression asks the runtime class of, as a narrowing
@@ -644,16 +653,7 @@ pub(in crate::type_engine) fn class_identity_subject_key(expr: &Expression<'_>) 
                 Argument::Named(named) => named.value,
             })
         }
-        Expression::Access(Access::ClassConstant(cca)) => {
-            let ClassLikeConstantSelector::Identifier(ident) = &cca.constant else {
-                return None;
-            };
-            if ident.value != b"class" {
-                return None;
-            }
-            expr_to_subject_key(cca.class)
-        }
-        _ => None,
+        _ => expr_to_subject_key(crate::parser::class_fetch_target(expr)?),
     }
 }
 
@@ -671,16 +671,7 @@ pub(in crate::type_engine) fn match_class_subject_var<'b>(
         Expression::Parenthesized(inner) => inner.expression,
         other => other,
     };
-    let Expression::Access(Access::ClassConstant(cca)) = subject else {
-        return None;
-    };
-    let ClassLikeConstantSelector::Identifier(ident) = &cca.constant else {
-        return None;
-    };
-    if ident.value != b"class" {
-        return None;
-    }
-    match cca.class {
+    match crate::parser::class_fetch_target(subject)? {
         Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name)),
         _ => None,
     }
@@ -692,12 +683,13 @@ pub(in crate::type_engine) fn match_class_subject_var<'b>(
 /// an arm's conditions together describe a union.
 pub(in crate::type_engine) fn class_match_condition_class(
     condition: &Expression<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<PhpType> {
     let condition = match condition {
         Expression::Parenthesized(inner) => inner.expression,
         other => other,
     };
-    extract_class_string_from_expr(condition).map(|n| PhpType::named(atom(n.as_ref())))
+    extract_class_string_from_expr(condition).map(|n| names.class_type(&n))
 }
 
 // ── Compound instanceof helpers ─────────────────────────────────
@@ -707,13 +699,14 @@ pub(in crate::type_engine) fn class_match_condition_class(
 /// For `$x instanceof A || $x instanceof B || $x instanceof C`,
 /// returns `Some(["A", "B", "C"])`.  Returns `None` if the expression
 /// is not a chain of `||`-connected instanceof checks on `var_name`.
-pub(crate) fn try_extract_compound_or_instanceof<'b>(
+pub(in crate::type_engine) fn try_extract_compound_or_instanceof<'b>(
     expr: &'b Expression<'b>,
     var_name: &str,
+    names: &WrittenNames<'_>,
 ) -> Option<Vec<PhpType>> {
     match expr {
         Expression::Parenthesized(inner) => {
-            try_extract_compound_or_instanceof(inner.expression, var_name)
+            try_extract_compound_or_instanceof(inner.expression, var_name, names)
         }
         Expression::Binary(bin)
             if matches!(
@@ -722,7 +715,7 @@ pub(crate) fn try_extract_compound_or_instanceof<'b>(
             ) =>
         {
             let mut classes = Vec::new();
-            collect_or_instanceof_classes(expr, var_name, &mut classes);
+            collect_or_instanceof_classes(expr, var_name, names, &mut classes);
             if classes.is_empty() {
                 None
             } else {
@@ -738,11 +731,12 @@ pub(crate) fn try_extract_compound_or_instanceof<'b>(
 fn collect_or_instanceof_classes<'b>(
     expr: &'b Expression<'b>,
     var_name: &str,
+    names: &WrittenNames<'_>,
     out: &mut Vec<PhpType>,
 ) {
     match expr {
         Expression::Parenthesized(inner) => {
-            collect_or_instanceof_classes(inner.expression, var_name, out);
+            collect_or_instanceof_classes(inner.expression, var_name, names, out);
         }
         Expression::Binary(bin)
             if matches!(
@@ -750,11 +744,11 @@ fn collect_or_instanceof_classes<'b>(
                 BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
             ) =>
         {
-            collect_or_instanceof_classes(bin.lhs, var_name, out);
-            collect_or_instanceof_classes(bin.rhs, var_name, out);
+            collect_or_instanceof_classes(bin.lhs, var_name, names, out);
+            collect_or_instanceof_classes(bin.rhs, var_name, names, out);
         }
         _ => {
-            if let Some(cls_type) = try_extract_instanceof(expr, var_name)
+            if let Some(cls_type) = try_extract_instanceof(expr, var_name, names)
                 && !out.contains(&cls_type)
             {
                 out.push(cls_type);

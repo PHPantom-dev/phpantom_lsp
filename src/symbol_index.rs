@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use parking_lot::RwLock;
 
 use crate::ci_map::{CiMap, CiSet};
-use crate::types::{ClassInfo, DefineInfo, FunctionInfo, MethodStore};
+use crate::types::{ClassInfo, DefineInfo, FunctionInfo};
 use crate::{ClassCompletionOrigin, UriGlobals};
 
 /// Every declaration of the names that more than one file declares, keyed
@@ -77,8 +77,6 @@ pub(crate) struct SymbolIndex {
     /// the name and cleared wholesale whenever the indexes grow, the
     /// same lifecycle `class_not_found_cache` follows.
     pub(crate) function_not_found_cache: Arc<RwLock<CiSet>>,
-    /// Global method store: `(class_fqn, method_name)` → `Arc<MethodInfo>`.
-    pub(crate) method_store: MethodStore,
     /// Reverse inheritance index: parent FQN → list of child FQNs.
     pub(crate) gti_index: Arc<RwLock<HashMap<String, Vec<String>>>>,
     /// The same inheritance edges the other way round: child FQN → the
@@ -132,10 +130,32 @@ impl SymbolIndex {
             duplicate_classes: Arc::new(RwLock::new(CiMap::new())),
             class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             function_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
-            method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
             gti_parents_index: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Drop the completion origin of every class, function and constant
+    /// the discovery indexes no longer hold.  The origin maps are only
+    /// ever written beside those indexes, so a vendor rescan or a deleted
+    /// file that purges an entry would otherwise leave its origin behind.
+    pub(crate) fn prune_orphaned_origins(&self) {
+        {
+            let idx = self.fqn_uri_index.read();
+            self.fqn_origin_index
+                .write()
+                .retain(|fqn, _| idx.contains_key(fqn));
+        }
+        {
+            let idx = self.autoload_function_index.read();
+            self.autoload_function_origin_index
+                .write()
+                .retain(|fqn, _| idx.contains_key(fqn));
+        }
+        let idx = self.autoload_constant_index.read();
+        self.autoload_constant_origin_index
+            .write()
+            .retain(|name, _| idx.contains_key(name));
     }
 
     pub(crate) fn function_index_generation(&self) -> u64 {
@@ -198,6 +218,84 @@ impl SymbolIndex {
             classes: &mut classes,
             dupes: &mut dupes,
         })
+    }
+}
+
+impl SymbolIndex {
+    /// Record the inheritance edges of `classes` in the GTI
+    /// (go-to-implementation) reverse inheritance index.  For each class,
+    /// inserts the class's FQN into the child list of every parent
+    /// (parent_class, interfaces, used_traits), and records the same edges
+    /// under the class itself in `gti_parents_index` so they can be
+    /// withdrawn again without searching for them.
+    pub(crate) fn index_inheritance(&self, classes: &[Arc<ClassInfo>]) {
+        let mut gti = self.gti_index.write();
+        let mut parents_index = self.gti_parents_index.write();
+        for cls in classes {
+            if cls.name.starts_with("__anonymous@") {
+                continue;
+            }
+            if cls.parent_class.is_none() && cls.interfaces.is_empty() && cls.used_traits.is_empty()
+            {
+                continue;
+            }
+
+            let child_fqn = cls.fqn().to_string();
+            let registered = parents_index.entry(child_fqn.clone()).or_default();
+
+            for parent in cls
+                .parent_class
+                .iter()
+                .chain(cls.interfaces.iter())
+                .chain(cls.used_traits.iter())
+            {
+                let parent_fqn: &str = parent;
+                // The edge is deduplicated against the child's own parents,
+                // a list as long as its `extends`/`implements`/`use`
+                // clauses, rather than against the parent's child list,
+                // which grows with the number of implementors.
+                if registered.iter().any(|p| p == parent_fqn) {
+                    continue;
+                }
+                registered.push(parent_fqn.to_string());
+                match gti.get_mut(parent_fqn) {
+                    Some(children) => children.push(child_fqn.clone()),
+                    None => {
+                        gti.insert(parent_fqn.to_string(), vec![child_fqn.clone()]);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Withdraw what [`index_inheritance`](Self::index_inheritance)
+    /// recorded for the classes named `fqns`, before they are re-indexed or
+    /// dropped: every GTI entry where one of them appears as a child.
+    ///
+    /// Only the parents each class was registered under are touched, so the
+    /// cost is the size of the re-parsed file's inheritance clauses rather
+    /// than the size of the workspace.
+    pub(crate) fn withdraw_inheritance(&self, fqns: &[String]) {
+        if fqns.is_empty() {
+            return;
+        }
+        let mut gti = self.gti_index.write();
+        let mut parents_index = self.gti_parents_index.write();
+        for fqn in fqns {
+            let Some(parents) = parents_index.remove(fqn.as_str()) else {
+                continue;
+            };
+            for parent in parents {
+                let Some(children) = gti.get_mut(&parent) else {
+                    continue;
+                };
+                children.retain(|child| child != fqn);
+                // Remove empty entries to avoid unbounded growth.
+                if children.is_empty() {
+                    gti.remove(&parent);
+                }
+            }
+        }
     }
 }
 
@@ -305,7 +403,7 @@ impl ClassDeclarations<'_> {
     ///
     /// Returns the names that no file declares any more and the names that
     /// changed hands, so the caller can refresh the indexes derived from
-    /// them (`method_store`, `gti_index`).
+    /// them (`gti_index`).
     pub(crate) fn withdraw_uris(&mut self, uris: &HashSet<String>) -> WithdrawnClasses {
         let affected: Vec<String> = self
             .dupes
@@ -372,7 +470,7 @@ impl ClassDeclarations<'_> {
 }
 
 /// What [`ClassDeclarations::declare`] did, for refreshing the indexes
-/// derived from the class index (`method_store`, `gti_index`).
+/// derived from the class index (`gti_index`).
 pub(crate) struct Declared {
     /// Whether the new declaration is the one now serving lookups, or a
     /// lower-sorting file's declaration of the same name still is.

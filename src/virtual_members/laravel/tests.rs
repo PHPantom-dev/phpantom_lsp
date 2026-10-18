@@ -4,7 +4,8 @@ use crate::php_type::PhpType;
 use crate::test_fixtures::{
     make_class, make_method, make_method_with_params, make_param, no_loader,
 };
-use crate::types::{MethodInfo, PropertySource, Visibility};
+use crate::types::{ClassInfo, ELOQUENT_COLLECTION_FQN, MethodInfo, PropertySource, Visibility};
+use crate::virtual_members::VirtualMemberProvider;
 use crate::virtual_members::laravel::database_schema::{SchemaIndex, parse_schema_dump};
 use std::sync::Arc;
 

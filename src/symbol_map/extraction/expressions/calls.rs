@@ -10,41 +10,7 @@ pub(super) fn extract_instantiation_expr<'a>(
     scope_start: u32,
 ) {
     emit_keyword(&inst.new, ctx);
-    match inst.class {
-        Expression::Identifier(ident) => {
-            let raw = bytes_to_str(ident.value()).to_string();
-            ctx.spans.push(class_ref_span_ctx(
-                ident.span().start.offset,
-                ident.span().end.offset,
-                &raw,
-                ClassRefContext::New,
-            ));
-        }
-        Expression::Self_(kw) => {
-            ctx.spans.push(SymbolSpan {
-                start: kw.span.start.offset,
-                end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Self_),
-            });
-        }
-        Expression::Static(kw) => {
-            ctx.spans.push(SymbolSpan {
-                start: kw.span.start.offset,
-                end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Static),
-            });
-        }
-        Expression::Parent(kw) => {
-            ctx.spans.push(SymbolSpan {
-                start: kw.span.start.offset,
-                end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Parent),
-            });
-        }
-        _ => {
-            extract_from_expression(inst.class, ctx, scope_start);
-        }
-    }
+    emit_class_expr_span(inst.class, ClassRefContext::New, ctx, scope_start);
     if let Some(ref args) = inst.argument_list {
         let class_text = expr_to_subject_text(inst.class);
         // A mailable's `content()` returns
@@ -113,14 +79,13 @@ fn extract_property_hook_call<'a>(
         return false;
     };
 
-    let class_span = property_access.class.span();
-    let subject_text = SubjectText::new(
-        expr_to_subject_text(property_access.class),
-        class_span.start.offset,
-        class_span.end.offset,
-        ctx.content,
+    let subject_text = subject_text_of(property_access.class, ctx.content);
+    emit_class_expr_span(
+        property_access.class,
+        ClassRefContext::Other,
+        ctx,
+        scope_start,
     );
-    emit_class_expr_span(property_access.class, ctx, scope_start);
 
     let property_name = {
         let s = bytes_to_str(variable.name);
@@ -270,843 +235,298 @@ fn extract_call<'a>(
 ) {
     record_morph_column_call(call, ctx.content, &mut ctx.morph_column_sites);
     match call {
-        Call::Function(func_call) => {
-            match func_call.function {
-                Expression::Identifier(ident) => {
-                    let raw = bytes_to_str(ident.value());
-                    let name_clean = strip_fqn_prefix(raw);
-                    if name_clean.eq_ignore_ascii_case("compact") {
-                        try_emit_compact_string_spans(
-                            &func_call.argument_list,
-                            ctx.content,
-                            &mut ctx.spans,
-                        );
-                    }
-                    if name_clean.eq_ignore_ascii_case("define") {
-                        try_emit_constant_name_span(
-                            &func_call.argument_list,
-                            ctx.content,
-                            true,
-                            &mut ctx.spans,
-                        );
-                    } else if name_clean.eq_ignore_ascii_case("defined")
-                        || name_clean.eq_ignore_ascii_case("constant")
-                    {
-                        try_emit_constant_name_span(
-                            &func_call.argument_list,
-                            ctx.content,
-                            false,
-                            &mut ctx.spans,
-                        );
-                    }
-                    ctx.spans.push(SymbolSpan {
-                        start: ident.span().start.offset,
-                        end: ident.span().end.offset,
-                        kind: SymbolKind::FunctionCall {
-                            name: crate::atom::atom(name_clean),
-                            is_definition: false,
-                            is_docblock_reference: false,
-                        },
-                    });
-                    // `@includeFirst` and its `@componentFirst` /
-                    // `@extendsFirst` siblings put their candidates in an
-                    // array literal, so the compiled directive names several
-                    // templates at once.
-                    if name_clean.eq_ignore_ascii_case("blade_view_directive")
-                        || name_clean.eq_ignore_ascii_case("blade_component_directive")
-                    {
-                        try_emit_laravel_view_span_at(
-                            0,
-                            &func_call.argument_list,
-                            ctx.content,
-                            &mut ctx.spans,
-                        );
-                    }
-                    // `@yield`/`@section`/`@stack`/`@push` and their
-                    // helpers lower to markers of their own, so the
-                    // section or stack they name is extracted here.
-                    try_emit_blade_block_span(
-                        name_clean,
+        Call::Function(func_call) => extract_function_call(func_call, ctx, scope_start),
+        Call::Method(method_call) => extract_method_call(
+            method_call.object,
+            &method_call.method,
+            &method_call.argument_list,
+            false,
+            ctx,
+            scope_start,
+            visit_receiver,
+        ),
+        Call::NullSafeMethod(method_call) => extract_method_call(
+            method_call.object,
+            &method_call.method,
+            &method_call.argument_list,
+            true,
+            ctx,
+            scope_start,
+            visit_receiver,
+        ),
+        Call::StaticMethod(static_call) => {
+            extract_static_method_call(static_call, ctx, scope_start)
+        }
+    }
+}
+
+fn extract_function_call<'a>(
+    func_call: &'a FunctionCall<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+) {
+    match func_call.function {
+        Expression::Identifier(ident) => {
+            let raw = bytes_to_str(ident.value());
+            let name_clean = strip_fqn_prefix(raw);
+            if name_clean.eq_ignore_ascii_case("compact") {
+                try_emit_compact_string_spans(
+                    &func_call.argument_list,
+                    ctx.content,
+                    &mut ctx.spans,
+                );
+            }
+            if name_clean.eq_ignore_ascii_case("define") {
+                try_emit_constant_name_span(
+                    &func_call.argument_list,
+                    ctx.content,
+                    true,
+                    &mut ctx.spans,
+                );
+            } else if name_clean.eq_ignore_ascii_case("defined")
+                || name_clean.eq_ignore_ascii_case("constant")
+            {
+                try_emit_constant_name_span(
+                    &func_call.argument_list,
+                    ctx.content,
+                    false,
+                    &mut ctx.spans,
+                );
+            }
+            ctx.spans.push(SymbolSpan {
+                start: ident.span().start.offset,
+                end: ident.span().end.offset,
+                kind: SymbolKind::FunctionCall {
+                    name: crate::atom::atom(name_clean),
+                    is_definition: false,
+                    is_docblock_reference: false,
+                },
+            });
+            // `@yield`/`@section`/`@stack`/`@push` and their
+            // helpers lower to markers of their own, so the
+            // section or stack they name is extracted here.
+            try_emit_blade_block_span(
+                name_clean,
+                &func_call.argument_list,
+                ctx.content,
+                &mut ctx.spans,
+            );
+            match helper_function_first_arg_kind(name_clean) {
+                // The `config()` helper both reads and writes.
+                Some(crate::symbol_map::LaravelStringKind::Config) => {
+                    try_emit_laravel_config_helper_spans(
                         &func_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,
                     );
-                    // Detect Laravel helper calls and emit a
-                    // LaravelStringKey span for the first string arg.
-                    // Uses if-else to short-circuit (most function calls
-                    // won't match) and avoids to_ascii_lowercase() heap
-                    // allocations.
-                    // The `config()` helper is the one that both reads and
-                    // writes, so it takes a path of its own rather than the
-                    // read-only mapping below.
-                    if name_clean.eq_ignore_ascii_case("config") {
-                        try_emit_laravel_config_helper_spans(
-                            &func_call.argument_list,
-                            ctx.content,
-                            &mut ctx.spans,
-                        );
-                    }
-                    let laravel_kind = if name_clean.eq_ignore_ascii_case("view")
-                        || name_clean.eq_ignore_ascii_case("blade_each_directive")
-                    {
-                        Some(crate::symbol_map::LaravelStringKind::View)
-                    } else if name_clean.eq_ignore_ascii_case("route")
-                        || name_clean.eq_ignore_ascii_case("to_route")
-                    {
-                        Some(crate::symbol_map::LaravelStringKind::Route)
-                    } else if name_clean.eq_ignore_ascii_case("__")
-                        || name_clean.eq_ignore_ascii_case("trans")
-                        || name_clean.eq_ignore_ascii_case("trans_choice")
-                    {
-                        Some(crate::symbol_map::LaravelStringKind::Trans)
-                    } else if name_clean.eq_ignore_ascii_case("app")
-                        || name_clean.eq_ignore_ascii_case("resolve")
-                    {
-                        Some(crate::symbol_map::LaravelStringKind::ContainerBinding)
-                    } else if name_clean.eq_ignore_ascii_case("env") {
-                        Some(crate::symbol_map::LaravelStringKind::Env)
-                    } else {
-                        None
-                    };
-                    if let Some(kind) = laravel_kind {
-                        try_emit_laravel_string_span(
-                            kind,
-                            &func_call.argument_list,
-                            ctx.content,
-                            &mut ctx.spans,
-                        );
-                    }
-                    if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
-                        ctx.content,
-                        name_clean,
-                        ident.span().start.offset,
-                        ctx.resolved_names,
-                        None,
-                    ) {
-                        let span_start = ctx.spans.len();
-                        try_emit_laravel_config_resource_span_for_parameter(
-                            trigger.kind,
-                            trigger.shape,
-                            trigger.access,
-                            &func_call.argument_list,
-                            trigger.argument,
-                            ctx.content,
-                            &mut ctx.spans,
-                        );
-                        if let Some(dependency) = ctx
-                            .resolved_name_at(ident.span().start.offset)
-                            .and_then(crate::symbol_map::LaravelStringDependency::namespaced_auth)
-                        {
-                            ctx.defer_laravel_spans_since(span_start, dependency);
-                        }
-                    }
-                    // The Blade preprocessor lowers `@can`/`@cannot`/`@canany`
-                    // to this call so the ability string is extracted here
-                    // like any other authorization check.
-                    if name_clean == BLADE_CAN_DIRECTIVE {
-                        try_emit_gate_ability_spans(
-                            &func_call.argument_list,
-                            0,
-                            Some(1),
-                            AbilityRole::Check,
-                            ctx.content,
-                            &mut ctx.spans,
-                            &mut ctx.gate_subjects,
-                        );
-                    }
                 }
-                _ => {
-                    extract_from_expression(func_call.function, ctx, scope_start);
-                }
-            }
-            let func_text = expr_to_subject_text(func_call.function);
-            if !func_text.is_empty() {
-                emit_call_site(
-                    func_text,
-                    &func_call.argument_list,
-                    &mut ctx.call_sites,
-                    &mut ctx.untyped_closure_sites,
-                );
-            }
-            extract_from_arguments(&func_call.argument_list.arguments, ctx, scope_start);
-        }
-        Call::Method(method_call) => {
-            let subject_text = expr_to_subject_text(method_call.object);
-            if visit_receiver {
-                extract_from_expression(method_call.object, ctx, scope_start);
-            }
-
-            if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
-                let member_name = crate::atom::atom_bytes(ident.value);
-                if member_name.eq_ignore_ascii_case("macro") {
-                    try_emit_laravel_macro_string_span(
-                        &method_call.argument_list,
+                // `@can`, `@cannot` and `@canany` check the ability
+                // against the arguments that follow it.
+                Some(crate::symbol_map::LaravelStringKind::GateAbility) => {
+                    try_emit_gate_ability_spans(
+                        &func_call.argument_list,
+                        0,
+                        Some(1),
+                        AbilityRole::Check,
                         ctx.content,
                         &mut ctx.spans,
+                        &mut ctx.gate_subjects,
                     );
                 }
-                if is_laravel_config_repository_call(method_call.object, &member_name) {
-                    try_emit_laravel_config_key_span(
-                        &member_name,
-                        &method_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // `$this->app->singleton('payments', …)` registers a container
-                // key and `app()->make('payments')` asks for one.  Gated on the
-                // receiver: `make` and `bind` say nothing on their own.
-                if is_laravel_container_expr(method_call.object) {
-                    try_emit_container_key_span(
-                        &member_name,
-                        &method_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // `redirect()->route('users.index')`, `url()->signedRoute(…)`,
-                // and `response()->redirectToRoute(…)` all name a route.
-                // Keyed on the receiver: `route()` is a plain enough method
-                // name that only the helper it hangs off says it names one.
-                if is_route_name_helper_receiver(method_call.object)
-                    && is_route_name_method(&member_name)
-                {
-                    try_emit_laravel_string_span(
-                        crate::symbol_map::LaravelStringKind::Route,
-                        &method_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // `$request->routeIs('admin.*', 'account.*')` asks whether the
-                // current route is any of the names it lists.
-                if is_request_route_pattern_method(&member_name) {
-                    try_emit_laravel_string_spans_all(
-                        crate::symbol_map::LaravelStringKind::Route,
-                        &method_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // `$this->view('emails.shipped', [...])` in a mailable, and
-                // the view factory's own methods reached through a bare
-                // `view()` helper call.  Both are keyed on the receiver:
-                // `view`, `make`, and `first` are far too common as method
-                // names to recognise on their own.
-                let mut named_syntactically = true;
-                if ctx.in_mailable
-                    && is_mailable_view_method(&member_name)
-                    && matches!(method_call.object, Expression::Variable(Variable::Direct(v)) if v.name == b"$this")
-                {
-                    try_emit_laravel_string_span(
-                        crate::symbol_map::LaravelStringKind::View,
-                        &method_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                } else if is_laravel_view_factory_call(method_call.object)
-                    && let Some(index) = view_factory_method_name_index(&member_name)
+                // `@includeFirst` and its `@componentFirst` /
+                // `@extendsFirst` siblings put their candidates in an
+                // array literal, so the compiled directive names several
+                // templates at once.
+                Some(crate::symbol_map::LaravelStringKind::View)
+                    if helper_function_accepts_name_list(name_clean) =>
                 {
                     try_emit_laravel_view_span_at(
-                        index,
-                        &method_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                } else if is_laravel_view_factory_call(method_call.object)
-                    && is_render_each_method(&member_name)
-                {
-                    try_emit_render_each_view_spans(
-                        &method_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                } else {
-                    named_syntactically = false;
-                }
-                // Nothing the receiver is spelled as says it renders, so
-                // whether this names a template at all is a question about
-                // its type — recorded here and answered lazily.
-                if !named_syntactically
-                    && let Some((receiver, name_indices)) = view_receiver_method(&member_name)
-                {
-                    record_view_receiver_sites(
-                        receiver,
-                        name_indices,
-                        &method_call.argument_list,
-                        ctx.content,
-                        &mut ctx.view_receiver_sites,
-                    );
-                }
-                // `$this->call('app:sync')` / `$this->callSilently('app:sync')`
-                // inside a console command runs another Artisan command.
-                // Gated on `in_console_command` because `->call()` is an
-                // extremely common method name elsewhere (e.g.
-                // `$this->call('GET', '/uri')` in HTTP tests).
-                if ctx.in_console_command
-                    && matches!(method_call.object, Expression::Variable(Variable::Direct(v)) if v.name == b"$this")
-                {
-                    match member_name.to_ascii_lowercase().as_str() {
-                        "call" | "callsilently" => {
-                            try_emit_laravel_string_span(
-                                crate::symbol_map::LaravelStringKind::Command,
-                                &method_call.argument_list,
-                                ctx.content,
-                                &mut ctx.spans,
-                            );
-                        }
-                        "argument" | "hasargument" | "getargument" => {
-                            try_emit_command_own_param_span(
-                                false,
-                                &method_call.argument_list,
-                                ctx.content,
-                                &mut ctx.spans,
-                            );
-                        }
-                        "option" | "hasoption" | "getoption" => {
-                            try_emit_command_own_param_span(
-                                true,
-                                &method_call.argument_list,
-                                ctx.content,
-                                &mut ctx.spans,
-                            );
-                        }
-                        _ => {}
-                    }
-                }
-                // Authorization abilities.  `->can()` and friends are named
-                // too plainly to claim on the method name alone, so each
-                // shape is gated on what its receiver reads as: the `Gate`
-                // facade, a route registration, `$this` in a controller, or
-                // something that plainly is the authenticated user.
-                emit_gate_ability_spans_for_method(
-                    method_call.object,
-                    &member_name,
-                    &method_call.argument_list,
-                    ctx,
-                );
-                // `$query->whereHasMorph('commentable', ['post'], …)` resolves
-                // each type through the morph map, so a literal there is an
-                // alias.  Keyed on the method name alone: every method in the
-                // family is Eloquent-specific enough that a same-named method
-                // elsewhere is vanishingly unlikely.
-                if is_morph_types_query_method(&member_name) {
-                    try_emit_morph_type_spans(
-                        &method_call.argument_list,
-                        1,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                emit_call_site(
-                    format!("{}->{}", subject_text, member_name),
-                    &method_call.argument_list,
-                    &mut ctx.call_sites,
-                    &mut ctx.untyped_closure_sites,
-                );
-                let object_span = method_call.object.span();
-                ctx.spans.push(SymbolSpan {
-                    start: ident.span.start.offset,
-                    end: ident.span.end.offset,
-                    kind: SymbolKind::MemberAccess {
-                        subject_text: SubjectText::new(
-                            subject_text,
-                            object_span.start.offset,
-                            object_span.end.offset,
-                            ctx.content,
-                        ),
-                        member_name,
-                        is_static: false,
-                        is_method_call: true,
-                        docblock_ref: DocblockMemberRef::No,
-                        is_array_callable: false,
-                        is_nullsafe: false,
-                    },
-                });
-                // Laravel: if this is a ->group() call, check for
-                // ->controller(X::class) in the chain and emit MemberAccess
-                // spans for route method-name strings inside the closure.
-                if ident.value.eq_ignore_ascii_case(b"group")
-                    && let Some(controller) =
-                        laravel_route_find_controller_in_chain(method_call.object)
-                {
-                    for arg in method_call.argument_list.arguments.iter() {
-                        laravel_route_scan_group_body(
-                            arg.value(),
-                            &controller,
-                            ctx.content,
-                            &mut ctx.spans,
-                        );
-                    }
-                }
-            }
-            extract_from_arguments(&method_call.argument_list.arguments, ctx, scope_start);
-        }
-        Call::NullSafeMethod(method_call) => {
-            let subject_text = expr_to_subject_text(method_call.object);
-            if visit_receiver {
-                extract_from_expression(method_call.object, ctx, scope_start);
-            }
-
-            if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
-                let member_name = crate::atom::atom_bytes(ident.value);
-                if is_laravel_config_repository_call(method_call.object, &member_name) {
-                    try_emit_laravel_config_key_span(
-                        &member_name,
-                        &method_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // Use `->` so resolve_callable handles it the same
-                // as regular method calls.
-                emit_call_site(
-                    format!("{}->{}", subject_text, member_name),
-                    &method_call.argument_list,
-                    &mut ctx.call_sites,
-                    &mut ctx.untyped_closure_sites,
-                );
-                let object_span = method_call.object.span();
-                ctx.spans.push(SymbolSpan {
-                    start: ident.span.start.offset,
-                    end: ident.span.end.offset,
-                    kind: SymbolKind::MemberAccess {
-                        subject_text: SubjectText::new(
-                            subject_text,
-                            object_span.start.offset,
-                            object_span.end.offset,
-                            ctx.content,
-                        ),
-                        member_name,
-                        is_static: false,
-                        is_method_call: true,
-                        docblock_ref: DocblockMemberRef::No,
-                        is_array_callable: false,
-                        is_nullsafe: false,
-                    },
-                });
-            }
-            extract_from_arguments(&method_call.argument_list.arguments, ctx, scope_start);
-        }
-        Call::StaticMethod(static_call) => {
-            if extract_property_hook_call(static_call, ctx, scope_start) {
-                return;
-            }
-
-            let subject_text = expr_to_subject_text(static_call.class);
-            emit_class_expr_span(static_call.class, ctx, scope_start);
-
-            if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
-                let member_name = crate::atom::atom_bytes(ident.value);
-                if member_name.eq_ignore_ascii_case("macro") {
-                    try_emit_laravel_macro_string_span(
-                        &static_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                emit_call_site(
-                    format!("{}::{}", subject_text, member_name),
-                    &static_call.argument_list,
-                    &mut ctx.call_sites,
-                    &mut ctx.untyped_closure_sites,
-                );
-                let class_span = static_call.class.span();
-                ctx.spans.push(SymbolSpan {
-                    start: ident.span.start.offset,
-                    end: ident.span.end.offset,
-                    kind: SymbolKind::MemberAccess {
-                        subject_text: SubjectText::new(
-                            subject_text.clone(),
-                            class_span.start.offset,
-                            class_span.end.offset,
-                            ctx.content,
-                        ),
-                        member_name,
-                        is_static: true,
-                        is_method_call: true,
-                        docblock_ref: DocblockMemberRef::No,
-                        is_array_callable: false,
-                        is_nullsafe: false,
-                    },
-                });
-                let clean_subject = strip_fqn_prefix(&subject_text);
-                let semantic_subject = ctx
-                    .resolved_name_at(class_span.start.offset)
-                    .map(strip_fqn_prefix)
-                    .unwrap_or(clean_subject);
-                let laravel_span_start = ctx.spans.len();
-                if is_config_facade_name(clean_subject) && is_config_repository_method(&member_name)
-                {
-                    try_emit_laravel_config_key_span(
-                        &member_name,
-                        &static_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                if let Some(trigger) = crate::symbol_map::laravel_resources::static_method_trigger(
-                    semantic_subject,
-                    &member_name,
-                ) {
-                    try_emit_laravel_config_resource_span_for_parameter(
-                        trigger.kind,
-                        trigger.shape,
-                        trigger.access,
-                        &static_call.argument_list,
-                        trigger.argument,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // The `View` facade proxies the view factory, so every
-                // factory method that names a template does so here too.
-                if clean_subject.eq_ignore_ascii_case("View")
-                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\View")
-                {
-                    if let Some(index) = view_factory_method_name_index(&member_name) {
-                        try_emit_laravel_view_span_at(
-                            index,
-                            &static_call.argument_list,
-                            ctx.content,
-                            &mut ctx.spans,
-                        );
-                    } else if is_render_each_method(&member_name) {
-                        try_emit_render_each_view_spans(
-                            &static_call.argument_list,
-                            ctx.content,
-                            &mut ctx.spans,
-                        );
-                    }
-                }
-                // `Route::view('/about', 'pages.about', [...])` binds a URI
-                // straight to a template, naming the view second;
-                // `Response::view('pages.about', [...])` names it first.
-                if (clean_subject.eq_ignore_ascii_case("Route")
-                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Route"))
-                    && member_name.eq_ignore_ascii_case("view")
-                {
-                    try_emit_laravel_string_span_at(
-                        crate::symbol_map::LaravelStringKind::View,
-                        1,
-                        &static_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                if (clean_subject.eq_ignore_ascii_case("Response")
-                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Response"))
-                    && member_name.eq_ignore_ascii_case("view")
-                {
-                    try_emit_laravel_string_span(
-                        crate::symbol_map::LaravelStringKind::View,
-                        &static_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // `URL::signedRoute('orders.show')`,
-                // `Redirect::route('home')`, `Response::redirectToRoute(…)`.
-                if is_route_name_facade_call(clean_subject, &member_name) {
-                    try_emit_laravel_string_span(
-                        crate::symbol_map::LaravelStringKind::Route,
-                        &static_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // `Route::is('admin.*')` / `Route::currentRouteNamed(…)` list
-                // the names the current route is checked against.
-                if (clean_subject.eq_ignore_ascii_case("Route")
-                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Route"))
-                    && is_route_facade_pattern_method(&member_name)
-                {
-                    try_emit_laravel_string_spans_all(
-                        crate::symbol_map::LaravelStringKind::Route,
-                        &static_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // `Env::get('APP_NAME')` reads the same variable the `env()`
-                // helper it backs does.
-                if (clean_subject.eq_ignore_ascii_case("Env")
-                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Env"))
-                    && matches!(
-                        member_name.to_ascii_lowercase().as_str(),
-                        "get" | "getorfail"
-                    )
-                {
-                    try_emit_laravel_string_span(
-                        crate::symbol_map::LaravelStringKind::Env,
-                        &static_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                if (clean_subject.eq_ignore_ascii_case("Lang")
-                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Lang"))
-                    && matches!(
-                        member_name.to_ascii_lowercase().as_str(),
-                        "get" | "has" | "hasforlocale" | "choice"
-                    )
-                {
-                    try_emit_laravel_string_span(
-                        crate::symbol_map::LaravelStringKind::Trans,
-                        &static_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // `App::make('payments')` and the registrations written
-                // against the same facade.
-                if clean_subject.eq_ignore_ascii_case("App")
-                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\App")
-                {
-                    try_emit_container_key_span(
-                        &member_name,
-                        &static_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // Artisan command names: `Artisan::call('app:sync')`,
-                // `Artisan::queue('app:sync')`, `Schedule::command('app:sync')`.
-                if is_artisan_command_static_call(clean_subject, &member_name) {
-                    try_emit_laravel_string_span(
-                        crate::symbol_map::LaravelStringKind::Command,
-                        &static_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // Authorization abilities checked (or defined) through the
-                // `Gate` facade, and the `can:ability,Model` middleware
-                // parameter of a route registration.
-                if is_gate_facade(clean_subject) {
-                    emit_gate_facade_ability_spans(&member_name, &static_call.argument_list, ctx);
-                } else if matches_laravel_facade(semantic_subject, "Route")
-                    && member_name.eq_ignore_ascii_case("middleware")
-                {
-                    try_emit_can_middleware_spans(
-                        &static_call.argument_list,
-                        true,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
-                }
-                // Eloquent morph aliases: the keys of a
-                // `Relation::morphMap(['post' => Post::class])` registration,
-                // and the argument of `Relation::getMorphedModel('post')` /
-                // `Model::getActualClassNameForMorph('post')`.
-                if clean_subject.eq_ignore_ascii_case("Relation")
-                    || clean_subject
-                        .eq_ignore_ascii_case("Illuminate\\Database\\Eloquent\\Relations\\Relation")
-                {
-                    if is_morph_map_registration_method(&member_name) {
-                        try_emit_morph_map_key_spans(
-                            &static_call.argument_list,
-                            ctx.content,
-                            &mut ctx.spans,
-                        );
-                    } else if member_name.eq_ignore_ascii_case("getMorphedModel") {
-                        try_emit_morph_type_spans(
-                            &static_call.argument_list,
-                            0,
-                            ctx.content,
-                            &mut ctx.spans,
-                        );
-                    }
-                }
-                if member_name.eq_ignore_ascii_case("getActualClassNameForMorph") {
-                    try_emit_morph_type_spans(
-                        &static_call.argument_list,
                         0,
+                        &func_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,
                     );
                 }
-                // A model forwards static calls to its query builder, so
-                // `Comment::whereHasMorph('commentable', ['post'])` is the same
-                // call site as the instance form.
-                if is_morph_types_query_method(&member_name) {
-                    try_emit_morph_type_spans(
-                        &static_call.argument_list,
-                        1,
+                Some(kind) => {
+                    try_emit_laravel_string_span(
+                        kind,
+                        &func_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,
                     );
                 }
-                if let Some(dependency) = ctx.resolved_names.and_then(|_| {
-                    crate::symbol_map::LaravelStringDependency::root_facade(semantic_subject)
-                }) {
-                    ctx.defer_laravel_spans_since(laravel_span_start, dependency);
+                None => {}
+            }
+            if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
+                ctx.content,
+                name_clean,
+                ident.span().start.offset,
+                ctx.resolved_names,
+                None,
+            ) {
+                let span_start = ctx.spans.len();
+                try_emit_laravel_config_resource_span_for_parameter(
+                    trigger.kind,
+                    trigger.shape,
+                    trigger.access,
+                    &func_call.argument_list,
+                    trigger.argument,
+                    ctx.content,
+                    &mut ctx.spans,
+                );
+                if let Some(dependency) = ctx
+                    .resolved_name_at(ident.span().start.offset)
+                    .and_then(crate::symbol_map::LaravelStringDependency::namespaced_auth)
+                {
+                    ctx.defer_laravel_spans_since(span_start, dependency);
                 }
             }
-            extract_from_arguments(&static_call.argument_list.arguments, ctx, scope_start);
+        }
+        _ => {
+            extract_from_expression(func_call.function, ctx, scope_start);
         }
     }
-}
-
-// ─── Authorization gate abilities ───────────────────────────────────────────
-
-/// Emit ability spans for a `Gate::<method>(…)` static call.
-///
-/// `define()` declares the ability it names, so its span is marked as a write
-/// and never judged against the known set.  Every other gate method reads one
-/// (or a list), with the model — when the call names one — in the second
-/// argument.
-fn emit_gate_facade_ability_spans<'a>(
-    member_name: &str,
-    argument_list: &'a ArgumentList<'a>,
-    ctx: &mut ExtractionCtx<'a>,
-) {
-    if member_name.eq_ignore_ascii_case("define") {
-        try_emit_gate_ability_spans(
-            argument_list,
-            0,
-            None,
-            AbilityRole::Definition,
-            ctx.content,
-            &mut ctx.spans,
-            &mut ctx.gate_subjects,
-        );
-        return;
-    }
-    if is_gate_check_method(member_name) {
-        try_emit_gate_ability_spans(
-            argument_list,
-            0,
-            Some(1),
-            gate_ability_role(member_name),
-            ctx.content,
-            &mut ctx.spans,
-            &mut ctx.gate_subjects,
+    let func_text = invoked_callee_text(func_call.function);
+    if !func_text.is_empty() {
+        emit_call_site(
+            func_text,
+            &func_call.argument_list,
+            &mut ctx.call_sites,
+            &mut ctx.untyped_closure_sites,
         );
     }
+    extract_from_arguments(&func_call.argument_list.arguments, ctx, scope_start);
 }
 
-/// What a `Gate` method does with the ability it is handed.
+/// Extract an instance method call, written with `->` or `?->`.
 ///
-/// `has()` is the framework's own "is this ability registered?" predicate, so
-/// a name it does not find is the answer the call was written to get rather
-/// than a typo.  The span is still emitted — completion, hover, and
-/// go-to-definition all work inside it — but it is not judged.
-fn gate_ability_role(member_name: &str) -> AbilityRole {
-    if member_name.eq_ignore_ascii_case("has") {
-        AbilityRole::Existence
-    } else {
-        AbilityRole::Check
-    }
-}
-
-/// Emit ability spans for an instance-method authorization check.
-///
-/// Recognises the four unambiguous shapes: a chain rooted at the `Gate`
-/// facade, `$this->authorize()` / `$this->authorizeForUser()` from the
-/// `AuthorizesRequests` trait, `->can()` on something that plainly is the
-/// authenticated user, and a route registration's `->can()` /
-/// `->middleware('can:…')`.
-fn emit_gate_ability_spans_for_method<'a>(
+/// Both spell the same call to the same method, so everything a `->` call
+/// names a `?->` call names too. The one difference is recorded on the
+/// member span: `?->` short-circuits to `null` when its receiver is `null`
+/// instead of touching the member.
+fn extract_method_call<'a>(
     object: &'a Expression<'a>,
-    member_name: &str,
+    method: &'a ClassLikeMemberSelector<'a>,
     argument_list: &'a ArgumentList<'a>,
+    is_nullsafe: bool,
     ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+    visit_receiver: bool,
 ) {
-    // Every shape below is one of a handful of method names, and this runs for
-    // every method call in every file, so reject on the name first — before
-    // walking any receiver chain or touching the heap.
-    let is_can = member_name.eq_ignore_ascii_case("can")
-        || member_name.eq_ignore_ascii_case("cannot")
-        || member_name.eq_ignore_ascii_case("canAny");
-    let is_authorize_for_user = member_name.eq_ignore_ascii_case("authorizeForUser");
-    let is_middleware = member_name.eq_ignore_ascii_case("middleware");
-    if !is_can
-        && !is_authorize_for_user
-        && !is_middleware
-        && !member_name.eq_ignore_ascii_case("authorize")
-        && !is_gate_check_method(member_name)
-    {
+    let subject_text = expr_to_subject_text(object);
+    if visit_receiver {
+        extract_from_expression(object, ctx, scope_start);
+    }
+
+    if let ClassLikeMemberSelector::Identifier(ident) = method {
+        let member_name = crate::atom::atom_bytes(ident.value);
+        emit_laravel_method_call_spans(object, &member_name, argument_list, ctx);
+        // Recorded with `->` for both spellings so callable resolution
+        // treats them alike.
+        emit_call_site(
+            format!("{}->{}", subject_text, member_name),
+            argument_list,
+            &mut ctx.call_sites,
+            &mut ctx.untyped_closure_sites,
+        );
+        let object_span = object.span();
+        ctx.spans.push(SymbolSpan {
+            start: ident.span.start.offset,
+            end: ident.span.end.offset,
+            kind: SymbolKind::MemberAccess {
+                subject_text: SubjectText::new(
+                    subject_text,
+                    object_span.start.offset,
+                    object_span.end.offset,
+                    ctx.content,
+                ),
+                member_name,
+                is_static: false,
+                is_method_call: true,
+                docblock_ref: DocblockMemberRef::No,
+                is_array_callable: false,
+                is_nullsafe,
+            },
+        });
+        // Laravel: if this is a ->group() call, check for
+        // ->controller(X::class) in the chain and emit MemberAccess
+        // spans for route method-name strings inside the closure.
+        if ident.value.eq_ignore_ascii_case(b"group")
+            && let Some(controller) = laravel_route_find_controller_in_chain(object)
+        {
+            for arg in argument_list.arguments.iter() {
+                laravel_route_scan_group_body(
+                    arg.value(),
+                    &controller,
+                    ctx.content,
+                    &mut ctx.spans,
+                );
+            }
+        }
+    }
+    extract_from_arguments(&argument_list.arguments, ctx, scope_start);
+}
+
+fn extract_static_method_call<'a>(
+    static_call: &'a StaticMethodCall<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+) {
+    if extract_property_hook_call(static_call, ctx, scope_start) {
         return;
     }
 
-    let receiver_is_this =
-        matches!(object, Expression::Variable(Variable::Direct(v)) if v.name == b"$this");
+    let subject_text = expr_to_subject_text(static_call.class);
+    emit_class_expr_span(static_call.class, ClassRefContext::Other, ctx, scope_start);
 
-    // `$this->authorizeForUser($user, 'update', $post)` puts the user first,
-    // shifting the ability and model along by one.  It is a method of the
-    // `AuthorizesRequests` trait, so `$this` is the only receiver it has —
-    // anything else is a different method that happens to share the name.
-    if is_authorize_for_user {
-        if receiver_is_this {
-            try_emit_gate_ability_spans(
-                argument_list,
-                1,
-                Some(2),
-                AbilityRole::Check,
+    if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
+        let member_name = crate::atom::atom_bytes(ident.value);
+        if member_name.eq_ignore_ascii_case("macro") {
+            try_emit_laravel_macro_string_span(
+                &static_call.argument_list,
                 ctx.content,
                 &mut ctx.spans,
-                &mut ctx.gate_subjects,
             );
         }
-        return;
-    }
-
-    let route_dependency = if is_middleware || is_can {
-        ctx.resolved_names
-            .and_then(|names| route_facade_root_dependency(object, names))
-    } else {
-        None
-    };
-    let route_receiver =
-        (is_middleware || is_can) && chain_roots_at_route_facade(object, ctx.resolved_names);
-    if is_middleware && (receiver_is_this || route_receiver) {
-        let span_start = ctx.spans.len();
-        try_emit_can_middleware_spans(argument_list, route_receiver, ctx.content, &mut ctx.spans);
-        if let Some(dependency) = route_dependency {
-            ctx.defer_laravel_spans_since(span_start, dependency);
-        }
-        return;
-    }
-
-    // A route registration's `->can('update', 'post')` names a route
-    // parameter, not a model, in its second argument.
-    if is_can && route_receiver {
-        let span_start = ctx.spans.len();
-        try_emit_gate_ability_spans(
-            argument_list,
-            0,
-            None,
-            AbilityRole::Check,
-            ctx.content,
-            &mut ctx.spans,
-            &mut ctx.gate_subjects,
+        emit_call_site(
+            format!("{}::{}", subject_text, member_name),
+            &static_call.argument_list,
+            &mut ctx.call_sites,
+            &mut ctx.untyped_closure_sites,
         );
-        if let Some(dependency) = route_dependency {
-            ctx.defer_laravel_spans_since(span_start, dependency);
-        }
-        return;
+        let class_span = static_call.class.span();
+        ctx.spans.push(SymbolSpan {
+            start: ident.span.start.offset,
+            end: ident.span.end.offset,
+            kind: SymbolKind::MemberAccess {
+                subject_text: SubjectText::new(
+                    subject_text.clone(),
+                    class_span.start.offset,
+                    class_span.end.offset,
+                    ctx.content,
+                ),
+                member_name,
+                is_static: true,
+                is_method_call: true,
+                docblock_ref: DocblockMemberRef::No,
+                is_array_callable: false,
+                is_nullsafe: false,
+            },
+        });
+        let clean_subject = strip_fqn_prefix(&subject_text);
+        let semantic_subject = ctx
+            .resolved_name_at(class_span.start.offset)
+            .map(strip_fqn_prefix)
+            .unwrap_or(clean_subject);
+        emit_laravel_static_call_spans(
+            clean_subject,
+            semantic_subject,
+            &member_name,
+            &static_call.argument_list,
+            ctx,
+        );
     }
-
-    let is_check = if is_can {
-        receiver_is_user_like(object)
-    } else if member_name.eq_ignore_ascii_case("authorize") {
-        receiver_is_this || chain_roots_at_gate(object)
-    } else {
-        chain_roots_at_gate(object)
-    };
-    if !is_check {
-        return;
-    }
-    try_emit_gate_ability_spans(
-        argument_list,
-        0,
-        Some(1),
-        gate_ability_role(member_name),
-        ctx.content,
-        &mut ctx.spans,
-        &mut ctx.gate_subjects,
-    );
+    extract_from_arguments(&static_call.argument_list.arguments, ctx, scope_start);
 }
 
 // ─── First-class callable / partial application ─────────────────────────────
@@ -1137,13 +557,7 @@ pub(super) fn extract_partial_application_expr<'a>(
             }
         },
         PartialApplication::Method(method_pa) => {
-            let object_span = method_pa.object.span();
-            let subject_text = SubjectText::new(
-                expr_to_subject_text(method_pa.object),
-                object_span.start.offset,
-                object_span.end.offset,
-                ctx.content,
-            );
+            let subject_text = subject_text_of(method_pa.object, ctx.content);
             extract_from_expression(method_pa.object, ctx, scope_start);
             if let ClassLikeMemberSelector::Identifier(ident) = &method_pa.method {
                 let member_name = crate::atom::atom_bytes(ident.value);
@@ -1163,14 +577,8 @@ pub(super) fn extract_partial_application_expr<'a>(
             }
         }
         PartialApplication::StaticMethod(static_pa) => {
-            let class_span = static_pa.class.span();
-            let subject_text = SubjectText::new(
-                expr_to_subject_text(static_pa.class),
-                class_span.start.offset,
-                class_span.end.offset,
-                ctx.content,
-            );
-            emit_class_expr_span(static_pa.class, ctx, scope_start);
+            let subject_text = subject_text_of(static_pa.class, ctx.content);
+            emit_class_expr_span(static_pa.class, ClassRefContext::Other, ctx, scope_start);
             if let ClassLikeMemberSelector::Identifier(ident) = &static_pa.method {
                 let member_name = crate::atom::atom_bytes(ident.value);
                 ctx.spans.push(SymbolSpan {

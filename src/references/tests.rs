@@ -291,6 +291,65 @@ async fn test_macro_registration_references_include_unresolved_chain_call() {
     );
 }
 
+/// Loading a class reads the macro index, and a reader queues behind a
+/// waiting writer, so a search holding the index across its ancestor walk
+/// would deadlock against a rebuild arriving mid-walk.  Holding the stub
+/// index stops the walk inside the load of `\Countable`, and the macro index
+/// must be free there.
+#[test]
+fn macro_targets_leave_the_macro_index_free_while_loading_ancestors() {
+    let backend = Backend::new_test_with_stubs(std::collections::HashMap::from([(
+        "Countable",
+        "<?php interface Countable {}",
+    )]));
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "Widget::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    backend.update_ast(
+        "file:///Widget.php",
+        concat!(
+            "<?php\n",
+            "namespace App\\Support;\n",
+            "class Widget implements \\Countable {}\n",
+        ),
+    );
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let stubs = backend.stub_index.write();
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let walker = {
+        let backend = backend.clone_for_blocking();
+        std::thread::spawn(move || {
+            started_tx.send(()).expect("report start");
+            backend.collect_macro_declaring_targets(&["App\\Support\\Widget".to_string()], "shine")
+        })
+    };
+    started_rx.recv().expect("walker thread started");
+    // Time to reach the stub lookup, which cannot finish while `stubs` is held.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert!(
+        !walker.is_finished(),
+        "the walk should be waiting to load `\\Countable`"
+    );
+    assert!(
+        backend
+            .laravel_macros
+            .try_write_for(std::time::Duration::from_secs(5))
+            .is_some(),
+        "the macro index must not be held while the walk loads a class"
+    );
+    drop(stubs);
+
+    assert_eq!(
+        walker.join().expect("walker thread"),
+        Some(vec!["App\\Support\\Widget".to_string()])
+    );
+}
+
 #[test]
 fn workspace_indexing_batch_merges_disk_files() {
     use crate::reference_index::ReferenceIndexKey;
@@ -1451,4 +1510,75 @@ function run(Service $service, Other $other): void {
     let cold = references(false);
     assert_eq!(cold.len(), 1, "only the Service receiver is a reference");
     assert_eq!(references(true), cold);
+}
+
+/// The warm-up's scope build infers the return type of every untyped
+/// method it meets, so it runs under the same body-inference memo as the
+/// resolutions after it: a method called twice has its body walked once.
+#[test]
+fn warming_a_file_walks_an_untyped_callee_once() {
+    const URI: &str = "file:///Consumer.php";
+    const CONSUMER: &str = r#"<?php
+class Box { public function open(): void {} }
+class Factory {
+    public static function make() { return new Box(); }
+}
+function run(): void {
+    $first = Factory::make();
+    $first->open();
+    $second = Factory::make();
+    $second->open();
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, URI, CONSUMER);
+
+    let before = crate::type_engine::call_resolution::test_body_inferences();
+    assert!(backend.warm_member_receivers(URI));
+    assert_eq!(
+        crate::type_engine::call_resolution::test_body_inferences() - before,
+        1,
+        "both call sites share one reading of `make()`"
+    );
+}
+
+/// A callee first reached at the bottom of a longer chain of untyped
+/// methods is read with no budget left for the methods it calls itself.
+/// That cut-off reading must not answer for a call site that reaches the
+/// same callee with budget to spare.
+#[test]
+fn warming_a_file_reads_past_a_callee_first_reached_at_the_depth_cap() {
+    const URI: &str = "file:///Factory.php";
+    const SOURCE: &str = r#"<?php
+class Box { public function open(): void {} }
+class Factory {
+    public static function a() { $value = self::b(); return $value; }
+    public static function b() { $value = self::c(); return $value; }
+    public static function c() { $value = self::d(); return $value; }
+    public static function d() { $value = self::e(); return $value; }
+    public static function e() { return new Box(); }
+}
+function run(): void {
+    $box = Factory::d();
+    $box->open();
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, URI, SOURCE);
+    assert!(backend.warm_member_receivers(URI));
+
+    let map = symbol_map_of(&backend, URI);
+    let entry = backend
+        .resolved_member_file(URI, &map)
+        .expect("the warm-up left an entry");
+    let open = crate::atom::atom("open");
+    let targets: Vec<String> = map
+        .member_access_indices(&open)
+        .iter()
+        .filter_map(|&span_index| entry.resolved_access(span_index))
+        .flat_map(|(_, targets)| targets.iter().map(|t| t.to_string()))
+        .collect();
+    assert_eq!(targets, ["Box"]);
 }

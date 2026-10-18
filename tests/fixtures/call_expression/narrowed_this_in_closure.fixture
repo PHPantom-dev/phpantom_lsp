@@ -1,0 +1,21 @@
+// test: a $this narrowed by an assertion in a top-level closure types the calls made on it
+// feature: hover
+// expect: array{Stamp}
+---
+<?php
+
+class Stamp {}
+
+class StampCase {
+    public function makeStamp(): Stamp {
+        return new Stamp();
+    }
+}
+
+function it(string $name, callable $test): void {}
+
+it('stamps', function (): void {
+    assert($this instanceof StampCase);
+    $stamps = [$this->makeStamp()];
+    echo $sta<>mps;
+});

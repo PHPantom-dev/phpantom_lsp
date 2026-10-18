@@ -19,12 +19,14 @@
 
 use tower_lsp::lsp_types::*;
 
-use super::{InsertionPoint, find_method_insertion_point};
+use super::attributes::attributed_member_at;
 use crate::Backend;
-use crate::code_actions::phpstan::contains_php_attribute;
+use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::completion::use_edit::{analyze_use_block_in, build_use_edit, use_import_conflicts};
-use crate::text_position::{offset_to_position, ranges_overlap};
+use crate::completion::use_edit::{
+    analyze_use_block_in, build_use_edit, short_name_needs_import, use_import_conflicts,
+};
+use crate::text_position::{line_ending, offset_to_position};
 
 /// The PHPStan identifier we match on.
 const MISSING_OVERRIDE_ID: &str = "method.missingOverride";
@@ -43,19 +45,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if identifier != MISSING_OVERRIDE_ID {
@@ -63,19 +57,14 @@ impl Backend {
             }
 
             // The diagnostic range covers the method signature line.
-            // Find the insertion point: just before the first token of
-            // the method declaration (attribute list, modifier, or
-            // `function` keyword).
             let diag_line = diag.range.start.line as usize;
-
-            let Some(insertion) = find_method_insertion_point(content, diag_line) else {
+            let Some(method) = attributed_member_at(content, diag_line) else {
                 continue;
             };
 
-            // Check if `#[Override]` or `#[\Override]` is already present
-            // on the method (could have been added manually since PHPStan
-            // last ran).
-            if already_has_override(content, &insertion) {
+            // `#[Override]` may have been added by hand since PHPStan
+            // last ran.
+            if method.has_attribute("Override") {
                 continue;
             }
 
@@ -120,14 +109,14 @@ impl Backend {
 
         let diag_line = data.extra.get("diagnostic_line")?.as_u64()? as usize;
 
-        let insertion = find_method_insertion_point(content, diag_line)?;
+        let method = attributed_member_at(content, diag_line)?;
 
         // If Override was added since the action was offered, bail out.
-        if already_has_override(content, &insertion) {
+        if method.has_attribute("Override") {
             return None;
         }
 
-        let block = self.import_block_at(uri, insertion.insert_offset);
+        let block = self.import_block_at(uri, method.line_start);
         let file_use_map = &block.use_map;
         let file_namespace = &block.namespace;
 
@@ -138,13 +127,7 @@ impl Backend {
         // declares a namespace we need a `use Override;` import
         // (just like any other global class).  When the file has no
         // namespace, no import is needed.
-        let already_imported = file_use_map.iter().any(|(alias, fqn)| {
-            alias.eq_ignore_ascii_case("Override") && fqn.eq_ignore_ascii_case("Override")
-        });
-
-        let same_namespace = file_namespace.is_none();
-
-        let needs_import = !already_imported && !same_namespace;
+        let needs_import = short_name_needs_import("Override", file_use_map, file_namespace);
 
         // Check for import conflicts (e.g. a different class named
         // `Override` is already imported).
@@ -156,12 +139,12 @@ impl Backend {
             "#[Override]"
         };
 
-        // Build the text edit: insert `#[Override]\n<indent>` at the
-        // start of the method declaration line (before any existing
-        // attributes or modifiers).
-        let insert_text = format!("{}{}\n", insertion.indent, attr_text);
+        // Build the text edit: insert `<indent>#[Override]` on a line of
+        // its own at the start of the method declaration line (before any
+        // existing attributes or modifiers).
+        let insert_text = format!("{}{}{}", method.indent, attr_text, line_ending(content));
 
-        let insert_pos = offset_to_position(content, insertion.insert_offset);
+        let insert_pos = offset_to_position(content, method.line_start);
 
         let mut edits = vec![TextEdit {
             range: Range {
@@ -207,36 +190,11 @@ fn extract_method_name(message: &str) -> Option<&str> {
     Some(name)
 }
 
-/// Check if the method already has a `#[Override]` or `#[\Override]`
-/// attribute.
-fn already_has_override(content: &str, insertion: &InsertionPoint) -> bool {
-    // If there are no attribute lines, there's nothing to check.
-    if insertion.attrs_end_offset <= insertion.first_token_offset {
-        return false;
-    }
-    let attr_region = &content[insertion.first_token_offset..insertion.attrs_end_offset];
-    // Look for `Override` in the attribute region, accounting for
-    // both `#[Override]` and `#[\Override]`.
-    for line in attr_region.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("#[") {
-            // Crude but effective: check if `Override` appears as an
-            // attribute name in this line.
-            if contains_php_attribute(trimmed, b"Override") {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
-    use super::super::{is_attribute_line, is_modifier_line};
     use super::*;
-    use crate::util::contains_function_keyword;
 
     // ── extract_method_name ─────────────────────────────────────────
 
@@ -262,174 +220,5 @@ mod tests {
     fn extracts_constructor_name() {
         let msg = "Method App\\Foo::__construct() overrides method App\\Base::__construct() but is missing the #[Override] attribute.";
         assert_eq!(extract_method_name(msg), Some("__construct"));
-    }
-
-    // ── contains_function_keyword ───────────────────────────────────
-
-    #[test]
-    fn detects_function_keyword() {
-        assert!(contains_function_keyword(
-            "    public function bar(): void {"
-        ));
-        assert!(contains_function_keyword("function foo()"));
-        assert!(contains_function_keyword(
-            "    protected static function baz()"
-        ));
-    }
-
-    #[test]
-    fn rejects_function_in_string() {
-        assert!(!contains_function_keyword("    $functionality = true;"));
-        assert!(!contains_function_keyword("    // some_function()"));
-    }
-
-    // ── is_modifier_line ────────────────────────────────────────────
-
-    #[test]
-    fn detects_modifier_lines() {
-        assert!(is_modifier_line("public function"));
-        assert!(is_modifier_line("protected static"));
-        assert!(is_modifier_line("abstract public"));
-        assert!(is_modifier_line("final protected"));
-    }
-
-    #[test]
-    fn rejects_non_modifier_lines() {
-        assert!(!is_modifier_line("function foo()"));
-        assert!(!is_modifier_line("$public = true;"));
-        assert!(!is_modifier_line("// public function"));
-    }
-
-    // ── is_attribute_line ───────────────────────────────────────────
-
-    #[test]
-    fn detects_attribute_lines() {
-        assert!(is_attribute_line("#[Override]"));
-        assert!(is_attribute_line("#[\\Override]"));
-        assert!(is_attribute_line("#[Route('/foo')]"));
-        assert!(is_attribute_line("#[Override, Deprecated]"));
-    }
-
-    #[test]
-    fn rejects_non_attribute_lines() {
-        assert!(!is_attribute_line("// #[Override]"));
-        assert!(!is_attribute_line("public function foo()"));
-    }
-
-    // ── contains_php_attribute ──────────────────────────────────────
-
-    #[test]
-    fn finds_override_simple() {
-        assert!(contains_php_attribute("#[Override]", b"Override"));
-    }
-
-    #[test]
-    fn finds_override_with_backslash() {
-        assert!(contains_php_attribute("#[\\Override]", b"Override"));
-    }
-
-    #[test]
-    fn finds_override_in_list() {
-        assert!(contains_php_attribute(
-            "#[Override, Deprecated]",
-            b"Override"
-        ));
-        assert!(contains_php_attribute(
-            "#[Deprecated, Override]",
-            b"Override"
-        ));
-        assert!(contains_php_attribute(
-            "#[Deprecated, \\Override]",
-            b"Override"
-        ));
-    }
-
-    #[test]
-    fn does_not_match_partial() {
-        assert!(!contains_php_attribute("#[OverrideSomething]", b"Override"));
-        assert!(!contains_php_attribute("#[MyOverride]", b"Override"));
-    }
-
-    // ── already_has_override ────────────────────────────────────────
-
-    #[test]
-    fn detects_existing_override() {
-        let content =
-            "<?php\nclass Foo {\n    #[\\Override]\n    public function bar(): void {}\n}\n";
-        let insertion = InsertionPoint {
-            insert_offset: content.find("#[\\Override]").unwrap(),
-            indent: "    ".to_string(),
-            first_token_offset: content.find("#[\\Override]").unwrap(),
-            attrs_end_offset: content.find("    public function").unwrap(),
-        };
-        assert!(already_has_override(content, &insertion));
-    }
-
-    #[test]
-    fn no_override_when_no_attrs() {
-        let content = "<?php\nclass Foo {\n    public function bar(): void {}\n}\n";
-        let offset = content.find("    public function").unwrap();
-        let insertion = InsertionPoint {
-            insert_offset: offset,
-            indent: "    ".to_string(),
-            first_token_offset: offset,
-            attrs_end_offset: offset,
-        };
-        assert!(!already_has_override(content, &insertion));
-    }
-
-    // ── find_method_insertion_point ──────────────────────────────────
-
-    #[test]
-    fn finds_insertion_for_simple_method() {
-        let content = "<?php\nclass Foo {\n    public function bar(): void {}\n}\n";
-        let line = 2; // `public function bar()`
-        let ins = find_method_insertion_point(content, line).unwrap();
-        assert_eq!(ins.indent, "    ");
-        // insert_offset should be at the start of the `    public function` line
-        let expected_offset = content.find("    public function").unwrap();
-        assert_eq!(ins.insert_offset, expected_offset);
-    }
-
-    #[test]
-    fn finds_insertion_for_method_with_existing_attributes() {
-        let content =
-            "<?php\nclass Foo {\n    #[Route('/bar')]\n    public function bar(): void {}\n}\n";
-        let line = 3; // `public function bar()` line
-        let ins = find_method_insertion_point(content, line).unwrap();
-        assert_eq!(ins.indent, "    ");
-        // Should insert before the existing attribute line.
-        let expected_offset = content.find("    #[Route").unwrap();
-        assert_eq!(ins.insert_offset, expected_offset);
-    }
-
-    #[test]
-    fn finds_insertion_with_multiple_attributes() {
-        let content = "<?php\nclass Foo {\n    #[Route('/bar')]\n    #[Deprecated]\n    public function bar(): void {}\n}\n";
-        let line = 4; // `public function bar()` line
-        let ins = find_method_insertion_point(content, line).unwrap();
-        // Should insert before the first attribute.
-        let expected_offset = content.find("    #[Route").unwrap();
-        assert_eq!(ins.insert_offset, expected_offset);
-    }
-
-    // ── Integration: build edit text ────────────────────────────────
-
-    #[test]
-    fn builds_correct_override_text() {
-        let content = "<?php\nclass Foo {\n    public function bar(): void {}\n}\n";
-        let line = 2;
-        let ins = find_method_insertion_point(content, line).unwrap();
-        let insert_text = format!("{}#[Override]\n", ins.indent);
-        assert_eq!(insert_text, "    #[Override]\n");
-    }
-
-    #[test]
-    fn builds_correct_override_text_nested() {
-        let content = "<?php\nclass Foo {\n        protected function bar(): void {}\n}\n";
-        let line = 2;
-        let ins = find_method_insertion_point(content, line).unwrap();
-        let insert_text = format!("{}#[Override]\n", ins.indent);
-        assert_eq!(insert_text, "        #[Override]\n");
     }
 }

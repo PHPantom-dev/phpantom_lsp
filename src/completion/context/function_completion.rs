@@ -175,7 +175,7 @@ impl Backend {
         uri: &str,
         position: Position,
     ) -> (Vec<CompletionItem>, bool) {
-        let prefix_lower = strip_fqn_prefix(prefix).to_lowercase();
+        let prefix_lower = strip_fqn_prefix(prefix).to_ascii_lowercase();
         let mut seen: HashSet<String> = HashSet::new();
         let mut items: Vec<CompletionItem> = Vec::new();
 
@@ -185,17 +185,15 @@ impl Backend {
         // ── 1. User-defined functions (from parsed files) ───────────
         {
             let fmap = self.symbols.global_functions.read();
-            for (key, (_uri, info)) in fmap.iter() {
+            for (folded, key, (_uri, info)) in fmap.iter_folded() {
                 // The Blade lowering's own functions resolve, but the
                 // user never writes one: they are not completions.
                 if crate::blade::is_synthetic_function(&info.name) {
                     continue;
                 }
-                // Match against both the FQN (key) and the short name so
-                // that typing either finds the function.
-                if !key.to_lowercase().contains(&prefix_lower)
-                    && !info.name.to_lowercase().contains(&prefix_lower)
-                {
+                // The key is the FQN, which ends with the short name, so
+                // typing either finds the function.
+                if !folded.contains(&prefix_lower) {
                     continue;
                 }
                 // Deduplicate on the map key (FQN for namespaced
@@ -291,8 +289,8 @@ impl Backend {
         // after the first use triggers a lazy `update_ast` call.
         {
             let idx = self.symbols.autoload_function_index.read();
-            for (fqn, _path) in idx.iter() {
-                if !fqn.to_lowercase().contains(&prefix_lower) {
+            for (folded, fqn, _path) in idx.iter_folded() {
+                if !folded.contains(&prefix_lower) {
                     continue;
                 }
                 if !seen.insert(fqn.to_owned()) {
@@ -351,8 +349,8 @@ impl Backend {
 
         // ── 3. Built-in PHP functions from stubs ────────────────────
         let stub_fn_idx = self.stub_function_index.read();
-        for name in stub_fn_idx.keys() {
-            if !name.to_lowercase().contains(&prefix_lower) {
+        for (folded, name, _) in stub_fn_idx.iter_folded() {
+            if !folded.contains(&prefix_lower) {
                 continue;
             }
             if crate::blade::is_synthetic_function(name) {

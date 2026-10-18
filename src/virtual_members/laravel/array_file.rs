@@ -48,6 +48,36 @@ pub(crate) fn returned_exprs<'a>(program: &'a Program<'a>) -> Vec<&'a Expression
         .collect()
 }
 
+/// The value of the `key` entry in an array a top-level `return [...]`
+/// hands back (`'providers' => [...]` in `config/app.php`), in either
+/// array syntax.
+pub(crate) fn returned_array_entry<'ast, 'arena>(
+    program: &'ast Program<'arena>,
+    key: &str,
+) -> Option<&'ast Expression<'arena>> {
+    program.statements.iter().find_map(|stmt| {
+        let Statement::Return(ret) = stmt else {
+            return None;
+        };
+        let elements = match ret.value? {
+            Expression::Array(arr) => &arr.elements,
+            Expression::LegacyArray(arr) => &arr.elements,
+            _ => return None,
+        };
+        elements.iter().find_map(|element| match element {
+            ArrayElement::KeyValue(kv) if is_string_literal(kv.key, key) => Some(kv.value),
+            _ => None,
+        })
+    })
+}
+
+fn is_string_literal(expr: &Expression<'_>, expected: &str) -> bool {
+    matches!(
+        expr,
+        Expression::Literal(Literal::String(s)) if s.value.is_some_and(|v| v == expected.as_bytes())
+    )
+}
+
 /// Whether `expr` is an array as far as [`for_each_entry`] is concerned:
 /// an array literal, one in parentheses, or an `array_merge()` of such.
 pub(crate) fn is_array_expr(expr: &Expression<'_>) -> bool {

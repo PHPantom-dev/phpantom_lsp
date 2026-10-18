@@ -1,13 +1,16 @@
-/// Iterable element/key type extraction from a class's generic
-/// annotations (`@extends Collection<int, User>`,
-/// `@implements IteratorAggregate<int, User>`), plus
-/// [`resolve_expression_type`], a thin wrapper over the unified RHS
-/// pipeline.
-///
-/// Consumed by the forward walker's foreach/destructuring handling,
-/// array-access resolution, and raw type inference.
+//! Iterable element/key type extraction from a class's generic
+//! annotations (`@extends Collection<int, User>`,
+//! `@implements IteratorAggregate<int, User>`), plus
+//! [`resolve_expression_type`], a thin wrapper over the unified RHS
+//! pipeline.
+//!
+//! Consumed by the forward walker's foreach/destructuring handling,
+//! array-access resolution, and raw type inference.
+
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use crate::inheritance::ancestry::ClassLoader;
 
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
@@ -226,6 +229,25 @@ pub(crate) fn resolve_iterable_element_via_class(
     iter_type: &PhpType,
     ctx: &IterableCtx<'_>,
 ) -> Option<PhpType> {
+    resolve_iterable_slot_via_class(iter_type, ctx, extract_iterable_element_type_from_class)
+}
+
+/// Resolve the iterable **key** type from a class's `implements_generics`
+/// / `extends_generics`.  Mirrors [`resolve_iterable_element_via_class`].
+pub(crate) fn resolve_iterable_key_via_class(
+    iter_type: &PhpType,
+    ctx: &IterableCtx<'_>,
+) -> Option<PhpType> {
+    resolve_iterable_slot_via_class(iter_type, ctx, extract_iterable_key_type_from_class)
+}
+
+/// The type `extract` reads off the fully merged class an iterable type
+/// names, with an unsubstituted template parameter replaced by its bound.
+fn resolve_iterable_slot_via_class(
+    iter_type: &PhpType,
+    ctx: &IterableCtx<'_>,
+    extract: fn(&ClassInfo, ClassLoader<'_>) -> Option<PhpType>,
+) -> Option<PhpType> {
     // Accept bare class names, whether or not wrapped in `Nullable` (e.g.
     // `?SimpleXMLElement`, the return type of `SimpleXMLElement::children()`).
     // `base_name` unwraps `Nullable`/`Generic` to the underlying class name.
@@ -237,86 +259,32 @@ pub(crate) fn resolve_iterable_element_via_class(
 
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         iter_type,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
+    let merged = |cls: &ClassInfo| {
+        crate::virtual_members::resolve_class_fully_maybe_cached(
+            cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        )
+    };
 
     if classes.is_empty() {
         // Try direct class loader as fallback (handles FQN names).
         let cls = (ctx.class_loader)(class_name)?;
-        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-            &cls,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        );
-        return extract_iterable_element_type_from_class(&merged, ctx.class_loader);
+        return extract(&merged(&cls), ctx.class_loader);
     }
 
-    for cls in &classes {
-        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-            cls,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        );
-        let element_type = extract_iterable_element_type_from_class(&merged, ctx.class_loader);
-        if let Some(ref et) = element_type {
-            // When the extracted type is an unsubstituted template parameter
-            // (e.g. `TModel`), resolve it through the class's template bounds
-            // (e.g. `@template TModel of BlogAuthor` → `BlogAuthor`).
-            if let Some(bound) = template_bound(et, &merged) {
-                return Some(bound);
-            }
-            return element_type;
-        }
-    }
-
-    None
-}
-
-/// Resolve the iterable **key** type from a class's `implements_generics`
-/// / `extends_generics`.  Mirrors [`resolve_iterable_element_via_class`].
-pub(crate) fn resolve_iterable_key_via_class(
-    iter_type: &PhpType,
-    ctx: &IterableCtx<'_>,
-) -> Option<PhpType> {
-    // See `resolve_iterable_element_via_class`: unwrap `Nullable`/`Generic`
-    // via `base_name` so `?SimpleXMLElement`-style iterable types resolve.
-    let class_name = iter_type.base_name()?;
-
-    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-        iter_type,
-        &ctx.current_class.name,
-        ctx.all_classes,
-        ctx.class_loader,
-    );
-
-    if classes.is_empty() {
-        let cls = (ctx.class_loader)(class_name)?;
-        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-            &cls,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        );
-        return extract_iterable_key_type_from_class(&merged, ctx.class_loader);
-    }
-
-    for cls in &classes {
-        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-            cls,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        );
-        let key_type = extract_iterable_key_type_from_class(&merged, ctx.class_loader);
-        if let Some(ref kt) = key_type {
-            if let Some(bound) = template_bound(kt, &merged) {
-                return Some(bound);
-            }
-            return key_type;
-        }
-    }
-
-    None
+    classes.iter().find_map(|cls| {
+        let merged = merged(cls);
+        let ty = extract(&merged, ctx.class_loader)?;
+        // When the extracted type is an unsubstituted template parameter
+        // (e.g. `TModel`), resolve it through the class's template bounds
+        // (e.g. `@template TModel of BlogAuthor` → `BlogAuthor`).
+        Some(template_bound(&ty, &merged).unwrap_or(ty))
+    })
 }
 
 /// The bound a class declares for `ty`, when `ty` is one of the class's
@@ -367,9 +335,8 @@ const ITERABLE_IFACE_NAMES: &[&str] = &[
 /// `@implements IteratorAggregate<int, User>`, this
 /// function returns `Some("User")`.
 ///
-/// Checks (in order of priority):
-/// 1. `implements_generics` for known iterable interfaces
-/// 2. `extends_generics` for any parent with generic type args
+/// Reads the generic annotations first (see [`declared_iterable_arg`]),
+/// then falls back to the `current()` / `offsetGet()` return types.
 ///
 /// Returns `None` when no generic iterable annotation is found or
 /// when the element type is a scalar (scalars have no completable
@@ -378,45 +345,8 @@ pub(crate) fn extract_iterable_element_type_from_class(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
-    // 1. Check implements_generics for known iterable interfaces.
-    for (name, args) in &class.implements_generics {
-        let short = short_name(name);
-        if ITERABLE_IFACE_NAMES.contains(&short)
-            && let Some(arg) = iterable_value_arg(args)
-        {
-            let value = resolve_own_template_arg(arg, class);
-            if !is_unbounded_template_placeholder(&value) {
-                return Some(value);
-            }
-        }
-    }
-
-    // 1b. Check implements_generics for interfaces that transitively
-    //     extend a known iterable interface (e.g. `TypedCollection`
-    //     extends `IteratorAggregate`).
-    for (name, args) in &class.implements_generics {
-        let short = short_name(name);
-        if !ITERABLE_IFACE_NAMES.contains(&short)
-            && let Some(arg) = iterable_value_arg(args)
-            && let Some(iface) = class_loader(name)
-            && is_transitive_iterable(&iface, class_loader)
-        {
-            let value = resolve_own_template_arg(arg, class);
-            if !is_unbounded_template_placeholder(&value) {
-                return Some(value);
-            }
-        }
-    }
-
-    // 2. Check extends_generics — common for collection subclasses
-    //    like `@extends Collection<int, User>`.
-    for (_, args) in &class.extends_generics {
-        if let Some(arg) = iterable_value_arg(args) {
-            let value = resolve_own_template_arg(arg, class);
-            if !is_unbounded_template_placeholder(&value) {
-                return Some(value);
-            }
-        }
+    if let Some(value) = declared_iterable_arg(class, class_loader, iterable_value_arg) {
+        return Some(value);
     }
 
     // 3. Fall back to the `current()` return type when the class
@@ -463,6 +393,57 @@ fn iterable_value_arg(args: &[PhpType]) -> Option<&PhpType> {
     } else {
         args.last()
     }
+}
+
+/// Select the generic argument that describes the iterated **key** type:
+/// the first of a `<TKey, TValue>` pair. A lone argument names the value,
+/// so there is no key to read.
+fn iterable_key_arg(args: &[PhpType]) -> Option<&PhpType> {
+    if args.len() >= 2 { args.first() } else { None }
+}
+
+/// The iterable argument `pick` selects from a class's generic
+/// annotations, with the class's own template parameters resolved to
+/// their bounds.
+///
+/// Checks, in order of priority:
+/// 1. `implements_generics` for known iterable interfaces,
+/// 2. `implements_generics` for interfaces that transitively extend one
+///    (e.g. `TypedCollection` extends `IteratorAggregate`),
+/// 3. `extends_generics` for any parent with generic type args, common
+///    for collection subclasses like `@extends Collection<int, User>`.
+fn declared_iterable_arg(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pick: fn(&[PhpType]) -> Option<&PhpType>,
+) -> Option<PhpType> {
+    let usable = |args: &[PhpType]| {
+        let arg = resolve_own_template_arg(pick(args)?, class);
+        (!is_unbounded_template_placeholder(&arg)).then_some(arg)
+    };
+    let is_known = |name: &str| ITERABLE_IFACE_NAMES.contains(&short_name(name));
+
+    let generics = &class.implements_generics;
+    generics
+        .iter()
+        .filter(|(name, _)| is_known(name))
+        .find_map(|(_, args)| usable(args))
+        .or_else(|| {
+            generics
+                .iter()
+                .filter(|(name, args)| !is_known(name) && pick(args).is_some())
+                .filter(|(name, _)| {
+                    class_loader(name)
+                        .is_some_and(|iface| is_transitive_iterable(&iface, class_loader))
+                })
+                .find_map(|(_, args)| usable(args))
+        })
+        .or_else(|| {
+            class
+                .extends_generics
+                .iter()
+                .find_map(|(_, args)| usable(args))
+        })
 }
 
 /// Resolve a generic argument that references the class's own `@template`
@@ -605,50 +586,17 @@ pub(in crate::type_engine) fn extract_iterable_key_type_from_class(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
-    // 1. Check implements_generics for known iterable interfaces.
-    //    A single-argument traversal binding (`IteratorAggregate<User>`)
-    //    names the value alone, which leaves the key `mixed` unless the
-    //    class's own `key()` says more.
-    let mut value_only_traversal = false;
-    for (name, args) in &class.implements_generics {
-        let short = short_name(name);
-        if !ITERABLE_IFACE_NAMES.contains(&short) {
-            continue;
-        }
-        if args.len() >= 2 {
-            let key = resolve_own_template_arg(&args[0], class);
-            if !is_unbounded_template_placeholder(&key) {
-                return Some(key);
-            }
-        } else if args.len() == 1 && is_traversal_name(short) {
-            value_only_traversal = true;
-        }
+    if let Some(key) = declared_iterable_arg(class, class_loader, iterable_key_arg) {
+        return Some(key);
     }
 
-    // 1b. Transitive iterable interfaces.
-    for (name, args) in &class.implements_generics {
-        let short = short_name(name);
-        if !ITERABLE_IFACE_NAMES.contains(&short)
-            && args.len() >= 2
-            && let Some(iface) = class_loader(name)
-            && is_transitive_iterable(&iface, class_loader)
-        {
-            let key = resolve_own_template_arg(&args[0], class);
-            if !is_unbounded_template_placeholder(&key) {
-                return Some(key);
-            }
-        }
-    }
-
-    // 2. Check extends_generics.
-    for (_, args) in &class.extends_generics {
-        if args.len() >= 2 {
-            let key = resolve_own_template_arg(&args[0], class);
-            if !is_unbounded_template_placeholder(&key) {
-                return Some(key);
-            }
-        }
-    }
+    // A single-argument traversal binding (`IteratorAggregate<User>`)
+    // names the value alone, which leaves the key `mixed` unless the
+    // class's own `key()` says more.
+    let value_only_traversal = class
+        .implements_generics
+        .iter()
+        .any(|(name, args)| args.len() == 1 && is_traversal_name(short_name(name)));
 
     // 3. Fall back to the `key()` return type when the class implements
     //    `Iterator` directly without a generic annotation. Mirrors the

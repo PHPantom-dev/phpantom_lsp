@@ -9941,3 +9941,52 @@ function demonstrate(ValueBox $box): void { BODY }
         }
     }
 }
+
+/// A wrapper template is bound from `new Wrapper(…)`'s constructor only when
+/// the argument is that `new` expression: with a call chained off it (PHP
+/// 8.4's parenthesis-free `new`), the argument is whatever the call returns.
+#[tokio::test]
+async fn test_wrapper_template_not_bound_through_call_chained_off_new() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///new_chain_wrapper_arg.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                            // 0
+        "/**\n",                                                              // 1
+        " * @template T\n",                                                   // 2
+        " */\n",                                                              // 3
+        "class Box {\n",                                                      // 4
+        "    /** @param T $val */\n",                                         // 5
+        "    public function __construct($val) {}\n",                         // 6
+        "    public function receipt(): Receipt { return new Receipt(); }\n", // 7
+        "}\n",                                                                // 8
+        "class Receipt {}\n",                                                 // 9
+        "class Product {\n",                                                  // 10
+        "    public function getPrice(): float {}\n",                         // 11
+        "}\n",                                                                // 12
+        "/**\n",                                                              // 13
+        " * @template T\n",                                                   // 14
+        " * @param Box<T> $box\n",                                            // 15
+        " * @return T\n",                                                     // 16
+        " */\n",                                                              // 17
+        "function unbox(Box $box) {}\n",                                      // 18
+        "function wrapped() {\n",                                             // 19
+        "    $r = unbox(new Box(new Product()));\n",                          // 20
+        "    $r->\n",                                                         // 21
+        "}\n",                                                                // 22
+        "function chained() {\n",                                             // 23
+        "    $r = unbox(new Box(new Product())->receipt());\n",               // 24
+        "    $r->\n",                                                         // 25
+        "}\n",                                                                // 26
+    );
+
+    let wrapped = crate::common::complete_labels_at(&backend, &uri, text, 21, 8).await;
+    assert!(
+        wrapped.iter().any(|label| label.starts_with("getPrice")),
+        "unbox(new Box(new Product())) binds T to Product, got: {wrapped:?}"
+    );
+    let chained = crate::common::complete_labels_at(&backend, &uri, text, 25, 8).await;
+    assert!(
+        !chained.iter().any(|label| label.starts_with("getPrice")),
+        "the argument is a Receipt, so T is not Product, got: {chained:?}"
+    );
+}

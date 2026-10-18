@@ -1,6 +1,6 @@
 //! Morph-map aliases used as values of a model's actual polymorphic type columns.
 
-use crate::common::{create_psr4_workspace, open_php};
+use crate::common::{create_psr4_workspace, open_php, position_after};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -143,18 +143,6 @@ class ColdConsumer {
     let uri = Url::from_file_path(dir.path().join("app/Consumer.php")).unwrap();
     open_php(&backend, &uri, source).await;
     (backend, dir, uri)
-}
-
-fn position_after(source: &str, prefix: &str) -> Position {
-    let end = source
-        .find(prefix)
-        .unwrap_or_else(|| panic!("missing {prefix}"))
-        + prefix.len();
-    let before = &source[..end];
-    Position::new(
-        before.bytes().filter(|byte| *byte == b'\n').count() as u32,
-        before.rsplit('\n').next().unwrap().encode_utf16().count() as u32,
-    )
 }
 
 async fn labels(backend: &Backend, uri: &Url, position: Position) -> Vec<String> {

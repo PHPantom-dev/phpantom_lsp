@@ -1,9 +1,10 @@
-/// Variable name completion.
-///
-/// This module handles building completion items for variable names (`$`
-/// prefix) by collecting variable definitions from the precomputed
-/// [`SymbolMap`] visible at the cursor position, respecting PHP scoping
-/// rules (function, method, closure, and top-level scope).
+//! Variable name completion.
+//!
+//! This module handles building completion items for variable names (`$`
+//! prefix) by collecting variable definitions from the precomputed
+//! [`SymbolMap`] visible at the cursor position, respecting PHP scoping
+//! rules (function, method, closure, and top-level scope).
+
 use std::collections::HashSet;
 
 use tower_lsp::lsp_types::*;
@@ -229,7 +230,7 @@ fn collect_variables_from_symbol_map(
             break;
         }
         // If this scope is an arrow function, walk up to the parent.
-        if map.arrow_fn_scopes.contains(&scope) {
+        if map.is_arrow_fn_scope(scope) {
             // Find the parent scope: the next-innermost scope that
             // contains `scope` but is not `scope` itself.
             let mut parent: u32 = 0;

@@ -185,10 +185,8 @@ fn collect_map_argument(
     content: &str,
     scan: &mut MorphMapScan,
 ) {
-    let elements = match expr {
-        Expression::Array(array) => &array.elements,
-        Expression::LegacyArray(array) => &array.elements,
-        _ => return,
+    let Some(elements) = crate::parser::array_literal_elements(expr) else {
+        return;
     };
 
     for element in elements.iter() {
@@ -228,37 +226,16 @@ fn class_constant_fqn(
     resolved: &OwnedResolvedNames,
     content: &str,
 ) -> Option<String> {
-    match expr {
-        Expression::Access(Access::ClassConstant(access))
-            if matches!(
-                &access.constant,
-                ClassLikeConstantSelector::Identifier(constant)
-                    if bytes_to_str(constant.value).eq_ignore_ascii_case("class")
-            ) =>
-        {
-            let Expression::Identifier(ident) = access.class else {
-                return None;
-            };
-            let raw = bytes_to_str(ident.value());
-            if matches!(
-                raw.to_ascii_lowercase().as_str(),
-                "self" | "static" | "parent"
-            ) {
-                return None;
-            }
-            resolved
-                .get(ident.span().start.offset)
-                .map(|fqn| fqn.trim_start_matches('\\').to_string())
-                .or_else(|| (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string()))
-        }
-        Expression::Literal(Literal::String(_)) => {
-            let (raw, _) = string_literal_at(expr, content)?;
-            let fqn = raw.replace("\\\\", "\\");
-            let fqn = fqn.trim_start_matches('\\');
-            (!fqn.is_empty()).then(|| fqn.to_string())
-        }
-        _ => None,
+    if let Some(ident) = crate::parser::class_fetch_identifier(expr) {
+        return resolved.class_fqn(ident);
     }
+    let Expression::Literal(Literal::String(_)) = expr else {
+        return None;
+    };
+    let (raw, _) = string_literal_at(expr, content)?;
+    let fqn = raw.replace("\\\\", "\\");
+    let fqn = fqn.trim_start_matches('\\');
+    (!fqn.is_empty()).then(|| fqn.to_string())
 }
 
 /// Where a morph alias was registered, and what it maps to.

@@ -1,16 +1,19 @@
-/// Request-scoped memos for call resolution, plus body-return-type
-/// inference.
-///
-/// Bundles the callable-target cache and the body-return-inference memo
-/// behind [`activate_type_engine_caches`], which every request entry
-/// point activates so the two memos live exactly as long as one request
-/// (or one file's diagnostic pass).
-///
-/// The facilities that need project-wide state — inferring a return type
-/// from a method body, the model behind an auth guard, the validation
-/// rules describing a request — read the `Backend` off the resolution
-/// context instead, so a caller cannot forget to install them.
-use std::cell::{Cell, RefCell};
+//! Request-scoped memos for call resolution, plus body-return-type
+//! inference.
+//!
+//! Bundles the callable-target cache and the body-return-inference memo
+//! behind [`activate_type_engine_caches`], which every request entry
+//! point activates so the two memos live exactly as long as one request
+//! (or one file's diagnostic pass).
+//!
+//! The facilities that need project-wide state — inferring a return type
+//! from a method body, the model behind an auth guard, the validation
+//! rules describing a request — read the `Backend` off the resolution
+//! context instead, so a caller cannot forget to install them.
+
+#[cfg(test)]
+use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -30,7 +33,7 @@ use crate::types::*;
 type BodyInferKey = (Atom, Atom, Box<[PhpType]>);
 
 /// Memoized body-return-inference results.
-type BodyInferMemo = HashMap<BodyInferKey, Option<PhpType>>;
+type BodyInferMemo = crate::type_engine::BoundedMemo<BodyInferKey, Option<PhpType>>;
 
 /// The body-return inferences currently walking a body, each with the
 /// argument types its call site decided, keyed by `(declaring FQN,
@@ -64,13 +67,6 @@ thread_local! {
     static BODY_INFER_MEMO: RefCell<Option<BodyInferMemo>> =
         const { RefCell::new(None) };
 
-    /// Current nesting depth of body return inference.  Caps the
-    /// chain length so that A→B→C→D… doesn't trigger unbounded
-    /// sequential body scans.  Each scan runs `resolve_variable_types`
-    /// (forward walker + full resolution), so even non-recursive
-    /// chains are expensive.
-    static BODY_INFER_DEPTH: Cell<u8> = const { Cell::new(0) };
-
     /// The call-site argument types of every body-return inference
     /// currently walking a body, so the walker can seed that body's
     /// parameters with what the call actually passed rather than with
@@ -83,6 +79,15 @@ thread_local! {
     /// scan is cheaper than hashing.
     static BODY_INFER_ARGS: RefCell<CallSiteArgFrames> =
         const { RefCell::new(Vec::new()) };
+
+    #[cfg(test)]
+    static TEST_BODY_INFERENCES: Cell<usize> = const { Cell::new(0) };
+}
+
+/// How many method bodies this thread has walked for a return type.
+#[cfg(test)]
+pub(crate) fn test_body_inferences() -> usize {
+    TEST_BODY_INFERENCES.with(Cell::get)
 }
 
 /// Activate the thread-local callable target cache.
@@ -172,7 +177,12 @@ pub(crate) fn call_site_param_types(class_fqn: &str, method_name: &str) -> Optio
 /// itself while an outer inference is running, because that is the only
 /// time a refinement the arguments decide can still reach a caller.
 pub(crate) fn body_inference_in_progress() -> bool {
-    BODY_INFER_DEPTH.with(|cell| cell.get()) > 0
+    body_infer_depth() > 0
+}
+
+/// How many body-return inferences are walking a body on this thread.
+fn body_infer_depth() -> u8 {
+    crate::type_engine::inference_depth(crate::type_engine::BoundedInference::BodyReturn)
 }
 
 /// A hash of everything about the body-return inferences in progress
@@ -187,7 +197,7 @@ pub(crate) fn body_inference_in_progress() -> bool {
 pub(crate) fn body_inference_context() -> u64 {
     use std::hash::{Hash, Hasher};
 
-    let depth = BODY_INFER_DEPTH.with(Cell::get);
+    let depth = body_infer_depth();
     if depth == 0 {
         return 0;
     }
@@ -255,7 +265,7 @@ pub(crate) fn try_infer_body_return_type(
     crate::type_engine::memoized_bounded_inference(
         &BODY_INFER_MEMO,
         &BODY_INFER_VISITED,
-        &BODY_INFER_DEPTH,
+        crate::type_engine::BoundedInference::BodyReturn,
         MAX_BODY_INFER_DEPTH,
         memo_key,
         visited_key,
@@ -279,6 +289,9 @@ fn infer_body_return_type(
     method: &MethodInfo,
     call_args: &[PhpType],
 ) -> Option<PhpType> {
+    #[cfg(test)]
+    TEST_BODY_INFERENCES.with(|count| count.set(count.get() + 1));
+
     // The method may have been inherited from a trait or parent class
     // declared in a *different* file.  `method.name_offset` is relative
     // to that declaring file, so reading the receiver's own file at
@@ -387,7 +400,7 @@ fn infer_body_return_type(
 
 /// The request-scoped memos the type engine keeps, activated as a unit.
 ///
-/// All four are pure memos: without them the type engine reaches the
+/// All of them are pure memos: without them the type engine reaches the
 /// same answers, just by re-doing work it has already done for this
 /// file.
 /// They are activated at the chokepoints every request passes through so
@@ -397,6 +410,7 @@ pub(crate) struct TypeEngineCaches {
     _body_infer: BodyInferMemoGuard,
     _out_type: super::out_param::OutTypeMemoGuard,
     _walk: crate::type_engine::variable::forward_walk::WalkMemoGuard,
+    _form_request_rules: crate::virtual_members::laravel::validation_rules::RulesMemoGuard,
 }
 
 /// Activate every request-scoped type-engine memo for the current
@@ -415,6 +429,7 @@ pub(crate) fn activate_type_engine_caches() -> TypeEngineCaches {
         _body_infer: with_body_infer_memo(),
         _out_type: super::out_param::with_out_type_memo(),
         _walk: crate::type_engine::variable::forward_walk::with_walk_memo(),
+        _form_request_rules: crate::virtual_members::laravel::validation_rules::with_rules_memo(),
     }
 }
 

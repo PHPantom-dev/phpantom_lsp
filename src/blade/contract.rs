@@ -423,7 +423,10 @@ fn rendered_view_names(content: &str) -> RenderedViews {
         };
         i = end;
         let args = &content[open + 1..end];
-        let Some(argument) = signature::split_top_level_args(args).into_iter().nth(index) else {
+        let Some(argument) = crate::text_scan::split_top_level_commas(args)
+            .into_iter()
+            .nth(index)
+        else {
             closed = false;
             continue;
         };

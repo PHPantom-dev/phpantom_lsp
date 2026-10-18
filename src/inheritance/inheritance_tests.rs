@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use super::*;
 use crate::atom::{AtomMap, atom};
 use crate::php_type::PhpType;
-use crate::types::{ClassLikeKind, MethodInfo};
+use crate::types::{ClassLikeKind, MethodInfo, Visibility};
 
 /// Helper to build a `HashMap<String, PhpType>` from `(&str, &str)` pairs.
 fn make_subs(pairs: &[(&str, &str)]) -> HashMap<String, PhpType> {
@@ -298,7 +300,6 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
 
     let mut method = MethodInfo {
         name: crate::atom::atom("first"),
-        name_offset: 0,
         parameters: vec![crate::types::ParameterInfo {
             name: crate::atom::atom("$key"),
             is_required: false,
@@ -310,23 +311,11 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         }]
         .into(),
         return_type: Some(PhpType::parse("TValue")),
-        native_return_type: None,
-        description: None,
-        is_static: false,
-        visibility: Visibility::Public,
-        has_scope_attribute: false,
-        is_abstract: false,
-        is_final: false,
-        is_virtual: false,
-        is_macro: false,
-        is_inferred_return: false,
-        is_pure: false,
-        is_impure: false,
-        reads_func_args: false,
-        extras: None,
+        ..Default::default()
     };
 
     apply_substitution_to_method(&mut method, &subs);
@@ -413,6 +402,7 @@ fn test_extends_generics_propagate_through_parent_use_generics() {
     };
 
     let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "DataCollection" => Some(Arc::new(parent_class.clone())),
             "EnumerableMethods" => Some(Arc::new(trait_info.clone())),
@@ -637,6 +627,7 @@ fn method_tag_does_not_shadow_a_real_inherited_method() {
     ));
 
     let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "TestCase" => Some(Arc::new(parent_class.clone())),
             _ => None,

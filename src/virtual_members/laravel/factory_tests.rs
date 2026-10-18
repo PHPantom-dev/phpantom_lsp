@@ -108,6 +108,7 @@ fn extends_factory_indirect() {
     base.parent_class = Some(atom(FACTORY_FQN));
 
     let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         if name == "BaseFactory" {
             Some(Arc::new(base.clone()))
         } else {
@@ -182,6 +183,7 @@ fn unbound_factory_generic_yields_to_declared_model() {
 
     let (document_factory, factory_base) = generic_document_factory_classes();
     let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "Database\\Factories\\DocumentFactory" => Some(Arc::new(document_factory.clone())),
             FACTORY_FQN => Some(Arc::new(factory_base.clone())),
@@ -219,6 +221,7 @@ fn explicit_base_model_binding_remains_authoritative() {
 
     let (document_factory, factory_base) = generic_document_factory_classes();
     let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "Database\\Factories\\DocumentFactory" => Some(Arc::new(document_factory.clone())),
             FACTORY_FQN => Some(Arc::new(factory_base.clone())),

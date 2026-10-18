@@ -11,125 +11,25 @@
 //! and `@mixin SomeClass` where `SomeClass` also has an `$id` property,
 //! the `@property` tag wins.
 
-use std::cell::RefCell;
+mod mixins;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::atom::{Atom, AtomSet};
 use crate::inheritance;
-use crate::inheritance::ClassRef;
-use crate::php_type::{PhpType, TypeKind};
-use crate::types::{
-    ClassInfo, ConstantInfo, MAX_INHERITANCE_DEPTH, MAX_MIXIN_DEPTH, MethodInfo, PropertyInfo,
-    PropertySource, Visibility,
-};
-use crate::util::short_name;
-
-/// Laravel's call-forwarding trait.  Classes that use it (Eloquent
-/// `Builder`, `Relation`, …) implement the decorated-forward rule:
-/// when a call is forwarded to another object and that object returns
-/// itself, the forwarder returns `$this` instead.
-const FORWARDS_CALLS_FQN: &str = "Illuminate\\Support\\Traits\\ForwardsCalls";
-const FORWARDS_CALLS_SHORT: &str = "ForwardsCalls";
-
-/// Global generation counter, incremented every time a file is re-parsed.
-/// Thread-local caches compare against this to detect staleness.
-static MIXIN_GENERATION: AtomicU64 = AtomicU64::new(0);
-
-/// Bump the mixin-cache generation so that all threads discard stale entries
-/// on their next access.  Called from [`Backend::update_ast`] whenever a file
-/// changes.
-pub fn bump_mixin_generation() {
-    MIXIN_GENERATION.fetch_add(1, Ordering::Relaxed);
-}
-
-thread_local! {
-    /// Thread-local cache of base-resolved mixin classes.
-    ///
-    /// Keyed by fully-qualified mixin name, stores the result of
-    /// [`resolve_class_with_inheritance`](crate::inheritance::resolve_class_with_inheritance)
-    /// so that expensive inheritance walks (e.g. for
-    /// `\Illuminate\Database\Eloquent\Builder`) are performed at most
-    /// once per thread.
-    ///
-    /// Automatically invalidated when the global generation counter
-    /// advances (i.e. when any file is re-parsed).
-    static MIXIN_CACHE: RefCell<(u64, HashMap<String, Arc<ClassInfo>>)> =
-        RefCell::new((0, HashMap::new()));
-}
-
-/// Clear the thread-local mixin resolution cache.
-///
-/// In production the cache lives for the lifetime of the thread and is
-/// safe because the same FQN always maps to the same class.  In tests,
-/// however, each test may define classes with identical short names but
-/// different members.  Call this function when creating a new test
-/// backend so that stale entries from a previous test do not leak.
-pub fn clear_mixin_cache() {
-    MIXIN_CACHE.with(|cache| {
-        let mut inner = cache.borrow_mut();
-        inner.0 = MIXIN_GENERATION.load(Ordering::Relaxed);
-        inner.1.clear();
-    });
-}
-
-/// Ensure the thread-local cache is current with the global generation.
-/// Clears the cache if stale.
-fn ensure_mixin_cache_fresh() {
-    MIXIN_CACHE.with(|cache| {
-        let current_gen = MIXIN_GENERATION.load(Ordering::Relaxed);
-        let mut inner = cache.borrow_mut();
-        if inner.0 != current_gen {
-            inner.0 = current_gen;
-            inner.1.clear();
-        }
-    });
-}
-
-/// Accumulates mixin members during collection, grouping the output
-/// vectors and dedup sets into a single value to keep the argument
-/// count of [`collect_mixin_members`] within clippy's limit.
-struct MixinCollector {
-    methods: Vec<Arc<MethodInfo>>,
-    properties: Vec<PropertyInfo>,
-    constants: Vec<ConstantInfo>,
-    dedup: MixinDedup,
-}
-
-/// Tracks member names already seen during mixin collection.
-///
-/// Passed through [`collect_mixin_members`] (including recursive calls)
-/// so that every addition is checked in O(1) instead of scanning the
-/// accumulated vectors and base class members.
-struct MixinDedup {
-    /// Method names from the base class + accumulated virtual methods.
-    methods: AtomSet,
-    /// Property names from the base class + accumulated virtual properties.
-    properties: AtomSet,
-    /// Constant names from the base class + accumulated virtual constants.
-    constants: AtomSet,
-}
-
-/// The substitution environment for a single [`collect_mixin_members`] level.
-///
-/// Groups the maps used to resolve a `@mixin` name that is a template
-/// parameter into a concrete class, plus the ForwardsCalls flag, keeping
-/// the argument count of [`collect_mixin_members`] within clippy's limit.
-struct MixinSubs<'a> {
-    /// Concrete type per template param (from generic arguments provided by
-    /// a subclass via `@extends`/`@mixin` generics).  Checked first.
-    subs: &'a HashMap<String, PhpType>,
-    /// Upper bound per template param (from `@template T of Bound`).  Used
-    /// as a fallback when no concrete type is bound, so a `@mixin T` still
-    /// resolves members through the constraint.
-    bounds: &'a crate::atom::AtomMap<PhpType>,
-    /// Whether the outermost consumer uses `ForwardsCalls` (decorated
-    /// forward: target-self returns become the forwarder's `$this`).
-    decorated_forward: bool,
-}
+use crate::inheritance::bind_template_args;
+use crate::php_type::PhpType;
+use crate::types::{ClassInfo, DocblockMembers, MethodInfo, PropertyInfo, PropertySource};
 
 use super::{VirtualMemberProvider, VirtualMembers};
+use mixins::{
+    MixinCollector, MixinDedup, collect_class_mixin_members, template_bound_ancestors,
+    uses_trait_with_mixins,
+};
+
+pub use mixins::resolve_template_param_mixins;
+pub(super) use mixins::uses_forwards_calls;
 
 /// Build a virtual [`PropertyInfo`] from a parsed `@property` tag,
 /// substituting template parameters in the declared type when `subs`
@@ -139,27 +39,14 @@ fn doc_property(
     type_hint: Option<&PhpType>,
     subs: &HashMap<String, PhpType>,
 ) -> PropertyInfo {
-    PropertyInfo {
-        name,
-        name_offset: 0,
-        type_hint: type_hint.map(|t| {
-            if subs.is_empty() {
-                t.clone()
-            } else {
-                t.substitute(subs)
-            }
-        }),
-        native_type_hint: None,
-        description: None,
-        is_static: false,
-        is_readonly: false,
-        visibility: Visibility::Public,
-        deprecation_message: None,
-        deprecated_replacement: None,
-        see_refs: Vec::new(),
-        is_virtual: true,
-        source: None,
-    }
+    let type_hint = type_hint.map(|t| {
+        if subs.is_empty() {
+            t.clone()
+        } else {
+            t.substitute(subs)
+        }
+    });
+    PropertyInfo::virtual_property_owned(name, type_hint)
 }
 
 /// Like [`doc_property`], but marked [`PropertySource::DocblockTag`].
@@ -254,18 +141,7 @@ impl VirtualMemberProvider for PHPDocProvider {
         }
 
         // Walk the parent chain to check for ancestor mixins or tags.
-        let mut current_parent = class.parent_class;
-        let mut depth = 0u32;
-        while let Some(ref parent_name) = current_parent {
-            depth += 1;
-            if depth > MAX_INHERITANCE_DEPTH {
-                break;
-            }
-            let parent = if let Some(p) = class_loader(parent_name) {
-                p
-            } else {
-                break;
-            };
+        for (_, parent) in inheritance::ancestors(class, class_loader) {
             if !parent.mixins.is_empty()
                 || parent.doc_members.is_some()
                 || uses_trait_with_mixins(&parent, class_loader)
@@ -280,7 +156,6 @@ impl VirtualMemberProvider for PHPDocProvider {
                     return true;
                 }
             }
-            current_parent = parent.parent_class;
         }
 
         // Walk implemented interfaces (and the interfaces they extend),
@@ -318,344 +193,19 @@ impl VirtualMemberProvider for PHPDocProvider {
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         cache: Option<&super::ResolvedClassCache>,
     ) -> VirtualMembers {
-        let mut methods = Vec::new();
-        let mut properties = Vec::new();
-        let constants = Vec::new();
-
-        // Dedup sets for O(1) membership checks.  Seeded from the
-        // base-resolved class members (real + inherited) and updated
-        // as virtual members are collected.
-        //
-        // `seen_props` is NOT seeded from existing class properties.
-        // Phase 1 (`@property` tags) always emits its properties so
-        // that `merge_virtual_members` can compare type specificity
-        // and keep the most specific type (e.g. `array<string>` from
-        // `@property` beats bare `array` from `$casts`).  After
-        // phase 1 emits, names are added to `seen_props` to prevent
-        // lower-priority sources (trait tags, parent tags, `@mixin`
-        // members) from overriding them.
-        let mut seen_methods: AtomSet = class.methods.iter().map(|m| m.name).collect();
-        let mut seen_props: AtomSet = AtomSet::default();
-        let seen_consts: AtomSet = class.constants.iter().map(|c| c.name).collect();
-
-        // No generic substitution applies to the class's own tags, nor to
-        // tags inherited from a trait: `@use Trait<T>` substitution is the
-        // inheritance merge's job, and it does not reach docblock tags.
-        let no_subs: HashMap<String, PhpType> = HashMap::new();
-
-        // ── Phase 1: @method and @property tags (higher precedence) ─────
-
-        if let Some(doc) = class.doc_members.as_deref() {
-            for m in &doc.methods {
-                seen_methods.insert(m.name);
-                methods.push(Arc::clone(m));
-            }
-
-            for (name, type_hint) in &doc.properties {
-                seen_props.insert(*name);
-                properties.push(doc_tag_property(*name, type_hint.as_ref(), &no_subs));
-            }
-        }
-
-        // ── Phase 1b: @method and @property tags from used traits ───────
-        //
-        // When a class uses a trait that declares `@method` or `@property`
-        // tags in its docblock, those virtual members should propagate to
-        // the consuming class.  Real trait methods are already merged by
-        // `merge_traits_into`, but virtual members from docblock tags are
-        // not — they only exist as text in the trait's `class_docblock`.
-        for trait_name in &class.used_traits {
-            let trait_info = if let Some(t) = class_loader(trait_name) {
-                t
-            } else {
-                continue;
-            };
-
-            if let Some(doc) = trait_info.doc_members.as_deref() {
-                for m in &doc.methods {
-                    if seen_methods.insert(m.name) {
-                        methods.push(Arc::clone(m));
-                    }
-                }
-
-                for (name, type_hint) in &doc.properties {
-                    if seen_props.insert(*name) {
-                        properties.push(doc_tag_property(*name, type_hint.as_ref(), &no_subs));
-                    }
-                }
-            }
-        }
-
-        // ── Phase 1c: @method and @property tags from parent classes ────
-        //
-        // When a parent class declares `@method` or `@property` tags in
-        // its docblock, those virtual members should be visible on child
-        // classes.  Real inherited methods are already merged by
-        // `resolve_class_with_inheritance`, but virtual members from
-        // docblock tags are not — they only exist as text in the parent's
-        // `class_docblock`.  Walk the parent chain and collect them.
-        //
-        // Template substitutions from `@extends` annotations are applied
-        // so that `@method T get()` on a parent with `@template T` is
-        // resolved to the concrete type when the child declares
-        // `@extends Parent<ConcreteType>`.
-        {
-            let mut current: ClassRef<'_> = ClassRef::Borrowed(class);
-            let mut active_subs: HashMap<String, PhpType> = HashMap::new();
-            let mut depth = 0u32;
-
-            while let Some(ref parent_name) = current.parent_class {
-                depth += 1;
-                if depth > MAX_INHERITANCE_DEPTH {
-                    break;
-                }
-                let parent = if let Some(p) = class_loader(parent_name) {
-                    p
-                } else {
-                    break;
-                };
-
-                // Build a substitution map for this parent level from
-                // the child's `@extends` generics.
-                let level_subs = build_mixin_substitution_map(
-                    &current,
-                    &parent,
-                    &active_subs,
-                    &class.template_param_bounds,
-                );
-
-                if let Some(doc) = parent.doc_members.as_deref() {
-                    for m in &doc.methods {
-                        if seen_methods.insert(m.name) {
-                            methods.push(substituted_doc_method(m, &level_subs));
-                        }
-                    }
-
-                    for (name, type_hint) in &doc.properties {
-                        if seen_props.insert(*name) {
-                            properties.push(doc_tag_property(
-                                *name,
-                                type_hint.as_ref(),
-                                &level_subs,
-                            ));
-                        }
-                    }
-                }
-
-                // Tags on a trait the *parent* uses are inherited too: the
-                // parent merges the trait's members, so a child sees them
-                // just like the parent's own tags.  Laravel's collections
-                // depend on this — the higher-order proxy properties are
-                // declared on the `EnumeratesValues` trait that
-                // `Support\Collection` uses, and every collection subclass
-                // must see them.
-                for trait_name in &parent.used_traits {
-                    let Some(trait_info) = class_loader(trait_name) else {
-                        continue;
-                    };
-                    let Some(doc) = trait_info.doc_members.as_deref() else {
-                        continue;
-                    };
-                    let trait_subs =
-                        build_trait_substitution_map(&parent, &trait_info, trait_name, &level_subs);
-                    for m in &doc.methods {
-                        if seen_methods.insert(m.name) {
-                            methods.push(substituted_doc_method(m, &trait_subs));
-                        }
-                    }
-                    for (name, type_hint) in &doc.properties {
-                        if seen_props.insert(*name) {
-                            properties.push(doc_property(*name, type_hint.as_ref(), &trait_subs));
-                        }
-                    }
-                }
-
-                active_subs = level_subs;
-                current = ClassRef::Owned(parent);
-            }
-        }
-
-        // ── Phase 1d: @method and @property tags from implemented interfaces ─
-        //
-        // When a class implements an interface that declares `@method` or
-        // `@property` tags, those virtual members should be visible on the
-        // implementing class.  Template substitutions from `@implements`
-        // annotations are applied so that `@method E get()` on an interface
-        // with `@template E` is resolved to the concrete type when the class
-        // declares `@implements I<ConcreteType>`.
-        //
-        // We also walk each interface's parent interfaces (via `interfaces`
-        // field, which stores `extends` for interfaces).
-        {
-            let mut iface_queue: Vec<(Atom, HashMap<String, PhpType>)> = Vec::new();
-
-            // Seed with the class's own interfaces, building substitution
-            // maps from `@implements` generics.
-            for iface_name in &class.interfaces {
-                if let Some(iface) = class_loader(iface_name) {
-                    let subs = build_interface_substitution_map(class, &iface);
-                    iface_queue.push((*iface_name, subs));
-                }
-            }
-
-            let mut visited: HashSet<Atom> = HashSet::new();
-            while let Some((iface_name, subs)) = iface_queue.pop() {
-                if !visited.insert(iface_name) {
-                    continue;
-                }
-                let iface = if let Some(i) = class_loader(&iface_name) {
-                    i
-                } else {
-                    continue;
-                };
-
-                if let Some(doc) = iface.doc_members.as_deref() {
-                    for m in &doc.methods {
-                        if seen_methods.insert(m.name) {
-                            methods.push(substituted_doc_method(m, &subs));
-                        }
-                    }
-
-                    for (name, type_hint) in &doc.properties {
-                        if seen_props.insert(*name) {
-                            properties.push(doc_tag_property(*name, type_hint.as_ref(), &subs));
-                        }
-                    }
-                }
-
-                // Walk parent interfaces (interface extends).
-                for parent_iface_name in &iface.interfaces {
-                    if let Some(parent_iface) = class_loader(parent_iface_name) {
-                        let parent_subs =
-                            build_interface_extends_substitution_map(&iface, &parent_iface, &subs);
-                        iface_queue.push((*parent_iface_name, parent_subs));
-                    }
-                }
-            }
-        }
-
-        // ── Phase 2: @mixin members (lower precedence) ─────────────────
-
-        let mixin_dedup = MixinDedup {
-            methods: seen_methods,
-            properties: seen_props,
-            constants: seen_consts,
-        };
-
+        let ancestors = template_bound_ancestors(class, class_loader);
+        let tags = DocTags::of(class, &ancestors, class_loader);
         let mut collector = MixinCollector {
-            methods,
-            properties,
-            constants,
-            dedup: mixin_dedup,
-        };
-
-        // Collect from the class's own mixins.
-        //
-        // No template substitutions are available at this stage because
-        // the concrete generic arguments for the class itself are applied
-        // later by `apply_generic_args`.  Template-param mixin names
-        // (e.g. `@mixin TWraps`) on the own class are resolved during
-        // the ancestor walk when a child class provides concrete types
-        // via `@extends`.
-        let decorated_forward = uses_forwards_calls(class, class_loader);
-        collect_mixin_members(
-            &class.mixins,
-            &class.mixin_generics,
-            class_loader,
-            &mut collector,
-            &MixinSubs {
-                subs: &HashMap::new(),
-                bounds: &class.template_param_bounds,
-                decorated_forward,
+            methods: tags.methods,
+            properties: tags.properties,
+            constants: Vec::new(),
+            dedup: MixinDedup {
+                methods: tags.seen_methods,
+                properties: tags.seen_props,
+                constants: class.constants.iter().map(|c| c.name).collect(),
             },
-            0,
-            cache,
-        );
-        collect_trait_mixin_members(
-            class,
-            &HashMap::new(),
-            class_loader,
-            &mut collector,
-            decorated_forward,
-            cache,
-        );
-
-        // Collect from ancestor mixins.
-        //
-        // As we walk the parent chain we accumulate a substitution map
-        // (template-param → concrete-type) so that mixin generic
-        // arguments that reference a parent's template params are
-        // resolved to concrete types.  For example, when
-        // `BelongsTo extends Relation<Product>` and `Relation` has
-        // `@mixin Builder<TRelatedModel>`, the walk builds
-        // `{TRelatedModel → Product}` from the child's `@extends`
-        // generics and applies it to the mixin's generic args, turning
-        // `Builder<TRelatedModel>` into `Builder<Product>`.
-        let mut current_ancestor: ClassRef<'_> = ClassRef::Borrowed(class);
-        let mut active_subs: HashMap<String, PhpType> = HashMap::new();
-        let mut depth = 0u32;
-        while let Some(ref parent_name) = current_ancestor.parent_class {
-            depth += 1;
-            if depth > MAX_INHERITANCE_DEPTH {
-                break;
-            }
-            let parent = if let Some(p) = class_loader(parent_name) {
-                p
-            } else {
-                break;
-            };
-
-            // Build the substitution map for this parent level.
-            let level_subs = build_mixin_substitution_map(
-                &current_ancestor,
-                &parent,
-                &active_subs,
-                &class.template_param_bounds,
-            );
-
-            if !parent.mixins.is_empty() {
-                // Apply the accumulated substitution map to the
-                // parent's mixin generic arguments so that template
-                // param names are replaced with concrete types.
-                let resolved_mixin_generics: Vec<(Atom, Vec<PhpType>)> = if level_subs.is_empty() {
-                    parent.mixin_generics.clone()
-                } else {
-                    parent
-                        .mixin_generics
-                        .iter()
-                        .map(|(name, args)| {
-                            let resolved_args: Vec<PhpType> =
-                                args.iter().map(|arg| arg.substitute(&level_subs)).collect();
-                            (*name, resolved_args)
-                        })
-                        .collect()
-                };
-
-                collect_mixin_members(
-                    &parent.mixins,
-                    &resolved_mixin_generics,
-                    class_loader,
-                    &mut collector,
-                    &MixinSubs {
-                        subs: &level_subs,
-                        bounds: &parent.template_param_bounds,
-                        decorated_forward,
-                    },
-                    0,
-                    cache,
-                );
-            }
-            collect_trait_mixin_members(
-                &parent,
-                &level_subs,
-                class_loader,
-                &mut collector,
-                decorated_forward,
-                cache,
-            );
-            active_subs = level_subs;
-            current_ancestor = ClassRef::Owned(parent);
-        }
+        };
+        collect_class_mixin_members(class, &ancestors, class_loader, &mut collector, cache);
 
         VirtualMembers {
             methods: collector.methods,
@@ -665,681 +215,145 @@ impl VirtualMemberProvider for PHPDocProvider {
     }
 }
 
-/// Whether `class` uses a trait (directly or through a trait it uses)
-/// that declares `@mixin`.
-fn uses_trait_with_mixins(
-    class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
-    let mut queue: Vec<Atom> = class.used_traits.to_vec();
-    let mut visited = AtomSet::default();
-    while let Some(trait_name) = queue.pop() {
-        if !visited.insert(trait_name) {
-            continue;
-        }
-        let Some(trait_info) = class_loader(&trait_name) else {
-            continue;
-        };
-        if !trait_info.mixins.is_empty() {
-            return true;
-        }
-        queue.extend(trait_info.used_traits.iter().copied());
-    }
-    false
+/// The `@method` and `@property` tags a class answers to, each name once.
+///
+/// Collected before the `@mixin` members, whose dedup sets these names
+/// seed, so that a tag always beats a mixin member of the same name.
+struct DocTags {
+    methods: Vec<Arc<MethodInfo>>,
+    properties: Vec<PropertyInfo>,
+    /// Seeded from the base-resolved class's methods (real and inherited).
+    seen_methods: AtomSet,
+    /// Not seeded from the class's properties: the class's own
+    /// `@property` tags are always emitted, so that
+    /// `merge_virtual_members` can compare type specificity and keep the
+    /// most specific type (`array<string>` from `@property` beats a bare
+    /// `array` from `$casts`).  Their names then keep the lower-priority
+    /// sources (trait and parent tags, `@mixin` members) from overriding
+    /// them.
+    seen_props: AtomSet,
 }
 
-/// Collect the members of the `@mixin` classes declared on the traits
-/// `owner` uses, and on the traits those traits use.
-///
-/// A trait's docblock describes the class that uses it, so its mixins
-/// apply to that class like the class's own.  `owner_subs` binds
-/// `owner`'s template parameters (non-empty when `owner` is an ancestor
-/// reached through `@extends`); each trait's `@use Trait<…>` arguments
-/// are layered on top of it.
-fn collect_trait_mixin_members(
-    owner: &ClassInfo,
-    owner_subs: &HashMap<String, PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    collector: &mut MixinCollector,
-    decorated_forward: bool,
-    cache: Option<&super::ResolvedClassCache>,
-) {
-    if owner.used_traits.is_empty() {
-        return;
-    }
-    let mut queue: Vec<(Arc<ClassInfo>, HashMap<String, PhpType>)> = Vec::new();
-    let mut visited = AtomSet::default();
-    let mut enqueue =
-        |consumer: &ClassInfo,
-         subs: &HashMap<String, PhpType>,
-         queue: &mut Vec<(Arc<ClassInfo>, HashMap<String, PhpType>)>| {
-            for trait_name in &consumer.used_traits {
-                if !visited.insert(*trait_name) {
-                    continue;
-                }
-                if let Some(trait_info) = class_loader(trait_name) {
-                    let trait_subs =
-                        build_trait_substitution_map(consumer, &trait_info, trait_name, subs);
-                    queue.push((trait_info, trait_subs));
-                }
-            }
+impl DocTags {
+    /// The tags of `class` itself, then of its traits, of each parent (the
+    /// `ancestors`, with their bindings) and the traits that parent uses,
+    /// and of its interfaces and the interfaces they extend, with each
+    /// source's template parameters bound the way `class` binds them.
+    ///
+    /// Inherited tags are read here rather than by the inheritance merge:
+    /// real trait and parent members are merged by then, but a tag exists
+    /// only on the docblock that declares it.
+    fn of(
+        class: &ClassInfo,
+        ancestors: &[(Arc<ClassInfo>, HashMap<String, PhpType>)],
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Self {
+        let mut tags = DocTags {
+            methods: Vec::new(),
+            properties: Vec::new(),
+            seen_methods: class.methods.iter().map(|m| m.name).collect(),
+            seen_props: AtomSet::default(),
         };
-    enqueue(owner, owner_subs, &mut queue);
-    // Walk in declaration order so an earlier `use` wins a name clash.
-    queue.reverse();
-    while let Some((trait_info, trait_subs)) = queue.pop() {
-        if !trait_info.mixins.is_empty() {
-            let mixin_generics: Vec<(Atom, Vec<PhpType>)> = if trait_subs.is_empty() {
-                trait_info.mixin_generics.clone()
-            } else {
-                trait_info
-                    .mixin_generics
-                    .iter()
-                    .map(|(name, args)| {
-                        (
-                            *name,
-                            args.iter().map(|a| a.substitute(&trait_subs)).collect(),
-                        )
-                    })
-                    .collect()
-            };
-            collect_mixin_members(
-                &trait_info.mixins,
-                &mixin_generics,
-                class_loader,
-                collector,
-                &MixinSubs {
-                    subs: &trait_subs,
-                    bounds: &trait_info.template_param_bounds,
-                    decorated_forward,
-                },
-                0,
-                cache,
-            );
+
+        if let Some(doc) = class.doc_members.as_deref() {
+            tags.add_own(doc);
         }
-        let mut nested = Vec::new();
-        enqueue(&trait_info, &trait_subs, &mut nested);
-        nested.reverse();
-        queue.extend(nested);
-    }
-}
+        tags.add_trait_tags(class, &HashMap::new(), class_loader);
 
-/// Recursively collect public members from mixin classes.
-///
-/// For each mixin name, loads the class via `class_loader`, fully resolves
-/// it (via [`super::resolve_class_fully_maybe_cached`], so the mixin's own
-/// virtual members come through too — see the inline comment below), and
-/// adds its public members to the output vectors.  Only members whose
-/// names are not already present in `class` (the target class with base
-/// resolution already applied) or in the output vectors are added.
-/// This means `@method` / `@property` tags collected before this function
-/// is called take precedence over mixin members.
-///
-/// Recurses into mixins declared on the mixin classes themselves, up to
-/// [`MAX_MIXIN_DEPTH`] levels.
-///
-/// Prefers the caller-supplied or thread-active [`super::ResolvedClassCache`]
-/// so repeat lookups of the same mixin FQN are cache hits; when neither is
-/// available, falls back to a thread-local cache so a mixin like
-/// `\Illuminate\Database\Eloquent\Builder` is still resolved at most once
-/// per thread instead of being fully re-resolved (very expensive: deep
-/// inheritance chain with dozens of traits) for every Eloquent model class.
-fn collect_mixin_members(
-    mixin_names: &[Atom],
-    mixin_generics: &[(Atom, Vec<PhpType>)],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    collector: &mut MixinCollector,
-    subs: &MixinSubs<'_>,
-    depth: u32,
-    cache: Option<&super::ResolvedClassCache>,
-) {
-    if depth > MAX_MIXIN_DEPTH {
-        return;
-    }
-
-    let template_subs = subs.subs;
-    let decorated_forward = subs.decorated_forward;
-
-    for mixin_name in mixin_names {
-        // If the mixin name is a template parameter, substitute it
-        // with the concrete type from the generic arguments.
-        let resolved_mixin_name = if let Some(concrete) = template_subs.get(mixin_name.as_str()) {
-            if let Some(base) = concrete.base_name() {
-                base.to_string()
-            } else {
-                // The concrete type is a scalar, union, or other
-                // non-class type — cannot be used as a mixin.
-                continue;
+        // `@extends Parent<…>` binds the parent's template parameters, so
+        // `@method T get()` on a parent comes out as the concrete type.  A
+        // trait the parent uses is merged into the parent, so its tags
+        // reach the child just like the parent's own: Laravel's
+        // higher-order collection proxies are declared on the
+        // `EnumeratesValues` trait that `Support\Collection` uses.
+        for (parent, level_subs) in ancestors {
+            if let Some(doc) = parent.doc_members.as_deref() {
+                tags.add(doc, level_subs);
             }
-        } else if let Some(bound) = subs.bounds.get(mixin_name) {
-            // The mixin name is a template parameter with no concrete
-            // binding (e.g. `@mixin TNode` on a class declaring
-            // `@template TNode of Engine`).  Resolve members through the
-            // template's upper bound so the class itself still exposes the
-            // bound's public API.  A concrete subclass that provides a
-            // real binding via `@extends` overrides this through the
-            // substitution path above.
-            if let Some(base) = bound.base_name() {
-                base.to_string()
-            } else {
-                // The bound is a scalar, union, or other non-class type.
-                continue;
-            }
-        } else {
-            mixin_name.to_string()
-        };
+            tags.add_trait_tags(parent, level_subs, class_loader);
+        }
 
-        let mixin_class = if let Some(c) = class_loader(&resolved_mixin_name) {
-            c
-        } else {
-            continue;
-        };
-
-        // Find generic args for this mixin from the @mixin tag.
-        // Check both the original name (e.g. "TWraps") and the resolved
-        // name in case the mixin_generics were stored under either form.
-        let mixin_short = short_name(&resolved_mixin_name);
-        let generic_args: Option<&[PhpType]> = mixin_generics
+        // `@implements I<…>` binds an interface's template parameters, and
+        // the interfaces it extends (its `interfaces`) are walked with those
+        // bindings carried along.
+        let mut iface_queue: Vec<(Atom, HashMap<String, PhpType>)> = class
+            .interfaces
             .iter()
-            .find(|(name, _)| {
-                name == mixin_name
-                    || short_name(name) == mixin_short
-                    || name == &resolved_mixin_name
+            .filter_map(|iface_name| {
+                let iface = class_loader(iface_name)?;
+                Some((*iface_name, build_interface_substitution_map(class, &iface)))
             })
-            .map(|(_, args)| args.as_slice());
-
-        // Resolve the mixin class *fully* so that its own virtual members
-        // (Laravel relationship properties, scopes, casts, accessors, and
-        // `@method` / `@property` tags) are exposed on the consuming class,
-        // not just its real declared members.  A `@mixin` proxies the whole
-        // public API via magic methods, so a model's synthesized members
-        // must come through as well.
-        //
-        // The re-entrancy guard in `resolve_class_fully_inner` breaks any
-        // cyclic `@mixin` chain by returning a base-only result on re-entry,
-        // so this cannot recurse unboundedly.  Eager resolution populates the
-        // shared cache in dependency order (mixin targets before their
-        // dependents), so on the warm path this is a cache hit.
-        //
-        // Prefer the caller-supplied cache, falling back to the thread-local
-        // active cache so consumers that reach this path through the uncached
-        // `resolve_class_fully` still share resolved results.
-        let resolved_mixin = if let Some(c) = cache {
-            // The shared cache memoizes the full resolution, so resolve
-            // directly and let it serve repeat lookups.
-            super::resolve_class_fully_maybe_cached(&mixin_class, class_loader, Some(c))
-        } else if let Some(active) = super::active_resolved_class_cache() {
-            super::resolve_class_fully_maybe_cached(&mixin_class, class_loader, Some(active))
-        } else {
-            // No shared cache is active — memoize per thread so that a deep
-            // mixin (e.g. the Eloquent query builder) is fully resolved at
-            // most once per thread.  The full resolution runs virtual member
-            // providers, which recurse back into this function for nested
-            // mixins, so it must happen *outside* the cache borrow: get,
-            // release, resolve, then insert.
-            ensure_mixin_cache_fresh();
-            let cached = MIXIN_CACHE
-                .with(|thread_cache| thread_cache.borrow().1.get(&resolved_mixin_name).cloned());
-            if let Some(cached) = cached {
-                cached
-            } else {
-                let resolved =
-                    super::resolve_class_fully_maybe_cached(&mixin_class, class_loader, None);
-                MIXIN_CACHE.with(|thread_cache| {
-                    thread_cache
-                        .borrow_mut()
-                        .1
-                        .insert(resolved_mixin_name.clone(), Arc::clone(&resolved));
-                });
-                resolved
-            }
-        };
-
-        // Build a substitution map from the mixin class's template params
-        // to the concrete types provided in the @mixin tag's generic args.
-        let subs: HashMap<String, PhpType> = if let Some(args) = generic_args {
-            let mut map = HashMap::new();
-            for (i, param_name) in mixin_class.template_params.iter().enumerate() {
-                if let Some(arg) = args.get(i) {
-                    map.insert(param_name.to_string(), arg.clone());
-                }
-            }
-            map
-        } else {
-            HashMap::new()
-        };
-
-        // Known values for the mixin class's template parameters: explicit
-        // `@mixin Foo<...>` generic args, falling back to each param's
-        // declared default (`@template T of bool = false`).  A bare
-        // `@mixin Foo` therefore behaves like `@mixin Foo<default>`, which
-        // lets conditional return types keyed on those params (e.g.
-        // `(TAsync is false ? Response : PromiseInterface)`) collapse to a
-        // concrete branch instead of defaulting to the else type.
-        let mut template_values = subs.clone();
-        for (name, default) in mixin_class.template_param_defaults.iter() {
-            template_values
-                .entry(name.to_string())
-                .or_insert_with(|| default.clone());
-        }
-
-        // The object a forwarded call actually runs on, which is what a
-        // `static`/`self`/`$this` in one of the mixin method's parameters
-        // describes (see `bind_param_self_refs`).
-        let mixin_type = match generic_args {
-            Some(args) if !args.is_empty() => PhpType::generic(&resolved_mixin_name, args.to_vec()),
-            _ => PhpType::named(crate::atom::atom(&resolved_mixin_name)),
-        };
-
-        // Interning fingerprint for the transform applied below.  The
-        // conditional-collapse inputs (`template_values`) are the subs
-        // plus the mixin class's template defaults, and the
-        // decorated-forward rewrite targets the mixin class — both are
-        // fully determined by the origin method's class, so hashing the
-        // subs and the decorated flag identifies the transform.
-        let fp = super::cache::TransformFingerprint::new(
-            Some(&subs),
-            None,
-            if decorated_forward {
-                super::cache::transform_flags::MIXIN_VIRTUAL_DECORATED
-            } else {
-                super::cache::transform_flags::MIXIN_VIRTUAL
-            },
-        );
-
-        // Only merge public members — mixins proxy via magic methods
-        // which only expose public API.
-        for method in &resolved_mixin.methods {
-            if method.visibility != Visibility::Public {
+            .collect();
+        let mut visited: HashSet<Atom> = HashSet::new();
+        while let Some((iface_name, subs)) = iface_queue.pop() {
+            if !visited.insert(iface_name) {
                 continue;
             }
-            // Skip if the base-resolved class already has this method,
-            // or if a previous @method tag or mixin already contributed it.
-            if !collector.dedup.methods.insert(method.name) {
+            let Some(iface) = class_loader(&iface_name) else {
                 continue;
+            };
+            if let Some(doc) = iface.doc_members.as_deref() {
+                tags.add(doc, &subs);
             }
-            let transformed = super::cache::intern_transformed_method(method, fp, || {
-                let mut method = (**method).clone();
-                if !subs.is_empty() {
-                    inheritance::apply_substitution_to_method(&mut method, &subs);
+            for parent_iface_name in &iface.interfaces {
+                if let Some(parent_iface) = class_loader(parent_iface_name) {
+                    let parent_subs =
+                        build_interface_extends_substitution_map(&iface, &parent_iface, &subs);
+                    iface_queue.push((*parent_iface_name, parent_subs));
                 }
-                // Collapse a conditional return type keyed on one of the mixin
-                // class's template params now that their values are known (from
-                // generic args or defaults).  Without this, the conditional's
-                // subject template is unresolvable at the call site — the mixin
-                // origin is lost once the method is merged into the consumer —
-                // and resolution falls back to the else branch.
-                if !template_values.is_empty()
-                    && let Some(cond) = method.conditional_return()
-                    && let Some(resolved) =
-                        crate::type_engine::conditional_resolution::resolve_conditional_from_values(
-                            cond,
-                            &template_values,
-                        )
-                {
-                    method.return_type = Some(resolved);
-                    method.extras_mut().conditional_return = None;
-                }
-                // A docblock's `self` names the class the docblock is written
-                // in, so `@return self<T>` on the mixin returns the *mixin*
-                // parameterised by `T`.  The consumer declares none of the
-                // mixin's template parameters and so cannot carry those
-                // arguments; leaving the keyword bare would read the return as
-                // the consumer itself and silently drop them.  Only a `self`
-                // that carries arguments is bound this way: a bare `self`,
-                // `$this`, or `static` continues to bind late, to the consumer,
-                // which is what keeps a fluent chain on the class it started on.
-                if let Some(ret) = method.return_type.as_ref()
-                    && returns_parameterised_self(ret)
-                {
-                    let bound = ret.replace_bare_self(&resolved_mixin_name);
-                    method.return_type = Some(bound);
-                }
-                // Decorated forward (ForwardsCalls / forwardDecoratedCallTo):
-                // when the target returns itself, the forwarder returns
-                // `$this`.  Self-like returns are left as `$this`/`self`/
-                // `static` so call-site resolution binds them to the
-                // consumer (and preserves generics like `Builder<TModel>`).
-                // Returns that name the mixin class FQN are rewritten to
-                // `$this` for the same reason.  Non-self returns (int, bool,
-                // Collection, …) pass through unchanged.
-                //
-                // Builder-as-static forwarding still needs the raw keyword
-                // so its substitution map can rewrite `$this` →
-                // `Builder<ConcreteModel>`.
-                if decorated_forward {
-                    apply_decorated_forward_return(&mut method, &resolved_mixin_name, &mixin_class);
-                }
-                bind_param_self_refs(&mut method, &mixin_type);
-                method.is_virtual = true;
-                method
-            });
-            collector.methods.push(transformed);
-        }
-
-        for property in &resolved_mixin.properties {
-            if property.visibility != Visibility::Public {
-                continue;
-            }
-            if !collector.dedup.properties.insert(property.name) {
-                continue;
-            }
-            let mut property = (**property).clone();
-            if !subs.is_empty() {
-                inheritance::apply_substitution_to_property(&mut property, &subs);
-            }
-            property.is_virtual = true;
-            collector.properties.push(property);
-        }
-
-        for constant in &resolved_mixin.constants {
-            if constant.visibility != Visibility::Public {
-                continue;
-            }
-            if !collector.dedup.constants.insert(constant.name) {
-                continue;
-            }
-            collector.constants.push((**constant).clone());
-        }
-
-        // ── Phase: @method/@property tags from the mixin's own docblock ──
-        // `resolve_class_with_inheritance` does NOT include virtual members
-        // from @method/@property tags (to avoid circular provider calls).
-        // Extract them manually so that e.g. `@mixin A` where A declares
-        // `@method $this active()` propagates `active()` to the consumer.
-        if let Some(doc) = mixin_class.doc_members.as_deref() {
-            for m in &doc.methods {
-                if !collector.dedup.methods.insert(m.name) {
-                    continue;
-                }
-                let mut m = (**m).clone();
-                if !subs.is_empty() {
-                    inheritance::apply_substitution_to_method(&mut m, &subs);
-                }
-                if decorated_forward {
-                    apply_decorated_forward_return(&mut m, &resolved_mixin_name, &mixin_class);
-                }
-                bind_param_self_refs(&mut m, &mixin_type);
-                m.is_virtual = true;
-                collector.methods.push(Arc::new(m));
-            }
-
-            for (name, type_hint) in &doc.properties {
-                if !collector.dedup.properties.insert(*name) {
-                    continue;
-                }
-                collector
-                    .properties
-                    .push(doc_property(*name, type_hint.as_ref(), &subs));
             }
         }
 
-        // Recurse into mixins declared by the mixin class itself
-        // (e.g. Relation → Builder → Query\Builder).  Keep the original
-        // consumer's decorated-forward flag so nested target returns
-        // still rewrite to the outermost forwarder.
-        if !mixin_class.mixins.is_empty() {
-            collect_mixin_members(
-                &mixin_class.mixins,
-                &mixin_class.mixin_generics,
-                class_loader,
-                collector,
-                &MixinSubs {
-                    subs: &HashMap::new(),
-                    bounds: &mixin_class.template_param_bounds,
-                    decorated_forward,
-                },
-                depth + 1,
-                cache,
-            );
+        tags
+    }
+
+    /// Add every tag of the class's own docblock, whatever came before.
+    fn add_own(&mut self, doc: &DocblockMembers) {
+        for m in &doc.methods {
+            self.seen_methods.insert(m.name);
+            self.methods.push(Arc::clone(m));
+        }
+        for (name, type_hint) in &doc.properties {
+            self.seen_props.insert(*name);
+            self.properties
+                .push(doc_tag_property(*name, type_hint.as_ref(), &HashMap::new()));
         }
     }
-}
 
-/// Whether `class` (or an ancestor) uses Laravel's `ForwardsCalls` trait.
-pub(super) fn uses_forwards_calls(
-    class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
-    if class
-        .used_traits
-        .iter()
-        .any(|t| is_forwards_calls_trait(t.as_str()))
-    {
-        return true;
-    }
-    let mut parent_name = class.parent_class;
-    let mut depth = 0u32;
-    while let Some(ref p) = parent_name {
-        depth += 1;
-        if depth > MAX_INHERITANCE_DEPTH {
-            break;
+    /// Add the tags of `doc` that no nearer source declared, with `subs`
+    /// binding the template parameters they are written against.
+    fn add(&mut self, doc: &DocblockMembers, subs: &HashMap<String, PhpType>) {
+        for m in &doc.methods {
+            if self.seen_methods.insert(m.name) {
+                self.methods.push(substituted_doc_method(m, subs));
+            }
         }
-        let Some(parent) = class_loader(p) else {
-            break;
-        };
-        if parent
-            .used_traits
-            .iter()
-            .any(|t| is_forwards_calls_trait(t.as_str()))
-        {
-            return true;
-        }
-        parent_name = parent.parent_class;
-    }
-    false
-}
-
-fn is_forwards_calls_trait(name: &str) -> bool {
-    name == FORWARDS_CALLS_FQN
-        || name == FORWARDS_CALLS_SHORT
-        || short_name(name) == FORWARDS_CALLS_SHORT
-}
-
-/// Bind the `static`/`self`/`$this` in a mixed-in method's parameters to
-/// the mixin class.
-///
-/// A mixin proxies the call to the object it names, so that object is what
-/// the method runs on: `Relation::where(fn (Builder $q) => …)` reaches
-/// `Builder::where(Closure(static) $column)` and the closure is handed the
-/// builder, not the relation. The return type keeps its late binding, since
-/// a forwarder that gets its target back returns itself.
-fn bind_param_self_refs(method: &mut MethodInfo, mixin_type: &PhpType) {
-    if !method
-        .parameters
-        .iter()
-        .any(|p| p.type_hint.as_ref().is_some_and(PhpType::contains_self_ref))
-    {
-        return;
-    }
-    for param in method.parameters.make_mut() {
-        if let Some(hint) = param.type_hint.as_ref()
-            && hint.contains_self_ref()
-        {
-            param.type_hint = Some(hint.replace_self_with_type(mixin_type));
+        for (name, type_hint) in &doc.properties {
+            if self.seen_props.insert(*name) {
+                self.properties
+                    .push(doc_tag_property(*name, type_hint.as_ref(), subs));
+            }
         }
     }
-}
 
-/// Whether a return type is a `self` that carries generic arguments
-/// (`self<T>`), as opposed to a bare `self`, `$this`, or `static`.
-fn returns_parameterised_self(return_type: &PhpType) -> bool {
-    matches!(
-        return_type.kind(),
-        TypeKind::Generic(g) if !g.args.is_empty() && g.name.eq_ignore_ascii_case("self")
-    )
-}
-
-/// Apply `forwardDecoratedCallTo` return semantics to a mixed-in method.
-///
-/// - Self-like (`$this` / `self` / `static`) → left as-is (call site binds
-///   to the consumer, preserving generics).
-/// - Return type whose base is the mixin class → rewritten to `$this`.
-/// - Anything else (scalars, collections, models, …) → unchanged.
-fn apply_decorated_forward_return(
-    method: &mut MethodInfo,
-    mixin_resolved_name: &str,
-    mixin_class: &ClassInfo,
-) {
-    let Some(ret) = method.return_type.as_ref() else {
-        return;
-    };
-    if ret.is_self_like() || ret.contains_self_ref() {
-        return;
-    }
-    let mixin_fqn = mixin_class.fqn();
-    let mixin_fqn = mixin_fqn.as_str();
-    let mixin_short = mixin_class.name.as_str();
-    let resolved_short = short_name(mixin_resolved_name);
-    if return_type_is_mixin_self(
-        ret,
-        mixin_fqn,
-        mixin_short,
-        mixin_resolved_name,
-        resolved_short,
+    /// Add the tags of the traits `owner` uses, which are written against
+    /// each trait's template parameters, bound by `owner`'s `@use Trait<…>`
+    /// on top of `owner_subs`.
+    fn add_trait_tags(
+        &mut self,
+        owner: &ClassInfo,
+        owner_subs: &HashMap<String, PhpType>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) {
-        method.return_type = Some(PhpType::this());
-        if method.native_return_type.as_ref().is_some_and(|n| {
-            return_type_is_mixin_self(
-                n,
-                mixin_fqn,
-                mixin_short,
-                mixin_resolved_name,
-                resolved_short,
-            )
-        }) {
-            method.native_return_type = Some(PhpType::this());
+        for trait_name in &owner.used_traits {
+            let Some(trait_info) = class_loader(trait_name) else {
+                continue;
+            };
+            if let Some(doc) = trait_info.doc_members.as_deref() {
+                let trait_subs = build_trait_substitution_map(owner, &trait_info, owner_subs);
+                self.add(doc, &trait_subs);
+            }
         }
-    }
-}
-
-fn return_type_is_mixin_self(
-    ty: &PhpType,
-    mixin_fqn: &str,
-    mixin_short: &str,
-    mixin_resolved_name: &str,
-    resolved_short: &str,
-) -> bool {
-    let check_name = |name: &str| {
-        let stripped = name.strip_prefix('\\').unwrap_or(name);
-        stripped == mixin_fqn
-            || stripped == mixin_resolved_name
-            || stripped == mixin_short
-            || stripped == resolved_short
-            || short_name(stripped) == mixin_short
-    };
-    match ty.kind() {
-        TypeKind::Named(n) | TypeKind::StaticType(n) | TypeKind::ThisType(n) => check_name(n),
-        TypeKind::Generic(g) => check_name(&g.name),
-        TypeKind::Nullable(inner) => return_type_is_mixin_self(
-            inner,
-            mixin_fqn,
-            mixin_short,
-            mixin_resolved_name,
-            resolved_short,
-        ),
-        TypeKind::Union(members) => {
-            let non_null: Vec<_> = members.iter().filter(|m| !m.is_null()).collect();
-            !non_null.is_empty()
-                && non_null.iter().all(|m| {
-                    return_type_is_mixin_self(
-                        m,
-                        mixin_fqn,
-                        mixin_short,
-                        mixin_resolved_name,
-                        resolved_short,
-                    )
-                })
-        }
-        _ => false,
-    }
-}
-
-/// Resolve `@mixin` tags that name a template parameter, using concrete
-/// generic arguments provided at a call site.
-///
-/// During [`PHPDocProvider::provide`], mixin names that are template
-/// parameters (e.g. `@mixin TWraps`) cannot be resolved because the
-/// concrete type arguments are not yet known — they are applied later
-/// by [`apply_generic_args`](crate::inheritance::apply_generic_args).
-/// This function fills that gap: after generic substitution has been
-/// performed, call it with the **original** (unsubstituted) class and
-/// the substitution map to collect members from the now-concrete mixin
-/// classes.
-///
-/// Only mixins whose names match a template parameter are processed;
-/// non-template mixins were already resolved during `provide`.
-///
-/// The returned [`VirtualMembers`](super::VirtualMembers) should be
-/// merged into the substituted class via
-/// [`merge_virtual_members`](super::merge_virtual_members).
-pub fn resolve_template_param_mixins(
-    original_class: &ClassInfo,
-    template_subs: &HashMap<String, PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> super::VirtualMembers {
-    if template_subs.is_empty() || original_class.mixins.is_empty() {
-        return super::VirtualMembers {
-            methods: Vec::new(),
-            properties: Vec::new(),
-            constants: Vec::new(),
-        };
-    }
-
-    // Only process mixins whose name is a template parameter — the
-    // rest were already resolved during `PHPDocProvider::provide`.
-    let template_mixins: Vec<Atom> = original_class
-        .mixins
-        .iter()
-        .filter(|m| {
-            original_class
-                .template_params
-                .iter()
-                .any(|t| t.as_str() == m.as_str())
-        })
-        .copied()
-        .collect();
-
-    if template_mixins.is_empty() {
-        return super::VirtualMembers {
-            methods: Vec::new(),
-            properties: Vec::new(),
-            constants: Vec::new(),
-        };
-    }
-
-    let dedup = MixinDedup {
-        methods: AtomSet::default(),
-        properties: AtomSet::default(),
-        constants: AtomSet::default(),
-    };
-
-    let mut collector = MixinCollector {
-        methods: Vec::new(),
-        properties: Vec::new(),
-        constants: Vec::new(),
-        dedup,
-    };
-
-    let decorated_forward = uses_forwards_calls(original_class, class_loader);
-    collect_mixin_members(
-        &template_mixins,
-        &original_class.mixin_generics,
-        class_loader,
-        &mut collector,
-        &MixinSubs {
-            subs: template_subs,
-            bounds: &original_class.template_param_bounds,
-            decorated_forward,
-        },
-        0,
-        None,
-    );
-
-    super::VirtualMembers {
-        methods: collector.methods,
-        properties: collector.properties,
-        constants: collector.constants,
     }
 }
 
@@ -1351,30 +365,7 @@ fn build_interface_substitution_map(
     class: &ClassInfo,
     iface: &ClassInfo,
 ) -> HashMap<String, PhpType> {
-    if iface.template_params.is_empty() {
-        return HashMap::new();
-    }
-
-    let iface_short = short_name(&iface.name);
-
-    let type_args = class
-        .implements_generics
-        .iter()
-        .find(|(name, _)| short_name(name) == iface_short)
-        .map(|(_, args)| args);
-
-    let type_args = match type_args {
-        Some(args) => args,
-        None => return HashMap::new(),
-    };
-
-    let mut map = HashMap::new();
-    for (i, param_name) in iface.template_params.iter().enumerate() {
-        if let Some(arg) = type_args.get(i) {
-            map.insert(param_name.to_string(), arg.clone());
-        }
-    }
-    map
+    bind_template_args(iface, &class.implements_generics, &HashMap::new()).unwrap_or_default()
 }
 
 /// Build a substitution map for an interface's parent interface (interface extends).
@@ -1387,35 +378,8 @@ fn build_interface_extends_substitution_map(
     parent_iface: &ClassInfo,
     active_subs: &HashMap<String, PhpType>,
 ) -> HashMap<String, PhpType> {
-    if parent_iface.template_params.is_empty() {
-        return active_subs.clone();
-    }
-
-    let parent_short = short_name(&parent_iface.name);
-
-    let type_args = child_iface
-        .extends_generics
-        .iter()
-        .find(|(name, _)| short_name(name) == parent_short)
-        .map(|(_, args)| args);
-
-    let type_args = match type_args {
-        Some(args) => args,
-        None => return active_subs.clone(),
-    };
-
-    let mut map = HashMap::new();
-    for (i, param_name) in parent_iface.template_params.iter().enumerate() {
-        if let Some(arg) = type_args.get(i) {
-            let resolved = if active_subs.is_empty() {
-                arg.clone()
-            } else {
-                arg.substitute(active_subs)
-            };
-            map.insert(param_name.to_string(), resolved);
-        }
-    }
-    map
+    bind_template_args(parent_iface, &child_iface.extends_generics, active_subs)
+        .unwrap_or_else(|| active_subs.clone())
 }
 
 /// Map a used trait's template parameters onto the consuming class's
@@ -1429,128 +393,10 @@ fn build_interface_extends_substitution_map(
 fn build_trait_substitution_map(
     consumer: &ClassInfo,
     trait_info: &ClassInfo,
-    trait_name: &str,
     active_subs: &HashMap<String, PhpType>,
 ) -> HashMap<String, PhpType> {
-    if trait_info.template_params.is_empty() {
-        return active_subs.clone();
-    }
-
-    let trait_short = short_name(trait_name);
-    let Some(type_args) = consumer
-        .use_generics
-        .iter()
-        .find(|(name, _)| short_name(name) == trait_short)
-        .map(|(_, args)| args)
-    else {
-        return active_subs.clone();
-    };
-
-    let mut map = HashMap::new();
-    for (i, param_name) in trait_info.template_params.iter().enumerate() {
-        if let Some(arg) = type_args.get(i) {
-            let resolved = if active_subs.is_empty() {
-                arg.clone()
-            } else {
-                arg.substitute(active_subs)
-            };
-            map.insert(param_name.to_string(), resolved);
-        }
-    }
-    map
-}
-
-/// Build a substitution map for mixin generic resolution by zipping the
-/// parent class's `@template` parameters with the type arguments the
-/// child provides via `@extends` / `@implements` generics.
-///
-/// Mirrors [`crate::inheritance::build_substitution_map`], with an extra
-/// fallback to template bounds when a `@mixin` names a template parameter
-/// (see the comment on `parent_has_template_param_mixin` below).
-fn build_mixin_substitution_map(
-    current: &ClassInfo,
-    parent: &ClassInfo,
-    active_subs: &HashMap<String, PhpType>,
-    origin_bounds: &crate::atom::AtomMap<PhpType>,
-) -> HashMap<String, PhpType> {
-    if parent.template_params.is_empty() {
-        return active_subs.clone();
-    }
-
-    let parent_short = short_name(&parent.name);
-
-    // Find `@extends`/`@implements` generics matching this parent.
-    let type_args = current
-        .extends_generics
-        .iter()
-        .chain(current.implements_generics.iter())
-        .find(|(name, _)| {
-            let name_short = short_name(name);
-            name_short == parent_short
-        })
-        .map(|(_, args)| args);
-
-    let type_args = match type_args {
-        Some(args) => args,
-        None => return active_subs.clone(),
-    };
-
-    // Check whether the parent has any @mixin whose name is itself a
-    // template parameter (e.g. `@mixin TNode` on a class with
-    // `@template TNode`).  When this is the case and a substitution
-    // still resolves to a raw template parameter name on the child
-    // class, we fall back to the template bound.  This handles the
-    // PHPMD pattern where `AbstractNode<TNode>` has `@mixin TNode`
-    // and `ASTNode extends AbstractNode<TNode>` — without the
-    // fallback, `TNode` stays as an unresolvable class name.
-    //
-    // We do NOT apply this fallback when the mixin is a concrete
-    // class with template arguments (e.g. `@mixin Builder<TModel>`),
-    // because the template param may be resolved later by a concrete
-    // caller through the generic substitution chain.
-    let parent_has_template_param_mixin = parent.mixins.iter().any(|m| {
-        parent
-            .template_params
-            .iter()
-            .any(|t| t.as_str() == m.as_str())
-    });
-
-    let mut map = HashMap::new();
-    for (i, param_name) in parent.template_params.iter().enumerate() {
-        if let Some(arg) = type_args.get(i) {
-            let mut resolved = if active_subs.is_empty() {
-                arg.clone()
-            } else {
-                arg.substitute(active_subs)
-            };
-
-            // Fall back to the template bound only when the parent
-            // uses the template param directly as a mixin name.
-            //
-            // Prefer the bound declared on the walk-origin class (the
-            // most-derived class whose members are being resolved) over
-            // the intermediate level's bound.  In a straight-through chain
-            // (`@extends Parent<TNode>` at every level) each class may
-            // tighten the constraint, e.g. `AbstractNode<TNode of ASTNode>`
-            // → `CallableNode<TNode of AbstractCallable>`.  The mixin lives
-            // on the ancestor with the loosest bound, but the concrete
-            // members available come from the origin's tighter bound, so
-            // that is the one to resolve against.
-            if parent_has_template_param_mixin
-                && let Some(name) = resolved.base_name()
-                && let Some(tp) = current.template_params.iter().find(|t| t.as_str() == name)
-                && let Some(bound) = origin_bounds
-                    .get(tp)
-                    .or_else(|| current.template_param_bounds.get(tp))
-            {
-                resolved = bound.clone();
-            }
-
-            map.insert(param_name.to_string(), resolved);
-        }
-    }
-
-    map
+    bind_template_args(trait_info, &consumer.use_generics, active_subs)
+        .unwrap_or_else(|| active_subs.clone())
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

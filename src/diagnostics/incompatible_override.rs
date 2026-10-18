@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
@@ -30,7 +29,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let class_loaders = self.class_loaders(&ctx.file);
+        let class_loaders = self.resolved_class_loaders(&ctx.file);
 
         for span in &ctx.symbol_map.spans {
             let class_name = match &span.kind {
@@ -113,102 +112,25 @@ fn contains_static_type(ty: &PhpType) -> bool {
     }
 }
 
+/// The declaration `method_name` overrides, with the name its class was
+/// loaded by: one up the class chain or in an interface, which the override
+/// has to stay compatible with.
+///
+/// A class method displaces the concrete trait method it collides with,
+/// and PHP runs no compatibility check on that pair. Only an abstract
+/// trait method states a requirement the class has to satisfy.
 fn find_parent_method(
     class: &ClassInfo,
     method_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<(Arc<MethodInfo>, String)> {
-    let lower = method_name.to_lowercase();
-    let mut visited = HashSet::new();
-
-    if let Some(ref parent_name) = class.parent_class
-        && let Some(result) = find_method_in_chain(parent_name, &lower, class_loader, &mut visited)
-    {
-        return Some(result);
-    }
-
-    for iface_name in &class.interfaces {
-        if let Some(result) = find_method_in_chain(iface_name, &lower, class_loader, &mut visited) {
-            return Some(result);
-        }
-    }
-
-    // A class method displaces the concrete trait method it collides with,
-    // and PHP runs no compatibility check on that pair. Only an abstract
-    // trait method states a requirement the class has to satisfy.
-    for trait_name in &class.used_traits {
-        if let Some(result) =
-            find_abstract_method_in_traits(trait_name, &lower, class_loader, &mut visited)
-        {
-            return Some(result);
-        }
-    }
-
-    None
-}
-
-fn find_abstract_method_in_traits(
-    trait_name: &str,
-    method_lower: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    visited: &mut HashSet<String>,
-) -> Option<(Arc<MethodInfo>, String)> {
-    if !visited.insert(trait_name.to_string()) {
-        return None;
-    }
-
-    let trait_info = class_loader(trait_name)?;
-
-    if let Some(method) = trait_info
-        .methods
-        .iter()
-        .find(|m| m.is_abstract && m.name.to_lowercase() == *method_lower)
-    {
-        return Some((Arc::clone(method), trait_name.to_string()));
-    }
-
-    for nested in &trait_info.used_traits {
-        if let Some(result) =
-            find_abstract_method_in_traits(nested, method_lower, class_loader, visited)
-        {
-            return Some(result);
-        }
-    }
-
-    None
-}
-
-fn find_method_in_chain(
-    class_name: &str,
-    method_lower: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    visited: &mut HashSet<String>,
-) -> Option<(Arc<MethodInfo>, String)> {
-    if !visited.insert(class_name.to_string()) {
-        return None;
-    }
-
-    let class = class_loader(class_name)?;
-
-    if let Some(method) = class
-        .methods
-        .iter()
-        .find(|m| m.name.to_lowercase() == *method_lower)
-    {
-        return Some((Arc::clone(method), class_name.to_string()));
-    }
-
-    if let Some(ref parent) = class.parent_class
-        && let Some(result) = find_method_in_chain(parent, method_lower, class_loader, visited)
-    {
-        return Some(result);
-    }
-
-    for iface in &class.interfaces {
-        if let Some(result) = find_method_in_chain(iface, method_lower, class_loader, visited) {
-            return Some(result);
-        }
-    }
-
-    None
+    let declares = |candidate: &ClassInfo| match candidate.kind {
+        ClassLikeKind::Trait => candidate
+            .get_method(method_name)
+            .is_some_and(|method| method.is_abstract),
+        _ => candidate.has_method(method_name),
+    };
+    let (name, declaring) =
+        crate::inheritance::find_declaring_ancestor(class, class_loader, &declares)?;
+    Some((declaring.get_method_arc(method_name)?, name.to_string()))
 }

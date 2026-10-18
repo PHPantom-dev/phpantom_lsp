@@ -1,17 +1,18 @@
-/// Go-to-type-definition resolution (`textDocument/typeDefinition`).
-///
-/// "Go to Type Definition" jumps from a variable or expression to the
-/// class/interface/trait/enum declaration of its resolved type, rather
-/// than to the definition site (assignment, parameter, etc.).
-///
-/// For example, if `$user` is typed as `User`, go-to-definition jumps
-/// to the `$user = ...` assignment, while go-to-type-definition jumps
-/// to the `class User { … }` declaration.
-///
-/// The implementation reuses the existing variable type resolution and
-/// subject resolution pipelines, then looks up each resolved class name
-/// via [`resolve_class_reference`](super::resolve) to find its
-/// definition location.
+//! Go-to-type-definition resolution (`textDocument/typeDefinition`).
+//!
+//! "Go to Type Definition" jumps from a variable or expression to the
+//! class/interface/trait/enum declaration of its resolved type, rather
+//! than to the definition site (assignment, parameter, etc.).
+//!
+//! For example, if `$user` is typed as `User`, go-to-definition jumps
+//! to the `$user = ...` assignment, while go-to-type-definition jumps
+//! to the `class User { … }` declaration.
+//!
+//! The implementation reuses the existing variable type resolution and
+//! subject resolution pipelines, then looks up each resolved class name
+//! via [`resolve_class_reference`](super::resolve) to find its
+//! definition location.
+
 use crate::atom::atom;
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
@@ -20,7 +21,8 @@ use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::php_type::PhpType;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
-use crate::type_engine::resolver::{CtxLoaders, Loaders};
+use crate::type_engine::resolver::Loaders;
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::*;
 
 impl Backend {
@@ -44,9 +46,10 @@ impl Backend {
 
         let ctx = self.file_context_at(uri, offset);
         let current_class = find_class_at_offset(&ctx.classes, offset);
-        let class_loader = self.class_loader(&ctx);
-        let function_loader = self.function_loader(&ctx);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let loaders = self.file_loaders(&ctx);
+        let class_loader = loaders.class_loader_at(offset);
+        let resolved_class_loader = loaders.resolved_class_loader();
+        let function_loader = loaders.function_loader_at(offset);
 
         let resolved_types: Vec<PhpType> = match &symbol.kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
@@ -81,23 +84,9 @@ impl Backend {
                 is_method_call,
                 ..
             } => {
-                let access_kind = if *is_static {
-                    AccessKind::DoubleColon
-                } else {
-                    AccessKind::Arrow
-                };
+                let access_kind = AccessKind::of_member_access(*is_static);
 
-                let rctx = self.resolution_ctx_at(
-                    current_class,
-                    &ctx.classes,
-                    content,
-                    offset,
-                    CtxLoaders::new(
-                        &class_loader,
-                        &function_loader,
-                        &laravel_macro_this_resolver,
-                    ),
-                );
+                let rctx = loaders.resolution_ctx_at(content, offset);
 
                 let source = self.symbol_map_source(uri, content)?;
                 let candidates = ResolvedType::into_arced_classes(
@@ -109,14 +98,19 @@ impl Backend {
                 );
 
                 // Resolve the member's return type / property type.
-                self.resolve_member_type(&candidates, member_name, *is_method_call, &class_loader)
-                    .into_iter()
-                    .collect()
+                self.resolve_member_type(
+                    &candidates,
+                    member_name,
+                    *is_method_call,
+                    &resolved_class_loader,
+                )
+                .into_iter()
+                .collect()
             }
 
             SymbolKind::SelfStaticParent(ssp_kind) => match ssp_kind {
                 SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => current_class
-                    .map(|cc| vec![PhpType::named(atom(cc.name.as_ref()))])
+                    .map(|cc| vec![PhpType::named(cc.fqn())])
                     .unwrap_or_default(),
                 SelfStaticParentKind::This => {
                     if let Some(override_cls) =
@@ -125,7 +119,7 @@ impl Backend {
                         vec![PhpType::named(override_cls.fqn())]
                     } else {
                         current_class
-                            .map(|cc| vec![PhpType::named(atom(cc.name.as_ref()))])
+                            .map(|cc| vec![PhpType::named(cc.fqn())])
                             .unwrap_or_default()
                     }
                 }
@@ -135,9 +129,11 @@ impl Backend {
                     .unwrap_or_default(),
             },
 
-            SymbolKind::ClassReference { name, .. } => {
-                // The type *is* the class itself.
-                vec![PhpType::named(atom(name))]
+            SymbolKind::ClassReference { name, is_fqn, .. } => {
+                // The type *is* the class itself, named as written.
+                return self
+                    .resolve_class_reference(uri, content, name, *is_fqn, offset)
+                    .map(|loc| vec![loc]);
             }
 
             SymbolKind::FunctionCall { name, .. } => self
@@ -271,8 +267,9 @@ impl Backend {
                     continue;
                 }
 
+                // Every type here is resolved, so its names are FQNs.
                 if let Some(loc) =
-                    self.resolve_class_reference(uri, content, &name, false, cursor_offset)
+                    self.resolve_class_reference(uri, content, &name, true, cursor_offset)
                 {
                     // Avoid duplicate locations.
                     if !locations
@@ -306,20 +303,24 @@ fn resolve_variable_type_names(
 ) -> Option<PhpType> {
     // $this resolves to the enclosing class.
     if name == "this" {
-        return current_class.map(|cc| PhpType::named(atom(cc.name.as_ref())));
+        return current_class.map(|cc| PhpType::named(cc.fqn()));
     }
 
     // Delegate to the unified pipeline.
-    let resolved = crate::type_engine::variable::resolution::resolve_variable_php_type(
-        name,
-        content,
+    let resolved_class_loader =
+        |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
+    let resolved = crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
+        var_name: name,
         cursor_offset,
+        content,
         current_class,
-        &ctx.classes,
-        class_loader,
+        all_classes: &ctx.classes,
+        class_loader: &resolved_class_loader,
+        source_class_loader: class_loader,
+        source_imports: Some(&ctx.use_map),
         backend,
-        Loaders::with_function(Some(function_loader)),
-    );
+        loaders: Loaders::with_function(Some(function_loader)),
+    });
 
     // Only return types that contain at least one class name (scalars
     // are not useful for go-to-type-definition).
