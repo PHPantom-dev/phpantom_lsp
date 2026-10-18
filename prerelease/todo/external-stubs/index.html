@@ -1146,6 +1146,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#keeping-the-indices-current" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Keeping the indices current
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#complexity_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1211,6 +1222,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Scanning and priority
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changing-the-paths-mid-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Changing the paths mid-session
       </span>
     </span>
   </a>
@@ -2021,6 +2043,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#keeping-the-indices-current" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Keeping the indices current
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#complexity_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2086,6 +2119,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Scanning and priority
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changing-the-paths-mid-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Changing the paths mid-session
       </span>
     </span>
   </a>
@@ -2730,6 +2774,27 @@ project-specific definition is more accurate than the generic one.</p>
 <p><code>src/stub_patches/</code> should not apply to a class or function loaded
 from an external stub: the patches exist to fix the embedded copy, and
 a user who supplies their own stub has said what the declaration is.</p>
+<h3 id="keeping-the-indices-current">Keeping the indices current<a class="headerlink" href="#keeping-the-indices-current" title="Permanent link">&para;</a></h3>
+<p>A stub package changes mid-session when the user runs <code>composer update</code>
+or <code>composer remove</code>, and its new declarations have to replace the old
+ones. <code>rescan_composer_indexes</code> (<code>src/indexing/scan.rs</code>) runs on a
+<code>composer.lock</code> change and already rebuilds the vendor class, function
+and constant indices; rebuild the three external stub indices there too,
+from the same <code>installed.json</code> read, so a removed package's entries go
+and an updated one's paths are current.</p>
+<p>Rebuilding the indices is not enough on its own, because what was already
+parsed from a stub file stays cached: its classes in <code>uri_classes_index</code>,
+its functions in <code>global_functions</code>, and its constants. Drop everything
+parsed from an external stub in the same rescan (the rescan already clears
+the class store, the negative caches and the resolved-class cache). An
+edit to one stub file has to reach that cache as well, and the file
+watcher reports <code>file://</code> URIs, which a <code>phpantom-ext-stub://</code> key never
+matches. Either cache the parse under the stub's <code>file://</code> URI, so the
+watcher's existing re-parse of a loaded file covers it, or map a change
+under a stub directory back to the <code>phpantom-ext-stub://</code> key and evict
+that. The scheme is also what keeps a stub file inside the workspace out
+of analysis and edits (see E3), so the first option needs another way to
+say that.</p>
 <h3 id="complexity_1">Complexity<a class="headerlink" href="#complexity_1" title="Permanent link">&para;</a></h3>
 <p>High. This inserts a new phase directly into <code>find_or_load_class</code>,
 <code>find_or_load_function</code>, and the constant lookup chain — the shared
@@ -2803,6 +2868,21 @@ skip-if-present, so higher-priority sources win:</p>
 <li><strong>Embedded stubs.</strong> Final fallback (not in the external index;
    checked separately as the last resolution phase).</li>
 </ol>
+<h3 id="changing-the-paths-mid-session">Changing the paths mid-session<a class="headerlink" href="#changing-the-paths-mid-session" title="Permanent link">&para;</a></h3>
+<p><code>.phpantom.toml</code> is reloaded while the server runs (<code>reload_config</code>), and
+the client can re-send its options (<code>did_change_configuration</code>), so the
+stub paths can change mid-session. Both entry points already snapshot
+<code>DiscoveryInputs</code> (<code>src/indexing/reconcile.rs</code>) and hand it to
+<code>reconcile_index_for_input_change</code>; add the resolved stub paths to that
+snapshot rather than comparing them at either site. On a change, rebuild
+the external stub indices from scratch and drop what was parsed from
+them, the way E2's composer rescan does. Adding to the indices the way
+<code>[indexing] include</code> does is not enough: a removed include path only
+keeps filling gaps until a restart, but a removed stub path would keep
+overriding the declaration the user just went back to. A stub directory
+outside the workspace gets no file watcher (the gap X18 covers for
+<code>[indexing] include</code>), so an edit inside one is only seen after a
+restart.</p>
 <h3 id="use-cases">Use cases<a class="headerlink" href="#use-cases" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>IDE extension distribution.</strong> A Zed/VS Code extension ships
