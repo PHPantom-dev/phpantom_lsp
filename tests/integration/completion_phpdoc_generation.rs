@@ -1835,6 +1835,34 @@ async fn generates_docblock_when_multiple_attributes() {
     );
 }
 
+#[tokio::test]
+async fn generates_docblock_when_attribute_shares_the_declaration_line() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///gen_attr_inline.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Foo {\n",
+        "    /**\n",
+        "    #[\\Override] public function save(array $rows): void {}\n",
+        "}\n",
+    );
+    let items = complete_at(&backend, &uri, text, 2, 7).await;
+    let item = find_docblock_item(&items);
+    assert!(item.is_some(), "Should produce a docblock generation item");
+
+    let snippet = snippet_text(item.unwrap());
+    assert!(
+        snippet.contains("@param") && snippet.contains("\\$rows"),
+        "array param should get @param, got:\n{}",
+        snippet
+    );
+    assert!(
+        !snippet.contains("@return"),
+        "void should not get @return, got:\n{}",
+        snippet
+    );
+}
+
 // ─── Variable assignments ───────────────────────────────────────────────────
 
 /// Typing `/**` above a variable assignment should produce a single-line

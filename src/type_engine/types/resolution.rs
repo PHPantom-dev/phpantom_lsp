@@ -1,28 +1,27 @@
-/// Type-hint resolution to concrete `ClassInfo` values.
-///
-/// This module contains the logic for mapping parsed [`PhpType`] values
-/// (as they appear in return types, property annotations, and PHPDoc
-/// tags) to resolved `ClassInfo` values that the completion, hover, and
-/// definition engines can work with.
-///
-/// Split from [`crate::type_engine::resolver`] for navigability.  The entry points are:
-///
-/// - [`type_hint_to_classes_typed`]: maps a parsed [`PhpType`] to all
-///   matching `ClassInfo` values (handles unions, intersections, generics,
-///   `self`/`static`/`$this`, nullable types, object shapes, and type
-///   alias expansion).
-/// - [`resolve_type_alias_typed`]: fully expands a type alias defined
-///   via `@phpstan-type` / `@psalm-type` / `@phpstan-import-type`.
-/// - [`resolve_property_types`]: resolves a property's type hint
-///   on a class to all candidate `ClassInfo` values.
-/// - [`resolve_imported_type_alias`]: resolves a single imported
-///   type alias reference.
+//! Type-hint resolution to concrete `ClassInfo` values.
+//!
+//! This module contains the logic for mapping parsed [`PhpType`] values
+//! (as they appear in return types, property annotations, and PHPDoc
+//! tags) to resolved `ClassInfo` values that the completion, hover, and
+//! definition engines can work with.
+//!
+//! Split from [`crate::type_engine::resolver`] for navigability.  The entry points are:
+//!
+//! - [`type_hint_to_classes_typed`]: maps a parsed [`PhpType`] to all
+//!   matching `ClassInfo` values (handles unions, intersections, generics,
+//!   `self`/`static`/`$this`, nullable types, object shapes, and type
+//!   alias expansion).
+//! - [`resolve_property_types`]: resolves a property's type hint
+//!   on a class to all candidate `ClassInfo` values.
+//!
+//! Type aliases themselves are expanded by [`super::aliases`].
+
 use std::sync::Arc;
 
+use super::aliases::resolve_type_alias_typed;
 use crate::atom::atom;
-use crate::class_lookup::find_class_by_name;
-use crate::inheritance::build_generic_subs;
-use crate::php_type::{PhpType, TypeKind};
+use crate::class_lookup::find_or_load_resolved;
+use crate::php_type::{PhpType, TypeKind, is_builtin_non_class_type};
 use crate::types::*;
 use crate::util::short_name;
 use crate::virtual_members::{self, laravel};
@@ -50,13 +49,11 @@ pub(crate) fn resolve_property_types(
     type_hint_to_classes_typed(&type_hint, &owner_fqn, all_classes, class_loader)
 }
 
-/// Look up a class by name and return its declaration as written, with
-/// no generic substitution applied.
+/// Look up the class the resolved `name` names and return its declaration
+/// as written, with no generic substitution applied.
 ///
-/// When `name` is a short name (no backslash), a class in the same
-/// namespace as the owning class wins.  This prevents cross-namespace
-/// contamination in multi-namespace files where several namespaces
-/// define a class with the same short name.
+/// `name` is exactly the FQN it spells: a bare `Node` is the global class,
+/// never a same-named class of the namespace the lookup happens in.
 ///
 /// Callers that want the *type* `name` denotes (with unsupplied
 /// `@template` parameters erased to their bounds) want
@@ -65,57 +62,10 @@ pub(crate) fn resolve_property_types(
 /// the parameter names still standing in the member signatures.
 pub(crate) fn lookup_class_declaration(
     name: &str,
-    owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Arc<ClassInfo>> {
-    if !name.contains('\\') && owning_class_name.contains('\\') {
-        let owning_ns = owning_class_name.rsplit_once('\\').map(|(ns, _)| ns);
-        all_classes
-            .iter()
-            .find(|c| c.name == name && c.file_namespace.as_deref() == owning_ns)
-            .map(Arc::clone)
-            .or_else(|| find_class_by_name(all_classes, name).map(Arc::clone))
-            .or_else(|| class_loader(name))
-    } else if !name.contains('\\') && owning_class_name.is_empty() {
-        // For unqualified names in top-level code (no enclosing class),
-        // prefer the namespace-aware class_loader over find_class_by_name.
-        // The class_loader uses the FileContext's namespace to resolve
-        // short names correctly, while find_class_by_name returns the
-        // first match regardless of namespace in multi-namespace files.
-        class_loader(name).or_else(|| find_class_by_name(all_classes, name).map(Arc::clone))
-    } else {
-        find_class_by_name(all_classes, name)
-            .map(Arc::clone)
-            .or_else(|| class_loader(name))
-    }
-}
-
-/// Whether `cls` is the very class the hint is being resolved inside.
-///
-/// Callers spell `owning_class_name` either short or fully qualified, so
-/// a direct FQN comparison is not enough.  When only the short names
-/// match, the owning class is looked up to confirm both spellings name
-/// the same declaration; that lookup is skipped whenever the cheap
-/// comparison already settles it.
-fn is_enclosing_class(
-    cls: &ClassInfo,
-    owning_class_name: &str,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
-    if owning_class_name.is_empty() {
-        return false;
-    }
-    let fqn = cls.fqn();
-    if fqn.eq_ignore_ascii_case(owning_class_name) {
-        return true;
-    }
-    if !cls.name.eq_ignore_ascii_case(short_name(owning_class_name)) {
-        return false;
-    }
-    lookup_class_declaration(owning_class_name, "", all_classes, class_loader)
-        .is_some_and(|owner| owner.fqn().eq_ignore_ascii_case(fqn.as_str()))
+    find_or_load_resolved(name, all_classes, class_loader)
 }
 
 /// Map a parsed [`PhpType`] to all matching `ClassInfo` values.
@@ -290,10 +240,7 @@ fn type_hint_to_classes_typed_depth(
             let self_fqn = if !owning_class_name.is_empty()
                 && entries.iter().any(|e| e.value_type.contains_bare_self())
             {
-                find_class_by_name(all_classes, owning_class_name)
-                    .map(Arc::clone)
-                    .or_else(|| class_loader(owning_class_name))
-                    .map(|c| c.fqn())
+                find_or_load_resolved(owning_class_name, all_classes, class_loader).map(|c| c.fqn())
             } else {
                 None
             };
@@ -459,9 +406,7 @@ fn resolve_named_type(
                 produced,
             );
         }
-        return find_class_by_name(all_classes, owning_class_name)
-            .map(Arc::clone)
-            .or_else(|| class_loader(owning_class_name))
+        return find_or_load_resolved(owning_class_name, all_classes, class_loader)
             .into_iter()
             .collect();
     }
@@ -469,13 +414,10 @@ fn resolve_named_type(
     // ── parent ─────────────────────────────────────────────────────
     // Case-insensitive to match PHP behaviour (`Parent::`, `PARENT::` are valid).
     if name.eq_ignore_ascii_case("parent") {
-        let parent_name = find_class_by_name(all_classes, owning_class_name)
-            .and_then(|c| c.parent_class)
-            .or_else(|| class_loader(owning_class_name).and_then(|c| c.parent_class));
+        let parent_name = find_or_load_resolved(owning_class_name, all_classes, class_loader)
+            .and_then(|c| c.parent_class);
         if let Some(parent) = parent_name {
-            return find_class_by_name(all_classes, &parent)
-                .map(Arc::clone)
-                .or_else(|| class_loader(&parent))
+            return find_or_load_resolved(&parent, all_classes, class_loader)
                 .into_iter()
                 .collect();
         }
@@ -503,11 +445,7 @@ fn resolve_named_type(
     let owner_cell: std::cell::OnceCell<Option<Arc<ClassInfo>>> = std::cell::OnceCell::new();
     let owner = || {
         owner_cell
-            .get_or_init(|| {
-                find_class_by_name(all_classes, owning_class_name)
-                    .cloned()
-                    .or_else(|| class_loader(owning_class_name))
-            })
+            .get_or_init(|| find_or_load_resolved(owning_class_name, all_classes, class_loader))
             .as_deref()
     };
 
@@ -534,7 +472,7 @@ fn resolve_named_type(
         };
     }
 
-    match lookup_class_declaration(name, owning_class_name, all_classes, class_loader) {
+    match lookup_class_declaration(name, all_classes, class_loader) {
         Some(cls) => {
             // ── Eloquent custom collection swapping ────────────────
             // Only for a returned type hint — see
@@ -570,7 +508,7 @@ fn resolve_named_type(
             let erased_args: Vec<PhpType>;
             let generic_args: &[PhpType] = if generic_args.is_empty()
                 && !cls.template_params.is_empty()
-                && !is_enclosing_class(&cls, owning_class_name, all_classes, class_loader)
+                && !cls.fqn().eq_ignore_ascii_case(owning_class_name)
             {
                 erased_args = crate::inheritance::default_type_args(&cls);
                 &erased_args
@@ -594,68 +532,12 @@ fn resolve_named_type(
             {
                 let generic_arg_strings: Vec<String> =
                     generic_args.iter().map(|a| a.to_string()).collect();
-                // Threaded through the same entry point with or without an
-                // active cache: it applies the substitution *and* the
-                // post-substitution fixups that depend on concrete type
-                // arguments (higher-order collection proxy members), which
-                // an inline `apply_generic_args` would skip.
-                let resolved = virtual_members::resolve_class_fully_with_generics(
+                vec![virtual_members::resolve_class_for_type_hint(
                     &cls,
                     class_loader,
-                    virtual_members::active_resolved_class_cache(),
                     &generic_arg_strings,
                     generic_args,
-                );
-                let mut result = Arc::unwrap_or_clone(resolved);
-
-                // ── Template-param mixin resolution ────────────────
-                // When a class declares `@mixin TParam` where `TParam`
-                // is a template parameter, the mixin cannot be resolved
-                // during `resolve_class_fully` because the concrete type
-                // is not yet known.  Now that generic args are concrete,
-                // resolve those mixins and merge their members.
-                if cls
-                    .mixins
-                    .iter()
-                    .any(|m| cls.template_params.iter().any(|t| t == m.as_str()))
-                {
-                    let subs = build_generic_subs(&cls, generic_args);
-                    if !subs.is_empty() {
-                        let mixin_members = virtual_members::phpdoc::resolve_template_param_mixins(
-                            &cls,
-                            &subs,
-                            class_loader,
-                        );
-                        if !mixin_members.is_empty() {
-                            virtual_members::merge_virtual_members(&mut result, mixin_members);
-                        }
-                    }
-                }
-
-                // ── Eloquent Builder scope injection ───────────────
-                laravel::try_inject_builder_scopes(
-                    &mut result,
-                    &cls,
-                    name,
-                    generic_args,
-                    class_loader,
-                );
-
-                // ── Inherited Builder mixin scope injection ────────
-                // When a class inherits `@mixin Builder<TRelatedModel>`
-                // from an ancestor (e.g. HasMany inherits it from
-                // Relation), the mixin expansion adds Builder's own
-                // methods but not model-specific scopes.  Now that
-                // generic args are concrete, resolve the model type
-                // and inject its scopes.
-                laravel::try_inject_mixin_builder_scopes(
-                    &mut result,
-                    &cls,
-                    generic_args,
-                    class_loader,
-                );
-
-                vec![Arc::new(result)]
+                )]
             } else {
                 vec![cls]
             }
@@ -689,323 +571,4 @@ fn resolve_named_type(
             vec![]
         }
     }
-}
-
-/// Look up a type alias by name and fully expand alias chains.
-///
-/// Returns the fully expanded type definition string if `hint` is a
-/// known alias, or `None` if it is not. Follows up to 10 levels of
-/// alias indirection to handle aliases that reference other aliases.
-///
-/// For imported aliases, the source class is loaded and the original
-/// alias is resolved from its `type_aliases` map.
-///
-/// Pass an empty `owning_class_name` to search all classes without
-/// priority (used by the array-key completion path).
-use crate::php_type::is_builtin_non_class_type;
-
-pub(crate) fn resolve_type_alias_typed(
-    ty: &PhpType,
-    owning_class_name: &str,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<PhpType> {
-    let mut current = ty.clone();
-    let mut last_resolved: Option<PhpType> = None;
-
-    for _ in 0..10 {
-        // Only bare identifiers can be type aliases.  Skip anything that
-        // looks like a complex type expression to avoid false matches.
-        if !matches!(current.kind(), TypeKind::Named(_)) {
-            break;
-        }
-
-        let expanded =
-            resolve_type_alias_once(&current, owning_class_name, all_classes, class_loader);
-
-        match expanded {
-            Some(php_type) => {
-                current = php_type.clone();
-                last_resolved = Some(php_type);
-            }
-            None => break,
-        }
-    }
-
-    last_resolved
-}
-
-/// Expand every type alias named anywhere inside `ty` (`Shape|null`,
-/// `list<Row>`), or `None` when it names none.
-///
-/// [`resolve_type_alias_typed`] only expands a type that *is* an alias; a
-/// declared type that merely contains one needs this walk.  An alias body
-/// that names another alias is expanded too, up to the same ten levels the
-/// chain lookup allows, so a cycle stops rather than recursing forever.
-pub(crate) fn expand_nested_type_aliases(
-    ty: &PhpType,
-    owning_class_name: &str,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<PhpType> {
-    // Aliases are declared on a class in the file, so a file that declares
-    // none cannot name one.
-    if all_classes.iter().all(|c| c.type_aliases.is_empty()) {
-        return None;
-    }
-    fn walk(
-        ty: &PhpType,
-        depth: u8,
-        owning_class_name: &str,
-        all_classes: &[Arc<ClassInfo>],
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> PhpType {
-        if depth >= 10 {
-            return ty.clone();
-        }
-        if matches!(ty.kind(), TypeKind::Named(_)) {
-            return match resolve_type_alias_typed(ty, owning_class_name, all_classes, class_loader)
-            {
-                Some(expanded) => walk(
-                    &expanded,
-                    depth + 1,
-                    owning_class_name,
-                    all_classes,
-                    class_loader,
-                ),
-                None => ty.clone(),
-            };
-        }
-        ty.map_children(&|child| walk(child, depth, owning_class_name, all_classes, class_loader))
-    }
-    let expanded = walk(ty, 0, owning_class_name, all_classes, class_loader);
-    (expanded != *ty).then_some(expanded)
-}
-
-/// [`expand_nested_type_aliases`] for a type read off a member of `class`,
-/// which may be declared in another file.
-///
-/// The file-scoped lookup only sees the classes of the file being
-/// analysed, but a member signature names the aliases of the class that
-/// declares it. An inherited or trait-imported member no longer records
-/// that class, so a bare alias name the file cannot resolve is looked up
-/// on `class`, the traits it uses and its ancestors, nearest first.
-pub(crate) fn expand_member_type_aliases(
-    ty: &PhpType,
-    class: &ClassInfo,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<PhpType> {
-    if let Some(expanded) = expand_nested_type_aliases(ty, &class.name, all_classes, class_loader) {
-        return Some(expanded);
-    }
-    let TypeKind::Named(name) = ty.kind() else {
-        return None;
-    };
-    if is_builtin_non_class_type(name) {
-        return None;
-    }
-    let name = atom(name);
-    let mut queue: Vec<Arc<ClassInfo>> = Vec::new();
-    let mut visited = crate::atom::AtomSet::default();
-    let mut loaded_current: Option<Arc<ClassInfo>> = None;
-    let mut index = 0;
-    loop {
-        let current: &ClassInfo = loaded_current.as_deref().unwrap_or(class);
-        if let Some(def) = current.type_aliases.get(&name) {
-            let expanded = expand_type_alias_def(def, all_classes, class_loader)?;
-            return Some(
-                expand_nested_type_aliases(&expanded, &current.name, all_classes, class_loader)
-                    .unwrap_or(expanded),
-            );
-        }
-        for related in current
-            .used_traits
-            .iter()
-            .chain(current.parent_class.iter())
-        {
-            if visited.insert(*related)
-                && let Some(loaded) = class_loader(related)
-            {
-                queue.push(loaded);
-            }
-        }
-        loaded_current = Some(Arc::clone(queue.get(index)?));
-        index += 1;
-    }
-}
-
-/// Single-level alias lookup (no chaining).
-fn resolve_type_alias_once(
-    hint: &PhpType,
-    owning_class_name: &str,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<PhpType> {
-    let name = match hint.kind() {
-        TypeKind::Named(n) => n.as_str(),
-        _ => return None,
-    };
-
-    let owning_class = all_classes.iter().find(|c| c.name == owning_class_name);
-
-    if let Some(cls) = owning_class
-        && let Some(def) = cls.type_aliases.get(&atom(name))
-    {
-        return expand_type_alias_def(def, all_classes, class_loader);
-    }
-
-    // Also check all classes in the file — the type alias might be
-    // referenced from a method inside a different class that uses the
-    // owning class's return type.  This is rare but handles the case
-    // where the owning class name is empty (top-level code) or when
-    // the type is used in a context where the owning class is not the
-    // declaring class.
-    for cls in all_classes {
-        if cls.name == owning_class_name {
-            continue; // Already checked above.
-        }
-        if let Some(def) = cls.type_aliases.get(&atom(name)) {
-            return expand_type_alias_def(def, all_classes, class_loader);
-        }
-    }
-
-    None
-}
-
-/// Expand a [`TypeAliasDef`] into a resolved [`PhpType`].
-///
-/// For local aliases, returns the `PhpType` directly.
-/// For imports, loads the source class and returns the original alias
-/// definition.
-fn expand_type_alias_def(
-    def: &TypeAliasDef,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<PhpType> {
-    match def {
-        TypeAliasDef::Local(php_type) => Some(php_type.clone()),
-        TypeAliasDef::Import {
-            source_class,
-            original_name,
-        } => resolve_imported_type_alias(source_class, original_name, all_classes, class_loader),
-    }
-}
-
-/// Resolve an imported type alias reference.
-///
-/// Loads the source class by `source_class_name` and looks up
-/// `original_name` in its `type_aliases` map.
-pub(crate) fn resolve_imported_type_alias(
-    source_class_name: &str,
-    original_name: &str,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<PhpType> {
-    let visiting = std::cell::RefCell::new(Vec::new());
-    resolve_imported_alias_in_source(
-        source_class_name,
-        original_name,
-        all_classes,
-        class_loader,
-        &visiting,
-    )
-}
-
-/// [`resolve_imported_type_alias`], with the imports already being
-/// resolved on the way here.
-///
-/// An imported alias is written in its source class's scope, so any alias
-/// its body names (`array{r: RDto}` under `@import-type RDto from R`) is
-/// that class's, not the importer's, and is expanded there. An import of an
-/// import is followed the same way. `visiting` holds the `(class, alias)`
-/// pairs being resolved, so an alias that names itself through a cycle of
-/// imports resolves to `mixed` where it recurs, as PHPStan gives up on a
-/// circular alias. Leaving the name there instead would hand it back to the
-/// caller's own alias walk, which would expand the cycle once more per
-/// level it allows.
-fn resolve_imported_alias_in_source(
-    source_class_name: &str,
-    original_name: &str,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    visiting: &std::cell::RefCell<Vec<(String, String)>>,
-) -> Option<PhpType> {
-    let lookup = source_class_name
-        .rsplit('\\')
-        .next()
-        .unwrap_or(source_class_name);
-    let source_class = all_classes
-        .iter()
-        .find(|c| c.name == lookup)
-        .cloned()
-        .or_else(|| class_loader(source_class_name))?;
-    let def = source_class.type_aliases.get(&atom(original_name))?;
-
-    let key = (source_class_name.to_string(), original_name.to_string());
-    if visiting.borrow().contains(&key) {
-        return Some(PhpType::mixed());
-    }
-    visiting.borrow_mut().push(key);
-    let resolved = match def {
-        TypeAliasDef::Local(php_type) => Some(expand_aliases_in_source(
-            php_type,
-            &source_class,
-            class_loader,
-            visiting,
-        )),
-        TypeAliasDef::Import {
-            source_class,
-            original_name,
-        } => resolve_imported_alias_in_source(
-            source_class,
-            original_name,
-            &[],
-            class_loader,
-            visiting,
-        ),
-    };
-    visiting.borrow_mut().pop();
-    resolved
-}
-
-/// Expand the aliases `source_class` declares or imports wherever they are
-/// named inside `ty`.
-fn expand_aliases_in_source(
-    ty: &PhpType,
-    source_class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    visiting: &std::cell::RefCell<Vec<(String, String)>>,
-) -> PhpType {
-    if source_class.type_aliases.is_empty() {
-        return ty.clone();
-    }
-    if let TypeKind::Named(name) = ty.kind()
-        && let Some(def) = source_class.type_aliases.get(name)
-    {
-        let expanded = match def {
-            TypeAliasDef::Local(body) => {
-                let key = (source_class.fqn().to_string(), name.to_string());
-                if visiting.borrow().contains(&key) {
-                    return PhpType::mixed();
-                }
-                visiting.borrow_mut().push(key);
-                let expanded = expand_aliases_in_source(body, source_class, class_loader, visiting);
-                visiting.borrow_mut().pop();
-                Some(expanded)
-            }
-            TypeAliasDef::Import {
-                source_class,
-                original_name,
-            } => resolve_imported_alias_in_source(
-                source_class,
-                original_name,
-                &[],
-                class_loader,
-                visiting,
-            ),
-        };
-        return expanded.unwrap_or_else(|| ty.clone());
-    }
-    ty.map_children(&|child| expand_aliases_in_source(child, source_class, class_loader, visiting))
 }

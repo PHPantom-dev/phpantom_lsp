@@ -1,0 +1,14 @@
+// test: pipe into a function returning a scalar keeps the scalar type
+// feature: hover
+// expect: int
+---
+<?php
+
+function count_words(string $input): int {
+    return 0;
+}
+
+function demo(): void {
+    $words = 'some words' |> count_words(...);
+    echo $wo<>rds;
+}

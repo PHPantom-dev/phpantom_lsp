@@ -20,11 +20,9 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::resolver::{LendsLoaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
-use crate::types::ClassInfo;
 
-use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
+use super::helpers::make_diagnostic;
 
 struct LiteralCondition {
     scalar_type: &'static str,
@@ -57,12 +55,7 @@ impl Backend {
     ) {
         let file_ctx = self.file_context(uri);
         let _parse_guard = with_parse_cache(content);
-        let class_loaders = self.class_loaders(&file_ctx);
-        let function_loaders = self.function_loaders(&file_ctx);
-        let constant_loaders = file_ctx.per_block(|use_map, namespace| {
-            self.constant_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace)
-        });
-        let default_class = ClassInfo::default();
+        let loaders = self.file_loaders(&file_ctx);
 
         let issues: Vec<MatchArmIssue> =
             with_parsed_program(content, "match_type_diagnostics", |program, _| {
@@ -78,29 +71,7 @@ impl Backend {
                     if !super::incremental::reports_site(subject_offset) {
                         continue;
                     }
-                    let enclosing =
-                        find_innermost_enclosing_class(&file_ctx.classes, subject_offset);
-                    let current_class = enclosing.unwrap_or(&default_class);
-
-                    let owned_loaders = self.diagnostic_loaders_over(
-                        function_loaders.at(subject_offset),
-                        constant_loaders.at(subject_offset),
-                    );
-                    let loaders = owned_loaders.loaders();
-
-                    let var_ctx = VarResolutionCtx {
-                        backend: Some(self),
-                        loaders,
-                        resolved_class_cache: Some(&self.resolved_class_cache),
-                        ..VarResolutionCtx::new(
-                            "",
-                            current_class,
-                            &file_ctx.classes,
-                            content,
-                            subject_offset,
-                            class_loaders.at(subject_offset),
-                        )
-                    };
+                    let var_ctx = loaders.var_ctx_at(content, subject_offset);
 
                     let subject_type = match resolve_expression_type(match_data.subject, &var_ctx) {
                         Some(ty) => ty,

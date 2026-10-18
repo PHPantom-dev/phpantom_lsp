@@ -1,4 +1,5 @@
 use super::*;
+use crate::type_engine::variable::resolution::VarQuery;
 
 // ─── Scope map building ─────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ pub(crate) fn resolve_var_type(
 ) -> Option<PhpType> {
     let ctx = backend.file_context_at(uri, cursor_offset);
     let class_loader = backend.class_loader(&ctx);
+    let resolved_class_loader = backend.resolved_class_loader(&ctx);
     let function_loader = backend.function_loader(&ctx);
     let constant_loader = backend.constant_loader(&ctx);
     let config_resolver = |key: &str| backend.resolve_config_type(key);
@@ -41,14 +43,16 @@ pub(crate) fn resolve_var_type(
 
     let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
 
-    crate::type_engine::variable::resolution::resolve_variable_php_type(
+    crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
         var_name,
-        content,
         cursor_offset,
+        content,
         current_class,
-        &ctx.classes,
-        &class_loader,
-        Some(backend),
+        all_classes: &ctx.classes,
+        class_loader: &resolved_class_loader,
+        source_class_loader: &class_loader,
+        source_imports: Some(&ctx.use_map),
+        backend: Some(backend),
         loaders,
-    )
+    })
 }

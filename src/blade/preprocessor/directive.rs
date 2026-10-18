@@ -1,6 +1,7 @@
 use super::shared::{LineOut, Lowering, closes_args, flush_buffer};
 use super::{CapturedDirective, Mode};
-use crate::blade::directives::{BladeDirectives, CUSTOM_MARKER, CustomForm, translate_directive};
+use crate::blade::directives::{BladeDirectives, CustomForm, translate_directive};
+use crate::blade::markers::CUSTOM as CUSTOM_MARKER;
 
 /// An `@name` directive opening at the cursor.
 pub(super) fn open(

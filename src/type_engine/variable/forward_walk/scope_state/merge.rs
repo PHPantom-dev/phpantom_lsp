@@ -400,7 +400,19 @@ fn disagreeing<V: PartialEq>(mine: &AtomTrie<V>, theirs: &AtomTrie<V>) -> Vec<At
 
 /// Whether two type lists say the same thing, comparing a shared
 /// `class_info` by pointer rather than walking the class.
-pub(super) fn same_types(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
+///
+/// This is what tells whether a narrowing pass changed a variable's
+/// resolved type.  Both halves of a `ResolvedType` matter there: the type
+/// string carries most narrowings, but a member-existence guard
+/// (`property_exists($x, 'p')`) leaves it untouched and only swaps in a
+/// `ClassInfo` carrying the proven member, and every narrowing that
+/// rebuilds a `ClassInfo` yields a fresh allocation.
+///
+/// This is deliberately stricter than [`resolved_types_differ`], which
+/// compares classes by FQN: that one drives loop fix-point iteration, where
+/// treating a re-allocated but equal `ClassInfo` as a change would stop it
+/// converging.
+pub(crate) fn same_types(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
     a.len() == b.len()
         && a.iter().zip(b).all(|(x, y)| {
             x.type_string == y.type_string
@@ -410,6 +422,33 @@ pub(super) fn same_types(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
                     _ => false,
                 }
         })
+}
+
+/// Compare two `ResolvedType` slices by their observable identity
+/// (type string + class FQN).  `ResolvedType` intentionally does not
+/// implement `PartialEq` because `ClassInfo` is a large struct where
+/// field-by-field equality is too expensive and semantically wrong.
+/// This lightweight comparison detects when narrowing changed the
+/// resolved type (e.g. replaced `BaseCatalogFeature` with `self`).
+pub(crate) fn resolved_types_differ(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
+    if a.len() != b.len() {
+        return true;
+    }
+    for (ra, rb) in a.iter().zip(b.iter()) {
+        if ra.type_string != rb.type_string {
+            return true;
+        }
+        match (&ra.class_info, &rb.class_info) {
+            (Some(ca), Some(cb)) => {
+                if ca.fqn() != cb.fqn() {
+                    return true;
+                }
+            }
+            (None, None) => {}
+            _ => return true,
+        }
+    }
+    false
 }
 
 /// Whether two type lists say the same thing, comparing two separately

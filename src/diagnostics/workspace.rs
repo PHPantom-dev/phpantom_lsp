@@ -521,6 +521,23 @@ impl WorkspaceDiagnostics {
         self.result_ids.keys().cloned().collect()
     }
 
+    /// Clear the stored native and external results for one file, e.g.
+    /// when it is deleted.
+    ///
+    /// The result id is kept, like [`Self::clear_all`] keeps them, so a
+    /// pull client is told the set is now empty.  Returns whether anything
+    /// was stored and so needs republishing.
+    pub(crate) fn clear_uri(&mut self, uri: &str) -> bool {
+        let mut changed = self.native.remove(uri).is_some();
+        for map in self.external.values_mut() {
+            changed |= map.remove(uri).is_some();
+        }
+        if changed {
+            self.bump(uri);
+        }
+        changed
+    }
+
     /// Clear every stored native and external result, e.g. when
     /// `[diagnostics] workspace` is switched off mid-session.
     ///
@@ -670,6 +687,28 @@ impl Backend {
         let backend = self.clone_for_diagnostic_worker();
         runtime.spawn(async move {
             backend.clear_workspace_diagnostics().await;
+        });
+    }
+
+    /// Drop the workspace diagnostics of deleted files and tell the editor
+    /// to drop what it was shown for them.
+    pub(crate) fn forget_workspace_diagnostics(&self, uris: &[&str]) {
+        let changed: Vec<String> = {
+            let mut ws = self.diag.workspace_diags.lock();
+            uris.iter()
+                .filter(|uri| ws.clear_uri(uri))
+                .map(|uri| uri.to_string())
+                .collect()
+        };
+        if changed.is_empty() {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let backend = self.clone_for_diagnostic_worker();
+        runtime.spawn(async move {
+            backend.flush_workspace_diag_updates(changed).await;
         });
     }
 
@@ -1333,7 +1372,10 @@ impl Backend {
     }
 
     /// The single-file worker that shares a source's per-file cache.
-    fn external_tool_for_source(&self, source: &str) -> Option<&crate::ExternalToolWorker> {
+    fn external_tool_for_source(
+        &self,
+        source: &str,
+    ) -> Option<&crate::backend::external_tool_worker::ExternalToolWorker> {
         Some(match source {
             "phpstan" => &self.phpstan_tool,
             "phpcs" => &self.phpcs_tool,
@@ -1538,6 +1580,24 @@ mod tests {
 
         let merged = ws.merged("file:///a.php");
         assert_eq!(merged.len(), 2);
+    }
+
+    /// A deleted file's stored results go, native and external alike, but
+    /// it stays tracked so a pull client is told its set is now empty.
+    #[test]
+    fn clear_uri_drops_every_source_and_keeps_tracking() {
+        let mut ws = WorkspaceDiagnostics::default();
+        ws.set_native("file:///a.php", vec![diag("unknown_class", 1)]);
+        let mut phpstan = HashMap::new();
+        phpstan.insert("file:///a.php".to_string(), vec![diag("argument.type", 7)]);
+        ws.set_external("phpstan", phpstan);
+        let id_before = ws.result_id("file:///a.php").expect("tracked");
+
+        assert!(ws.clear_uri("file:///a.php"));
+        assert!(ws.merged("file:///a.php").is_empty());
+        assert!(ws.tracked_uris().contains(&"file:///a.php".to_string()));
+        assert_ne!(ws.result_id("file:///a.php"), Some(id_before));
+        assert!(!ws.clear_uri("file:///a.php"), "nothing left to clear");
     }
 
     #[test]

@@ -579,6 +579,37 @@ async fn test_generator_yield_reverse_inference_tvalue() {
     );
 }
 
+/// Only the variable the generator yields takes the yielded type: yielding
+/// `$users`, or yielding `$user` from a closure inside the body, says
+/// nothing about `$user`.
+#[tokio::test]
+async fn test_generator_yield_reverse_inference_needs_the_variable_itself() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///gen_yield_other_variable.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "}\n",
+        "class UserRepository {\n",
+        "    /** @return \\Generator<int, User> */\n",
+        "    public function findAll(): \\Generator {\n",
+        "        yield $users;\n",
+        "        $lazy = function () { yield $user; };\n",
+        "        $user->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 9, 15).await;
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        !labels.iter().any(|l| l.starts_with("name")),
+        "`$user` is not what the generator yields. Got: {:?}",
+        labels
+    );
+}
+
 /// Same as above but with four Generator type parameters.
 #[tokio::test]
 async fn test_generator_yield_reverse_inference_four_params() {
@@ -1055,8 +1086,7 @@ async fn test_generator_yield_chain_property() {
 }
 
 /// TSend inference (`$var = yield`) should work when the target method
-/// appears after other classes/methods with nested braces, which can
-/// confuse the backward brace scan in `find_enclosing_return_type`.
+/// appears after other classes/methods with nested braces.
 #[tokio::test]
 async fn test_generator_tsend_after_multiple_classes_with_braces() {
     let backend = create_test_backend();
@@ -1104,6 +1134,35 @@ async fn test_generator_tsend_after_multiple_classes_with_braces() {
     assert!(
         labels.iter().any(|l| l.starts_with("execute")),
         "Should include 'execute' from Command via TSend after multiple classes. Got: {:?}",
+        labels
+    );
+}
+
+/// TSend inference reads the docblock above the method's attributes.
+#[tokio::test]
+async fn test_generator_tsend_with_attribute_below_docblock() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///gen_tsend_attribute.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Task {\n",
+        "    public int $priority;\n",
+        "}\n",
+        "class Scheduler {\n",
+        "    /** @return \\Generator<int, string, Task, void> */\n",
+        "    #[\\ReturnTypeWillChange]\n",
+        "    public function schedule(): \\Generator {\n",
+        "        $task = yield 'waiting';\n",
+        "        $task->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 9, 15).await;
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.starts_with("priority")),
+        "Should include 'priority' from Task via TSend with an attribute on the method. Got: {:?}",
         labels
     );
 }

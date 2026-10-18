@@ -54,15 +54,15 @@ pub(crate) fn destructuring_rhs_type(
         _ => None,
     };
     let raw_type = preceding_var_type_of_value(var_ctx.content, stmt_offset, rhs_var)
-        .map(|vt| crate::util::resolve_php_type_names(&vt, var_ctx.class_loader))
+        .map(|vt| var_ctx.written_names().resolve_type(&vt))
         .or_else(|| {
             super::super::foreach_resolution::resolve_expression_type(assignment.rhs, var_ctx)
         })?;
 
     Some(
-        crate::type_engine::type_resolution::resolve_type_alias_typed(
+        crate::type_engine::types::aliases::resolve_type_alias_typed(
             &raw_type,
-            &var_ctx.current_class.name,
+            &var_ctx.current_class.fqn(),
             var_ctx.all_classes,
             var_ctx.class_loader,
         )

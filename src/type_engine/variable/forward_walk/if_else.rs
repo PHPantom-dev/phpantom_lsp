@@ -26,6 +26,8 @@ pub(crate) fn process_if<'b>(
         return;
     }
 
+    let chain = IfChain::of(&if_stmt.body);
+
     // Record a snapshot after condition processing so that variables
     // seeded by pass-by-reference (e.g. `$matches` from `preg_match`)
     // are visible in the then-body and elseif/else bodies.  Without
@@ -33,21 +35,10 @@ pub(crate) fn process_if<'b>(
     // `walk_body_forward` before `process_if` runs) would be the
     // nearest floor entry, and it predates the seeding.
     if is_diagnostic_scope_active() {
-        let body_start = match &if_stmt.body {
-            IfBody::Statement(body) => body.statement.span().start.offset,
-            IfBody::ColonDelimited(body) => body.colon.start.offset,
-        };
-        record_scope_snapshot(body_start, scope);
+        record_scope_snapshot(chain.then_arm.body.0, scope);
     }
 
-    match &if_stmt.body {
-        IfBody::Statement(body) => {
-            process_if_statement_body(if_stmt, body, enclosing_stmt, &condition, scope, ctx);
-        }
-        IfBody::ColonDelimited(body) => {
-            process_if_colon_body(if_stmt, body, enclosing_stmt, &condition, scope, ctx);
-        }
-    }
+    process_if_chain(if_stmt, &chain, enclosing_stmt, &condition, scope, ctx);
 }
 
 /// The scope an arm of an `if` chain is reached on: every condition
@@ -69,355 +60,242 @@ fn falsey_through<'b>(
     path
 }
 
-/// Process if with statement body (brace-style).
-pub(crate) fn process_if_statement_body<'b>(
+/// An `if` chain as both of its spellings present it: each arm's
+/// statements, and the stretch of source a cursor inside the arm's body
+/// falls in.
+struct IfChain<'b> {
+    then_arm: IfArm<'b>,
+    /// Each `elseif` with its condition, in source order.
+    else_ifs: Vec<(&'b Expression<'b>, IfArm<'b>)>,
+    else_arm: Option<IfArm<'b>>,
+}
+
+/// One arm of an [`IfChain`].
+struct IfArm<'b> {
+    statements: &'b [Statement<'b>],
+    /// The first and last offset a cursor inside the arm's body can be at:
+    /// the braced statement's span, or for a `:`-delimited arm, its colon
+    /// up to the keyword that opens the next arm (or `endif`).
+    body: (u32, u32),
+}
+
+impl<'b> IfChain<'b> {
+    fn of(body: &'b IfBody<'b>) -> Self {
+        match body {
+            IfBody::Statement(body) => {
+                let arm = |statement: &'b Statement<'b>| {
+                    let span = statement.span();
+                    IfArm {
+                        statements: std::slice::from_ref(statement),
+                        body: (span.start.offset, span.end.offset),
+                    }
+                };
+                IfChain {
+                    then_arm: arm(body.statement),
+                    else_ifs: body
+                        .else_if_clauses
+                        .iter()
+                        .map(|ei| (ei.condition, arm(ei.statement)))
+                        .collect(),
+                    else_arm: body.else_clause.as_ref().map(|ec| arm(ec.statement)),
+                }
+            }
+            IfBody::ColonDelimited(body) => {
+                let mut next_keywords = body
+                    .else_if_clauses
+                    .iter()
+                    .map(|ei| ei.elseif.span().start.offset)
+                    .chain(
+                        body.else_clause
+                            .iter()
+                            .map(|ec| ec.r#else.span().start.offset),
+                    )
+                    .chain(std::iter::once(body.endif.span().start.offset));
+                let mut arm = |colon: mago_span::Span, statements: &'b [Statement<'b>]| {
+                    let start = colon.start.offset;
+                    let next = next_keywords.next().unwrap_or(start + 1);
+                    IfArm {
+                        statements,
+                        body: (start, next.saturating_sub(1).max(start)),
+                    }
+                };
+                let then_arm = arm(body.colon, body.statements.as_slice());
+                let else_ifs = body
+                    .else_if_clauses
+                    .iter()
+                    .map(|ei| (ei.condition, arm(ei.colon, ei.statements.as_slice())))
+                    .collect();
+                let else_arm = body
+                    .else_clause
+                    .as_ref()
+                    .map(|ec| arm(ec.colon, ec.statements.as_slice()));
+                IfChain {
+                    then_arm,
+                    else_ifs,
+                    else_arm,
+                }
+            }
+        }
+    }
+
+    /// The conditions of the first `count` `elseif`s.
+    fn else_if_conditions(&self, count: usize) -> impl Iterator<Item = &'b Expression<'b>> + '_ {
+        self.else_ifs[..count]
+            .iter()
+            .map(|(condition, _)| *condition)
+    }
+}
+
+impl IfArm<'_> {
+    fn holds_cursor(&self, cursor_offset: u32) -> bool {
+        cursor_offset >= self.body.0 && cursor_offset <= self.body.1
+    }
+}
+
+/// Walk an `if` chain from the scope its condition was evaluated on: only
+/// the arm the cursor is in, or every arm and their join when the cursor
+/// is after the chain.
+fn process_if_chain<'b>(
     if_stmt: &'b If<'b>,
-    body: &'b IfStatementBody<'b>,
+    chain: &IfChain<'b>,
     enclosing_stmt: &'b Statement<'b>,
     condition: &Condition<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let then_span = body.statement.span();
-    let cursor_in_then =
-        ctx.cursor_offset >= then_span.start.offset && ctx.cursor_offset <= then_span.end.offset;
-
     // Which branches a decidable guard rules out.  Recorded before the
     // cursor dispatch below so the ranges are collected whichever branch
     // the walk goes on to take.
     let dead = dead_if_branches(
         if_stmt.condition,
-        body.else_if_clauses.iter().map(|ei| ei.condition),
-        body.else_clause.is_some(),
+        chain.else_if_conditions(chain.else_ifs.len()),
+        chain.else_arm.is_some(),
         ctx,
     );
     if dead.any() {
         if dead.then_branch {
-            record_unreachable_range((then_span.start.offset, then_span.end.offset));
+            record_statements_unreachable(chain.then_arm.statements.iter());
         }
-        for (ei, ei_dead) in body.else_if_clauses.iter().zip(dead.else_if_clauses.iter()) {
+        for ((_, arm), ei_dead) in chain.else_ifs.iter().zip(dead.else_if_clauses.iter()) {
             if *ei_dead {
-                let sp = ei.statement.span();
-                record_unreachable_range((sp.start.offset, sp.end.offset));
+                record_statements_unreachable(arm.statements.iter());
             }
         }
         if dead.else_clause
-            && let Some(ref else_clause) = body.else_clause
+            && let Some(arm) = &chain.else_arm
         {
-            let sp = else_clause.statement.span();
-            record_unreachable_range((sp.start.offset, sp.end.offset));
+            record_statements_unreachable(arm.statements.iter());
         }
     }
 
-    let cursor_in_elseif = body.else_if_clauses.iter().any(|ei| {
-        let sp = ei.statement.span();
-        ctx.cursor_offset >= sp.start.offset && ctx.cursor_offset <= sp.end.offset
-    });
-
-    let cursor_in_else = body.else_clause.as_ref().is_some_and(|ec| {
-        let sp = ec.statement.span();
-        ctx.cursor_offset >= sp.start.offset && ctx.cursor_offset <= sp.end.offset
-    });
-
     // Cursor inside an elseif's own condition (as opposed to its body,
-    // handled by `cursor_in_elseif` below): the if condition and every
-    // strictly preceding elseif condition were false to reach here, and
-    // this elseif's own condition is walked from there, so the scope it
-    // reaches the cursor with answers.  The if/preceding-elseif bodies
-    // never ran: without this case the cursor falls through to the "after
-    // the whole chain" merge below, which pulls in assignments from the
-    // if-body (e.g. `if (...) { $value = true; } elseif (foo($value)) { ...
-    // }` must not see `$value` as `T|bool` while evaluating `foo($value)`).
-    for (idx, ei) in body.else_if_clauses.iter().enumerate() {
-        let cond_span = ei.condition.span();
+    // handled below): the if condition and every strictly preceding elseif
+    // condition were false to reach here, and this elseif's own condition
+    // is walked from there, so the scope it reaches the cursor with
+    // answers.  The if/preceding-elseif bodies never ran: without this
+    // case the cursor falls through to the "after the whole chain" merge
+    // below, which pulls in assignments from the if-body (e.g.
+    // `if (...) { $value = true; } elseif (foo($value)) { ... }` must not
+    // see `$value` as `T|bool` while evaluating `foo($value)`).
+    for (idx, (ei_condition, _)) in chain.else_ifs.iter().enumerate() {
+        let cond_span = ei_condition.span();
         if ctx.cursor_offset >= cond_span.start.offset && ctx.cursor_offset <= cond_span.end.offset
         {
-            *scope = falsey_through(
-                condition,
-                body.else_if_clauses.iter().take(idx).map(|ei| ei.condition),
-                ctx,
-            );
-            process_condition(ei.condition, scope, ctx);
+            *scope = falsey_through(condition, chain.else_if_conditions(idx), ctx);
+            process_condition(ei_condition, scope, ctx);
             return;
         }
     }
 
-    if cursor_in_then {
+    if chain.then_arm.holds_cursor(ctx.cursor_offset) {
         // Cursor is inside the then-branch: walk only this branch, on the
         // scope where the condition held.
         *scope = condition.truthy(ctx).clone();
-        walk_body_forward(std::iter::once(body.statement), scope, ctx);
+        walk_body_forward(chain.then_arm.statements.iter(), scope, ctx);
         return;
     }
 
-    if cursor_in_elseif {
-        // Find which elseif contains the cursor.
-        for (idx, ei) in body.else_if_clauses.iter().enumerate() {
-            let sp = ei.statement.span();
-            if ctx.cursor_offset >= sp.start.offset && ctx.cursor_offset <= sp.end.offset {
-                // Every condition above this one failed, and this one held.
-                let mut path = falsey_through(
-                    condition,
-                    body.else_if_clauses.iter().take(idx).map(|ei| ei.condition),
-                    ctx,
-                );
-                let arm = process_condition(ei.condition, &mut path, ctx);
-                *scope = arm.truthy(ctx).clone();
-                walk_body_forward(std::iter::once(ei.statement), scope, ctx);
-                return;
-            }
+    for (idx, (ei_condition, arm)) in chain.else_ifs.iter().enumerate() {
+        if arm.holds_cursor(ctx.cursor_offset) {
+            // Every condition above this one failed, and this one held.
+            let mut path = falsey_through(condition, chain.else_if_conditions(idx), ctx);
+            let arm_condition = process_condition(ei_condition, &mut path, ctx);
+            *scope = arm_condition.truthy(ctx).clone();
+            walk_body_forward(arm.statements.iter(), scope, ctx);
+            return;
         }
-        return;
     }
 
-    if cursor_in_else && let Some(ref else_clause) = body.else_clause {
+    if let Some(arm) = &chain.else_arm
+        && arm.holds_cursor(ctx.cursor_offset)
+    {
         // Every condition in the chain failed.
         *scope = falsey_through(
             condition,
-            body.else_if_clauses.iter().map(|ei| ei.condition),
+            chain.else_if_conditions(chain.else_ifs.len()),
             ctx,
         );
-        walk_body_forward(std::iter::once(else_clause.statement), scope, ctx);
+        walk_body_forward(arm.statements.iter(), scope, ctx);
         return;
     }
 
     // Cursor is AFTER the if/else block.  We need to merge all branches.
-    let branches = fork_if_branches(
-        condition,
-        &dead,
-        std::iter::once(body.statement),
-        body.else_if_clauses
-            .iter()
-            .map(|ei| ElseIfArm {
-                condition: ei.condition,
-                stmts: std::iter::once(ei.statement),
-            })
-            .collect(),
-        body.else_clause.as_ref().map(|else_clause| ElseArm {
-            stmts: std::iter::once(else_clause.statement),
-            snapshot_offset: Some(else_clause.statement.span().start.offset),
-        }),
-        scope,
-        ctx,
-    );
+    let branches = fork_if_branches(condition, &dead, chain, scope, ctx);
     merge_if_branches(if_stmt, branches, enclosing_stmt, scope, ctx);
-}
-
-/// Process if with colon-delimited body.
-pub(crate) fn process_if_colon_body<'b>(
-    if_stmt: &'b If<'b>,
-    body: &'b IfColonDelimitedBody<'b>,
-    enclosing_stmt: &'b Statement<'b>,
-    condition: &Condition<'b>,
-    scope: &mut ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    // Simplified handling for colon-delimited if.
-    // Check if cursor is inside the then-body.
-    let then_end = if !body.else_if_clauses.is_empty() {
-        body.else_if_clauses
-            .first()
-            .unwrap()
-            .elseif
-            .span()
-            .start
-            .offset
-    } else if let Some(ref ec) = body.else_clause {
-        ec.r#else.span().start.offset
-    } else {
-        body.endif.span().start.offset
-    };
-
-    let then_start = body.colon.start.offset;
-    let cursor_in_then = ctx.cursor_offset >= then_start && ctx.cursor_offset < then_end;
-
-    // Which branches a decidable guard rules out.  See the brace-body
-    // variant for why this runs before the cursor dispatch.
-    let dead = dead_if_branches(
-        if_stmt.condition,
-        body.else_if_clauses.iter().map(|ei| ei.condition),
-        body.else_clause.is_some(),
-        ctx,
-    );
-    if dead.any() {
-        if dead.then_branch {
-            record_statements_unreachable(body.statements.iter());
-        }
-        for (ei, ei_dead) in body.else_if_clauses.iter().zip(dead.else_if_clauses.iter()) {
-            if *ei_dead {
-                record_statements_unreachable(ei.statements.iter());
-            }
-        }
-        if dead.else_clause
-            && let Some(ref else_clause) = body.else_clause
-        {
-            record_statements_unreachable(else_clause.statements.iter());
-        }
-    }
-
-    if cursor_in_then {
-        *scope = condition.truthy(ctx).clone();
-        walk_body_forward(body.statements.iter(), scope, ctx);
-        return;
-    }
-
-    // Cursor inside an elseif's own condition (before its `:`): only the
-    // if condition and strictly preceding elseif conditions are known
-    // false here — this elseif's own condition and every branch body are
-    // not yet in effect.  See the brace-body variant above for why this
-    // case must be handled separately from the body case below.
-    for (idx, ei) in body.else_if_clauses.iter().enumerate() {
-        let cond_span = ei.condition.span();
-        if ctx.cursor_offset >= cond_span.start.offset && ctx.cursor_offset <= cond_span.end.offset
-        {
-            *scope = falsey_through(
-                condition,
-                body.else_if_clauses.iter().take(idx).map(|ei| ei.condition),
-                ctx,
-            );
-            process_condition(ei.condition, scope, ctx);
-            return;
-        }
-    }
-
-    for (idx, ei) in body.else_if_clauses.iter().enumerate() {
-        let ei_start = ei.colon.start.offset;
-        let ei_end = ei
-            .statements
-            .last()
-            .map(|s| s.span().end.offset)
-            .unwrap_or(ei_start);
-        if ctx.cursor_offset >= ei_start && ctx.cursor_offset <= ei_end {
-            let mut path = falsey_through(
-                condition,
-                body.else_if_clauses.iter().take(idx).map(|ei| ei.condition),
-                ctx,
-            );
-            let arm = process_condition(ei.condition, &mut path, ctx);
-            *scope = arm.truthy(ctx).clone();
-            walk_body_forward(ei.statements.iter(), scope, ctx);
-            return;
-        }
-    }
-
-    if let Some(ref else_clause) = body.else_clause {
-        let ec_start = else_clause.colon.start.offset;
-        let ec_end = else_clause
-            .statements
-            .last()
-            .map(|s| s.span().end.offset)
-            .unwrap_or(ec_start);
-        if ctx.cursor_offset >= ec_start && ctx.cursor_offset <= ec_end {
-            *scope = falsey_through(
-                condition,
-                body.else_if_clauses.iter().map(|ei| ei.condition),
-                ctx,
-            );
-            walk_body_forward(else_clause.statements.iter(), scope, ctx);
-            return;
-        }
-    }
-
-    // Cursor is after the if — merge branches.
-    let branches = fork_if_branches(
-        condition,
-        &dead,
-        body.statements.iter(),
-        body.else_if_clauses
-            .iter()
-            .map(|ei| ElseIfArm {
-                condition: ei.condition,
-                stmts: ei.statements.iter(),
-            })
-            .collect(),
-        body.else_clause.as_ref().map(|else_clause| ElseArm {
-            stmts: else_clause.statements.iter(),
-            snapshot_offset: else_clause
-                .statements
-                .first()
-                .map(|first_stmt| first_stmt.span().start.offset),
-        }),
-        scope,
-        ctx,
-    );
-    merge_if_branches(if_stmt, branches, enclosing_stmt, scope, ctx);
-}
-
-/// An `elseif` arm of an `if` chain, as either body spelling presents it.
-struct ElseIfArm<'b, I> {
-    condition: &'b Expression<'b>,
-    stmts: I,
-}
-
-/// The `else` arm of an `if` chain, as either body spelling presents it.
-struct ElseArm<I> {
-    stmts: I,
-    /// Where a diagnostic-scope snapshot of the arm's entry state is
-    /// recorded: the arm's first statement, when it has one.
-    snapshot_offset: Option<u32>,
 }
 
 /// Walk every arm of an `if` chain the cursor sits after, each from the
 /// scope it is reached on, so [`merge_if_branches`] can join them.
 ///
-/// Both spellings of an `if` (braced and `:`-delimited) fork the same way
-/// and differ only in how they reach each arm's statements, which is what
-/// the `I` iterator abstracts over.  A branch the guard rules out is still
-/// walked (the cursor may be inside it), but it is marked so the join drops
-/// what it established.
+/// A branch the guard rules out is still walked (the cursor may be inside
+/// it), but it is marked so the join drops what it established.
 ///
 /// An `elseif` is evaluated only when every condition before it failed, so
 /// it runs on the scope the one before it failed in, and so does whatever
 /// follows it: the `else`, or the fall-through when there is none.
-fn fork_if_branches<'b, I>(
+fn fork_if_branches(
     condition: &Condition<'_>,
     dead: &DeadIfBranches,
-    then_stmts: I,
-    else_ifs: Vec<ElseIfArm<'b, I>>,
-    else_arm: Option<ElseArm<I>>,
+    chain: &IfChain<'_>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) -> IfBranchScopes
-where
-    I: Iterator<Item = &'b Statement<'b>> + std::clone::Clone,
-{
+) -> IfBranchScopes {
     let mut then_scope = condition.truthy(ctx).clone();
     then_scope.unreachable |= dead.then_branch;
-    walk_body_forward(then_stmts.clone(), &mut then_scope, ctx);
-    let then_exits = branch_exits_stmts(then_stmts, &then_scope, ctx);
+    walk_body_forward(chain.then_arm.statements.iter(), &mut then_scope, ctx);
+    let then_exits = branch_exits_stmts(chain.then_arm.statements.iter(), &then_scope, ctx);
 
-    let has_else_ifs = !else_ifs.is_empty();
     let mut path = condition.falsey(ctx).clone();
-    let mut elseif_scopes: Vec<(ScopeState, bool)> = Vec::with_capacity(else_ifs.len());
-    for (ei_idx, arm) in else_ifs.into_iter().enumerate() {
+    let mut elseif_scopes: Vec<(ScopeState, bool)> = Vec::with_capacity(chain.else_ifs.len());
+    for (ei_idx, (ei_condition, arm)) in chain.else_ifs.iter().enumerate() {
         // Record a scope snapshot at the elseif condition boundary so
         // that diagnostic variable lookups inside the condition don't
         // pick up assignments from preceding if/elseif bodies.
         if is_diagnostic_scope_active() {
-            record_scope_snapshot(arm.condition.span().start.offset, &path);
+            record_scope_snapshot(ei_condition.span().start.offset, &path);
         }
-        let arm_condition = process_condition(arm.condition, &mut path, ctx);
+        let arm_condition = process_condition(ei_condition, &mut path, ctx);
         let mut ei_scope = arm_condition.truthy(ctx).clone();
         ei_scope.unreachable |= dead.else_if_clauses[ei_idx];
-        walk_body_forward(arm.stmts.clone(), &mut ei_scope, ctx);
-        let exits = branch_exits_stmts(arm.stmts, &ei_scope, ctx);
+        walk_body_forward(arm.statements.iter(), &mut ei_scope, ctx);
+        let exits = branch_exits_stmts(arm.statements.iter(), &ei_scope, ctx);
         elseif_scopes.push((ei_scope, exits));
         path = arm_condition.falsey(ctx).clone();
     }
 
-    let else_branch = else_arm.map(|arm| {
+    let else_branch = chain.else_arm.as_ref().map(|arm| {
         let mut else_scope = path.clone();
         else_scope.unreachable |= dead.else_clause;
         // Record a scope snapshot at the else boundary so that
         // diagnostic variable lookups inside the else body don't
         // pick up assignments from the if/elseif bodies.
         if is_diagnostic_scope_active()
-            && let Some(offset) = arm.snapshot_offset
+            && let Some(first) = arm.statements.first()
         {
-            record_scope_snapshot(offset, &else_scope);
+            record_scope_snapshot(first.span().start.offset, &else_scope);
         }
-        walk_body_forward(arm.stmts.clone(), &mut else_scope, ctx);
-        let exits = branch_exits_stmts(arm.stmts, &else_scope, ctx);
+        walk_body_forward(arm.statements.iter(), &mut else_scope, ctx);
+        let exits = branch_exits_stmts(arm.statements.iter(), &else_scope, ctx);
         (else_scope, exits)
     });
 
@@ -427,7 +305,7 @@ where
         else_ifs: elseif_scopes,
         else_branch,
         fall_through: path,
-        has_else_ifs,
+        has_else_ifs: !chain.else_ifs.is_empty(),
     }
 }
 
@@ -451,10 +329,6 @@ struct IfBranchScopes {
 
 /// Join the branch scopes of an `if` chain back into `scope`, and apply
 /// the narrowing a guard clause leaves behind.
-///
-/// Both spellings of an `if` (braced and `:`-delimited) reconverge the
-/// same way, so they share this half; they differ only in how they reach
-/// the branches in the first place.
 ///
 /// A branch that returns, throws, or jumps out of the enclosing loop does
 /// not reach the statement after the `if`, so it contributes nothing
@@ -639,14 +513,23 @@ pub(crate) fn branch_exits_stmts<'s>(
 ) -> bool {
     let var_types = |var_name: &str| scope.get(var_name).to_vec();
     let receiver_resolver = |expr: &Expression<'_>| resolved_receiver_class_names(expr, scope, ctx);
+    let static_receiver_resolver = |class_expr: &Expression<'_>| {
+        super::by_ref::static_receiver_classes(class_expr, scope, ctx)
+            .iter()
+            .map(|class| class.fqn().to_string())
+            .collect()
+    };
     let exit_ctx = narrowing::ExitCtx {
         current_class: ctx.current_class,
         all_classes: ctx.all_classes,
         class_loader: ctx.class_loader,
+        source_class_loader: ctx.source_class_loader,
+        source_imports: ctx.source_imports,
         function_loader: ctx.loaders.function_loader,
         resolved_class_cache: ctx.resolved_class_cache,
         var_types: Some(&var_types),
         receiver_resolver: Some(&receiver_resolver),
+        static_receiver_resolver: Some(&static_receiver_resolver),
     };
     narrowing::statements_unconditionally_exit(stmts, &exit_ctx)
 }

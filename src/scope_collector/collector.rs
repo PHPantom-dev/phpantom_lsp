@@ -960,19 +960,17 @@ const BY_REF_OUT_PARAMS: &[(&str, &[usize])] = &[
 /// Walk arguments for a direct function call, treating known
 /// by-reference out-parameters as writes.
 fn walk_function_call_arguments(func_call: &FunctionCall<'_>, collector: &mut Collector<'_>) {
-    // Try to extract a bare function name.
-    let func_name = match func_call.function {
-        Expression::Identifier(ident) => {
-            let raw = bytes_to_str(ident.value());
-            // Strip leading backslash for FQN calls like \preg_match
-            raw.strip_prefix('\\').unwrap_or(raw)
-        }
+    // Try to extract a function name, as written.
+    let written_name = match func_call.function {
+        Expression::Identifier(ident) => bytes_to_str(ident.value()),
         _ => {
             // Not a bare name — fall through to default handling.
             walk_arguments(&func_call.argument_list, collector);
             return;
         }
     };
+    // `\preg_match` names the same builtin the table lists.
+    let func_name = written_name.strip_prefix('\\').unwrap_or(written_name);
 
     // Look up by-ref out-parameter positions: first the hardcoded
     // table, then the optional resolver callback.
@@ -985,7 +983,7 @@ fn walk_function_call_arguments(func_call: &FunctionCall<'_>, collector: &mut Co
     let out_positions: Option<&[usize]> = if let Some(positions) = hardcoded {
         Some(positions)
     } else if let Some(ref resolver) = collector.by_ref_resolver {
-        let kind = ByRefCallKind::Function(func_name);
+        let kind = ByRefCallKind::Function(written_name);
         if let Some(positions) = resolver(&kind, collector.enclosing_class_name()) {
             resolved_positions = positions;
             if resolved_positions.is_empty() {

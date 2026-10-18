@@ -47,6 +47,27 @@ fn is_name_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || !c.is_ascii()
 }
 
+/// The subjects a condition can narrow: the scope keys it names
+/// ([`scope_keys_named_by`]), the variables its checks name whether or not
+/// the scope holds them yet (`if (!$x instanceof Foo) { return; }` on a
+/// never-assigned `$x`), and its property-access keys (`$a->foo` from
+/// `$a->foo instanceof Foo`).
+pub(crate) fn condition_subject_keys(expr: &Expression<'_>, scope: &ScopeState) -> Vec<String> {
+    let mut keys: Vec<String> = scope_keys_named_by(expr, scope)
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
+    for key in collect_condition_var_names(expr)
+        .into_iter()
+        .chain(collect_condition_property_keys(expr))
+    {
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    keys
+}
+
 /// Extract variable names referenced in instanceof / is_a / get_class
 /// conditions.  This catches variables that are not yet in scope but
 /// are used in guard clauses like `if (!$x instanceof Foo) { return; }`.

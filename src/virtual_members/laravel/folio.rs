@@ -5,10 +5,9 @@
 //! `Laravel\Folio\name()` inside the page gives it a name.  Nothing calls
 //! `Route::` for these, so the conventional scanner in [`super::route_names`]
 //! never sees them — this module bridges that gap, and its results are
-//! folded into [`super::route_names::enumerate_all_routes`] and
-//! [`super::route_names::resolve_route_definitions`] so every existing route
-//! consumer (completion, hover, diagnostics, go-to-definition,
-//! find-references) picks up Folio pages for free.
+//! folded into [`super::route_names::enumerate_all_routes`] so every
+//! existing route consumer (completion, hover, diagnostics,
+//! go-to-definition, find-references) picks up Folio pages for free.
 //!
 //! A mount is registered one of three ways, all recovered statically:
 //!
@@ -28,24 +27,24 @@
 
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::{Location, Url};
+use tower_lsp::lsp_types::Url;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::names::OwnedResolvedNames;
 use crate::text_position::offset_to_position;
 
-use super::helpers::{
-    chain_name_prefix, chain_uri_modifier, extract_string_literal, join_uri_segments,
-};
-use super::provider_resources::resolve_path_arg;
-use super::route_names::{RouteEntry, for_each_nested_statement, route_name_matches};
+use super::helpers::extract_string_literal;
+use super::provider_resources::{PathContext, resolve_path_arg};
+use super::route_groups::{chain_name_prefix, chain_uri_modifier, join_uri_segments};
+use super::route_names::{RouteDeclaration, RouteEntry, for_each_nested_statement};
 
 /// The FQN of Folio's page-naming helper, as `mago-names` resolves it.
 const FOLIO_NAME_FUNCTION: &str = "Laravel\\Folio\\name";
@@ -93,13 +92,12 @@ pub(crate) fn discover_folio_mounts(backend: &Backend) -> Vec<FolioMount> {
         let arena = LocalArena::new();
         let file_id = FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
-        let file_dir = bootstrap_path.parent().unwrap_or(&workspace_root);
-        mounts.extend(scan_folio_mounts_in_program(
+        let paths = PathContext {
+            file_dir: bootstrap_path.parent().unwrap_or(&workspace_root),
+            workspace_root: &workspace_root,
             program,
-            &content,
-            file_dir,
-            &workspace_root,
-        ));
+        };
+        mounts.extend(scan_folio_mounts_in_program(&content, &paths));
     }
 
     if mounts.is_empty() && folio_in_use(&workspace_root) {
@@ -138,26 +136,15 @@ fn folio_in_use(workspace_root: &Path) -> bool {
 /// `bootstrap/app.php`, which is scanned directly since it registers no
 /// provider of its own.
 pub(crate) fn scan_folio_mounts_in_program(
-    program: &Program<'_>,
     content: &str,
-    file_dir: &Path,
-    workspace_root: &Path,
+    paths: &PathContext<'_, '_>,
 ) -> Vec<FolioMount> {
     let mut mounts = Vec::new();
-    for stmt in program.statements.iter() {
-        collect_folio_path_mounts(
-            stmt,
-            content,
-            file_dir,
-            workspace_root,
-            program,
-            &mut mounts,
-        );
+    for stmt in paths.program.statements.iter() {
+        collect_folio_path_mounts(stmt, content, paths, &mut mounts);
     }
-    super::helpers::walk_program_expressions(program, &mut |expr| {
-        if let Some(mount) =
-            with_routing_pages_mount(expr, content, file_dir, workspace_root, program)
-        {
+    super::expr_walker::walk_program_expressions(paths.program, &mut |expr| {
+        if let Some(mount) = with_routing_pages_mount(expr, content, paths) {
             mounts.push(mount);
         }
         ControlFlow::Continue(())
@@ -178,19 +165,16 @@ pub(crate) fn scan_folio_mounts_in_program(
 fn collect_folio_path_mounts(
     stmt: &Statement<'_>,
     content: &str,
-    file_dir: &Path,
-    workspace_root: &Path,
-    program: &Program<'_>,
+    paths: &PathContext<'_, '_>,
     out: &mut Vec<FolioMount>,
 ) {
     if let Statement::Expression(e) = stmt
-        && let Some(mount) =
-            folio_path_mount(e.expression, content, file_dir, workspace_root, program)
+        && let Some(mount) = folio_path_mount(e.expression, content, paths)
     {
         out.push(mount);
     }
     for_each_nested_statement(stmt, &mut |nested| {
-        collect_folio_path_mounts(nested, content, file_dir, workspace_root, program, out);
+        collect_folio_path_mounts(nested, content, paths, out);
     });
 }
 
@@ -199,13 +183,11 @@ fn collect_folio_path_mounts(
 fn folio_path_mount(
     expr: &Expression<'_>,
     content: &str,
-    file_dir: &Path,
-    workspace_root: &Path,
-    program: &Program<'_>,
+    paths: &PathContext<'_, '_>,
 ) -> Option<FolioMount> {
     let args = folio_mount_root_args(expr, content)?;
     let path_arg = args.arguments.iter().next()?;
-    let directory = resolve_path_arg(path_arg.value(), content, file_dir, workspace_root, program)?;
+    let directory = resolve_path_arg(path_arg.value(), content, paths)?;
     Some(FolioMount {
         directory,
         uri_prefix: chain_uri_modifier(expr, content),
@@ -255,9 +237,7 @@ fn is_folio_facade(class: &Expression<'_>, content: &str) -> bool {
 fn with_routing_pages_mount(
     expr: &Expression<'_>,
     content: &str,
-    file_dir: &Path,
-    workspace_root: &Path,
-    program: &Program<'_>,
+    paths: &PathContext<'_, '_>,
 ) -> Option<FolioMount> {
     let Expression::Call(Call::Method(mc)) = expr else {
         return None;
@@ -280,7 +260,7 @@ fn with_routing_pages_mount(
             }
             _ => None,
         })?;
-    let directory = resolve_path_arg(pages_arg, content, file_dir, workspace_root, program)?;
+    let directory = resolve_path_arg(pages_arg, content, paths)?;
     Some(FolioMount {
         directory,
         uri_prefix: String::new(),
@@ -290,12 +270,13 @@ fn with_routing_pages_mount(
 
 // ─── Page walking ────────────────────────────────────────────────────────
 
-/// Every named route a project's Folio pages register.
+/// Every named route a project's Folio pages register, each with the page
+/// that registers it.
 ///
 /// Unnamed pages have a URI but no `route()`-reachable name, so they
 /// contribute nothing here — matching how a conventional route with no
 /// `->name()` is invisible to `route()` too.
-pub(crate) fn enumerate_folio_routes(backend: &Backend) -> Vec<RouteEntry> {
+pub(crate) fn enumerate_folio_routes(backend: &Backend) -> Vec<(RouteEntry, PathBuf)> {
     let mut routes = Vec::new();
     for mount in discover_folio_mounts(backend) {
         let mut pages = Vec::new();
@@ -304,46 +285,27 @@ pub(crate) fn enumerate_folio_routes(backend: &Backend) -> Vec<RouteEntry> {
             let Ok(content) = std::fs::read_to_string(&path) else {
                 continue;
             };
-            let Some((page_name, _offset)) = extract_page_route_name(&content) else {
-                continue;
-            };
-            routes.push(RouteEntry {
-                name: compose_folio_name(&mount.name_prefix, &page_name),
-                uri: compose_folio_uri(&mount.uri_prefix, &derive_folio_uri(&relative)),
-                from_vendor: false,
-            });
-        }
-    }
-    routes
-}
-
-/// Resolve `name` to the Folio page that declares it, if any.
-pub(crate) fn resolve_folio_route_definition(backend: &Backend, name: &str) -> Vec<Location> {
-    let mut results = Vec::new();
-    for mount in discover_folio_mounts(backend) {
-        let mut pages = Vec::new();
-        collect_page_files(&mount.directory, &mount.directory, &mut pages);
-        for (_relative, path) in pages {
-            let Ok(content) = std::fs::read_to_string(&path) else {
-                continue;
-            };
             let Some((page_name, offset)) = extract_page_route_name(&content) else {
                 continue;
             };
-            let full_name = compose_folio_name(&mount.name_prefix, &page_name);
-            if !route_name_matches(name, &full_name) {
-                continue;
-            }
-            let Ok(uri) = Url::from_file_path(&path) else {
-                continue;
+            let declarations = Url::from_file_path(&path)
+                .map(|file| RouteDeclaration {
+                    file: Arc::new(file),
+                    position: offset_to_position(&content, offset),
+                    name_arg: None,
+                })
+                .into_iter()
+                .collect();
+            let route = RouteEntry {
+                name: compose_folio_name(&mount.name_prefix, &page_name),
+                uri: compose_folio_uri(&mount.uri_prefix, &derive_folio_uri(&relative)),
+                from_vendor: false,
+                declarations,
             };
-            results.push(crate::definition::point_location(
-                uri,
-                offset_to_position(&content, offset),
-            ));
+            routes.push((route, path));
         }
     }
-    results
+    routes
 }
 
 /// Recursively record every `.blade.php` file under `dir` as
@@ -454,7 +416,7 @@ fn extract_page_route_name(content: &str) -> Option<(String, usize)> {
     let resolved = OwnedResolvedNames::from_resolved(&NameResolver::new(&arena).resolve(program));
 
     let mut found = None;
-    super::helpers::walk_program_expressions(program, &mut |expr| {
+    super::expr_walker::walk_program_expressions(program, &mut |expr| {
         let Expression::Call(Call::Function(fc)) = expr else {
             return ControlFlow::Continue(());
         };

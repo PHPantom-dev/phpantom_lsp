@@ -88,7 +88,10 @@ pub use discovery::{
 };
 pub use filters::{FollowedLinks, IndexFilters, LinkClaims, workspace_walk_builder};
 pub use lexer::{find_classes, find_symbols};
-pub(crate) use walk::{collect_php_files_gitignore, collect_workspace_index_files_gitignore};
+pub(crate) use walk::{
+    collect_php_files_gitignore, collect_workspace_index_files_gitignore,
+    visit_workspace_files_gitignore,
+};
 
 // ─── File reading ────────────────────────────────────────────────────────────
 
@@ -183,6 +186,51 @@ pub struct WorkspaceScanResult {
     /// longest-path-first for prefix-match origin lookups. Empty for
     /// scans that never touch a vendor tree.
     pub(crate) package_roots: Vec<(PathBuf, crate::ClassCompletionOrigin, String)>,
+}
+
+impl WorkspaceScanResult {
+    /// Fold `other`'s classes, functions and constants into `self`,
+    /// keeping `self`'s entry when both define the same name.
+    ///
+    /// Origins ride alongside the winning path: one is only recorded for
+    /// an entry of `other` that actually wins, so a symbol's recorded
+    /// origin always matches the file it resolves to. `other`'s
+    /// `package_roots` are dropped.
+    pub(crate) fn absorb_missing(&mut self, other: WorkspaceScanResult) {
+        fn absorb(
+            into: &mut HashMap<String, PathBuf>,
+            into_origins: &mut HashMap<String, crate::ClassCompletionOrigin>,
+            from: HashMap<String, PathBuf>,
+            from_origins: &HashMap<String, crate::ClassCompletionOrigin>,
+        ) {
+            for (name, path) in from {
+                if let std::collections::hash_map::Entry::Vacant(e) = into.entry(name) {
+                    if let Some(&origin) = from_origins.get(e.key()) {
+                        into_origins.insert(e.key().clone(), origin);
+                    }
+                    e.insert(path);
+                }
+            }
+        }
+        absorb(
+            &mut self.classmap,
+            &mut self.class_origins,
+            other.classmap,
+            &other.class_origins,
+        );
+        absorb(
+            &mut self.function_index,
+            &mut self.function_origins,
+            other.function_index,
+            &other.function_origins,
+        );
+        absorb(
+            &mut self.constant_index,
+            &mut self.constant_origins,
+            other.constant_index,
+            &other.constant_origins,
+        );
+    }
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────

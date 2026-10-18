@@ -782,6 +782,7 @@ fn trait_property_tag_beats_schema_column_end_to_end() {
     let model_arc = Arc::new(make_class("Illuminate\\Database\\Eloquent\\Model"));
     let carbon_arc = Arc::new(make_class("Illuminate\\Support\\Carbon"));
     let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "App\\Models\\Concerns\\Publishes" => Some(Arc::clone(&publishes_arc)),
             "Illuminate\\Database\\Eloquent\\Model" => Some(Arc::clone(&model_arc)),
@@ -1507,6 +1508,7 @@ fn base_resolution_shared_across_distinct_specialisations() {
     let collection_arc = Arc::new(collection);
     let base_loads = std::cell::Cell::new(0u32);
     let class_loader = |name: &str| -> Option<Arc<crate::types::ClassInfo>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "Base" => {
                 base_loads.set(base_loads.get() + 1);
@@ -1893,6 +1895,7 @@ fn resolve_class_fully_merges_transitive_interface_constants() {
     carbon.interfaces = vec![atom("CarbonInterface")];
 
     let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "CarbonInterface" => Some(Arc::new(carbon_iface.clone())),
             "DateTimeInterface" => Some(Arc::new(datetime_iface.clone())),
@@ -1958,6 +1961,7 @@ fn interface_merge_matches_with_and_without_a_warm_cache() {
         let concrete_arc = Arc::clone(&concrete_arc);
         let view_arc = Arc::clone(&view_arc);
         move |name: &str| -> Option<Arc<ClassInfo>> {
+            let name = name.strip_prefix('\\').unwrap_or(name);
             match name {
                 "Illuminate\\Contracts\\View\\View" => Some(Arc::clone(&contract_arc)),
                 "Illuminate\\View\\View" => Some(Arc::clone(&concrete_arc)),
@@ -2025,6 +2029,7 @@ fn concurrent_first_resolution_of_the_same_class_is_single_flighted() {
         let release = Arc::clone(&release);
         let reached_tx = reached_tx.clone();
         move |name: &str| -> Option<Arc<ClassInfo>> {
+            let name = name.strip_prefix('\\').unwrap_or(name);
             match name {
                 "Vendor\\Analyser\\ScopeImpl" => Some(Arc::clone(&target_arc)),
                 "Vendor\\Scope" => {

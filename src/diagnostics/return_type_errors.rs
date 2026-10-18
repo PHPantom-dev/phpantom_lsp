@@ -19,6 +19,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::find_class_at_offset;
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::return_collection::collect_returns;
@@ -26,7 +27,7 @@ use crate::type_engine::resolver::{CtxLoaders, LendsLoaders, Loaders, VarResolut
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::ClassInfo;
 
-use super::helpers::{collect_type_check, find_innermost_enclosing_class};
+use super::helpers::{collect_type_check, template_bounds, template_bounds_in_scope};
 use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for return type mismatch diagnostics.
@@ -45,111 +46,6 @@ struct ResolvedReturn {
     end: usize,
     /// The declared return type of the enclosing function/method.
     declared_type: PhpType,
-}
-
-// ── AST walkers ─────────────────────────────────────────────────────────────
-
-/// Check whether a statement list contains any `yield` expression
-/// (indicating a generator function whose return type semantics differ).
-fn body_contains_yield(stmts: &mago_syntax::cst::sequence::Sequence<'_, Statement<'_>>) -> bool {
-    for stmt in stmts.iter() {
-        if stmt_contains_yield(stmt) {
-            return true;
-        }
-    }
-    false
-}
-
-fn stmt_contains_yield(stmt: &Statement<'_>) -> bool {
-    match stmt {
-        Statement::Expression(expr_stmt) => expr_contains_yield(expr_stmt.expression),
-        Statement::Return(ret) => ret.value.is_some_and(|v| expr_contains_yield(v)),
-        Statement::Echo(echo) => echo.values.iter().any(|e| expr_contains_yield(e)),
-        Statement::If(if_stmt) => {
-            expr_contains_yield(if_stmt.condition) || if_body_contains_yield(&if_stmt.body)
-        }
-        Statement::While(w) => {
-            expr_contains_yield(w.condition)
-                || w.body.statements().iter().any(|s| stmt_contains_yield(s))
-        }
-        Statement::DoWhile(dw) => {
-            stmt_contains_yield(dw.statement) || expr_contains_yield(dw.condition)
-        }
-        Statement::For(f) => {
-            f.initializations.iter().any(|e| expr_contains_yield(e))
-                || f.conditions.iter().any(|e| expr_contains_yield(e))
-                || f.increments.iter().any(|e| expr_contains_yield(e))
-                || f.body.statements().iter().any(|s| stmt_contains_yield(s))
-        }
-        Statement::Foreach(fe) => {
-            expr_contains_yield(fe.expression)
-                || fe.body.statements().iter().any(|s| stmt_contains_yield(s))
-        }
-        Statement::Switch(sw) => {
-            expr_contains_yield(sw.expression) || switch_body_contains_yield(&sw.body)
-        }
-        Statement::Try(t) => {
-            t.block.statements.iter().any(|s| stmt_contains_yield(s))
-                || t.catch_clauses
-                    .iter()
-                    .any(|c| c.block.statements.iter().any(|s| stmt_contains_yield(s)))
-                || t.finally_clause
-                    .as_ref()
-                    .is_some_and(|f| f.block.statements.iter().any(|s| stmt_contains_yield(s)))
-        }
-        Statement::Block(b) => b.statements.iter().any(|s| stmt_contains_yield(s)),
-        // Don't recurse into nested functions/closures — their yields
-        // don't make the *enclosing* function a generator.
-        _ => false,
-    }
-}
-
-fn if_body_contains_yield(body: &mago_syntax::cst::control_flow::r#if::IfBody<'_>) -> bool {
-    use mago_syntax::cst::control_flow::r#if::IfBody;
-    match body {
-        IfBody::Statement(inner) => {
-            stmt_contains_yield(inner.statement)
-                || inner
-                    .else_if_clauses
-                    .iter()
-                    .any(|c| stmt_contains_yield(c.statement))
-                || inner
-                    .else_clause
-                    .as_ref()
-                    .is_some_and(|c| stmt_contains_yield(c.statement))
-        }
-        IfBody::ColonDelimited(body) => {
-            body.statements.iter().any(|s| stmt_contains_yield(s))
-                || body
-                    .else_if_clauses
-                    .iter()
-                    .any(|c| c.statements.iter().any(|s| stmt_contains_yield(s)))
-                || body
-                    .else_clause
-                    .as_ref()
-                    .is_some_and(|c| c.statements.iter().any(|s| stmt_contains_yield(s)))
-        }
-    }
-}
-
-fn switch_body_contains_yield(
-    body: &mago_syntax::cst::control_flow::switch::SwitchBody<'_>,
-) -> bool {
-    use mago_syntax::cst::control_flow::switch::SwitchBody;
-    match body {
-        SwitchBody::BraceDelimited(b) => b
-            .cases
-            .iter()
-            .any(|c| c.statements().iter().any(|s| stmt_contains_yield(s))),
-        SwitchBody::ColonDelimited(b) => b
-            .cases
-            .iter()
-            .any(|c| c.statements().iter().any(|s| stmt_contains_yield(s))),
-    }
-}
-
-fn expr_contains_yield(expr: &Expression<'_>) -> bool {
-    matches!(expr, Expression::Yield(_))
 }
 
 // ── Main diagnostic collection ──────────────────────────────────────────────
@@ -185,9 +81,10 @@ impl Backend {
                             uri,
                             content,
                             ctx.file_ctx,
-                            ctx.class_loader_at(offset),
-                            ctx.function_loader_at(offset),
-                            ctx.constant_loader_at(offset),
+                            ctx.loaders.class_loader_at(offset),
+                            ctx.loaders.resolved_class_loader(),
+                            ctx.loaders.function_loader_at(offset),
+                            ctx.loaders.constant_loader_at(offset),
                             self,
                             &mut resolved_returns,
                         );
@@ -213,7 +110,7 @@ impl Backend {
                         if is_type_compatible(
                             ty,
                             &ret.declared_type,
-                            ctx.class_loader_at(ret.start as u32),
+                            ctx.loaders.resolved_class_loader(),
                             ctx.strict_types,
                         ) =>
                     {
@@ -243,20 +140,13 @@ fn evaluate_declared_return(
     current_class: &ClassInfo,
     content: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
+    loaders: CtxLoaders<'_>,
     backend: &Backend,
 ) -> PhpType {
     if !declared.contains_unevaluated_operator() {
         return declared;
     }
-    let ctx = backend.resolution_ctx_at(
-        Some(current_class),
-        all_classes,
-        content,
-        0,
-        CtxLoaders::without_macro_this(class_loader, function_loader),
-    );
+    let ctx = backend.resolution_ctx_at(Some(current_class), all_classes, content, 0, loaders);
     crate::type_engine::call_resolution::evaluate_constant_operands(&declared, &ctx)
         .unwrap_or(declared)
 }
@@ -277,8 +167,9 @@ fn resolve_return_and_push(
     template_bounds: &HashMap<String, PhpType>,
     current_class: &ClassInfo,
     content: &str,
-    all_classes: &[Arc<ClassInfo>],
+    file_ctx: &crate::types::FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    resolved_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     loaders: Loaders<'_>,
     backend: &Backend,
     out: &mut Vec<ResolvedReturn>,
@@ -309,29 +200,34 @@ fn resolve_return_and_push(
                 return;
             }
 
-            let resolve_class_names = |ty: PhpType| {
-                let ty = if template_bounds.is_empty() {
-                    ty
-                } else {
-                    ty.substitute(template_bounds)
-                };
-                let ty = ty.resolve_names(&|name: &str| {
-                    if name.contains("__anonymous@") {
-                        return name.to_string();
-                    }
-                    if let Some(cls) = class_loader(name) {
-                        cls.fqn().to_string()
+            // `name_loader` is the source-name loader for a type read from a
+            // docblock, and the resolved-name loader for one the engine
+            // produced.  The template bounds are resolved names, so they go
+            // in after the type's own names are read.
+            let resolve_class_names =
+                |ty: PhpType, name_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>| {
+                    let ty = ty.resolve_names(&|name: &str| {
+                        if name.contains("__anonymous@") {
+                            return name.to_string();
+                        }
+                        if let Some(cls) = name_loader(name) {
+                            cls.fqn().to_string()
+                        } else {
+                            name.to_string()
+                        }
+                    });
+                    let ty = if template_bounds.is_empty() {
+                        ty
                     } else {
-                        name.to_string()
-                    }
-                });
-                // A Laravel model operator is a name for a class too, and
-                // this is where names become classes. Leaving it for the
-                // comparison alone would report the operator's own
-                // spelling back at the reader, who wrote a type that does
-                // name something.
-                crate::virtual_members::laravel::expand_model_type(&ty, class_loader)
-            };
+                        ty.substitute(template_bounds)
+                    };
+                    // A Laravel model operator is a name for a class too, and
+                    // this is where names become classes. Leaving it for the
+                    // comparison alone would report the operator's own
+                    // spelling back at the reader, who wrote a type that does
+                    // name something.
+                    crate::virtual_members::laravel::expand_model_type(&ty, resolved_class_loader)
+                };
 
             // A standalone `/** @var Type */` docblock (no variable name)
             // immediately above the `return` keyword casts the returned
@@ -345,7 +241,7 @@ fn resolve_return_and_push(
                 && !cast.is_empty()
             {
                 out.push(ResolvedReturn {
-                    ty: Some(resolve_class_names(cast)),
+                    ty: Some(resolve_class_names(cast, class_loader)),
                     start,
                     end,
                     declared_type: declared_return.clone(),
@@ -354,15 +250,17 @@ fn resolve_return_and_push(
             }
 
             let var_ctx = VarResolutionCtx {
+                source_imports: Some(file_ctx.use_map_at(start as u32)),
                 backend: Some(backend),
                 loaders,
                 resolved_class_cache: Some(&backend.resolved_class_cache),
                 ..VarResolutionCtx::new(
                     "",
                     current_class,
-                    all_classes,
+                    &file_ctx.classes,
                     content,
                     start as u32,
+                    resolved_class_loader,
                     class_loader,
                 )
             };
@@ -378,7 +276,7 @@ fn resolve_return_and_push(
             }
 
             // Resolve short class names to FQN.
-            let ty = resolve_class_names(ty);
+            let ty = resolve_class_names(ty, resolved_class_loader);
 
             out.push(ResolvedReturn {
                 ty: Some(ty),
@@ -406,51 +304,28 @@ fn indexed_return_type(
     func_offset: u32,
 ) -> Option<(PhpType, HashMap<String, PhpType>)> {
     let fqn = file_ctx.resolve_name_at(func_name, func_offset);
-    let with_bounds = |fi: &crate::types::FunctionInfo| {
-        let ret = fi.return_type.clone()?;
-        Some((
-            ret,
-            template_bounds(&fi.template_params, &fi.template_param_bounds),
-        ))
-    };
-
-    {
-        let fmap = backend.global_functions().read();
-        for name in [fqn.as_str(), func_name] {
-            if let Some((decl_uri, fi)) = fmap.get(name)
-                && decl_uri == uri
-            {
-                return with_bounds(fi);
+    let declared = || {
+        {
+            let fmap = backend.global_functions().read();
+            for name in [fqn.as_str(), func_name] {
+                if let Some((decl_uri, fi)) = fmap.get(name)
+                    && decl_uri == uri
+                {
+                    return Some(fi.clone());
+                }
             }
         }
-    }
+        let dups = backend.symbols.duplicate_functions.read();
+        [fqn.as_str(), func_name]
+            .into_iter()
+            .find_map(|name| dups.get(name).and_then(|by_uri| by_uri.get(uri)).cloned())
+    };
 
-    let dups = backend.symbols.duplicate_functions.read();
-    for name in [fqn.as_str(), func_name] {
-        if let Some(fi) = dups.get(name).and_then(|by_uri| by_uri.get(uri)) {
-            return with_bounds(fi);
-        }
-    }
-    None
-}
-
-/// Map each template parameter to its bound, or `mixed` when it has none.
-///
-/// Template parameters are plain names in a `PhpType`, so left in place they
-/// would be looked up as classes and a same-named class would stand in for
-/// them.  A value that fails the bound fails the template too, so the bound is
-/// what a return is checked against.
-fn template_bounds(
-    params: &[crate::atom::Atom],
-    bounds: &crate::atom::AtomMap<PhpType>,
-) -> HashMap<String, PhpType> {
-    params
-        .iter()
-        .map(|param| {
-            let bound = bounds.get(param).cloned();
-            (param.to_string(), bound.unwrap_or_else(PhpType::mixed))
-        })
-        .collect()
+    let mut fi = declared()?;
+    // Checked once the index is no longer locked: it loads classes.
+    backend.verify_function_doc_types(&mut fi);
+    let bounds = template_bounds(&fi.template_params, &fi.template_param_bounds);
+    Some((fi.return_type?, bounds))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -461,6 +336,7 @@ fn process_top_level_statement(
     content: &str,
     file_ctx: &crate::types::FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    resolved_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &Backend,
@@ -475,6 +351,7 @@ fn process_top_level_statement(
                     content,
                     file_ctx,
                     class_loader,
+                    resolved_class_loader,
                     function_loader,
                     constant_loader,
                     backend,
@@ -482,55 +359,14 @@ fn process_top_level_statement(
                 );
             }
         }
-        Statement::Class(class) => {
-            for member in class.members.iter() {
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            for member in body.members {
                 process_class_member(
                     member,
                     content,
                     file_ctx,
                     class_loader,
-                    function_loader,
-                    constant_loader,
-                    backend,
-                    out,
-                );
-            }
-        }
-        Statement::Interface(iface) => {
-            for member in iface.members.iter() {
-                process_class_member(
-                    member,
-                    content,
-                    file_ctx,
-                    class_loader,
-                    function_loader,
-                    constant_loader,
-                    backend,
-                    out,
-                );
-            }
-        }
-        Statement::Trait(trait_def) => {
-            for member in trait_def.members.iter() {
-                process_class_member(
-                    member,
-                    content,
-                    file_ctx,
-                    class_loader,
-                    function_loader,
-                    constant_loader,
-                    backend,
-                    out,
-                );
-            }
-        }
-        Statement::Enum(enum_def) => {
-            for member in enum_def.members.iter() {
-                process_class_member(
-                    member,
-                    content,
-                    file_ctx,
-                    class_loader,
+                    resolved_class_loader,
                     function_loader,
                     constant_loader,
                     backend,
@@ -573,7 +409,7 @@ fn process_top_level_statement(
             };
 
             // Skip generators.
-            if body_contains_yield(&func.body.statements) {
+            if crate::parser::contains_own_yield(func.body.statements.iter()) {
                 return;
             }
 
@@ -586,8 +422,7 @@ fn process_top_level_statement(
             }
 
             let placeholder;
-            let current_class = match find_innermost_enclosing_class(&file_ctx.classes, func_offset)
-            {
+            let current_class = match find_class_at_offset(&file_ctx.classes, func_offset) {
                 Some(cc) => cc,
                 None => {
                     placeholder =
@@ -601,8 +436,12 @@ fn process_top_level_statement(
                 current_class,
                 content,
                 &file_ctx.classes,
-                class_loader,
-                function_loader,
+                CtxLoaders::without_macro_this(
+                    resolved_class_loader,
+                    class_loader,
+                    function_loader,
+                )
+                .with_imports(file_ctx.use_map_at(func_offset)),
                 backend,
             );
 
@@ -619,8 +458,9 @@ fn process_top_level_statement(
                     &template_bounds,
                     current_class,
                     content,
-                    &file_ctx.classes,
+                    file_ctx,
                     class_loader,
+                    resolved_class_loader,
                     loaders,
                     backend,
                     out,
@@ -637,6 +477,7 @@ fn process_top_level_statement(
                         content,
                         file_ctx,
                         class_loader,
+                        resolved_class_loader,
                         function_loader,
                         constant_loader,
                         backend,
@@ -651,6 +492,7 @@ fn process_top_level_statement(
                             content,
                             file_ctx,
                             class_loader,
+                            resolved_class_loader,
                             function_loader,
                             constant_loader,
                             backend,
@@ -671,6 +513,7 @@ fn process_class_member(
     content: &str,
     file_ctx: &crate::types::FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    resolved_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &Backend,
@@ -696,7 +539,7 @@ fn process_class_member(
     }
 
     // Find the enclosing class to look up the method's declared return type.
-    let enclosing = find_innermost_enclosing_class(&file_ctx.classes, method_offset);
+    let enclosing = find_class_at_offset(&file_ctx.classes, method_offset);
     let current_class = match enclosing {
         Some(cls) => cls,
         None => return,
@@ -710,17 +553,12 @@ fn process_class_member(
         Some(t) if !t.is_untyped() && !t.is_mixed() => t,
         _ => return,
     };
-    let mut bounds = template_bounds(
-        &current_class.template_params,
-        &current_class.template_param_bounds,
+    let template_bounds = template_bounds_in_scope(
+        current_class,
+        method_info,
+        resolved_class_loader,
+        &backend.resolved_class_cache,
     );
-    if let Some(mi) = method_info {
-        bounds.extend(template_bounds(
-            mi.template_params(),
-            mi.template_param_bounds(),
-        ));
-    }
-    let template_bounds = bounds;
     let declared_return = if template_bounds.is_empty() {
         declared_return
     } else {
@@ -728,7 +566,7 @@ fn process_class_member(
     };
 
     // Skip generators.
-    if body_contains_yield(body) {
+    if crate::parser::contains_own_yield(body.iter()) {
         return;
     }
 
@@ -752,7 +590,7 @@ fn process_class_member(
             if name.contains("__anonymous@") {
                 return name.to_string();
             }
-            if let Some(cls) = class_loader(name) {
+            if let Some(cls) = resolved_class_loader(name) {
                 cls.fqn().to_string()
             } else {
                 name.to_string()
@@ -764,12 +602,12 @@ fn process_class_member(
         current_class,
         content,
         &file_ctx.classes,
-        class_loader,
-        function_loader,
+        CtxLoaders::without_macro_this(resolved_class_loader, class_loader, function_loader)
+            .with_imports(file_ctx.use_map_at(method_offset)),
         backend,
     );
     let declared_return =
-        crate::virtual_members::laravel::expand_model_type(&declared_return, class_loader);
+        crate::virtual_members::laravel::expand_model_type(&declared_return, resolved_class_loader);
 
     let owned_loaders = backend.diagnostic_loaders_over(function_loader, constant_loader);
     let loaders = owned_loaders.loaders();
@@ -784,8 +622,9 @@ fn process_class_member(
             &template_bounds,
             current_class,
             content,
-            &file_ctx.classes,
+            file_ctx,
             class_loader,
+            resolved_class_loader,
             loaders,
             backend,
             out,

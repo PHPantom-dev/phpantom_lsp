@@ -469,23 +469,6 @@ async fn test_goto_definition_class_from_autoload_files() {
         if let Ok(content) = fs::read_to_string(file_path) {
             let uri = format!("file://{}", file_path.display());
             backend.update_ast(&uri, &content);
-
-            // Also register functions
-            let functions = backend.parse_functions(&content);
-            {
-                let mut fmap = backend.global_functions().write();
-                for func in functions {
-                    let fqn = if let Some(ref ns) = func.namespace {
-                        format!("{}\\{}", ns, func.name)
-                    } else {
-                        func.name.to_string()
-                    };
-                    fmap.insert(fqn.clone(), (uri.clone(), func.clone()));
-                    if func.namespace.is_some() {
-                        fmap.or_insert_with(func.name.to_string(), || (uri.clone(), func.clone()));
-                    }
-                }
-            }
         }
     }
 
@@ -941,22 +924,6 @@ async fn test_goto_definition_function_return_type_cross_file() {
         if let Ok(content) = fs::read_to_string(file_path) {
             let uri = format!("file://{}", file_path.display());
             backend.update_ast(&uri, &content);
-
-            let functions = backend.parse_functions(&content);
-            {
-                let mut fmap = backend.global_functions().write();
-                for func in functions {
-                    let fqn = if let Some(ref ns) = func.namespace {
-                        format!("{}\\{}", ns, func.name)
-                    } else {
-                        func.name.to_string()
-                    };
-                    fmap.insert(fqn.clone(), (uri.clone(), func.clone()));
-                    if func.namespace.is_some() {
-                        fmap.or_insert_with(func.name.to_string(), || (uri.clone(), func.clone()));
-                    }
-                }
-            }
         }
     }
 

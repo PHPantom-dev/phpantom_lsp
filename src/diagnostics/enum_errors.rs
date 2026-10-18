@@ -41,7 +41,7 @@ impl Backend {
                 continue;
             }
 
-            if detect_invalid_backing_type(self, uri, content, span.end as usize, out) {
+            if detect_invalid_backing_type(self, uri, content, span.start, out) {
                 continue;
             }
 
@@ -58,45 +58,30 @@ impl Backend {
             let backed = class_info.backed_type.is_some();
 
             for case in &enum_cases {
-                if backed && case.enum_value.is_none() {
-                    let range = match self.offset_range_to_lsp_range(
-                        uri,
-                        content,
-                        case.name_offset as usize,
-                        case.name_offset as usize + case.name.len(),
-                    ) {
-                        Some(r) => r,
-                        None => continue,
-                    };
-                    out.push(make_diagnostic(
-                        range,
-                        DiagnosticSeverity::ERROR,
-                        "invalid_enum_case",
-                        format!(
-                            "Enum case '{}::{}' must have a value, enum '{}' is a backed enum",
-                            class_info.name, case.name, class_info.name
-                        ),
-                    ));
-                } else if !backed && case.enum_value.is_some() {
-                    let range = match self.offset_range_to_lsp_range(
-                        uri,
-                        content,
-                        case.name_offset as usize,
-                        case.name_offset as usize + case.name.len(),
-                    ) {
-                        Some(r) => r,
-                        None => continue,
-                    };
-                    out.push(make_diagnostic(
-                        range,
-                        DiagnosticSeverity::ERROR,
-                        "invalid_enum_case",
-                        format!(
-                            "Enum case '{}::{}' must not have a value, enum '{}' is not a backed enum",
-                            class_info.name, case.name, class_info.name
-                        ),
-                    ));
-                }
+                let (enum_name, case_name) = (&class_info.name, &case.name);
+                let message = match (backed, case.enum_value.is_some()) {
+                    (true, false) => format!(
+                        "Enum case '{enum_name}::{case_name}' must have a value, enum '{enum_name}' is a backed enum"
+                    ),
+                    (false, true) => format!(
+                        "Enum case '{enum_name}::{case_name}' must not have a value, enum '{enum_name}' is not a backed enum"
+                    ),
+                    _ => continue,
+                };
+                let Some(range) = self.offset_range_to_lsp_range(
+                    uri,
+                    content,
+                    case.name_offset as usize,
+                    case.name_offset as usize + case.name.len(),
+                ) else {
+                    continue;
+                };
+                out.push(make_diagnostic(
+                    range,
+                    DiagnosticSeverity::ERROR,
+                    "invalid_enum_case",
+                    message,
+                ));
             }
 
             if backed {
@@ -109,42 +94,39 @@ impl Backend {
 /// Report a backing type that is neither `int` nor `string`.
 ///
 /// The parser only records `int` and `string` backings, so an invalid one
-/// is indistinguishable from a unit enum in [`ClassInfo`] and has to be
-/// read back off the source.  The grammar makes that exact rather than a
-/// search: `enum Name` is followed by `: BackingType` (when backed) before
-/// any `implements` clause or the body, so the token right after the name
-/// decides it. Anything else there, including a comment, is left alone.
+/// is indistinguishable from a unit enum in [`ClassInfo`] and is read off
+/// the `enum` declaration whose name is at `name_start`.
 fn detect_invalid_backing_type(
     backend: &Backend,
     uri: &str,
     content: &str,
-    name_end: usize,
+    name_start: u32,
     out: &mut Vec<Diagnostic>,
 ) -> bool {
-    let Some(rest) = content.get(name_end..) else {
+    let Some((type_start, type_end)) =
+        crate::parser::with_parsed_program(content, "enum_backing_type", |program, _| {
+            crate::parser::innermost_node_at(
+                mago_syntax::cst::Node::Program(program),
+                name_start,
+                |node| match node {
+                    mago_syntax::cst::Node::Enum(enum_) => {
+                        let span =
+                            mago_span::HasSpan::span(&enum_.backing_type_hint.as_ref()?.hint);
+                        Some((span.start.offset as usize, span.end.offset as usize))
+                    }
+                    _ => None,
+                },
+            )
+        })
+    else {
         return false;
     };
-
-    let after_name = rest.trim_start();
-    let Some(after_colon) = after_name.strip_prefix(':') else {
+    let Some(type_name) = content.get(type_start..type_end) else {
         return false;
     };
-
-    let type_text = after_colon.trim_start();
-    let type_name: String = type_text
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '\\')
-        .collect();
-
-    if type_name.is_empty()
-        || type_name.eq_ignore_ascii_case("int")
-        || type_name.eq_ignore_ascii_case("string")
-    {
+    if type_name.eq_ignore_ascii_case("int") || type_name.eq_ignore_ascii_case("string") {
         return false;
     }
-
-    let type_start = name_end + (rest.len() - type_text.len());
-    let type_end = type_start + type_name.len();
 
     let range = match backend.offset_range_to_lsp_range(uri, content, type_start, type_end) {
         Some(r) => r,

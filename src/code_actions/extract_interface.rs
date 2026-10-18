@@ -10,11 +10,11 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{ClassLikeContextKind, CursorContext, find_cursor_context};
-use super::implement_methods::{detect_class_indent, shorten_single_type};
 use super::make_code_action_data;
 use crate::Backend;
 use crate::atom::atom;
 use crate::class_lookup::find_class_at_offset;
+use crate::signature_render::{detect_class_indent, shorten_single_type};
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, Visibility};
 
@@ -455,23 +455,8 @@ mod tests {
     fn make_method(name: &str, is_static: bool) -> Arc<MethodInfo> {
         Arc::new(MethodInfo {
             name: Atom::from(name),
-            name_offset: 0,
-            parameters: vec![].into(),
-            return_type: None,
-            native_return_type: None,
-            description: None,
             is_static,
-            visibility: Visibility::Public,
-            has_scope_attribute: false,
-            is_abstract: false,
-            is_final: false,
-            is_virtual: false,
-            is_macro: false,
-            is_inferred_return: false,
-            is_pure: false,
-            is_impure: false,
-            reads_func_args: false,
-            extras: None,
+            ..Default::default()
         })
     }
 
@@ -484,47 +469,9 @@ mod tests {
         let file_namespace = Some("App\\Models".to_string());
 
         let class = ClassInfo {
-            kind: ClassLikeKind::Class,
             name: Atom::from("User"),
-            methods: Default::default(),
-            method_index: Default::default(),
-            indexed_method_count: 0,
-            properties: Default::default(),
-            constants: Default::default(),
-            start_offset: 0,
-            end_offset: 0,
-            keyword_offset: 0,
-            decl_start_offset: 0,
-            parent_class: None,
-            interfaces: vec![],
-            used_traits: vec![],
-            mixins: vec![],
-            mixin_generics: vec![],
-            require_extends: None,
-            require_implements: Vec::new(),
-            is_final: false,
-            is_abstract: false,
-            is_readonly: false,
-            deprecation_message: None,
-            deprecated_replacement: None,
-            links: vec![],
-            see_refs: vec![],
-            template_params: vec![],
-            template_param_bounds: Default::default(),
-            template_param_defaults: Default::default(),
-            extends_generics: vec![],
-            implements_generics: vec![],
-            use_generics: vec![],
-            type_aliases: Default::default(),
-            trait_precedences: vec![],
-            trait_aliases: vec![],
-            class_docblock: None,
-            doc_members: None,
             file_namespace: Some(Atom::from("App\\Models")),
-            backed_type: None,
-            attribute_targets: 0,
-            laravel: Default::default(),
-            fqn: None,
+            ..Default::default()
         };
 
         let src = generate_interface_source(&InterfaceGenParams {
@@ -547,47 +494,12 @@ mod tests {
     fn build_implements_no_existing() {
         let content = "<?php\nclass User\n{\n}";
         let class = ClassInfo {
-            kind: ClassLikeKind::Class,
             name: Atom::from("User"),
-            methods: Default::default(),
-            method_index: Default::default(),
-            indexed_method_count: 0,
-            properties: Default::default(),
-            constants: Default::default(),
             start_offset: content.find('{').unwrap() as u32,
             end_offset: content.len() as u32,
             keyword_offset: content.find("class").unwrap() as u32,
             decl_start_offset: content.find("class").unwrap() as u32,
-            parent_class: None,
-            interfaces: vec![],
-            used_traits: vec![],
-            mixins: vec![],
-            mixin_generics: vec![],
-            require_extends: None,
-            require_implements: Vec::new(),
-            is_final: false,
-            is_abstract: false,
-            is_readonly: false,
-            deprecation_message: None,
-            deprecated_replacement: None,
-            links: vec![],
-            see_refs: vec![],
-            template_params: vec![],
-            template_param_bounds: Default::default(),
-            template_param_defaults: Default::default(),
-            extends_generics: vec![],
-            implements_generics: vec![],
-            use_generics: vec![],
-            type_aliases: Default::default(),
-            trait_precedences: vec![],
-            trait_aliases: vec![],
-            class_docblock: None,
-            doc_members: None,
-            file_namespace: None,
-            backed_type: None,
-            attribute_targets: 0,
-            laravel: Default::default(),
-            fqn: None,
+            ..Default::default()
         };
 
         let edit = build_implements_edit(content, &class, "UserInterface").unwrap();
@@ -598,47 +510,13 @@ mod tests {
     fn build_implements_existing() {
         let content = "<?php\nclass User implements Serializable\n{\n}";
         let class = ClassInfo {
-            kind: ClassLikeKind::Class,
             name: Atom::from("User"),
-            methods: Default::default(),
-            method_index: Default::default(),
-            indexed_method_count: 0,
-            properties: Default::default(),
-            constants: Default::default(),
             start_offset: content.find('{').unwrap() as u32,
             end_offset: content.len() as u32,
             keyword_offset: content.find("class").unwrap() as u32,
             decl_start_offset: content.find("class").unwrap() as u32,
-            parent_class: None,
             interfaces: vec![Atom::from("Serializable")],
-            used_traits: vec![],
-            mixins: vec![],
-            mixin_generics: vec![],
-            require_extends: None,
-            require_implements: Vec::new(),
-            is_final: false,
-            is_abstract: false,
-            is_readonly: false,
-            deprecation_message: None,
-            deprecated_replacement: None,
-            links: vec![],
-            see_refs: vec![],
-            template_params: vec![],
-            template_param_bounds: Default::default(),
-            template_param_defaults: Default::default(),
-            extends_generics: vec![],
-            implements_generics: vec![],
-            use_generics: vec![],
-            type_aliases: Default::default(),
-            trait_precedences: vec![],
-            trait_aliases: vec![],
-            class_docblock: None,
-            doc_members: None,
-            file_namespace: None,
-            backed_type: None,
-            attribute_targets: 0,
-            laravel: Default::default(),
-            fqn: None,
+            ..Default::default()
         };
 
         let edit = build_implements_edit(content, &class, "UserInterface").unwrap();

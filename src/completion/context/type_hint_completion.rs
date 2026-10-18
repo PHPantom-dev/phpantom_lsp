@@ -11,7 +11,9 @@
 //! confirm the cursor is inside a function/method *definition* (not a
 //! call) or a property/promoted-parameter declaration.
 
-use crate::completion::named_args::{find_enclosing_open_paren, position_to_char_offset};
+use crate::completion::named_args::{
+    find_enclosing_open_paren, is_function_definition_paren, position_to_char_offset,
+};
 use crate::text_position::position_to_offset;
 use crate::text_scan::skip_string_backward;
 use tower_lsp::lsp_types::Position;
@@ -59,7 +61,7 @@ pub(crate) fn detect_type_hint_context(
     // Member *names* after `function` / `const` / `case` are not types.
     // Without this, `public const ST` looks like a property type position
     // (modifier keyword earlier on the line) and steals completion.
-    if is_function_or_const_name_position_chars(&chars, cursor) {
+    if is_function_or_const_name_position(content, position) {
         return None;
     }
 
@@ -217,135 +219,11 @@ pub(crate) fn detect_type_hint_context(
 /// by `$`.  Type positions like `protected User|` intentionally still
 /// offer class names.
 pub(crate) fn is_function_or_const_name_position(content: &str, position: Position) -> bool {
-    let bytes = content.as_bytes();
-    let cursor = (position_to_offset(content, position) as usize).min(bytes.len());
-
-    // Skip the partial identifier being typed.
-    let mut i = cursor;
-    while i > 0 && is_ident_byte(bytes[i - 1]) {
-        i -= 1;
-    }
-
-    // Require whitespace between the keyword and the name (or empty name
-    // still after the keyword: `function |`).
-    let after_ident = i;
-    while i > 0 && bytes[i - 1].is_ascii_whitespace() {
-        i -= 1;
-    }
-    if i == after_ident && after_ident != cursor {
-        // Identifier jammed against previous token without space — not a
-        // declaration name (e.g. `functionfoo`).
-        return false;
-    }
-    // Empty partial right after keyword still needs the keyword check;
-    // `function|` (no space yet) is not a name position.
-    if i == after_ident {
-        return false;
-    }
-
-    if check_keyword_ending_at_bytes(bytes, i, b"fn") {
-        return true;
-    }
-    // `case` names an enum case (a member) but also labels a `switch`
-    // branch, where a class/const/enum name completion is wanted.
-    if check_keyword_ending_at_bytes(bytes, i, b"case") {
-        return super::override_completion::case_is_enum_declaration(bytes, i);
-    }
-    // `function` / `const` declare member names, but not after `use`
-    // (`use function foo`, `use const BAR` still need symbol completion).
-    if check_keyword_ending_at_bytes(bytes, i, b"function") {
-        return !preceded_by_use_keyword_bytes(bytes, i - "function".len());
-    }
-    if check_keyword_ending_at_bytes(bytes, i, b"const") {
-        return !preceded_by_use_keyword_bytes(bytes, i - "const".len());
-    }
-    has_const_keyword_before_name(bytes, i)
-}
-
-fn is_function_or_const_name_position_chars(chars: &[char], cursor: usize) -> bool {
-    let mut i = cursor;
-    while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
-        i -= 1;
-    }
-
-    let after_ident = i;
-    while i > 0 && chars[i - 1].is_ascii_whitespace() {
-        i -= 1;
-    }
-    if i == after_ident && after_ident != cursor {
-        return false;
-    }
-    if i == after_ident {
-        return false;
-    }
-
-    if check_keyword_ending_at(chars, i, "fn") || check_keyword_ending_at(chars, i, "case") {
-        return true;
-    }
-    if check_keyword_ending_at(chars, i, "function") {
-        return !preceded_by_use_keyword_chars(chars, i - "function".len());
-    }
-    if check_keyword_ending_at(chars, i, "const") {
-        return !preceded_by_use_keyword_chars(chars, i - "const".len());
-    }
-    has_const_keyword_before_name_chars(chars, i)
-}
-
-fn preceded_by_use_keyword_chars(chars: &[char], keyword_start: usize) -> bool {
-    let before = skip_whitespace_backward(chars, keyword_start);
-    check_keyword_ending_at(chars, before, "use")
-}
-
-fn has_const_keyword_before_name_chars(chars: &[char], pos: usize) -> bool {
-    let mut line_start = pos;
-    while line_start > 0 && chars[line_start - 1] != '\n' {
-        line_start -= 1;
-    }
-    let mut i = line_start;
-    while i + "const".len() <= pos {
-        let end = i + "const".len();
-        if check_keyword_ending_at(chars, end, "const")
-            && (end >= chars.len() || !(chars[end].is_alphanumeric() || chars[end] == '_'))
-            && !preceded_by_use_keyword_chars(chars, i)
-        {
-            return true;
-        }
-        i += 1;
-    }
-    false
-}
-
-fn is_ident_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
-fn check_keyword_ending_at_bytes(bytes: &[u8], pos: usize, keyword: &[u8]) -> bool {
-    if pos < keyword.len() {
-        return false;
-    }
-    let start = pos - keyword.len();
-    if &bytes[start..pos] != keyword {
-        return false;
-    }
-    if start > 0 && is_ident_byte(bytes[start - 1]) {
-        return false;
-    }
-    if pos < bytes.len() && is_ident_byte(bytes[pos]) {
-        return false;
-    }
-    true
-}
-
-fn preceded_by_use_keyword_bytes(bytes: &[u8], keyword_start: usize) -> bool {
-    let mut before = keyword_start;
-    while before > 0 && bytes[before - 1].is_ascii_whitespace() {
-        before -= 1;
-    }
-    check_keyword_ending_at_bytes(bytes, before, b"use")
-}
-
-fn has_const_keyword_before_name(bytes: &[u8], pos: usize) -> bool {
-    super::override_completion::has_const_keyword_before_name(bytes, pos)
+    let cursor = (position_to_offset(content, position) as usize).min(content.len());
+    super::override_completion::is_function_or_const_name_position_at_offset(
+        content.as_bytes(),
+        cursor,
+    )
 }
 
 // ─── Private helpers ────────────────────────────────────────────────────────
@@ -358,50 +236,6 @@ fn skip_whitespace_backward(chars: &[char], pos: usize) -> usize {
         i -= 1;
     }
     i
-}
-
-/// Check whether the `(` at `paren_pos` belongs to a function or method
-/// *definition* (as opposed to a function/method *call*).
-///
-/// Walks backward from just before the `(`, skipping whitespace and
-/// the optional function name, then looks for `function` or `fn`.
-fn is_function_definition_paren(chars: &[char], paren_pos: usize) -> bool {
-    let mut i = paren_pos;
-
-    // Skip whitespace before `(`
-    while i > 0 && chars[i - 1].is_ascii_whitespace() {
-        i -= 1;
-    }
-
-    // Walk backward through the identifier (function name — may be empty
-    // for anonymous functions / closures).
-    let name_end = i;
-    while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
-        i -= 1;
-    }
-
-    let name: String = chars[i..name_end].iter().collect();
-
-    // Anonymous `function(` or arrow `fn(` — the name *is* the keyword.
-    if name == "function" || name == "fn" {
-        return true;
-    }
-
-    // Named function / method: skip whitespace before the name and check
-    // for the `function` or `fn` keyword.
-    let mut j = i;
-    while j > 0 && chars[j - 1].is_ascii_whitespace() {
-        j -= 1;
-    }
-
-    if check_keyword_ending_at(chars, j, "function") {
-        return true;
-    }
-    if check_keyword_ending_at(chars, j, "fn") {
-        return true;
-    }
-
-    false
 }
 
 /// Check whether the `:` at `colon_pos` is a return-type colon — i.e.
@@ -582,25 +416,6 @@ fn is_after_modifier_keyword(chars: &[char], pos: usize) -> bool {
         }
         _ => false,
     }
-}
-
-/// Check whether a specific keyword ends at `pos` (exclusive) in `chars`,
-/// with a word-boundary before it.
-fn check_keyword_ending_at(chars: &[char], pos: usize, keyword: &str) -> bool {
-    let kw_len = keyword.len();
-    if pos < kw_len {
-        return false;
-    }
-    let start = pos - kw_len;
-    let candidate: String = chars[start..pos].iter().collect();
-    if candidate != keyword {
-        return false;
-    }
-    // Ensure word boundary before the keyword.
-    if start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == '_') {
-        return false;
-    }
-    true
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

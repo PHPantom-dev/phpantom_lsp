@@ -184,7 +184,6 @@ pub(crate) fn discover_user_files(
     let mut vendor_dirs = backend.workspace.vendor_dir_paths.lock().clone();
     vendor_dirs.sort_unstable();
     vendor_dirs.dedup();
-    let vendor_dirs = std::sync::Arc::new(vendor_dirs);
 
     // A directory filter that points outside every PSR-4 source directory
     // (e.g. into vendor/) is walked directly instead of being skipped.
@@ -221,7 +220,7 @@ pub(crate) fn discover_user_files(
     // line too.  Naming a file outright bypasses it (those never reach this
     // walk), which is the escape hatch for analysing an excluded path.
     for dir in &external_filters {
-        collect_php_files(dir, &std::sync::Arc::default(), &[], &filters, &mut files);
+        collect_php_files(dir, &[], &[], &filters, &mut files);
     }
 
     // `[indexing] include` paths inside the workspace are project code the
@@ -250,32 +249,24 @@ pub(crate) fn discover_user_files(
 /// paths `[indexing] exclude` prunes.
 fn collect_php_files(
     dir: &Path,
-    skip_vendor: &std::sync::Arc<Vec<PathBuf>>,
+    skip_vendor: &[PathBuf],
     crop: &[&Path],
     filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
     out: &mut Vec<PathBuf>,
 ) {
-    let walker = crate::classmap_scanner::workspace_walk_builder(
+    crate::classmap_scanner::visit_workspace_files_gitignore(
         dir,
-        std::sync::Arc::clone(skip_vendor),
-        std::sync::Arc::clone(filters),
-        false,
-        crate::classmap_scanner::LinkClaims::new([dir.to_path_buf()], None),
-    )
-    .build();
-
-    for entry in walker.flatten() {
-        let path = entry.into_path();
-        if !path.is_file() || !filters.is_php_file(&path) {
-            continue;
-        }
-
-        if !crop.is_empty() && !crop.iter().any(|fp| path.starts_with(fp)) {
-            continue;
-        }
-
-        out.push(path);
-    }
+        skip_vendor,
+        filters,
+        None,
+        |path| {
+            if filters.is_php_file(path)
+                && (crop.is_empty() || crop.iter().any(|fp| path.starts_with(fp)))
+            {
+                out.push(path.to_path_buf());
+            }
+        },
+    );
 }
 
 #[cfg(test)]

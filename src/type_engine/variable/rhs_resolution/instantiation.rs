@@ -1,8 +1,8 @@
-/// Instantiation (`new ClassName(…)`) resolution: the instantiated
-/// class, constructor template-binding classification, and generic
-/// substitution map construction for class-level `@template` parameters.
+//! Instantiation (`new ClassName(…)`) resolution: the instantiated
+//! class, constructor template-binding classification, and generic
+//! substitution map construction for class-level `@template` parameters.
+
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use mago_syntax::cst::*;
 
@@ -35,26 +35,15 @@ pub(super) fn resolve_rhs_instantiation(
             // global class (`App\Error` vs the built-in `\Error`) would
             // otherwise have every `new self(…)` resolve to the global one.
             "self" | "static" => ctx.current_class.fqn().to_string(),
-            // `parent` names the class the enclosing one extends, written
-            // however the `extends` clause spelled it, so it resolves
-            // through the same import table a written name does.
+            // `parent` names the class the enclosing one extends, which the
+            // parser already resolved against the declaring file's imports.
             "parent" => {
                 let Some(parent) = ctx.current_class.parent_class else {
                     return vec![];
                 };
-                crate::util::resolve_source_class_name(
-                    parent.as_str(),
-                    ctx.current_class.file_namespace.as_deref(),
-                    ctx.all_classes,
-                    ctx.class_loader,
-                )
+                parent.to_string()
             }
-            other => crate::util::resolve_source_class_name(
-                other,
-                ctx.current_class.file_namespace.as_deref(),
-                ctx.all_classes,
-                ctx.class_loader,
-            ),
+            other => ctx.written_names().resolve_class(other),
         };
         let parsed_name = if name == "static" {
             PhpType::static_type(atom(&fqn))
@@ -63,7 +52,7 @@ pub(super) fn resolve_rhs_instantiation(
         };
         let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &parsed_name,
-            &ctx.current_class.name,
+            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         );
@@ -109,7 +98,6 @@ pub(super) fn resolve_rhs_instantiation(
             .then(|| {
                 crate::type_engine::type_resolution::lookup_class_declaration(
                     &fqn,
-                    &ctx.current_class.name,
                     ctx.all_classes,
                     ctx.class_loader,
                 )
@@ -146,24 +134,20 @@ pub(super) fn resolve_rhs_instantiation(
         return ResolvedType::from_classes_with_hint(classes, parsed_name);
     }
 
-    // ── `new $var` where `$var` holds a class-string ────────────
-    // When the class expression is a variable, resolve it to check
-    // if it holds a class-string value (e.g. `$f = Foo::class;
-    // new $f`).  Extract the class name from the class-string and
-    // use it to resolve the instantiated type.
+    // ── `new $var` where `$var` holds a class name ──────────────
+    // `$f = Foo::class; new $f`, a `class-string<Foo>` parameter, or a
+    // string naming a class builds the class it names.
     if let Expression::Variable(Variable::Direct(dv)) = inst.class {
-        let var_name = bytes_to_str(dv.name).to_string();
-
         // `new $class` on a `class-string<T>` of a bounded template builds
         // a `T`, whatever classes its bound resolves to.
-        let var_types = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
+        let var_types = resolve_var_types(bytes_to_str(dv.name), ctx, ctx.cursor_offset);
         if let [only] = var_types.as_slice()
             && let TypeKind::ClassString(Some(inner)) = only.type_string.kind()
             && inner.as_template_param().is_some()
         {
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 inner,
-                &ctx.current_class.name,
+                &ctx.current_class.fqn(),
                 ctx.all_classes,
                 ctx.class_loader,
             );
@@ -172,57 +156,15 @@ pub(super) fn resolve_rhs_instantiation(
             }
         }
 
-        let resolved =
-            crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
-                &var_name,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.content,
-                ctx.cursor_offset,
-                ctx.class_loader,
-                ctx.backend,
-            );
-        if !resolved.is_empty() {
-            return ResolvedType::from_classes(resolved.into_iter().map(Arc::new).collect());
-        }
-
-        // Fallback: resolve the variable's type and extract the inner
-        // type from `class-string<T>`.  This handles parameters typed
-        // as `@param class-string<Foo> $var` where there is no
-        // `$var = Foo::class` assignment.
-        let class_name = extract_class_string_inner(&var_types);
-        if let Some(name) = class_name
-            && let Some(cls) = (ctx.class_loader)(&name)
-        {
-            return ResolvedType::from_classes(vec![cls]);
+        let classes = crate::type_engine::variable::class_string_resolution::classes_named_by(
+            &var_types, ctx,
+        );
+        if !classes.is_empty() {
+            return ResolvedType::from_classes(classes);
         }
     }
 
     vec![]
-}
-
-/// Extract the inner class name from a `class-string<T>` type in a list
-/// of resolved types.  Handles `class-string<T>`, `?class-string<T>`,
-/// and unions containing `class-string<T>`.
-pub(super) fn extract_class_string_inner(resolved: &[ResolvedType]) -> Option<String> {
-    resolved.iter().find_map(|rt| match &rt.type_string.kind() {
-        TypeKind::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
-        TypeKind::Nullable(inner) => match inner.kind() {
-            TypeKind::ClassString(Some(cs_inner)) => cs_inner.base_name().map(|s| s.to_string()),
-            _ => None,
-        },
-        TypeKind::Union(members) => members.iter().find_map(|m| match m.kind() {
-            TypeKind::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
-            TypeKind::Nullable(inner) => match inner.kind() {
-                TypeKind::ClassString(Some(cs_inner)) => {
-                    cs_inner.base_name().map(|s| s.to_string())
-                }
-                _ => None,
-            },
-            _ => None,
-        }),
-        _ => None,
-    })
 }
 
 /// Bind a template a `class-string<Wrapper<T>>` hint names, from the class
@@ -736,7 +678,7 @@ pub(crate) fn resolve_array_literal_generic(
         return Some(PhpType::never());
     }
 
-    let elements = crate::type_engine::conditional_resolution::split_text_args(inner);
+    let elements = crate::text_scan::split_top_level_commas(inner);
 
     let first = elements.first()?.trim();
     if let Some((key_text, val_text)) = crate::text_scan::split_top_level_arrow(first) {

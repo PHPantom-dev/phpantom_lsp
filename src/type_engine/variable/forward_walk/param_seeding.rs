@@ -1,7 +1,7 @@
-//! Seeding a scope with a function's parameters: the native hint, the
-//! `@param` docblock, the merged class info, and the Eloquent scope
-//! enrichment, plus the property-hook scope and the trait prototype lookup
-//! the parameter types resolve through.
+//! Seeding the scope a function-like body starts with: `$this`, the
+//! parameters (the native hint, the `@param` docblock, the merged class
+//! info, and the Eloquent scope enrichment), plus the property-hook scope
+//! and the trait prototype lookup the parameter types resolve through.
 
 use super::*;
 
@@ -11,6 +11,68 @@ use crate::atom::bytes_to_str;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 use crate::types::{MethodInfo, ResolvedType};
+
+/// What seeding a function-like body needs to know about its declaration.
+#[derive(Clone, Copy)]
+pub(crate) struct BodyOwner<'a> {
+    /// The method's name; `None` for a function.
+    pub method_name: Option<&'a str>,
+    /// The body runs without `$this`.
+    pub is_static: bool,
+    /// The method carries `#[Scope]`, for Eloquent query scopes.
+    pub has_scope_attr: bool,
+}
+
+impl<'a> BodyOwner<'a> {
+    /// A standalone function: no `$this`, and never a query scope.
+    pub(crate) const FUNCTION: Self = Self {
+        method_name: None,
+        is_static: true,
+        has_scope_attr: false,
+    };
+
+    pub(crate) fn method(method: &'a Method<'a>) -> Self {
+        Self {
+            method_name: Some(bytes_to_str(method.name.value)),
+            is_static: method.modifiers.contains_static(),
+            has_scope_attr: crate::virtual_members::laravel::has_scope_attribute(method),
+        }
+    }
+}
+
+/// The scope a function-like body starts with: `$this` and the
+/// constructor's readonly properties for an instance method, the
+/// parameters, the superglobals, and the `static` locals `body` declares.
+pub(crate) fn seed_body_scope<'b>(
+    parameters: impl Iterator<Item = &'b FunctionLikeParameter<'b>>,
+    body: &[&'b Statement<'b>],
+    span_start: u32,
+    owner: BodyOwner<'_>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> ScopeState {
+    let mut scope = ScopeState::new();
+    if !owner.is_static {
+        seed_this(&mut scope, ctx);
+        super::readonly_properties::seed_constructor_readonly_properties(
+            &mut scope,
+            owner.method_name,
+            ctx,
+        );
+    }
+    seed_params(
+        &mut scope,
+        parameters,
+        span_start,
+        owner.method_name,
+        owner.has_scope_attr,
+        ctx,
+    );
+    seed_superglobals(&mut scope);
+    // A `static $var;` local holds whatever an earlier call left in it,
+    // which the top-to-bottom walk cannot see.
+    super::static_locals::seed_static_locals(&mut scope, body, ctx);
+    scope
+}
 
 /// Seed the scope with types from function/method parameters.
 ///
@@ -52,15 +114,33 @@ pub(crate) fn seed_params<'b>(
         // parameter type, losing the docblock refinement).
         if param.is_promoted_property() {
             let param_offset = param.span().start.offset as usize;
-            if let Some((var_type, _name)) =
-                crate::docblock::find_inline_var_docblock(ctx.content, param_offset)
+            if let Some((var_type, _name)) = docblock_above(ctx.content, param_offset)
+                .and_then(crate::docblock::extract_var_type_with_name)
             {
-                let var_type = crate::util::resolve_php_type_names(&var_type, ctx.class_loader);
-                let effective = crate::docblock::resolve_effective_type_typed(
-                    native_type.as_ref(),
-                    Some(&var_type),
-                )
-                .unwrap_or(var_type);
+                let var_type = ctx.written_names().resolve_type(&var_type);
+                let native = native_type
+                    .as_ref()
+                    .map(|written| ctx.written_names().resolve_hint(written));
+                let effective =
+                    crate::docblock::resolve_effective_type_typed(native.as_ref(), Some(&var_type))
+                        .unwrap_or(var_type);
+                let effective = match (native_type.as_ref(), native) {
+                    (Some(written), Some(native))
+                        if effective != native
+                            && !super::super::resolution::param_docblock_narrows_hint(
+                                &effective,
+                                written,
+                                method_span_start as usize,
+                                ctx.current_class,
+                                ctx.content,
+                                ctx.class_loader,
+                                ctx.source_class_loader,
+                            ) =>
+                    {
+                        native
+                    }
+                    _ => effective,
+                };
 
                 let results = ctx.resolved_types_for(effective);
 
@@ -131,7 +211,7 @@ fn seed_from_call_site(
 
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         arg_type,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -186,7 +266,7 @@ fn seed_implicit_set_value(
         return;
     };
 
-    let hint_type = extract_hint_type(hint);
+    let hint_type = ctx.written_names().resolve_hint(&extract_hint_type(hint));
 
     scope.seed("$value", ctx.resolved_types_for(hint_type));
 }
@@ -220,14 +300,14 @@ fn finish_constant_operands(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> Option<Ph
 /// actually has, and the declaration is judged a refinement of the native
 /// `string` hint rather than an operator nothing can compare.
 pub(crate) fn resolve_docblock_param_type(raw: &PhpType, ctx: &ForwardWalkCtx<'_>) -> PhpType {
-    let expanded = crate::type_engine::type_resolution::expand_nested_type_aliases(
+    let expanded = crate::type_engine::types::aliases::expand_nested_type_aliases(
         raw,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
     let raw = expanded.as_ref().unwrap_or(raw);
-    let resolved = crate::util::resolve_php_type_names(raw, ctx.class_loader);
+    let resolved = ctx.written_names().resolve_type(raw);
     let resolved = bind_enclosing_self(&resolved, ctx).unwrap_or(resolved);
     finish_constant_operands(&resolved, ctx).unwrap_or(resolved)
 }
@@ -277,20 +357,53 @@ pub(crate) fn resolve_param_type(
     enclosing: &EnclosingMethod<'_>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
+    let docblock = super::super::resolution::declared_param_docblock_type(
+        ctx.content,
+        enclosing.span_start as usize,
+        pname,
+    );
+    let mut param_results = declared_param_type(pname, param, docblock, enclosing, ctx).results;
+    if param.ellipsis.is_some() {
+        wrap_variadic(&mut param_results);
+    }
+    param_results
+}
+
+/// What a parameter's declaration says it holds: [`resolve_param_type`]
+/// before a variadic parameter is wrapped into the array it receives.
+pub(crate) struct DeclaredParam {
+    /// The native hint, refined by the `@param` type where that may stand
+    /// in for it, with the declaration's template bounds substituted.
+    pub(crate) effective: Option<PhpType>,
+    /// What the parameter holds.
+    pub(crate) results: Vec<ResolvedType>,
+}
+
+/// The type a parameter's declaration gives it, from its native hint and
+/// `docblock`, the `@param` type the declaration's docblock spells for it,
+/// as written.  The caller reads the docblock, since a closure's is the one
+/// attached to the closure rather than to a declaration.
+pub(crate) fn declared_param_type(
+    pname: &str,
+    param: &FunctionLikeParameter<'_>,
+    docblock: Option<PhpType>,
+    enclosing: &EnclosingMethod<'_>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> DeclaredParam {
     let EnclosingMethod {
         span_start: method_span_start,
         name: method_name,
         has_scope_attr,
         trait_prototype,
     } = *enclosing;
-    let is_variadic = param.ellipsis.is_some();
     // The hint as written, which is what the declarations it is compared
     // against below record.
     let written_native = param.hint.as_ref().map(|h| extract_hint_type(h));
     // A method's own declaration records the same hint fully qualified
     // against its namespace block's imports, which the file-wide class
     // loader cannot do when blocks reuse a short name.  That is also the
-    // form the declarations it is compared against below record.
+    // form the declarations it is compared against below record.  A
+    // closure has no declaration, so its hint is qualified here.
     let raw_native = written_native
         .as_ref()
         .and_then(|_| {
@@ -302,7 +415,11 @@ pub(crate) fn resolve_param_type(
                 .find(|p| p.name == pname)?;
             own.native_type_hint.clone()
         })
-        .or(written_native);
+        .or_else(|| {
+            written_native
+                .as_ref()
+                .map(|hint| ctx.written_names().resolve_hint(hint))
+        });
     // A `null` default makes the parameter accept null whatever its type
     // says (`bool $a = null` is `?bool`).
     let default_is_null = crate::parser::param_default_is_null(param);
@@ -334,17 +451,13 @@ pub(crate) fn resolve_param_type(
     // templates are marked with their bounds before the docblock is
     // weighed against the native hint, so `@param T $foo` on `int $foo`
     // (`@template T of int`) is judged by what `T` is known to be.
-    let unmarked_docblock_type = super::super::resolution::declared_param_docblock_type(
-        ctx.content,
-        method_span_start as usize,
-        pname,
-    )
-    .map(|t| resolve_docblock_param_type(&t, ctx));
+    let unmarked_docblock_type = docblock.map(|t| resolve_docblock_param_type(&t, ctx));
     let raw_docblock_type = unmarked_docblock_type.clone().map(|t| {
         super::super::resolution::substitute_template_param_bounds(
             t,
             ctx.content,
             method_span_start as usize,
+            &ctx.written_names(),
         )
     });
 
@@ -403,6 +516,25 @@ pub(crate) fn resolve_param_type(
             ty
         }
     });
+    let effective_type = match effective_type {
+        Some(settled)
+            if native_for_effective.as_ref() != Some(&settled)
+                && written_native.as_ref().is_some_and(|written| {
+                    !super::super::resolution::param_docblock_narrows_hint(
+                        &settled,
+                        written,
+                        method_span_start as usize,
+                        ctx.current_class,
+                        ctx.content,
+                        ctx.class_loader,
+                        ctx.source_class_loader,
+                    )
+                }) =>
+        {
+            native_for_effective.clone()
+        }
+        effective => effective,
+    };
 
     // Substitute method-level template params with their bounds.
     let effective_type = effective_type.map(|ty| {
@@ -410,6 +542,7 @@ pub(crate) fn resolve_param_type(
             ty,
             ctx.content,
             method_span_start as usize,
+            &ctx.written_names(),
         );
         // Also substitute inside class-string<T> so that
         // `class-string<T>` with `@template T of Foo` becomes
@@ -418,6 +551,7 @@ pub(crate) fn resolve_param_type(
             ty,
             ctx.content,
             method_span_start as usize,
+            &ctx.written_names(),
         )
     });
 
@@ -426,7 +560,7 @@ pub(crate) fn resolve_param_type(
         .map(|ty| {
             crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 ty,
-                &ctx.current_class.name,
+                &ctx.current_class.fqn(),
                 ctx.all_classes,
                 ctx.class_loader,
             )
@@ -444,7 +578,7 @@ pub(crate) fn resolve_param_type(
     {
         let inner_resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             inner,
-            &ctx.current_class.name,
+            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         );
@@ -457,7 +591,7 @@ pub(crate) fn resolve_param_type(
     let mut param_results = if !resolved_from_effective.is_empty() {
         ResolvedType::from_classes_with_hint(
             resolved_from_effective,
-            effective_type.unwrap_or_else(|| {
+            effective_type.clone().unwrap_or_else(|| {
                 type_for_resolution
                     .cloned()
                     .unwrap_or_else(PhpType::untyped)
@@ -479,7 +613,7 @@ pub(crate) fn resolve_param_type(
         let parsed_docblock = rdt.clone();
         let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &parsed_docblock,
-            &ctx.current_class.name,
+            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         );
@@ -491,7 +625,7 @@ pub(crate) fn resolve_param_type(
                 build_type_string_only_result(
                     raw_docblock_type.as_ref(),
                     type_for_resolution,
-                    ctx.content,
+                    ctx,
                     method_span_start as usize,
                 )
             })
@@ -502,7 +636,7 @@ pub(crate) fn resolve_param_type(
             build_type_string_only_result(
                 raw_docblock_type.as_ref(),
                 type_for_resolution,
-                ctx.content,
+                ctx,
                 method_span_start as usize,
             )
         })
@@ -524,11 +658,10 @@ pub(crate) fn resolve_param_type(
         }
     }
 
-    if is_variadic {
-        wrap_variadic(&mut param_results);
+    DeclaredParam {
+        effective: effective_type,
+        results: param_results,
     }
-
-    param_results
 }
 
 /// Turn a variadic parameter's element types into the array it receives.
@@ -691,9 +824,9 @@ pub(crate) fn try_resolve_from_merged_class(
     let declared = merged_param.type_hint.as_ref()?;
     // The merged declaration is as much a place a `key-of<CONSTANT>` is read
     // as the source docblock is, and for a method it is the one that wins.
-    let expanded = crate::type_engine::type_resolution::expand_nested_type_aliases(
+    let expanded = crate::type_engine::types::aliases::expand_nested_type_aliases(
         declared,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -705,7 +838,7 @@ pub(crate) fn try_resolve_from_merged_class(
 
     let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         hint,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -728,7 +861,7 @@ pub(crate) fn try_resolve_from_merged_class(
 pub(crate) fn build_type_string_only_result(
     raw_docblock_type: Option<&PhpType>,
     type_for_resolution: Option<&PhpType>,
-    content: &str,
+    ctx: &ForwardWalkCtx<'_>,
     method_span_start: usize,
 ) -> Vec<ResolvedType> {
     let best_type = if let Some(rdt) = raw_docblock_type {
@@ -739,8 +872,9 @@ pub(crate) fn build_type_string_only_result(
     if let Some(mut parsed) = best_type {
         parsed = super::super::resolution::substitute_class_string_template_bounds(
             parsed,
-            content,
+            ctx.content,
             method_span_start,
+            &ctx.written_names(),
         );
         vec![ResolvedType::from_type_string(parsed)]
     } else {

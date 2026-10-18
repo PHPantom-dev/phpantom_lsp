@@ -80,66 +80,21 @@ pub(crate) fn detect_catch_context(content: &str, position: Position) -> Option<
     // to find the original `try {`.
     let try_body = find_try_block_body(content, before_catch)?;
 
-    // Analyse the try block for thrown exception types.
+    // Analyse the try block for thrown exception types, in the order the
+    // module docs list the sources, each short name once.
     let mut suggested_types = Vec::new();
     let mut seen = std::collections::HashSet::new();
-
-    // 1. Direct `throw new ExceptionType(…)` statements
-    let throws = throws_analysis::find_throw_statements(&try_body);
-    for throw in &throws {
-        let raw = throw.type_name.to_string();
-        let short_name = raw
-            .trim_start_matches('\\')
-            .rsplit('\\')
-            .next()
-            .unwrap_or(&raw);
-        if !short_name.is_empty() && seen.insert(short_name.to_lowercase()) {
-            suggested_types.push(short_name.to_string());
-        }
-    }
-
-    // 2. Inline `/** @throws ExceptionType */` annotations
-    let inline_throws = throws_analysis::find_inline_throws_annotations(&try_body);
-    for info in &inline_throws {
-        let raw = info.type_name.to_string();
-        let short_name = raw
-            .trim_start_matches('\\')
-            .rsplit('\\')
-            .next()
-            .unwrap_or(&raw);
-        if !short_name.is_empty() && seen.insert(short_name.to_lowercase()) {
-            suggested_types.push(short_name.to_string());
-        }
-    }
-
-    // 3. Propagated @throws from called methods
-    let propagated = throws_analysis::find_propagated_throws(&try_body, content);
-    let propagated: Vec<String> = propagated.iter().map(|t| t.type_name.to_string()).collect();
-    for exc_type in &propagated {
-        let short_name = exc_type
-            .trim_start_matches('\\')
-            .rsplit('\\')
-            .next()
-            .unwrap_or(exc_type);
-        if !short_name.is_empty() && seen.insert(short_name.to_lowercase()) {
-            suggested_types.push(short_name.to_string());
-        }
-    }
-
-    // 4. `throw $this->method()` / `throw self::method()` return types
-    let throw_expr_types = throws_analysis::find_throw_expression_types(&try_body, content);
-    let throw_expr_types: Vec<String> = throw_expr_types
-        .iter()
-        .map(|t| t.type_name.to_string())
-        .collect();
-    for exc_type in &throw_expr_types {
-        let short_name = exc_type
-            .trim_start_matches('\\')
-            .rsplit('\\')
-            .next()
-            .unwrap_or(exc_type);
-        if !short_name.is_empty() && seen.insert(short_name.to_lowercase()) {
-            suggested_types.push(short_name.to_string());
+    let thrown = [
+        throws_analysis::find_throw_statements(&try_body),
+        throws_analysis::find_inline_throws_annotations(&try_body),
+        throws_analysis::find_propagated_throws(&try_body, content),
+        throws_analysis::find_throw_expression_types(&try_body, content),
+    ];
+    for exc_type in thrown.iter().flatten() {
+        let raw = exc_type.to_string();
+        let name = short_name(&raw);
+        if !name.is_empty() && seen.insert(name.to_lowercase()) {
+            suggested_types.push(name.to_string());
         }
     }
 
@@ -176,7 +131,7 @@ pub(crate) fn build_catch_completions(
     let partial_lower = ctx.partial.to_lowercase();
 
     for (idx, exc_type) in ctx.suggested_types.iter().enumerate() {
-        let fqn = crate::util::resolve_to_fqn(exc_type, use_map, file_namespace);
+        let fqn = crate::names::resolve_to_fqn(exc_type, use_map, file_namespace);
         let sn = short_name(&fqn);
 
         // Filter by the partial text the user has typed

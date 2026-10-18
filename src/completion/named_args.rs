@@ -168,7 +168,9 @@ pub fn find_enclosing_open_paren(chars: &[char], start: usize) -> Option<usize> 
     while i > 0 {
         i -= 1;
         match chars[i] {
-            ')' => depth += 1,
+            // An earlier argument such as `[1, 2]`, a closure, or a `match`
+            // closes its brackets before the cursor; skip over the pair.
+            ')' | ']' | '}' => depth += 1,
             '(' => {
                 if depth > 0 {
                     depth -= 1;
@@ -185,16 +187,71 @@ pub fn find_enclosing_open_paren(chars: &[char], start: usize) -> Option<usize> 
             '"' => {
                 i = skip_string_backward(chars, i, '"');
             }
-            // If we hit `{` or `[` without a matching `}` or `]`, we've
-            // left the expression context — stop searching.
+            '{' | '[' if depth > 0 => depth -= 1,
+            // An unmatched `{` or `[` means the cursor is inside a block or
+            // an array, not directly in a call's arguments.
             '{' | '[' => return None,
-            // If we hit `;` we've gone past a statement boundary.
-            ';' => return None,
+            // A `;` outside every bracket is a statement boundary.
+            ';' if depth == 0 => return None,
             _ => {}
         }
     }
 
     None
+}
+
+/// Check whether the open parenthesis at `paren_pos` belongs to a
+/// function or method *definition* rather than a call expression.
+///
+/// Walks backward from `(` through the function name (if any), then
+/// through whitespace, looking for the `function` or `fn` keyword.
+/// Returns `true` for `function foo(`, `function (`, `fn(`, and
+/// `public function bar(`.
+pub fn is_function_definition_paren(chars: &[char], paren_pos: usize) -> bool {
+    let mut i = paren_pos;
+
+    // Skip whitespace before `(`
+    while i > 0 && chars[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+
+    // Walk backward through the identifier (function name, which may be
+    // empty for anonymous functions / closures).
+    let name_end = i;
+    while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
+        i -= 1;
+    }
+
+    let name: String = chars[i..name_end].iter().collect();
+
+    // Anonymous `function(` or arrow `fn(` — the name *is* the keyword.
+    if name == "function" || name == "fn" {
+        return true;
+    }
+
+    // Named function / method: skip whitespace before the name and check
+    // for the `function` or `fn` keyword.
+    let mut j = i;
+    while j > 0 && chars[j - 1].is_ascii_whitespace() {
+        j -= 1;
+    }
+
+    if ends_with_keyword(chars, j, "function") || ends_with_keyword(chars, j, "fn") {
+        return true;
+    }
+
+    false
+}
+
+/// Check whether the text ending at `pos` (exclusive) ends with `keyword`
+/// on a word boundary.
+fn ends_with_keyword(chars: &[char], pos: usize, keyword: &str) -> bool {
+    let Some(start) = pos.checked_sub(keyword.len()) else {
+        return false;
+    };
+    chars[start..pos].iter().copied().eq(keyword.chars())
+        // Ensure word boundary before the keyword.
+        && (start == 0 || !(chars[start - 1].is_alphanumeric() || chars[start - 1] == '_'))
 }
 
 /// Extract the call expression that precedes the opening paren at `open`.
@@ -346,8 +403,7 @@ pub fn parse_existing_args(args_text: &str) -> (Vec<String>, usize) {
     let mut named = Vec::new();
     let mut positional = 0usize;
 
-    // Split by commas at the top level (respecting nested parens/strings)
-    let args = split_args_top_level(args_text);
+    let args = crate::text_scan::split_top_level_commas(args_text);
 
     for arg in &args {
         let trimmed = arg.trim();
@@ -365,68 +421,6 @@ pub fn parse_existing_args(args_text: &str) -> (Vec<String>, usize) {
     }
 
     (named, positional)
-}
-
-/// Split argument text by commas at the top level (depth 0), respecting
-/// nested parentheses and string literals.
-pub fn split_args_top_level(text: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    let mut current = String::new();
-    let mut depth = 0i32;
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        match chars[i] {
-            '(' | '[' => {
-                depth += 1;
-                current.push(chars[i]);
-            }
-            ')' | ']' => {
-                depth -= 1;
-                current.push(chars[i]);
-            }
-            ',' if depth == 0 => {
-                args.push(std::mem::take(&mut current));
-            }
-            '\'' | '"' => {
-                let q = chars[i];
-                current.push(q);
-                i += 1;
-                while i < chars.len() {
-                    current.push(chars[i]);
-                    if chars[i] == q {
-                        // Count the backslashes immediately preceding this
-                        // quote (skipping the quote we just pushed). An even
-                        // count means the quote is not escaped and closes the
-                        // string. Counting by `char` keeps this correct on
-                        // lines with multibyte characters.
-                        let backslashes = current
-                            .chars()
-                            .rev()
-                            .skip(1)
-                            .take_while(|&c| c == '\\')
-                            .count();
-                        if backslashes.is_multiple_of(2) {
-                            break;
-                        }
-                    }
-                    i += 1;
-                }
-            }
-            _ => current.push(chars[i]),
-        }
-        i += 1;
-    }
-
-    // The caller already stripped the in-progress prefix from `args_text`
-    // before calling this, so the last segment here (if any) is a complete
-    // previous argument and must be pushed like any other.
-    if !current.trim().is_empty() {
-        args.push(current);
-    }
-
-    args
 }
 
 /// If `arg` looks like a named argument (`name: ...`), return the name.

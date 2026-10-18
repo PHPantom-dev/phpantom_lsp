@@ -140,6 +140,61 @@ pub(crate) struct LoopWalk<'a> {
     pub(crate) discovery_ctx: &'a ForwardWalkCtx<'a>,
 }
 
+/// Where the cursor sits relative to a loop body, and the contexts the
+/// body's walks run in.
+///
+/// When the cursor is inside the body (completion, hover), the discovery
+/// walks must cover the *entire* body so that assignments written below the
+/// cursor are still discovered; the final walk uses the real cursor so it
+/// stops there as usual.  A diagnostic pass keeps its cursor for both.
+pub(crate) struct LoopBodyCtxs<'a> {
+    /// Whether the cursor is inside the body.
+    pub(crate) cursor_in_body: bool,
+    /// The real walk context, cursor and all, marked as inside a loop.
+    pub(crate) body_ctx: ForwardWalkCtx<'a>,
+    discovery_ctx: ForwardWalkCtx<'a>,
+}
+
+impl<'a> LoopBodyCtxs<'a> {
+    pub(crate) fn new(ctx: &ForwardWalkCtx<'a>, body: mago_span::Span) -> Self {
+        let cursor_in_body =
+            ctx.cursor_offset >= body.start.offset && ctx.cursor_offset <= body.end.offset;
+        let body_ctx = ctx.with_in_loop(true);
+        let discovery_ctx = if cursor_in_body && !is_diagnostic_scope_active() {
+            body_ctx.with_cursor_offset(u32::MAX)
+        } else {
+            body_ctx.clone()
+        };
+        LoopBodyCtxs {
+            cursor_in_body,
+            body_ctx,
+            discovery_ctx,
+        }
+    }
+
+    /// Whether the walk that stopped at the cursor inside the body is the
+    /// answer: the request asks about that position, so the state after
+    /// the loop is of no interest.  A diagnostic pass always needs it.
+    pub(crate) fn answers_cursor(&self) -> bool {
+        self.cursor_in_body && !is_diagnostic_scope_active()
+    }
+
+    /// How to walk the body to its fixed point from `pre_loop_scope`.
+    pub(crate) fn walk<'s>(
+        &'s self,
+        pre_loop_scope: &'s ScopeState,
+        assignment_depth: u32,
+    ) -> LoopWalk<'s> {
+        LoopWalk {
+            pre_loop_scope,
+            assignment_depth,
+            fold_exit_edges: !self.cursor_in_body,
+            ctx: &self.body_ctx,
+            discovery_ctx: &self.discovery_ctx,
+        }
+    }
+}
+
 /// The entry scope of the next walk of a loop body: the previous walk
 /// advanced past the end of the body, merged with what was known before
 /// the loop (the body may not have run yet), then narrowed the way the

@@ -135,6 +135,44 @@ async fn test_param_closure_this_static_type() {
     );
 }
 
+/// A static call through a variable holding the class name binds the
+/// closure's `$this` the same way a call on the written class name does.
+#[tokio::test]
+async fn test_param_closure_this_static_call_on_a_class_string() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_this_class_string.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Route {\n",
+        "    public function middleware(string $m): self { return $this; }\n",
+        "}\n",
+        "class Router {\n",
+        "    /**\n",
+        "     * @param-closure-this Route $callback\n",
+        "     */\n",
+        "    public static function group(\\Closure $callback): void {}\n",
+        "}\n",
+        "class AppRoutes {\n",
+        "    public function register(): void {\n",
+        "        $router = Router::class;\n",
+        "        $router::group(function () {\n",
+        "            $this->\n",
+        "        });\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 14: `            $this->` — cursor after `->`
+    let items = complete_at(&backend, &uri, src, 14, 19).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"middleware"),
+        "Expected 'middleware' from @param-closure-this Route, got: {:?}",
+        names,
+    );
+}
+
 // ─── @param-closure-this on a standalone function ───────────────────────────
 
 /// `@param-closure-this` works on standalone functions too, not just methods.
@@ -615,6 +653,56 @@ async fn test_param_closure_this_method_chain() {
         "Expected 'prefix' from chained call on @param-closure-this Route, got: {:?}",
         names,
     );
+}
+
+// ─── @param-closure-this in else / switch branches ──────────────────────────
+
+/// The call site can sit in any branch of an `if` or a `switch` case, not
+/// only the first `if` body.
+#[tokio::test]
+async fn test_param_closure_this_in_else_and_switch_branches() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_this_branches.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Route {\n",
+        "    public function middleware(string $m): self { return $this; }\n",
+        "}\n",
+        "class Router {\n",
+        "    /**\n",
+        "     * @param-closure-this Route $callback\n",
+        "     */\n",
+        "    public function group(\\Closure $callback): void {}\n",
+        "}\n",
+        "class AppRoutes {\n",
+        "    public function register(Router $router, bool $flag, int $mode): void {\n",
+        "        if ($flag) {\n",
+        "        } elseif ($mode > 1) {\n",
+        "        } else {\n",
+        "            $router->group(function () {\n",
+        "                $this->\n",
+        "            });\n",
+        "        }\n",
+        "        switch ($mode) {\n",
+        "            case 1:\n",
+        "                $router->group(function () {\n",
+        "                    $this->\n",
+        "                });\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    for (line, character) in [(16, 23), (22, 27)] {
+        let items = complete_at(&backend, &uri, src, line, character).await;
+        let names = method_names(&items);
+        assert!(
+            names.contains(&"middleware"),
+            "Expected 'middleware' from @param-closure-this Route on line {line}, got: {:?}",
+            names,
+        );
+    }
 }
 
 // ─── @param-closure-this in nested closures ─────────────────────────────────

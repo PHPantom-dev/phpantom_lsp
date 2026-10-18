@@ -54,17 +54,13 @@ impl Backend {
         if params.is_empty() {
             let patched = Self::patch_content_at_cursor(content, position);
             if patched != content {
-                let patched_classes: Vec<Arc<crate::types::ClassInfo>> =
-                    self.parse_php(&patched).into_iter().map(Arc::new).collect();
+                let patched_classes: Vec<Arc<crate::types::ClassInfo>> = self
+                    .parse_php_resolved(&patched)
+                    .into_iter()
+                    .map(Arc::new)
+                    .collect();
                 if !patched_classes.is_empty() {
-                    let patched_ctx = FileContext {
-                        classes: patched_classes,
-                        use_map: ctx.use_map.clone(),
-                        namespace: ctx.namespace.clone(),
-                        namespace_spans: ctx.namespace_spans.clone(),
-                        resolved_names: ctx.resolved_names.clone(),
-                        pest_uses: ctx.pest_uses.clone(),
-                    };
+                    let patched_ctx = ctx.with_classes(patched_classes);
                     params =
                         self.resolve_named_arg_params(&na_ctx, &patched, position, &patched_ctx);
                 }

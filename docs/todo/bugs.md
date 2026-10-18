@@ -53,130 +53,115 @@ No outstanding items.
 
 ## Templates
 
-#### B6. A closure returning a local variable binds the template from its declared type
+No outstanding items.
 
-**Impact: Medium · Complexity: Medium**
+## Name resolution
 
-A closure's declared return type is narrowed by what its body returns
-before it binds a `Closure(): T` template, but only when the returned
-expression resolves without the closure's own local variables:
-
-```php
-/**
- * @template T
- * @param \Closure(): T $cb
- * @return T
- */
-function remember(\Closure $cb): mixed { return $cb(); }
-
-function local(): Sub {
-    return remember(function (): Base {
-        $p = make();          // returns Sub
-        return $p->sortBy();  // returns static
-    });
-    // Return type Base is incompatible with declared return type Sub
-}
-
-function direct(): Sub {
-    return remember(function (): Base {
-        return make()->sortBy();  // fine, T = Sub
-    });
-}
-```
-
-`Sub` extends `Base`. PHPStan intersects the declared type with the
-union of every `return` statement's type, so `T` is `Sub` in both.
-
-**Where to change:** `infer_closure_return_type_seeded` in
-`src/type_engine/call_resolution/template_subs.rs` resolves the text of
-the first `return EXPR;` with only the closure's parameters seeded, so a
-variable assigned inside the body is unknown and the declared type wins.
-The body should be walked by the forward walker so locals are in scope,
-and every `return` should contribute.
-
-#### B7. A class named like a template parameter still shadows it in type checks
-
-**Impact: Low-Medium · Complexity: Low**
-
-With a class-like named `T` anywhere in the project (PDepend's test
-fixtures declare `trait T`), member access on a `@template T` value now
-resolves correctly, but argument and return compatibility checks still
-compare against the class instead of the template's bound:
-
-```php
-trait T {}   // anywhere in the index
-```
-
-```php
-namespace App;
-
-/** @template T of Art */
-class ArtList {
-    /** @param T[] $artifacts */
-    public function __construct(array $artifacts) {
-        foreach ($artifacts as $artifact) {
-            (new Filter())->accept($artifact);  // expects Art, got T
-        }
-    }
-}
-
-interface Node {
-    /**
-     * @template T of Node
-     * @param class-string<T> $targetType
-     * @return T|null
-     */
-    public function first($targetType);
-}
-
-abstract class AbstractNode implements Node {
-    public function first($targetType): ?Node {
-        foreach ($this->children() as $node) {
-            if ($node instanceof $targetType) {
-                return $node;  // Return type T is incompatible with ?Node
-            }
-            if (($child = $node->first($targetType)) !== null) {
-                // expects class-string<Node>, got class-string<T>
-                return $child;
-            }
-        }
-        return null;
-    }
-}
-```
-
-Removing the trait makes all three clean.
-
-**Where to change:** the argument and return type compatibility checks
-need the template names in scope (including ones inherited from an
-interface method's docblock) to win over class lookup, the way member
-access does since the earlier fix. An unqualified `T` inside
-`namespace App` also should not fall back to the global `\T` at all.
+No outstanding items.
 
 ## Miscellaneous
 
-#### B8. `use X as Y` makes a bare `X` skip another import of the same short name
+### B618. "Update return type" on a closure writes the enclosing method's type
 
-**Impact: Low-Medium · Complexity: Medium**
+**Impact: Medium · Complexity: Medium-High**
 
 ```php
-namespace App;
-
-use Illuminate\Support\Facades\Redis;
-use Redis as PhpRedis;
-
-Redis::connection('cache');
-// Method 'connection' not found on class 'Redis'
+public function run(): array {
+    $f = function (): string {
+        return 42;   // PHPStan: Anonymous function should return string but returns int.
+    };
+    return [];
+}
 ```
 
-PHP resolves `Redis` through the first import, the facade. PHPantom
-resolves it to the global `\Redis` extension class.
+The quick fix rewrites the closure to `function (): array` and adds a
+`@return array{}` docblock above the statement: the type it writes is the
+method's, not the closure's. The return-type quick fixes
+(`code_actions/phpstan/fix_return_type/`, `remove_unused_return_type.rs`,
+`add_iterable_type.rs`) find their function by scanning text (braces back
+from the diagnostic line, the `)` before the `{`, the line holding
+`function`), and the inference behind them (`declared_body` in
+`fix_return_type/inference.rs`) then looks for a named function or method
+around the body brace, so a closure resolves to the method it sits in. An
+arrow function has no brace at all, and the text scan lands on the
+method's. Locate the function through the parsed AST instead
+(`find_enclosing_function` in `code_actions/cursor_context.rs`, with
+`FunctionKinds::All`) and read the native return type, the body to infer
+from and the docblock (already `paren_function_docblock`) from that one
+node.
 
-**Where to change:** `resolve_class_name` and `class_loader_with` in
-`src/resolution.rs` deliberately skip an import when another import's
-target is the bare name, because the loader cannot tell a name spelled
-in source (`Redis`, meaning the facade) from an already-resolved FQN
-(`Redis`, expanded from `PhpRedis`). The real fix is to stop feeding
-the loader a mix of the two: resolve `PhpRedis` to `\Redis` (or mark it
-as already qualified) before it reaches the use-map check, then drop
-the heuristic.
+### B630. An unclosed call inside a braced `namespace` block drops the block
+
+**Impact: Low · Complexity: Medium**
+
+```php
+<?php
+namespace Lib {
+    function greet(string $name): void {}
+}
+namespace App {
+    use function Lib\greet;
+    greet(   // until the `)` is typed, this line reads as `namespace Lib`
+}
+```
+
+While a call inside a braced `namespace App { … }` block is missing its
+`)`, mago's parser leaves the whole block out of `program.statements`, so
+`update_ast` (`parser/ast_update.rs`) records no `NamespaceSpan` for it and
+indexes none of its imports, classes or functions. An offset in it falls
+into the last block the parse kept (`NamespaceSpan::containing`), and
+every name typed there resolves against that block's namespace and imports
+until the call is closed. Signature help runs on exactly this text, so it
+shows the wrong function or none. A file that declares its blocks as
+`namespace App;` keeps every block. The block survives only if the
+parser's recovery ends the argument list at the block's `}` instead of
+dropping the statement: upstream in `mago-syntax`, or by re-parsing with
+the call closed, as signature help's text fallback already does for the
+classes (`patch_content_for_signature`).
+
+### B633. Diagnostics forget top-level variables at a braced `namespace` block
+
+**Impact: Low · Complexity: Low**
+
+```php
+<?php
+namespace A {
+    $x = new \DateTime();
+    $x->nope();   // reported: no `nope()` on DateTime
+}
+namespace B {
+    $x->nope();   // not reported, though `$x` is still the DateTime
+}
+```
+
+PHP keeps one global variable scope across a file's `namespace` blocks, and
+hover follows it: `walk_body_forward` (`forward_walk/statements.rs`) walks
+each block's statements on the same scope, so hovering `$x` in block B shows
+`DateTime`. The diagnostic walk does not: `walk_top_level_statements`
+(`forward_walk/diagnostic_walk.rs`) recurses into each `Statement::Namespace`
+and starts it on a fresh `ScopeState`, so a variable assigned in one block
+is untyped in the next and nothing checks the members, arguments or types
+it is used with there. Carry the top-level scope from block to block,
+switching only the loaders and imports, as the recursion's `block_ctx`
+already does.
+
+### B634. Edits outside the PHPStan quick fixes write `\n` line endings into `\r\n` files
+
+**Impact: Low · Complexity: Medium**
+
+In a file saved with `\r\n` line endings, most edits other than the PHPStan
+quick fixes end the lines they add with `\n`: the `use` line an import adds
+(from completion, "Import class", or the `use Override;` of "Add
+`#[Override]`"), a generated constructor, getter, setter or property hook,
+implemented methods, an extracted function, constant or interface, "Update
+docblock", the docblock generated on `/**`, and an override completion,
+among others. The file is left with mixed line endings. Each builder writes a literal
+`\n` (`build_constructor` in `generate_constructor.rs`,
+`extract_function/codegen.rs`, `update_docblock/rewrite.rs`, …) where it
+should write `line_ending(content)` from `text_position.rs`, as the PHPStan
+quick fixes and `sort_use_statements` do. Imports need the terminator
+carried in: `UseBlockInfo::import_text` (`completion/use_edit.rs`) and the
+template's `@use` writer (`blade/use_block.rs`) build their line without
+the file's content, so `analyze_use_block_in` and
+`analyze_template_use_block` would record it in the `UseBlockInfo`, and
+`drop_repeated_separator` would strip that terminator instead of `\n`.

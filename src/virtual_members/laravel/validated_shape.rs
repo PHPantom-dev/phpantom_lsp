@@ -327,7 +327,7 @@ fn key_list(args: &[&str]) -> Option<Vec<String>> {
         .and_then(|arg| arg.strip_suffix(']'));
 
     match single_array {
-        Some(inner) => crate::type_engine::conditional_resolution::split_text_args(inner)
+        Some(inner) => crate::text_scan::split_top_level_commas(inner)
             .into_iter()
             .map(unquote)
             .collect(),

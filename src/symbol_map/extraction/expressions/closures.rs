@@ -12,62 +12,18 @@ pub(super) fn extract_closure_expr<'a>(closure: &'a Closure<'a>, ctx: &mut Extra
         .push((closure_scope_start, closure_scope_end));
 
     for param in closure.parameter_list.parameters.iter() {
-        // Attributes (PHP 8) on the parameter.
-        extract_from_attribute_lists(&param.attribute_lists, ctx, 0);
-        if let Some(ref hint) = param.hint {
-            extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
-        }
-        let name = {
-            let s = bytes_to_str(param.variable.name);
-            s.strip_prefix('$').unwrap_or(s).to_string()
-        };
-        ctx.spans.push(SymbolSpan {
-            start: param.variable.span.start.offset,
-            end: param.variable.span.end.offset,
-            kind: SymbolKind::Variable {
-                name: crate::atom::atom(&name),
-            },
-        });
-        let cp_offset = param.variable.span.start.offset;
-        ctx.var_defs.push(VarDefSite {
-            offset: cp_offset,
-            name,
-            kind: VarDefKind::Parameter,
-            scope_start: closure_scope_start,
-            effective_from: cp_offset,
-            nesting_depth: ctx.cond_nesting_depth,
-            block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-        });
-        if let Some(ref default) = param.default_value {
-            extract_from_expression(default.value, ctx, closure_scope_start);
-        }
+        extract_from_parameter(param, ctx, closure_scope_start);
     }
     if let Some(ref use_clause) = closure.use_clause {
         for var in use_clause.variables.iter() {
-            let name = {
-                let s = bytes_to_str(var.variable.name);
-                s.strip_prefix('$').unwrap_or(s).to_string()
-            };
-            ctx.spans.push(SymbolSpan {
-                start: var.variable.span.start.offset,
-                end: var.variable.span.end.offset,
-                kind: SymbolKind::Variable {
-                    name: crate::atom::atom(&name),
-                },
-            });
-            // Emit VarDefSite so that GTD inside the closure body
-            // can find the captured variable.  The definition is
-            // scoped to the closure body and immediately visible.
-            let use_var_offset = var.variable.span.start.offset;
-            ctx.var_defs.push(VarDefSite {
-                offset: use_var_offset,
-                name,
-                kind: VarDefKind::ClosureCapture,
-                scope_start: closure_scope_start,
-                effective_from: use_var_offset,
-                nesting_depth: ctx.cond_nesting_depth,
-                block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-            });
+            // The capture is defined in the closure body's scope and is
+            // visible at once, so go-to-definition inside the body finds it.
+            ctx.push_variable_definition(
+                (var.variable.span.start.offset, var.variable.span.end.offset),
+                bare_variable_name(var.variable.name),
+                VarDefKind::ClosureCapture,
+                closure_scope_start,
+            );
         }
     }
     if let Some(ref return_type) = closure.return_type_hint {
@@ -95,35 +51,7 @@ pub(super) fn extract_arrow_function_expr<'a>(
         .push((arrow.arrow.start.offset, arrow_scope_end));
 
     for param in arrow.parameter_list.parameters.iter() {
-        // Attributes (PHP 8) on the parameter.
-        extract_from_attribute_lists(&param.attribute_lists, ctx, 0);
-        if let Some(ref hint) = param.hint {
-            extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
-        }
-        let name = {
-            let s = bytes_to_str(param.variable.name);
-            s.strip_prefix('$').unwrap_or(s).to_string()
-        };
-        ctx.spans.push(SymbolSpan {
-            start: param.variable.span.start.offset,
-            end: param.variable.span.end.offset,
-            kind: SymbolKind::Variable {
-                name: crate::atom::atom(&name),
-            },
-        });
-        let ap_offset = param.variable.span.start.offset;
-        ctx.var_defs.push(VarDefSite {
-            offset: ap_offset,
-            name,
-            kind: VarDefKind::Parameter,
-            scope_start: arrow_scope_start,
-            effective_from: ap_offset,
-            nesting_depth: ctx.cond_nesting_depth,
-            block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-        });
-        if let Some(ref default) = param.default_value {
-            extract_from_expression(default.value, ctx, arrow_scope_start);
-        }
+        extract_from_parameter(param, ctx, arrow_scope_start);
     }
     if let Some(ref return_type) = arrow.return_type_hint {
         extract_from_hint_ctx(&return_type.hint, &mut ctx.spans, ClassRefContext::TypeHint);

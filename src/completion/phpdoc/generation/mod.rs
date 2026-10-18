@@ -77,7 +77,7 @@ pub fn try_generate_docblock(
     function_loader: FunctionLoader<'_>,
     uri: &str,
 ) -> Option<CompletionResponse> {
-    let (trigger_range, indent) = trigger::detect_docblock_trigger(content, position)?;
+    let (trigger_range, _) = trigger::detect_docblock_trigger(content, position)?;
 
     // Find the declaration below and classify it.
     let remaining = trigger::get_text_after_trigger(content, position);
@@ -98,10 +98,10 @@ pub fn try_generate_docblock(
         parse_decl::enrich_property_type_from_class(&mut sym, content, position, local_classes);
     }
 
-    let snippet = build::build_docblock_snippet(
+    let snippet = build::build_docblock(
         &context,
         &sym,
-        &indent,
+        &mut build::DocForm::snippet(),
         content,
         position,
         use_map,
@@ -118,15 +118,14 @@ pub fn try_generate_docblock(
 
     // Collect additional text edits (e.g. use imports for @throws).
     let additional_edits = if matches!(context, DocblockContext::FunctionOrMethod) {
-        build_throws_import_edits(
-            content,
-            position,
-            use_map,
-            file_namespace,
+        let throws_ctx = ThrowsContext {
             class_loader,
             function_loader,
-            backend.map(|backend| (backend, uri)),
-        )
+            use_map,
+            local_classes,
+            backend,
+        };
+        build_throws_import_edits(content, position, &throws_ctx, file_namespace, uri)
     } else {
         Vec::new()
     };
@@ -204,10 +203,10 @@ pub fn try_generate_docblock_on_enter(
     }
 
     // Build the docblock as plain text (no snippet tab stops).
-    let plain = build::build_docblock_plain(
+    let plain = build::build_docblock(
         &context,
         &sym,
-        &indent,
+        &mut build::DocForm::Plain { indent: &indent },
         content,
         position,
         use_map,
@@ -229,14 +228,19 @@ pub fn try_generate_docblock_on_enter(
 
     // Auto-import edits for @throws.
     if matches!(context, DocblockContext::FunctionOrMethod) {
+        let throws_ctx = ThrowsContext {
+            class_loader,
+            function_loader,
+            use_map,
+            local_classes,
+            backend,
+        };
         edits.extend(build_throws_import_edits(
             content,
             position,
-            use_map,
+            &throws_ctx,
             file_namespace,
-            class_loader,
-            function_loader,
-            backend.map(|backend| (backend, uri)),
+            uri,
         ));
     }
 
@@ -250,29 +254,21 @@ pub fn try_generate_docblock_on_enter(
 fn build_throws_import_edits(
     content: &str,
     position: Position,
-    use_map: &HashMap<String, String>,
+    throws_ctx: &ThrowsContext<'_>,
     file_namespace: &Option<String>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    function_loader: FunctionLoader<'_>,
-    import_target: Option<(&crate::Backend, &str)>,
+    uri: &str,
 ) -> Vec<TextEdit> {
-    let throws_ctx = ThrowsContext {
-        class_loader,
-        function_loader,
-        use_map,
-        file_namespace,
-    };
     let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
         content,
         position,
-        Some(&throws_ctx),
+        Some(throws_ctx),
     );
     if uncaught.is_empty() {
         return Vec::new();
     }
 
-    let use_block = match import_target {
-        Some((backend, uri)) => backend.use_block_at(uri, content, position),
+    let use_block = match throws_ctx.backend {
+        Some(backend) => backend.use_block_at(uri, content, position),
         None => analyze_use_block(content),
     };
     let mut edits = Vec::new();

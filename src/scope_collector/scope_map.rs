@@ -183,6 +183,20 @@ pub(crate) struct Frame {
     pub is_static: bool,
 }
 
+impl Frame {
+    /// The frames among `frames` nested strictly inside this one whose span
+    /// holds `offset`.
+    pub(crate) fn nested_frames_at<'a>(
+        &'a self,
+        frames: &'a [Frame],
+        offset: u32,
+    ) -> impl Iterator<Item = &'a Frame> {
+        frames.iter().filter(move |f| {
+            f.start > self.start && f.end < self.end && offset >= f.start && offset <= f.end
+        })
+    }
+}
+
 /// The kind of scope boundary a [`Frame`] represents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FrameKind {
@@ -354,13 +368,9 @@ impl ScopeMap {
                 && access.name != "parent"
             {
                 // Skip if inside a nested frame.
-                let in_nested = self.frames.iter().any(|f| {
-                    f.start > frame.start
-                        && f.end < frame.end
-                        && access.offset >= f.start
-                        && access.offset <= f.end
-                        && f.kind != FrameKind::Catch
-                });
+                let in_nested = frame
+                    .nested_frames_at(&self.frames, access.offset)
+                    .any(|f| f.kind != FrameKind::Catch);
                 if !in_nested {
                     var_names.push(access.name.clone());
                 }

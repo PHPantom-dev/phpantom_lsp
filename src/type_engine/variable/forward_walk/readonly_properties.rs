@@ -137,19 +137,8 @@ fn constructor_narrowed_properties(
     }
 
     let walk_ctx = ForwardWalkCtx {
-        current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        content: ctx.content,
         cursor_offset: u32::MAX,
-        class_loader: ctx.class_loader,
-        backend: ctx.backend,
-        loaders: ctx.loaders,
-        resolved_class_cache: ctx.resolved_class_cache,
-        enclosing_return_type: None,
-        top_level_scope: None,
-        in_loop: false,
-        template_markers: None,
-        cursor_scope: None,
+        ..ctx.fresh()
     };
     let mut ctor_scope = ScopeState::new();
     seed_this(&mut ctor_scope, &walk_ctx);

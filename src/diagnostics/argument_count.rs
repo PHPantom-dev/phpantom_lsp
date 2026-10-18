@@ -22,16 +22,12 @@
 //!   1 or 2-3 arguments, `mt_rand` accepts 0 or 2) that the
 //!   phpstorm-stubs format cannot express with a single declaration.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::parser::with_parse_cache;
-use crate::types::ResolvedCallableTarget;
 
-use super::helpers::{is_position_independent_call_expression, make_diagnostic};
+use super::helpers::{CallTargetCache, is_position_independent_call_expression, make_diagnostic};
 
 /// Diagnostic code used for argument-count diagnostics.
 pub(crate) const ARGUMENT_COUNT_MISMATCH_CODE: &str = "argument_count_mismatch";
@@ -255,9 +251,7 @@ impl Backend {
         // target depends on the call site's position. There is one cache
         // per `namespace` block, since the same text can name a different
         // target under another block's imports.
-        let call_caches = file_ctx.per_block(|_, _| {
-            RefCell::new(HashMap::<String, Option<ResolvedCallableTarget>>::new())
-        });
+        let call_targets = CallTargetCache::new(&file_ctx);
 
         // ── Walk every call site ────────────────────────────────────
         for call_site in &symbol_map.call_sites {
@@ -271,19 +265,7 @@ impl Backend {
 
             // Look up or populate the call expression cache.
             let resolved = if is_position_independent_call_expression(expr) {
-                call_caches
-                    .at(call_site.args_start)
-                    .borrow_mut()
-                    .entry(expr.to_string())
-                    .or_insert_with(|| {
-                        self.resolve_callable_target_at_offset(
-                            expr,
-                            content,
-                            call_site.args_start,
-                            &file_ctx,
-                        )
-                    })
-                    .clone()
+                call_targets.target(self, expr, content, call_site.args_start, &file_ctx)
             } else {
                 self.resolve_callable_target_at_offset(
                     expr,

@@ -490,3 +490,29 @@ function getBadges($model) {
         "should reject: variable has another write after the assignment"
     );
 }
+
+#[test]
+fn inline_in_closure_body() {
+    let content = r#"<?php
+function foo() {
+    $name = 'outer';
+    $fn = function () {
+        $name = getName();
+        return $name;
+    };
+    return $name;
+}
+"#;
+    let edits = run_inline(content, "$name = getName()").expect("action should be offered");
+    let result = apply_edits(content, &edits);
+    assert!(
+        result.contains("        return getName();"),
+        "closure read should be inlined:\n{}",
+        result
+    );
+    assert!(
+        result.contains("$name = 'outer';") && result.contains("    return $name;\n}"),
+        "the function's own variable should be untouched:\n{}",
+        result
+    );
+}

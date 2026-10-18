@@ -80,7 +80,33 @@ pub(crate) fn narrow_iterated_collection<'b>(
     entry_value_types: Option<&[ResolvedType]>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) -> Option<()> {
+) {
+    let Some((collection_key, collection_type)) =
+        guarded_collection_type(foreach, body_stmts, iter_type, entry_value_types, ctx)
+    else {
+        return;
+    };
+    // Keep whatever class backs the container itself (a `Collection` object
+    // rather than a plain array); only its element type changed.
+    let mut entry = scope
+        .get(&collection_key)
+        .first()
+        .cloned()
+        .unwrap_or_else(|| ResolvedType::from_type_string(collection_type.clone()));
+    entry.type_string = collection_type;
+    scope.set(&collection_key, vec![entry]);
+}
+
+/// The subject key of the collection [`narrow_iterated_collection`]
+/// narrows and the type the loop's leading guards proved it has, or `None`
+/// when the loop proves nothing about its entries.
+fn guarded_collection_type<'b>(
+    foreach: &'b Foreach<'b>,
+    body_stmts: &[&'b Statement<'b>],
+    iter_type: Option<&PhpType>,
+    entry_value_types: Option<&[ResolvedType]>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<(String, PhpType)> {
     // A braced body arrives as a single `Block` statement, and the guards
     // are its children rather than the body's.  Checked before anything is
     // allocated: a loop that does not open with a guard is the common case
@@ -129,22 +155,13 @@ pub(crate) fn narrow_iterated_collection<'b>(
     }
 
     let narrowed = guard_scope.get(&var_name);
-    if narrowed.is_empty() || !narrowing_changed_types(entry_value_types, narrowed) {
+    if narrowed.is_empty() || same_types(entry_value_types, narrowed) {
         return None;
     }
     let element = ResolvedType::types_joined(narrowed);
     let collection_type =
         crate::type_engine::variable::array_func_rules::with_element_type(iter_type, element)?;
-    // Keep whatever class backs the container itself (a `Collection` object
-    // rather than a plain array); only its element type changed.
-    let mut entry = scope
-        .get(&collection_key)
-        .first()
-        .cloned()
-        .unwrap_or_else(|| ResolvedType::from_type_string(collection_type.clone()));
-    entry.type_string = collection_type;
-    scope.set(&collection_key, vec![entry]);
-    Some(())
+    Some((collection_key, collection_type))
 }
 
 /// The unexpanded iterable type, tried source by source.
@@ -162,41 +179,8 @@ pub(crate) fn resolve_foreach_iterable_type_raw<'b>(
         }
     }
 
-    // Fall back to resolve_rhs_expression for complex expressions.
     let resolved = resolve_rhs_with_scope(foreach.expression, scope, ctx);
-    if !resolved.is_empty() {
-        return Some(ResolvedType::types_joined(&resolved));
-    }
-
-    // Fallback: for simple `$variable` iterators, check for an inline
-    // `/** @var Type $var */` or `@param` annotation near the foreach.
-    // Handles cases where the variable's type comes from a docblock
-    // rather than an assignment.
-    if let Expression::Variable(Variable::Direct(dv)) = foreach.expression {
-        let var_name = bytes_to_str(dv.name).to_string();
-        let foreach_offset = foreach.foreach.span().start.offset as usize;
-        if let Some(docblock_type) = crate::docblock::find_iterable_raw_type_in_source(
-            ctx.content,
-            foreach_offset,
-            &var_name,
-        )
-        .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
-        {
-            return Some(docblock_type);
-        }
-    }
-
-    // Final fallback: resolve the foreach expression as a "subject"
-    // through the full resolver pipeline (SubjectExpr::parse →
-    // property/method chain resolution).  Handles cases like
-    // `$this->getItems()` or `self::fetchAll()` where the expression
-    // type wasn't captured by scope lookup or resolve_rhs_expression
-    // above.
-    if let Some(iter_type) = resolve_foreach_expr_via_subject(foreach.expression, scope, ctx) {
-        return Some(iter_type);
-    }
-
-    None
+    (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
 }
 
 /// The pieces of a forward-walk context the shared iterable element/key
@@ -288,6 +272,103 @@ fn reset_foreach_destructured_element(
     }
 }
 
+/// What a `foreach` binds its targets to at the top of every iteration:
+/// the iterable's key and element types, overridden by the inline
+/// `/** @var Type $var */` docblocks above the loop.
+struct ForeachBinding<'b> {
+    foreach: &'b Foreach<'b>,
+    /// The iterable expression's type.
+    iter_type: Option<PhpType>,
+    value_var_name: Option<String>,
+    key_var_name: Option<String>,
+    value_docblock_override: Option<Vec<ResolvedType>>,
+    key_docblock_override: Option<Vec<ResolvedType>>,
+}
+
+impl<'b> ForeachBinding<'b> {
+    fn new(foreach: &'b Foreach<'b>, iter_type: Option<PhpType>, ctx: &ForwardWalkCtx<'_>) -> Self {
+        let value_var_name = match &foreach.target {
+            ForeachTarget::Value(val) => extract_foreach_var_name(val.value),
+            ForeachTarget::KeyValue(kv) => extract_foreach_var_name(kv.value),
+        };
+        let key_var_name = match &foreach.target {
+            ForeachTarget::Value(_) => None,
+            ForeachTarget::KeyValue(kv) => extract_foreach_var_name(kv.key),
+        };
+
+        // Docblock fallback: when `bind_foreach_value`/`bind_foreach_key`
+        // could not determine the element type from the iterable (e.g. the
+        // iterable is `mixed` or a bare `array`), check for inline
+        // `/** @var Type $var */` docblock(s) preceding the foreach keyword
+        // and use them to seed the key and/or value variables.  @var
+        // annotations are explicit developer overrides that take priority
+        // over types inferred from the iterable.
+        let mut value_docblock_override: Option<Vec<ResolvedType>> = None;
+        let mut key_docblock_override: Option<Vec<ResolvedType>> = None;
+        let foreach_offset = foreach.foreach.span().start.offset as usize;
+        if let Some(doc_text) = docblock_above(ctx.content, foreach_offset) {
+            for (doc_var, php_type) in &parse_var_docblock_pairs(doc_text) {
+                if value_var_name.as_ref() == Some(doc_var) {
+                    value_docblock_override = Some(resolve_type_to_resolved_types(php_type, ctx));
+                }
+                if key_var_name.as_ref() == Some(doc_var) {
+                    key_docblock_override = Some(resolve_type_to_resolved_types(php_type, ctx));
+                }
+            }
+        }
+
+        Self {
+            foreach,
+            iter_type,
+            value_var_name,
+            key_var_name,
+            value_docblock_override,
+            key_docblock_override,
+        }
+    }
+
+    /// Bind the value variable (and optionally the key variable) for one
+    /// iteration.
+    fn bind(&self, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
+        match &self.foreach.target {
+            ForeachTarget::Value(val) => {
+                bind_foreach_value(val.value, &self.iter_type, scope, ctx);
+            }
+            ForeachTarget::KeyValue(kv) => {
+                bind_foreach_key(kv.key, &self.iter_type, scope, ctx);
+                bind_foreach_value(kv.value, &self.iter_type, scope, ctx);
+            }
+        }
+        // Apply docblock overrides (overwrites bind_foreach_key/value results).
+        if let Some(ref resolved) = self.value_docblock_override
+            && let Some(ref vn) = self.value_var_name
+        {
+            scope.set(vn, resolved.clone());
+        }
+        if let Some(ref resolved) = self.key_docblock_override
+            && let Some(ref kn) = self.key_var_name
+        {
+            scope.set(kn, resolved.clone());
+        }
+        if self.value_docblock_override.is_none() {
+            record_key_value_pairing(self.foreach, self.iter_type.as_ref(), scope, ctx);
+        }
+        record_existing_keys(self.foreach, scope);
+    }
+
+    /// Undo what the previous iteration wrote to the targets (see
+    /// [`reset_foreach_target`]).
+    fn reset(&self, scope: &mut ScopeState, pre_loop_scope: Option<&ScopeState>) {
+        match &self.foreach.target {
+            ForeachTarget::Value(val) => reset_foreach_target(val.value, scope, pre_loop_scope),
+            ForeachTarget::KeyValue(kv) => {
+                reset_foreach_target(kv.key, scope, pre_loop_scope);
+                reset_foreach_target(kv.value, scope, pre_loop_scope);
+            }
+        }
+    }
+}
+
 /// Process a `foreach` statement.
 pub(crate) fn process_foreach<'b>(
     foreach: &'b Foreach<'b>,
@@ -302,78 +383,6 @@ pub(crate) fn process_foreach<'b>(
         return;
     }
 
-    // Apply any standalone `/** @var Type $var */` docblocks that precede
-    // the foreach keyword.  These are not separate AST statements (the
-    // parser attaches them as comments to the foreach), so they won't be
-    // processed by `process_expression_statement`.  Without this, variables
-    // typed only via docblock (common in Blade templates) won't be in scope
-    // when the iterable expression is resolved.
-    //
-    // We extract all variables referenced in the foreach expression and
-    // check for @var annotations for each one.
-    let foreach_offset = foreach.foreach.span().start.offset as usize;
-    if let Expression::Variable(Variable::Direct(dv)) = foreach.expression {
-        // `bytes_to_str(dv.name)` already includes the leading `$`, which
-        // is how scope keys and `find_var_raw_type_in_source` expect it.
-        let var_name = bytes_to_str(dv.name);
-        if let Some(var_type) =
-            crate::docblock::find_var_raw_type_in_source(ctx.content, foreach_offset, var_name)
-        {
-            let php_type = crate::util::resolve_php_type_names(&var_type, ctx.class_loader);
-            // An explicit inline `@var` seeds an empty scope entry, and it
-            // also refines a non-informative pre-existing type such as a
-            // `mixed` closure/function parameter or a bare `array`.  Without
-            // the second case, a `mixed` parameter would occupy the scope
-            // slot and shadow the developer's `@var iterable<T> $x`
-            // annotation, leaving the loop variable untyped.
-            let current = scope.get(var_name);
-            let should_apply = current.is_empty()
-                || current.iter().all(|rt| {
-                    crate::docblock::should_override_type_typed(&php_type, &rt.type_string)
-                });
-            if should_apply {
-                let resolved = resolve_type_to_resolved_types(&php_type, ctx);
-                scope.set(var_name, resolved);
-            }
-        }
-    } else {
-        // For complex expressions like `$users->active()->byName()`,
-        // extract the base variable and resolve its type from @var.
-        let expr_start = foreach.expression.span().start.offset as usize;
-        let expr_end = foreach.expression.span().end.offset as usize;
-        if let Some(expr_text) = ctx.content.get(expr_start..expr_end) {
-            // Extract the base variable (e.g. "$users" from "$users->active()->byName()")
-            if let Some(base_end) = expr_text.find("->").or_else(|| expr_text.find("::")) {
-                let base_var = expr_text[..base_end].trim();
-                // Scope keys retain the leading `$` (e.g. "$users"), so the
-                // lookup and the insert must both use the `$`-prefixed name,
-                // matching the direct-variable branch above.
-                if base_var.starts_with('$')
-                    && let Some(var_type) = crate::docblock::find_var_raw_type_in_source(
-                        ctx.content,
-                        foreach_offset,
-                        base_var,
-                    )
-                {
-                    let php_type = crate::util::resolve_php_type_names(&var_type, ctx.class_loader);
-                    // As in the direct-variable branch: seed an unknown base
-                    // variable, or refine a non-informative pre-existing type
-                    // (e.g. a `mixed` parameter), but never clobber a more
-                    // precise type inferred from an assignment.
-                    let current = scope.get(base_var);
-                    let should_apply = current.is_empty()
-                        || current.iter().all(|rt| {
-                            crate::docblock::should_override_type_typed(&php_type, &rt.type_string)
-                        });
-                    if should_apply {
-                        let resolved = resolve_type_to_resolved_types(&php_type, ctx);
-                        scope.set(base_var, resolved);
-                    }
-                }
-            }
-        }
-    }
-
     // The iterable expression is an expression position like any other,
     // so the writes it makes and the narrowing its own short-circuit
     // chains, ternary branches and `match (true)` arms prove have to reach
@@ -382,101 +391,31 @@ pub(crate) fn process_foreach<'b>(
     // reads `getTypes()` off the narrowed subject, not the declared one.
     process_expr(foreach.expression, scope, ctx);
 
-    // Resolve the iterable expression's type.
-    let iter_type = resolve_foreach_iterable_type(foreach, scope, ctx);
+    let binding = ForeachBinding::new(
+        foreach,
+        resolve_foreach_iterable_type(foreach, scope, ctx),
+        ctx,
+    );
+    let iter_type = &binding.iter_type;
 
     let pre_loop_scope = scope.clone();
 
-    // When the cursor is inside the loop body (completion path), discovery
-    // passes must walk the ENTIRE body; the final pass uses the real
-    // cursor_offset so it stops at the cursor as usual.
-    let body_span = match &foreach.body {
-        ForeachBody::Statement(inner) => inner.span(),
-        ForeachBody::ColonDelimited(body) => body.span(),
-    };
-    let cursor_in_body =
-        ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset;
-    let discovery_ctx = (if cursor_in_body && !is_diagnostic_scope_active() {
-        ctx.with_cursor_offset(u32::MAX)
-    } else {
-        ctx.with_cursor_offset(ctx.cursor_offset)
-    })
-    .with_in_loop(true);
-    let loop_body_ctx = ctx.with_in_loop(true);
+    let loop_ctxs = LoopBodyCtxs::new(
+        ctx,
+        match &foreach.body {
+            ForeachBody::Statement(inner) => inner.span(),
+            ForeachBody::ColonDelimited(body) => body.span(),
+        },
+    );
+    let cursor_in_body = loop_ctxs.cursor_in_body;
 
-    // Bind the value variable (and optionally the key variable).
-    match &foreach.target {
-        ForeachTarget::Value(val) => {
-            bind_foreach_value(val.value, &iter_type, scope, ctx);
-        }
-        ForeachTarget::KeyValue(kv) => {
-            bind_foreach_key(kv.key, &iter_type, scope, ctx);
-            bind_foreach_value(kv.value, &iter_type, scope, ctx);
-        }
-    }
-
-    // Docblock fallback: when `bind_foreach_value`/`bind_foreach_key`
-    // could not determine the element type from the iterable (e.g. the
-    // iterable is `mixed` or a bare `array`), check for inline
-    // `/** @var Type $var */` docblock(s) preceding the foreach keyword
-    // and use them to seed the key and/or value variables.  @var
-    // annotations are explicit developer overrides that take priority
-    // over types inferred from the iterable.
-    let value_var_name = match &foreach.target {
-        ForeachTarget::Value(val) => extract_foreach_var_name(val.value),
-        ForeachTarget::KeyValue(kv) => extract_foreach_var_name(kv.value),
-    };
-    let key_var_name = match &foreach.target {
-        ForeachTarget::Value(_) => None,
-        ForeachTarget::KeyValue(kv) => extract_foreach_var_name(kv.key),
-    };
-
-    // Collect resolved docblock overrides for key/value variables.
-    let mut value_docblock_override: Option<Vec<ResolvedType>> = None;
-    let mut key_docblock_override: Option<Vec<ResolvedType>> = None;
-    let foreach_offset = foreach.foreach.span().start.offset as usize;
-    let before = &ctx.content[..foreach_offset.min(ctx.content.len())];
-    let trimmed = before.trim_end();
-    if trimmed.ends_with("*/")
-        && let Some(doc_start) = trimmed.rfind("/**")
-    {
-        let doc_text = &trimmed[doc_start..trimmed.len()];
-        let var_annotations = parse_var_docblock_pairs(doc_text);
-        for (doc_var, php_type) in &var_annotations {
-            if let Some(ref vn) = value_var_name
-                && doc_var == vn
-            {
-                value_docblock_override = Some(resolve_type_to_resolved_types(php_type, ctx));
-            }
-            if let Some(ref kn) = key_var_name
-                && doc_var == kn
-            {
-                key_docblock_override = Some(resolve_type_to_resolved_types(php_type, ctx));
-            }
-        }
-    }
-
-    // Apply docblock overrides (overwrites bind_foreach_key/value results).
-    if let Some(ref resolved) = value_docblock_override
-        && let Some(ref vn) = value_var_name
-    {
-        scope.set(vn, resolved.clone());
-    }
-    if let Some(ref resolved) = key_docblock_override
-        && let Some(ref kn) = key_var_name
-    {
-        scope.set(kn, resolved.clone());
-    }
-    if value_docblock_override.is_none() {
-        record_key_value_pairing(foreach, iter_type.as_ref(), scope, ctx);
-    }
-    record_existing_keys(foreach, scope);
+    binding.bind(scope, ctx);
     // When the iterable is a bare `array` (no generic parameters)
     // and no @var docblock provided a concrete type, the element
     // type is `mixed`.  Seed it so that assignments from the loop
     // variable propagate `mixed` correctly through the body.
-    if let Some(ref vn) = value_var_name
-        && value_docblock_override.is_none()
+    if let Some(ref vn) = binding.value_var_name
+        && binding.value_docblock_override.is_none()
         && scope.get(vn).is_empty()
         && iter_type.as_ref().is_some_and(|it| it.is_bare_array())
     {
@@ -485,8 +424,10 @@ pub(crate) fn process_foreach<'b>(
 
     // What one entry looks like before the body has said anything about
     // it, which is the baseline the loop's own guards narrow.
-    let entry_value_types: Option<Vec<ResolvedType>> =
-        value_var_name.as_ref().map(|vn| scope.get(vn).to_vec());
+    let entry_value_types: Option<Vec<ResolvedType>> = binding
+        .value_var_name
+        .as_ref()
+        .map(|vn| scope.get(vn).to_vec());
 
     // ── Assignment-depth-bounded loop iteration ─────────────────
     //
@@ -513,27 +454,7 @@ pub(crate) fn process_foreach<'b>(
     let own_key_write_target = foreach_own_keys(foreach)
         .filter(|(array_var, key_var)| body_writes_own_key(&body_stmts, array_var, key_var));
 
-    // A dynamic-key write onto some *other* array (`$out[$k] = …`, unlike
-    // `own_key_write_target`'s self-mutating `$pairs[$cn] = …`) that runs on
-    // every path through the body describes that array's element at
-    // whatever key the loop is currently visiting — a fact that stays true
-    // regardless of which concrete key that is, and so survives the key
-    // variable's rebind between fixed-point passes. Without this, the
-    // rebind's blanket invalidation of synthetic keys reading the old key
-    // (`reset_foreach_target`) drops it, and the next pass falls back to
-    // the array's own general element type, which a loop write always
-    // widens scalar literals in (see `array_shape_writes::merge_nested_array_write_inner`).
-    let carried_key_writes: Vec<String> = if let ForeachTarget::KeyValue(kv) = &foreach.target
-        && let Expression::Variable(Variable::Direct(dv)) = kv.key
-    {
-        let key_var = bytes_to_str(dv.name);
-        always_written_array_vars(&body_stmts, key_var)
-            .into_iter()
-            .filter_map(|array_var| array_write_synthetic_key(&array_var, &[kv.key]))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let carried_key_writes = carried_key_writes(foreach, &body_stmts);
 
     // A `foreach` over an array the engine watched being built and knows
     // is still empty runs zero times, so it cannot change any type.  The
@@ -552,19 +473,13 @@ pub(crate) fn process_foreach<'b>(
         .as_ref()
         .is_some_and(|it| it.is_empty_array_shape())
     {
-        match &foreach.target {
-            ForeachTarget::Value(val) => reset_foreach_target(val.value, scope, None),
-            ForeachTarget::KeyValue(kv) => {
-                reset_foreach_target(kv.key, scope, None);
-                reset_foreach_target(kv.value, scope, None);
-            }
-        }
+        binding.reset(scope, None);
         let exit_frame = ExitFrameGuard::push();
-        walk_body_forward(body_stmts.iter().copied(), scope, &loop_body_ctx);
+        walk_body_forward(body_stmts.iter().copied(), scope, &loop_ctxs.body_ctx);
         exit_frame.pop();
         // A cursor inside the body is answered by the walk that stopped at
         // it, as for any other loop below.
-        if !(cursor_in_body && !is_diagnostic_scope_active()) {
+        if !loop_ctxs.answers_cursor() {
             *scope = pre_loop_scope;
         }
         return;
@@ -574,13 +489,7 @@ pub(crate) fn process_foreach<'b>(
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        LoopWalk {
-            pre_loop_scope: &pre_loop_scope,
-            assignment_depth,
-            fold_exit_edges: !cursor_in_body,
-            ctx: &loop_body_ctx,
-            discovery_ctx: &discovery_ctx,
-        },
+        loop_ctxs.walk(&pre_loop_scope, assignment_depth),
         |next_scope, point| {
             if point != LoopSeedPoint::Entry {
                 return;
@@ -594,33 +503,8 @@ pub(crate) fn process_foreach<'b>(
                 .collect();
             // Re-bind the foreach variables for the next iteration,
             // discarding what the previous one wrote to them.
-            match &foreach.target {
-                ForeachTarget::Value(val) => {
-                    reset_foreach_target(val.value, next_scope, Some(&pre_loop_scope));
-                    bind_foreach_value(val.value, &iter_type, next_scope, ctx);
-                }
-                ForeachTarget::KeyValue(kv) => {
-                    reset_foreach_target(kv.key, next_scope, Some(&pre_loop_scope));
-                    reset_foreach_target(kv.value, next_scope, Some(&pre_loop_scope));
-                    bind_foreach_key(kv.key, &iter_type, next_scope, ctx);
-                    bind_foreach_value(kv.value, &iter_type, next_scope, ctx);
-                }
-            }
-            // Re-apply docblock overrides after re-binding.
-            if let Some(ref resolved) = value_docblock_override
-                && let Some(ref vn) = value_var_name
-            {
-                next_scope.set(vn, resolved.clone());
-            }
-            if let Some(ref resolved) = key_docblock_override
-                && let Some(ref kn) = key_var_name
-            {
-                next_scope.set(kn, resolved.clone());
-            }
-            if value_docblock_override.is_none() {
-                record_key_value_pairing(foreach, iter_type.as_ref(), next_scope, ctx);
-            }
-            record_existing_keys(foreach, next_scope);
+            binding.reset(next_scope, Some(&pre_loop_scope));
+            binding.bind(next_scope, ctx);
             for (key, types) in carried {
                 if !next_scope.contains(key) {
                     next_scope.set(key, types);
@@ -636,7 +520,7 @@ pub(crate) fn process_foreach<'b>(
     // the pre-loop scope (the loop might not run) would bring back what an
     // enclosing loop's earlier pass left in a variable the body has since
     // reassigned above the cursor.
-    if cursor_in_body && !is_diagnostic_scope_active() {
+    if loop_ctxs.answers_cursor() {
         return;
     }
 
@@ -712,7 +596,7 @@ pub(crate) fn process_foreach<'b>(
         if body_always_runs && exits.breaks.is_empty() {
             mark_visited_keys_written(foreach, &body_stmts, iter_type.as_ref(), scope);
         }
-        let _ = narrow_iterated_collection(
+        narrow_iterated_collection(
             foreach,
             &body_stmts,
             iter_type.as_ref(),
@@ -721,6 +605,35 @@ pub(crate) fn process_foreach<'b>(
             ctx,
         );
     }
+}
+
+/// The synthetic keys of the arrays a keyed `foreach` writes at the key
+/// it is visiting on every path through its body, which the next
+/// iteration's rebind must carry over.
+///
+/// A dynamic-key write onto some *other* array (`$out[$k] = …`, unlike an
+/// own-key write's self-mutating `$pairs[$cn] = …`) that runs on every
+/// path through the body describes that array's element at whatever key
+/// the loop is currently visiting — a fact that stays true regardless of
+/// which concrete key that is, and so survives the key variable's rebind
+/// between fixed-point passes. Without this, the rebind's blanket
+/// invalidation of synthetic keys reading the old key
+/// (`reset_foreach_target`) drops it, and the next pass falls back to the
+/// array's own general element type, which a loop write always widens
+/// scalar literals in (see
+/// `array_shape_writes::merge_nested_array_write_inner`).
+fn carried_key_writes(foreach: &Foreach<'_>, body_stmts: &[&Statement<'_>]) -> Vec<String> {
+    let ForeachTarget::KeyValue(kv) = &foreach.target else {
+        return Vec::new();
+    };
+    let Expression::Variable(Variable::Direct(dv)) = kv.key else {
+        return Vec::new();
+    };
+    let key_var = bytes_to_str(dv.name);
+    always_written_array_vars(body_stmts, key_var)
+        .into_iter()
+        .filter_map(|array_var| array_write_synthetic_key(&array_var, &[kv.key]))
+        .collect()
 }
 
 /// Make the entries a loop wrote at every key it visited required.
@@ -843,21 +756,9 @@ fn mark_keys_written(
 fn statement_may_continue(stmt: &Statement<'_>) -> bool {
     match stmt {
         Statement::Continue(_) => true,
-        Statement::Block(block) => block.statements.iter().any(statement_may_continue),
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => {
-                statement_may_continue(body.statement)
-                    || body
-                        .else_if_clauses
-                        .iter()
-                        .any(|clause| statement_may_continue(clause.statement))
-                    || body
-                        .else_clause
-                        .as_ref()
-                        .is_some_and(|clause| statement_may_continue(clause.statement))
-            }
-            IfBody::ColonDelimited(_) => true,
-        },
+        Statement::Block(_) | Statement::If(_) => {
+            crate::parser::any_nested_statement(stmt, statement_may_continue)
+        }
         Statement::Expression(_) | Statement::Echo(_) | Statement::Return(_) => false,
         // Anything else (a nested loop, `switch`, `try`) is taken to possibly
         // hold one, rather than walking every shape it comes in.
@@ -1249,87 +1150,14 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
 ) -> Option<PhpType> {
     let raw = resolve_foreach_iterable_type_raw(foreach, scope, ctx)?;
     Some(
-        crate::type_engine::type_resolution::resolve_type_alias_typed(
+        crate::type_engine::types::aliases::resolve_type_alias_typed(
             &raw,
-            &ctx.current_class.name,
+            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         )
         .unwrap_or(raw),
     )
-}
-
-/// Resolve a foreach expression to a `PhpType` by treating it as a
-/// subject string and going through the full resolver pipeline.
-///
-/// It extracts the expression text, calls `resolve_target_classes` to
-/// get `ClassInfo` objects, and constructs a `TypeKind::Named` from the
-/// first resolved class.
-pub(crate) fn resolve_foreach_expr_via_subject<'b>(
-    expression: &'b Expression<'b>,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) -> Option<PhpType> {
-    let expr_span = expression.span();
-    let expr_start = expr_span.start.offset as usize;
-    let expr_end = expr_span.end.offset as usize;
-    let expr_text = ctx.content.get(expr_start..expr_end)?.trim();
-    if expr_text.is_empty() {
-        return None;
-    }
-
-    // Build a ResolutionCtx from the forward walker's context.
-    let scope_resolver = scope.snapshot_resolver();
-    let var_ctx = ctx.var_ctx_for_with_scope(
-        "$__foreach",
-        expr_span.start.offset,
-        &scope_resolver,
-        Some(scope.proofs()),
-    );
-    let rctx = var_ctx.as_resolution_ctx();
-
-    let resolved = crate::type_engine::resolver::resolve_target_classes(
-        expr_text,
-        crate::types::AccessKind::Arrow,
-        &rctx,
-    );
-
-    if resolved.is_empty() {
-        return None;
-    }
-
-    // Construct a PhpType from the resolved classes.  If any resolved
-    // type has a structured type_string (e.g. `list<User>`,
-    // `Collection<int, Product>`), prefer that — it carries generic
-    // parameters that `extract_value_type` can use.
-    for rt in &resolved {
-        if rt.type_string.has_type_structure() {
-            let expanded = crate::type_engine::type_resolution::resolve_type_alias_typed(
-                &rt.type_string,
-                &ctx.current_class.name,
-                ctx.all_classes,
-                ctx.class_loader,
-            )
-            .unwrap_or_else(|| rt.type_string.clone());
-            return Some(expanded);
-        }
-    }
-
-    // Fall back to the class name — `bind_foreach_value` Strategy 2
-    // will resolve it through inheritance to find element types.
-    // Use `fqn()` (not `name`) so that the returned `TypeKind::Named`
-    // carries the fully-qualified class name.  `ClassInfo.name` is
-    // always the short name (e.g. `OrderProductCollection`), while
-    // `fqn()` combines namespace + name into the FQN that the class
-    // loader needs to find and merge the class.
-    let first = resolved.first()?;
-    let name = first
-        .class_info
-        .as_ref()
-        .map(|c| c.fqn().to_string())
-        .or_else(|| first.type_string.base_name().map(|s| s.to_string()))?;
-
-    Some(PhpType::named(atom(&name)))
 }
 
 /// Bind a foreach value variable from the iterable's element type.

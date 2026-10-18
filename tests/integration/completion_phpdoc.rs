@@ -1798,6 +1798,36 @@ async fn test_phpdoc_return_void_no_hint_bare_return() {
     assert_eq!(return_item.unwrap().label, "@return void");
 }
 
+/// A value returned by a closure the function declares, or written in a
+/// string, is not the function's own.
+#[tokio::test]
+async fn test_phpdoc_return_void_no_hint_closure_return() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///phpdoc_no_hint_closure.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Demo {\n",
+        "    /**\n",
+        "     * @\n",
+        "     */\n",
+        "    public function register() {\n",
+        "        $this->handlers[] = function () { return 1; };\n",
+        "        echo 'return 2;';\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 8).await;
+
+    let return_item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("@return"));
+    assert_eq!(
+        return_item.map(|item| item.label.as_str()),
+        Some("@return void")
+    );
+}
+
 // ─── Inline @var completion ─────────────────────────────────────────────────
 
 /// Inline @var above a variable assignment should sort first (0a_ prefix),

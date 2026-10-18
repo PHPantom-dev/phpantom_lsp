@@ -29,11 +29,15 @@
 //!     narrows to the corresponding scalar type.
 
 mod assertions;
+mod conditional_returns;
+mod exits;
 mod guards;
 mod instanceof;
 mod resolve;
 
 pub(in crate::type_engine) use assertions::*;
+pub(in crate::type_engine) use conditional_returns::*;
+pub(in crate::type_engine) use exits::*;
 pub(in crate::type_engine) use guards::*;
 pub(in crate::type_engine) use instanceof::*;
 pub(in crate::type_engine) use resolve::*;
@@ -42,4 +46,4 @@ pub(in crate::type_engine) use resolve::*;
 pub(crate) use resolve::array_index_key;
 // The unreachable-code diagnostic asks the same "does control leave this
 // list?" question without types, so it shares the structural rules.
-pub(crate) use guards::{contains_entry_label, statement_leaves_block};
+pub(crate) use exits::{contains_entry_label, statement_leaves_block};

@@ -1,0 +1,13 @@
+// test: pipe into a closure resolves to the closure's return type
+// feature: completion
+// expect: getTimestamp(
+---
+<?php
+
+class Stamp {
+    public function getTimestamp(): int {}
+}
+
+$result = 'now' |> fn (string $input): Stamp => new Stamp();
+
+$result-><>

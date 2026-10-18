@@ -387,7 +387,7 @@ trait Bar {
 
 Every caller of `trait_this_bounds`/`extend_this_with_trait_bounds` is on
 a `$this`-context resolution path (`forward_walk/param_seeding.rs`,
-`forward_walk/callable_inference.rs`, `resolver/mod.rs`, and
+`forward_walk/callable_inference.rs`, `resolver/variable_subjects.rs`, and
 `rhs_resolution/property_access.rs`). None of them run for a bare
 `self::`/`static::` completion inside a trait body, so the required
 class's constants and static properties/methods never enter the

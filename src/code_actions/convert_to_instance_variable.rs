@@ -28,13 +28,15 @@ use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::method::MethodBody;
 use mago_syntax::cst::class_like::property::Property;
 use mago_syntax::cst::sequence::Sequence;
-use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::class_lookup::find_class_at_offset;
-use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
+use crate::code_actions::cursor_context::{
+    CursorContext, FunctionKinds, MemberContext, find_cursor_context, find_enclosing_function,
+    plain_assignment_at,
+};
 use crate::code_actions::{CodeActionData, detect_indent_from_members, make_code_action_data};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::{
@@ -182,12 +184,19 @@ fn plan_conversion(content: &str, cursor_offset: u32) -> Option<Conversion> {
                 _ => return None,
             };
 
-            let assignment_info =
-                find_assignment_in_block(block.statements.as_slice(), cursor_offset)?;
-            let var_name = assignment_info.0;
-            if var_name == "$this" {
+            let assignment = plain_assignment_at(program, cursor_offset)?;
+            // One in a closure, arrow function or anonymous class inside
+            // the method assigns a variable of that function, not of the
+            // method.
+            let owner = find_enclosing_function(
+                &program.statements,
+                assignment.variable.span().start.offset,
+                FunctionKinds::All,
+            )?;
+            if owner.span != method.span() {
                 return None;
             }
+            let var_name = bytes_to_str(assignment.variable.name).to_string();
 
             let bare_name = var_name.strip_prefix('$').unwrap_or(&var_name);
 
@@ -331,143 +340,6 @@ fn use_item_removal(list: &ClosureUseList, index: usize, content: &str) -> (u32,
     }
 }
 
-/// Walk statements to find a simple `$var = expr;` assignment at cursor.
-/// Returns the variable name (with `$` prefix) if found.
-fn find_assignment_in_block(statements: &[Statement<'_>], cursor: u32) -> Option<(String,)> {
-    for stmt in statements {
-        if let Some(result) = find_assignment_in_stmt(stmt, cursor) {
-            return Some(result);
-        }
-    }
-    None
-}
-
-fn find_assignment_in_stmt(stmt: &Statement<'_>, cursor: u32) -> Option<(String,)> {
-    let span = stmt.span();
-    if cursor < span.start.offset || cursor > span.end.offset {
-        return None;
-    }
-
-    match stmt {
-        Statement::Expression(expr_stmt) => {
-            if let Expression::Assignment(assignment) = expr_stmt.expression {
-                if !assignment.operator.is_assign() {
-                    return None;
-                }
-                let var = match assignment.lhs {
-                    Expression::Variable(Variable::Direct(dv)) => dv,
-                    _ => return None,
-                };
-                let var_name = bytes_to_str(var.name).to_string();
-                if var_name == "$this" {
-                    return None;
-                }
-                return Some((var_name,));
-            }
-            None
-        }
-        Statement::Block(block) => find_assignment_in_block(block.statements.as_slice(), cursor),
-        Statement::If(if_stmt) => {
-            if let Some(r) = find_assignment_in_if_body(if_stmt, cursor) {
-                return Some(r);
-            }
-            None
-        }
-        Statement::While(w) => match &w.body {
-            WhileBody::Statement(s) => find_assignment_in_stmt(s, cursor),
-            WhileBody::ColonDelimited(body) => {
-                find_assignment_in_block(body.statements.as_slice(), cursor)
-            }
-        },
-        Statement::DoWhile(dw) => find_assignment_in_stmt(dw.statement, cursor),
-        Statement::For(f) => match &f.body {
-            ForBody::Statement(s) => find_assignment_in_stmt(s, cursor),
-            ForBody::ColonDelimited(body) => {
-                find_assignment_in_block(body.statements.as_slice(), cursor)
-            }
-        },
-        Statement::Foreach(fe) => match &fe.body {
-            ForeachBody::Statement(s) => find_assignment_in_stmt(s, cursor),
-            ForeachBody::ColonDelimited(body) => {
-                find_assignment_in_block(body.statements.as_slice(), cursor)
-            }
-        },
-        Statement::Switch(sw) => {
-            for case in sw.body.cases().iter() {
-                let stmts = match case {
-                    SwitchCase::Expression(c) => &c.statements,
-                    SwitchCase::Default(c) => &c.statements,
-                };
-                if let Some(r) = find_assignment_in_block(stmts.as_slice(), cursor) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        Statement::Try(t) => {
-            if let Some(r) = find_assignment_in_block(t.block.statements.as_slice(), cursor) {
-                return Some(r);
-            }
-            for catch in t.catch_clauses.iter() {
-                if let Some(r) = find_assignment_in_block(catch.block.statements.as_slice(), cursor)
-                {
-                    return Some(r);
-                }
-            }
-            if let Some(ref finally) = t.finally_clause
-                && let Some(r) =
-                    find_assignment_in_block(finally.block.statements.as_slice(), cursor)
-            {
-                return Some(r);
-            }
-            None
-        }
-        _ => None,
-    }
-}
-
-fn find_assignment_in_if_body(if_stmt: &If<'_>, cursor: u32) -> Option<(String,)> {
-    match &if_stmt.body {
-        IfBody::Statement(body) => {
-            if let Some(r) = find_assignment_in_stmt(body.statement, cursor) {
-                return Some(r);
-            }
-            for else_if in body.else_if_clauses.iter() {
-                if let Some(r) = find_assignment_in_stmt(else_if.statement, cursor) {
-                    return Some(r);
-                }
-            }
-            if let Some(ref else_clause) = body.else_clause
-                && let Some(r) = find_assignment_in_stmt(else_clause.statement, cursor)
-            {
-                return Some(r);
-            }
-        }
-        IfBody::ColonDelimited(body) => {
-            for s in body.statements.iter() {
-                if let Some(r) = find_assignment_in_stmt(s, cursor) {
-                    return Some(r);
-                }
-            }
-            for else_if in body.else_if_clauses.iter() {
-                for s in else_if.statements.iter() {
-                    if let Some(r) = find_assignment_in_stmt(s, cursor) {
-                        return Some(r);
-                    }
-                }
-            }
-            if let Some(ref else_clause) = body.else_clause {
-                for s in else_clause.statements.iter() {
-                    if let Some(r) = find_assignment_in_stmt(s, cursor) {
-                        return Some(r);
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
 // ─── Backend impl ───────────────────────────────────────────────────────────
 
 impl Backend {
@@ -486,8 +358,7 @@ impl Backend {
         let Some(enclosing) = find_class_at_offset(&local_classes, cursor_offset) else {
             return false;
         };
-        let (use_map, namespace) = self.use_map_and_namespace_at(uri, cursor_offset);
-        let class_loader = self.class_loader_with(&local_classes, &use_map, &namespace);
+        let class_loader = self.resolved_class_loader_with(&local_classes);
         let resolved =
             resolve_class_fully_cached(enclosing, &class_loader, &self.resolved_class_cache);
         resolved

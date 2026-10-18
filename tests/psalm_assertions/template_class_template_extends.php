@@ -413,9 +413,9 @@ namespace PsalmTest_template_class_template_extends_10 {
     class Foo {}
 
     /**
-     * @template-implements IteratorAggregate<int, Foo>
+     * @template-implements \IteratorAggregate<int, Foo>
      */
-    class SomeIterator implements IteratorAggregate
+    class SomeIterator implements \IteratorAggregate
     {
         public function getIterator() {
             yield new Foo;
@@ -483,16 +483,16 @@ namespace PsalmTest_template_class_template_extends_12 {
         public $handlers;
 
         /**
-         * @param SplObjectStorage<\stdClass, mixed> $handlers
+         * @param \SplObjectStorage<\stdClass, mixed> $handlers
          */
-        public function __construct(SplObjectStorage $handlers)
+        public function __construct(\SplObjectStorage $handlers)
         {
             $this->handlers = $handlers;
         }
     }
 
-    /** @var SplObjectStorage<\stdClass, mixed> */
-    $storage = new SplObjectStorage();
+    /** @var \SplObjectStorage<\stdClass, mixed> */
+    $storage = new \SplObjectStorage();
     new SomeService($storage);
 
     $c = new \stdClass();

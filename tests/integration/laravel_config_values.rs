@@ -11,8 +11,7 @@
 
 use crate::common::{
     LARAVEL_APP_COMPOSER, complete_labels_at_opened, create_initialized_psr4_workspace,
-    definition_locations, goto_definition_at, markup_hover_at, messages_with_code, position_after,
-    position_of,
+    definitions_at, hover_on, messages_with_code, position_after, position_of,
 };
 use tower_lsp::lsp_types::*;
 
@@ -77,30 +76,6 @@ fn config_diagnostics(backend: &phpantom_lsp::Backend, uri: &Url, content: &str)
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), content, &mut diags);
     messages_with_code(&diags, "invalid_laravel_config")
-}
-
-/// The go-to-definition targets inside the first occurrence of `needle`.
-async fn definitions_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    content: &str,
-    needle: &str,
-) -> Vec<Location> {
-    let position = position_of(content, needle);
-    definition_locations(
-        goto_definition_at(backend, uri, position.line, position.character + 2).await,
-    )
-}
-
-/// The hover over the first `needle` (a bare `$variable;` statement).
-async fn hover_on(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    content: &str,
-    needle: &str,
-) -> String {
-    let position = position_of(content, needle);
-    markup_hover_at(backend, uri, position.line, position.character + 1).await
 }
 
 // ─── Where a key is declared ────────────────────────────────────────────────

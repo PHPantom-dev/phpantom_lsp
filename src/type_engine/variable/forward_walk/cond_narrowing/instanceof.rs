@@ -20,7 +20,7 @@ pub(super) fn exclude_classes_in_scope(
     let resolve = |hint: PhpType| {
         crate::type_engine::type_resolution::resolved_types_for_hint(
             hint,
-            &var_ctx.current_class.name,
+            &var_ctx.current_class.fqn(),
             var_ctx.all_classes,
             var_ctx.class_loader,
         )
@@ -177,6 +177,7 @@ pub(super) fn commit_chain_instanceof<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<String> {
     let scope_resolver = scope.snapshot_resolver();
+    let names = ctx.written_names();
 
     // Track which variables have been narrowed by instanceof across
     // `&&` operands so we can merge them, plus where each subject's
@@ -196,7 +197,8 @@ pub(super) fn commit_chain_instanceof<'b>(
     for (op_idx, operand) in operands.iter().enumerate() {
         for var_name in var_names {
             // Compound OR instanceof: `$x instanceof A || $x instanceof B`
-            if let Some(classes) = narrowing::try_extract_compound_or_instanceof(operand, var_name)
+            if let Some(classes) =
+                narrowing::try_extract_compound_or_instanceof(operand, var_name, &names)
                 && !classes.is_empty()
             {
                 let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
@@ -205,7 +207,7 @@ pub(super) fn commit_chain_instanceof<'b>(
                     let entry = alternative_results.entry(var_name.clone()).or_default();
                     ResolvedType::extend_unique(
                         entry,
-                        union.into_iter().map(ResolvedType::from_class).collect(),
+                        union.into_iter().map(ResolvedType::from_arc).collect(),
                     );
                 }
                 continue;
@@ -230,7 +232,7 @@ pub(super) fn commit_chain_instanceof<'b>(
                         let entry = alternative_results.entry(var_name.clone()).or_default();
                         ResolvedType::extend_unique(
                             entry,
-                            union.into_iter().map(ResolvedType::from_class).collect(),
+                            union.into_iter().map(ResolvedType::from_arc).collect(),
                         );
                     }
                 }
@@ -284,14 +286,15 @@ pub(super) fn commit_chain_instanceof<'b>(
 
             // Single instanceof (including negated, is_a, get_class),
             // or a boolean that stands for one.
-            if let Some(extraction) =
-                narrowing::try_extract_instanceof_with_negation(operand, var_name).or_else(|| {
-                    alias_extractions[op_idx]
-                        .iter()
-                        .find(|a| a.subject == *var_name)
-                        .map(|a| a.extraction.clone())
-                })
-            {
+            if let Some(extraction) = narrowing::try_extract_instanceof_with_negation(
+                operand, var_name, &names,
+            )
+            .or_else(|| {
+                alias_extractions[op_idx]
+                    .iter()
+                    .find(|a| a.subject == *var_name)
+                    .map(|a| a.extraction.clone())
+            }) {
                 let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
                 if extraction.negated {
                     // Negated instanceof: apply exclusion to the current
@@ -389,17 +392,6 @@ pub(super) fn include_unloadable_class_in_scope(
     scope.set(var_name, results);
 }
 
-/// Write the outcome of a *successful* `instanceof` check on `var_name`
-/// into the scope.
-///
-/// `narrowed` holds the classes the check proves the value is; the
-/// variable's current types decide how they combine with what was already
-/// known.  Both polarities of the check reach this: a positive
-/// `instanceof` in a truthy branch, and the fall-through of a
-/// `if (!$x instanceof T) { return; }` guard, which proves exactly the
-/// same thing.  Keeping one implementation is what stops the guard form
-/// from drifting back into *adding* `T` to the union instead of
-/// filtering it down to `T`.
 /// The classes `$subject instanceof <value>` narrows to, when the
 /// right-hand side is a value rather than a literal class name.
 ///
@@ -440,6 +432,17 @@ pub(super) fn dynamic_instanceof_targets(
     targets
 }
 
+/// Write the outcome of a *successful* `instanceof` check on `var_name`
+/// into the scope.
+///
+/// `narrowed` holds the classes the check proves the value is; the
+/// variable's current types decide how they combine with what was already
+/// known.  Both polarities of the check reach this: a positive
+/// `instanceof` in a truthy branch, and the fall-through of a
+/// `if (!$x instanceof T) { return; }` guard, which proves exactly the
+/// same thing.  Keeping one implementation is what stops the guard form
+/// from drifting back into *adding* `T` to the union instead of
+/// filtering it down to `T`.
 pub(super) fn commit_instanceof_narrowing(
     var_name: &str,
     mut narrowed: Vec<ResolvedType>,
@@ -477,40 +480,11 @@ pub(super) fn commit_instanceof_narrowing(
     // `is_a($x, C::class, true)` also passes when `$x` is a
     // `class-string<C>`, so a string alternative already in the subject's
     // type must survive every path below that would otherwise replace the
-    // whole union with just the checked class. The string half can be a
-    // whole entry (`string`) or one member of a broader union carried by a
-    // single entry (`object|string`), so pull it out at the union-member
-    // level rather than requiring the whole entry to be string-only.
+    // whole union with just the checked class.
     // `apply_class_string_guard_narrowing` (run right after this pass)
     // turns the preserved string alternative into `class-string<C>`.
-    let string_alt: Vec<ResolvedType> = if allow_string {
-        existing
-            .iter()
-            .filter(|rt| rt.class_info.is_none())
-            .filter_map(|rt| {
-                // A `mixed` value may be a class name as much as an object,
-                // so it keeps a string half for the class-string pass too.
-                let stringy: Vec<PhpType> = rt
-                    .type_string
-                    .union_members()
-                    .into_iter()
-                    .filter_map(|m| {
-                        if m.is_mixed() {
-                            Some(PhpType::string())
-                        } else {
-                            m.is_subtype_of(&PhpType::string()).then(|| m.clone())
-                        }
-                    })
-                    .collect();
-                match stringy.len() {
-                    0 => None,
-                    1 => Some(ResolvedType::from_type_string(
-                        stringy.into_iter().next().unwrap(),
-                    )),
-                    _ => Some(ResolvedType::from_type_string(PhpType::union(stringy))),
-                }
-            })
-            .collect()
+    let string_alt = if allow_string {
+        string_alternatives(existing)
     } else {
         Vec::new()
     };
@@ -533,33 +507,7 @@ pub(super) fn commit_instanceof_narrowing(
     // A subject with no object alternative at all is deliberately left to
     // the passes that run after this one: `is_a($s, C::class, true)` on a
     // `string` proves a `class-string<C>`, not a `C`.
-    let is_broad_object = |ty: &PhpType| {
-        matches!(
-            ty.kind(),
-            TypeKind::Named(n) if n.eq_ignore_ascii_case("mixed") || n.eq_ignore_ascii_case("object")
-        )
-    };
-    let mut names_class = false;
-    let mut broad_object = false;
-    for rt in existing {
-        if rt.class_info.is_some() {
-            names_class = true;
-            break;
-        }
-        for member in rt.type_string.union_members() {
-            if !member.top_level_class_names().is_empty() {
-                names_class = true;
-                break;
-            }
-            let bare = member.non_null_type();
-            if is_broad_object(bare.as_ref().unwrap_or(member)) {
-                broad_object = true;
-            }
-        }
-        if names_class {
-            break;
-        }
-    }
+    let (names_class, broad_object) = class_alternatives(existing);
     if !names_class && broad_object {
         scope.set(var_name, with_string_alt(narrowed));
         return;
@@ -575,25 +523,163 @@ pub(super) fn commit_instanceof_narrowing(
         return;
     }
 
-    // Typed variable — filter the existing union to only types present in
-    // the narrowed set.  This correctly handles both single instanceof
-    // (`Dog|Cat` → `Dog`) and OR instanceof (`Dog|Cat|Other` → `Dog|Cat`).
-    //
-    // When the narrowed type is NOT in the existing union (e.g.
-    // `MockInterface` narrowed to `MolliePayment`), this is an
-    // intersection case — apply via apply_instanceof_inclusion which has
-    // interface intersection logic.
     let narrowed_fqns: Vec<String> = narrowed
         .iter()
         .filter_map(|rt| rt.class_info.as_ref().map(|c| c.fqn().to_string()))
         .collect();
 
-    // Try filtering: keep existing entries whose class is in the narrowed
-    // set, or is a subtype of one — a `VarLikeIdentifier` alternative
-    // passes `instanceof Identifier` and stays as itself, being the more
-    // specific of the two.  An exact check
-    // (`get_class($x) === Identifier::class`) pins the identity instead,
-    // and there the subclass does not pass.
+    if let Some(filtered) =
+        filter_to_checked_classes(existing, &narrowed, &narrowed_fqns, exact, intersected, ctx)
+    {
+        // Every surviving entry was `null`, which a successful check
+        // rules out: the checked classes are the whole answer.
+        let result = if filtered.is_empty() {
+            narrowed
+        } else {
+            filtered
+        };
+        scope.set(var_name, with_string_alt(result));
+        return;
+    }
+
+    // A template parameter nothing binds (`@template T`) names no class
+    // the check could filter by, and neither does a class the project does
+    // not ship.  A value that passes the check is both at once, `A&T`,
+    // which is also what lets the join after the `if` fold it back into
+    // the bare `T` rather than leave `T|A` behind.
+    if let Some(opaque) = opaque_named_alternatives(existing, ctx) {
+        let both = intersect_with_opaque(&narrowed, &opaque);
+        scope.set(var_name, with_string_alt(both));
+        return;
+    }
+
+    // An earlier conjunct of the same chain proved the class the subject
+    // holds, and this one proves an unrelated class: the value the branch
+    // runs on is both.  `$x instanceof Foobar && $x instanceof Barfoo` keeps
+    // the members of both, as the two checks spelled side by side promise.
+    if conjoined
+        && !narrowed_fqns.iter().any(|checked| {
+            existing.iter().any(|rt| {
+                rt.class_info.as_ref().is_some_and(|cls| {
+                    crate::class_lookup::is_subtype_of_names(checked, &cls.fqn(), ctx.class_loader)
+                })
+            })
+        })
+    {
+        let mut both: Vec<ResolvedType> = existing
+            .iter()
+            .filter(|rt| rt.class_info.is_some())
+            .cloned()
+            .collect();
+        ResolvedType::extend_unique(&mut both, narrowed);
+        ResolvedType::tag_as_intersection(&mut both);
+        scope.set(var_name, with_string_alt(both));
+        return;
+    }
+
+    let results = include_checked_classes(
+        existing,
+        &narrowed_fqns,
+        intersected,
+        var_name,
+        ctx,
+        scope_resolver,
+    );
+    if !results.is_empty() {
+        scope.set(var_name, with_string_alt(results));
+    } else {
+        // Fallback: use the narrowed types directly.
+        scope.set(var_name, with_string_alt(narrowed));
+    }
+}
+
+/// The string half of the subject's alternatives, which an
+/// `is_a($x, C::class, true)` check lets through as a class name.  It can
+/// be a whole entry (`string`) or one member of a broader union carried by
+/// a single entry (`object|string`), so it is pulled out at the
+/// union-member level rather than requiring the whole entry to be
+/// string-only.
+fn string_alternatives(existing: &[ResolvedType]) -> Vec<ResolvedType> {
+    existing
+        .iter()
+        .filter(|rt| rt.class_info.is_none())
+        .filter_map(|rt| {
+            // A `mixed` value may be a class name as much as an object,
+            // so it keeps a string half for the class-string pass too.
+            let stringy: Vec<PhpType> = rt
+                .type_string
+                .union_members()
+                .into_iter()
+                .filter_map(|m| {
+                    if m.is_mixed() {
+                        Some(PhpType::string())
+                    } else {
+                        m.is_subtype_of(&PhpType::string()).then(|| m.clone())
+                    }
+                })
+                .collect();
+            match stringy.len() {
+                0 => None,
+                1 => Some(ResolvedType::from_type_string(
+                    stringy.into_iter().next().unwrap(),
+                )),
+                _ => Some(ResolvedType::from_type_string(PhpType::union(stringy))),
+            }
+        })
+        .collect()
+}
+
+/// Whether any of the subject's alternatives names a class, and whether
+/// any is a bare `object` / `mixed` (nullable or not).
+fn class_alternatives(existing: &[ResolvedType]) -> (bool, bool) {
+    let is_broad_object = |ty: &PhpType| {
+        matches!(
+            ty.kind(),
+            TypeKind::Named(n) if n.eq_ignore_ascii_case("mixed") || n.eq_ignore_ascii_case("object")
+        )
+    };
+    let mut broad_object = false;
+    for rt in existing {
+        if rt.class_info.is_some() {
+            return (true, broad_object);
+        }
+        for member in rt.type_string.union_members() {
+            if !member.top_level_class_names().is_empty() {
+                return (true, broad_object);
+            }
+            let bare = member.non_null_type();
+            if is_broad_object(bare.as_ref().unwrap_or(member)) {
+                broad_object = true;
+            }
+        }
+    }
+    (false, broad_object)
+}
+
+/// Filter the subject's class alternatives down to the ones that pass the
+/// check, or `None` when none passes outright.  The result has `null`
+/// stripped, since a successful check guarantees non-null, and may be
+/// empty when nothing else was left.
+///
+/// Typed variable — filter the existing union to only types present in
+/// the narrowed set.  This correctly handles both single instanceof
+/// (`Dog|Cat` → `Dog`) and OR instanceof (`Dog|Cat|Other` → `Dog|Cat`).
+/// When the narrowed type is NOT in the existing union (e.g.
+/// `MockInterface` narrowed to `MolliePayment`), this is an intersection
+/// case, which [`include_checked_classes`] handles.
+fn filter_to_checked_classes(
+    existing: &[ResolvedType],
+    narrowed: &[ResolvedType],
+    narrowed_fqns: &[String],
+    exact: bool,
+    intersected: bool,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    // Keep existing entries whose class is in the narrowed set, or is a
+    // subtype of one — a `VarLikeIdentifier` alternative passes
+    // `instanceof Identifier` and stays as itself, being the more specific
+    // of the two.  An exact check (`get_class($x) === Identifier::class`)
+    // pins the identity instead, and there the subclass does not pass.
     //
     // A kept entry's own type_string may still be the whole pre-check union
     // (a conditional return type resolves to one entry naming a class and
@@ -620,8 +706,8 @@ pub(super) fn commit_instanceof_narrowing(
     // half becomes the intersection, carried by one entry per class so
     // member lookup sees both, and is judged beside the alternatives that
     // passed outright (`SomeClass&SomeInterface|SomeInterface`).  When no
-    // alternative passes outright, `apply_instanceof_inclusion` below
-    // decides instead.
+    // alternative passes outright, `include_checked_classes` decides
+    // instead.
     let mut filtered: Vec<ResolvedType> = Vec::with_capacity(existing.len());
     let mut any_passed = false;
     for rt in existing {
@@ -645,7 +731,7 @@ pub(super) fn commit_instanceof_narrowing(
             filtered.push(rt);
             continue;
         }
-        for checked in &narrowed {
+        for checked in narrowed {
             let Some(checked_cls) = checked.class_info.as_ref() else {
                 continue;
             };
@@ -680,79 +766,56 @@ pub(super) fn commit_instanceof_narrowing(
         }
     }
 
-    if any_passed && !filtered.is_empty() {
-        // Filter matched — use the filtered results (preserves richer type
-        // info from original resolution).  Also strip bare `null` entries:
-        // a successful instanceof check guarantees non-null, so `null`
-        // entries added by `from_classes_with_hint` must be removed.
-        let mut filtered: Vec<ResolvedType> = filtered
-            .into_iter()
-            .filter(|rt| !rt.type_string.is_null())
-            .collect();
-        if intersected {
-            ResolvedType::tag_as_intersection(&mut filtered);
-        }
-        if filtered.is_empty() {
-            scope.set(var_name, with_string_alt(narrowed));
-        } else {
-            scope.set(var_name, with_string_alt(filtered));
-        }
-        return;
+    if !any_passed || filtered.is_empty() {
+        return None;
     }
+    // Filter matched — use the filtered results (preserves richer type
+    // info from original resolution).  Also strip bare `null` entries:
+    // a successful instanceof check guarantees non-null, so `null`
+    // entries added by `from_classes_with_hint` must be removed.
+    let mut filtered: Vec<ResolvedType> = filtered
+        .into_iter()
+        .filter(|rt| !rt.type_string.is_null())
+        .collect();
+    if intersected {
+        ResolvedType::tag_as_intersection(&mut filtered);
+    }
+    Some(filtered)
+}
 
-    // A template parameter nothing binds (`@template T`) names no class
-    // the check could filter by, and neither does a class the project does
-    // not ship.  A value that passes the check is both at once, `A&T`,
-    // which is also what lets the join after the `if` fold it back into
-    // the bare `T` rather than leave `T|A` behind.
-    if let Some(opaque) = opaque_named_alternatives(existing, ctx) {
-        let mut intersected: Vec<ResolvedType> = Vec::with_capacity(narrowed.len());
-        for checked in &narrowed {
-            for name in &opaque {
-                ResolvedType::extend_unique(
-                    &mut intersected,
-                    vec![ResolvedType {
-                        type_string: PhpType::intersection(vec![
-                            checked.type_string.clone(),
-                            name.clone(),
-                        ]),
-                        ..checked.clone()
-                    }],
-                );
-            }
+/// Each checked class intersected with each opaque name the subject is
+/// known by (see [`opaque_named_alternatives`]).
+fn intersect_with_opaque(narrowed: &[ResolvedType], opaque: &[PhpType]) -> Vec<ResolvedType> {
+    let mut intersected: Vec<ResolvedType> = Vec::with_capacity(narrowed.len());
+    for checked in narrowed {
+        for name in opaque {
+            ResolvedType::extend_unique(
+                &mut intersected,
+                vec![ResolvedType {
+                    type_string: PhpType::intersection(vec![
+                        checked.type_string.clone(),
+                        name.clone(),
+                    ]),
+                    ..checked.clone()
+                }],
+            );
         }
-        scope.set(var_name, with_string_alt(intersected));
-        return;
     }
+    intersected
+}
 
-    // An earlier conjunct of the same chain proved the class the subject
-    // holds, and this one proves an unrelated class: the value the branch
-    // runs on is both.  `$x instanceof Foobar && $x instanceof Barfoo` keeps
-    // the members of both, as the two checks spelled side by side promise.
-    if conjoined
-        && !narrowed_fqns.iter().any(|checked| {
-            existing.iter().any(|rt| {
-                rt.class_info.as_ref().is_some_and(|cls| {
-                    crate::class_lookup::is_subtype_of_names(checked, &cls.fqn(), ctx.class_loader)
-                })
-            })
-        })
-    {
-        let mut both: Vec<ResolvedType> = existing
-            .iter()
-            .filter(|rt| rt.class_info.is_some())
-            .cloned()
-            .collect();
-        ResolvedType::extend_unique(&mut both, narrowed);
-        ResolvedType::tag_as_intersection(&mut both);
-        scope.set(var_name, with_string_alt(both));
-        return;
-    }
-
-    // No overlap between existing and narrowed types.  This is the
-    // intersection case (e.g. MockInterface narrowed to MolliePayment).
-    // Use apply_instanceof_inclusion which produces the intersection when
-    // one side is an interface.
+/// No overlap between existing and narrowed types.  This is the
+/// intersection case (e.g. MockInterface narrowed to MolliePayment).
+/// Use apply_instanceof_inclusion which produces the intersection when
+/// one side is an interface.
+fn include_checked_classes(
+    existing: &[ResolvedType],
+    narrowed_fqns: &[String],
+    intersected: bool,
+    var_name: &str,
+    ctx: &ForwardWalkCtx<'_>,
+    scope_resolver: &dyn Fn(&str) -> Vec<ResolvedType>,
+) -> Vec<ResolvedType> {
     let mut results = existing.to_vec();
     // Apply all narrowed classes as a single group by building a union type.
     let union_type = if narrowed_fqns.len() == 1 {
@@ -788,10 +851,5 @@ pub(super) fn commit_instanceof_narrowing(
     if intersected || kept_unchecked_class {
         ResolvedType::tag_as_intersection(&mut results);
     }
-    if !results.is_empty() {
-        scope.set(var_name, with_string_alt(results));
-    } else {
-        // Fallback: use the narrowed types directly.
-        scope.set(var_name, with_string_alt(narrowed));
-    }
+    results
 }

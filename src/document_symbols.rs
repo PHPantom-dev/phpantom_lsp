@@ -23,13 +23,17 @@
 //! sections, stacks, and component tags) are added on top. See
 //! [`crate::blade::outline`].
 
+use std::fmt::Write;
+
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::blade::outline::OutlineEntry;
+use crate::php_type::PhpType;
 use crate::text_position::LineIndex;
 use crate::types::{
-    ClassInfo, ClassLikeKind, ConstantInfo, FunctionInfo, MethodInfo, PropertyInfo, Visibility,
+    ClassInfo, ClassLikeKind, ConstantInfo, FunctionInfo, MethodInfo, ParameterInfo, PropertyInfo,
+    Visibility,
 };
 use crate::util::short_name;
 
@@ -536,66 +540,36 @@ fn build_method_detail(method: &MethodInfo) -> Option<String> {
         detail.push_str("static ");
     }
 
-    // Parameter list.
-    detail.push('(');
-    let params: Vec<String> = method
-        .parameters
-        .iter()
-        .map(|p| {
-            let mut s = String::new();
-            if let Some(ref t) = p.type_hint {
-                s.push_str(&t.to_string());
-                s.push(' ');
-            }
-            if p.is_variadic {
-                s.push_str("...");
-            }
-            s.push_str(&p.name);
-            s
-        })
-        .collect();
-    detail.push_str(&params.join(", "));
-    detail.push(')');
-
-    // Return type.
-    if let Some(ref ret) = method.return_type {
-        detail.push_str(": ");
-        detail.push_str(&ret.to_string());
-    }
-
+    push_signature(&mut detail, &method.parameters, method.return_type.as_ref());
     Some(detail)
 }
 
 /// Build a detail string for a standalone function showing its signature.
 fn build_function_detail(func: &FunctionInfo) -> Option<String> {
     let mut detail = String::new();
-
-    detail.push('(');
-    let params: Vec<String> = func
-        .parameters
-        .iter()
-        .map(|p| {
-            let mut s = String::new();
-            if let Some(ref t) = p.type_hint {
-                s.push_str(&t.to_string());
-                s.push(' ');
-            }
-            if p.is_variadic {
-                s.push_str("...");
-            }
-            s.push_str(&p.name);
-            s
-        })
-        .collect();
-    detail.push_str(&params.join(", "));
-    detail.push(')');
-
-    if let Some(ref ret) = func.return_type {
-        detail.push_str(": ");
-        detail.push_str(&ret.to_string());
-    }
-
+    push_signature(&mut detail, &func.parameters, func.return_type.as_ref());
     Some(detail)
+}
+
+/// Append `(Type $a, ...$b): Ret` to `detail`.
+fn push_signature(detail: &mut String, params: &[ParameterInfo], return_type: Option<&PhpType>) {
+    detail.push('(');
+    for (i, p) in params.iter().enumerate() {
+        if i > 0 {
+            detail.push_str(", ");
+        }
+        if let Some(t) = &p.type_hint {
+            let _ = write!(detail, "{t} ");
+        }
+        if p.is_variadic {
+            detail.push_str("...");
+        }
+        detail.push_str(&p.name);
+    }
+    detail.push(')');
+    if let Some(ret) = return_type {
+        let _ = write!(detail, ": {ret}");
+    }
 }
 
 /// Find the start of a class/interface/trait/enum name token after the
@@ -620,8 +594,7 @@ fn find_name_after_keyword(content: &str, keyword_offset: usize) -> usize {
 mod tests {
     use super::*;
     use crate::atom::atom;
-    use crate::php_type::PhpType;
-    use crate::types::{ClassLikeKind, MethodInfo, ParameterInfo, Visibility};
+    use crate::test_fixtures::{make_class, make_method, make_method_with_params, make_param};
 
     #[test]
     fn short_name_extracts_last_segment() {
@@ -699,78 +672,22 @@ mod tests {
 
     #[test]
     fn build_method_detail_simple() {
-        let method = MethodInfo {
-            name: crate::atom::atom("foo"),
-            name_offset: 0,
-            parameters: vec![].into(),
-            return_type: Some(PhpType::parse("void")),
-            native_return_type: None,
-            description: None,
-            is_static: false,
-            visibility: Visibility::Public,
-            has_scope_attribute: false,
-            is_abstract: false,
-            is_final: false,
-            is_virtual: false,
-            is_macro: false,
-            is_inferred_return: false,
-            is_pure: false,
-            is_impure: false,
-            reads_func_args: false,
-            extras: None,
-        };
+        let method = make_method("foo", Some("void"));
         let detail = build_method_detail(&method);
         assert_eq!(detail, Some("(): void".to_string()));
     }
 
     #[test]
     fn build_method_detail_with_params() {
-        let method = MethodInfo {
-            name: crate::atom::atom("process"),
-            name_offset: 0,
-            parameters: vec![
-                ParameterInfo {
-                    name: crate::atom::atom("$input"),
-                    is_required: true,
-                    type_hint: Some(PhpType::parse("string")),
-                    native_type_hint: None,
-                    description: None,
-                    default_value: None,
-                    is_variadic: false,
-                    is_reference: false,
-                    closure_this_type: None,
-                    param_out_type: None,
-                },
-                ParameterInfo {
-                    name: crate::atom::atom("$items"),
-                    is_required: false,
-                    type_hint: Some(PhpType::parse("array")),
-                    native_type_hint: None,
-                    description: None,
-                    default_value: Some("[]".to_string()),
-                    is_variadic: true,
-                    is_reference: false,
-                    closure_this_type: None,
-                    param_out_type: None,
-                },
-            ]
-            .into(),
-            return_type: Some(PhpType::parse("int")),
-            native_return_type: None,
-            description: None,
-            is_static: true,
-            visibility: Visibility::Protected,
-            has_scope_attribute: false,
-            is_abstract: false,
-            is_final: false,
-            is_virtual: false,
-            is_macro: false,
-            is_inferred_return: false,
-            is_pure: false,
-            is_impure: false,
-            reads_func_args: false,
-            extras: None,
-        };
+        let mut items = make_param("$items", Some("array"), false);
+        items.is_variadic = true;
+        let mut method = make_method_with_params(
+            "process",
+            Some("int"),
+            vec![make_param("$input", Some("string"), true), items],
+        );
+        method.is_static = true;
+        method.visibility = Visibility::Protected;
         let detail = build_method_detail(&method);
         assert_eq!(
             detail,
@@ -781,47 +698,9 @@ mod tests {
     #[test]
     fn build_class_detail_with_parent_and_interfaces() {
         let class = ClassInfo {
-            kind: ClassLikeKind::Class,
-            name: crate::atom::atom("Foo"),
-            methods: Default::default(),
-            method_index: Default::default(),
-            indexed_method_count: 0,
-            properties: Default::default(),
-            constants: Default::default(),
-            start_offset: 0,
-            end_offset: 0,
-            keyword_offset: 0,
-            decl_start_offset: 0,
             parent_class: Some(atom("Bar")),
             interfaces: vec![atom("Baz"), atom("Qux")],
-            used_traits: vec![],
-            mixins: vec![],
-            mixin_generics: vec![],
-            require_extends: None,
-            require_implements: Vec::new(),
-            is_final: false,
-            is_abstract: false,
-            is_readonly: false,
-            deprecation_message: None,
-            deprecated_replacement: None,
-            links: Vec::new(),
-            see_refs: Vec::new(),
-            template_params: vec![],
-            template_param_bounds: Default::default(),
-            template_param_defaults: Default::default(),
-            extends_generics: vec![],
-            implements_generics: vec![],
-            use_generics: vec![],
-            type_aliases: Default::default(),
-            trait_precedences: vec![],
-            trait_aliases: vec![],
-            class_docblock: None,
-            doc_members: None,
-            file_namespace: None,
-            backed_type: None,
-            attribute_targets: 0,
-            laravel: None,
-            fqn: None,
+            ..make_class("Foo")
         };
         let detail = build_class_detail(&class);
         assert_eq!(detail, Some("extends Bar implements Baz, Qux".to_string()));
@@ -831,46 +710,8 @@ mod tests {
     fn build_class_detail_interface_uses_extends() {
         let class = ClassInfo {
             kind: ClassLikeKind::Interface,
-            name: crate::atom::atom("Foo"),
-            methods: Default::default(),
-            method_index: Default::default(),
-            indexed_method_count: 0,
-            properties: Default::default(),
-            constants: Default::default(),
-            start_offset: 0,
-            end_offset: 0,
-            keyword_offset: 0,
-            decl_start_offset: 0,
-            parent_class: None,
             interfaces: vec![atom("Bar")],
-            used_traits: vec![],
-            mixins: vec![],
-            mixin_generics: vec![],
-            require_extends: None,
-            require_implements: Vec::new(),
-            is_final: false,
-            is_abstract: false,
-            is_readonly: false,
-            deprecation_message: None,
-            deprecated_replacement: None,
-            links: Vec::new(),
-            see_refs: Vec::new(),
-            template_params: vec![],
-            template_param_bounds: Default::default(),
-            template_param_defaults: Default::default(),
-            extends_generics: vec![],
-            implements_generics: vec![],
-            use_generics: vec![],
-            type_aliases: Default::default(),
-            trait_precedences: vec![],
-            trait_aliases: vec![],
-            class_docblock: None,
-            doc_members: None,
-            file_namespace: None,
-            backed_type: None,
-            attribute_targets: 0,
-            laravel: None,
-            fqn: None,
+            ..make_class("Foo")
         };
         let detail = build_class_detail(&class);
         assert_eq!(detail, Some("extends Bar".to_string()));
@@ -879,30 +720,8 @@ mod tests {
     #[test]
     fn function_detail_no_params_no_return() {
         let func = FunctionInfo {
-            name: crate::atom::atom("noop"),
-            name_offset: 0,
-            parameters: vec![].into(),
-            return_type: None,
-            native_return_type: None,
-            description: None,
-            return_description: None,
-            links: Vec::new(),
-            see_refs: Vec::new(),
-            namespace: None,
-            conditional_return: None,
-            type_assertions: vec![],
-            deprecation_message: None,
-            deprecated_replacement: None,
-            template_params: vec![],
-            template_param_bounds: Default::default(),
-            template_bindings: vec![],
-            template_param_defaults: Default::default(),
-            throws: Vec::new(),
-            is_polyfill: false,
-            overloads: vec![],
-            is_pure: false,
-            is_impure: false,
-            reads_func_args: false,
+            name: atom("noop"),
+            ..Default::default()
         };
         let detail = build_function_detail(&func);
         assert_eq!(detail, Some("()".to_string()));

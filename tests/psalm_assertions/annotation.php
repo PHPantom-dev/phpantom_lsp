@@ -15,7 +15,7 @@ namespace PsalmTest_annotation_1 {
 // Test: doubleVar
 namespace PsalmTest_annotation_2 {
     function foo() : array {
-        return ["hello" => new stdClass, "goodbye" => new stdClass];
+        return ["hello" => new \stdClass, "goodbye" => new \stdClass];
     }
 
     $_a = null;
@@ -23,7 +23,7 @@ namespace PsalmTest_annotation_2 {
 
     /**
      * @var string $_key
-     * @var stdClass $_value
+     * @var \stdClass $_value
      */
     foreach (foo() as $_key => $_value) {
         $_a = $_key;

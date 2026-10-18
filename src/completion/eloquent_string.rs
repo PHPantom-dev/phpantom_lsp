@@ -28,7 +28,7 @@ use crate::completion::source::string_argument::{
 use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::text_scan::collapse_continuation_lines;
-use crate::type_engine::resolver::{CtxLoaders, resolve_target_classes};
+use crate::type_engine::resolver::resolve_target_classes;
 use crate::type_engine::subject_extraction::detect_access_operator;
 use crate::types::{AccessKind, ClassInfo, FileContext};
 use crate::virtual_members::laravel::{
@@ -396,14 +396,10 @@ impl Backend {
         let cursor_offset = position_to_offset(content, position) as usize;
         let es_ctx = detect_eloquent_string_context(content, cursor_offset, code)?;
 
-        let class_loader = self.class_loader(ctx);
-        let model_class = self.resolve_eloquent_model_from_subject(
-            &es_ctx,
-            content,
-            cursor_offset as u32,
-            ctx,
-            &class_loader,
-        )?;
+        let class_loader = self.resolved_class_loader(ctx);
+
+        let model_class =
+            self.resolve_eloquent_model_from_subject(&es_ctx, content, cursor_offset as u32, ctx)?;
 
         let items = match es_ctx.kind {
             EloquentStringKind::Relation => {
@@ -440,18 +436,10 @@ impl Backend {
         content: &str,
         cursor_offset: u32,
         ctx: &FileContext,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<Arc<ClassInfo>> {
-        let current_class = crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
-        let function_loader = self.function_loader(ctx);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(class_loader);
-        let rctx = self.resolution_ctx_at(
-            current_class,
-            &ctx.classes,
-            content,
-            cursor_offset,
-            CtxLoaders::new(class_loader, &function_loader, &laravel_macro_this_resolver),
-        );
+        let loaders = self.file_loaders(ctx);
+        let class_loader = loaders.resolved_class_loader();
+        let rctx = loaders.resolution_ctx_at(content, cursor_offset);
         let access_kind = if es_ctx.is_static {
             AccessKind::DoubleColon
         } else {
@@ -682,7 +670,8 @@ impl Backend {
             &model_name_owned
         };
 
-        let class_loader = self.class_loader(ctx);
+        let class_loader = self.resolved_class_loader(ctx);
+
         let model_class = class_loader(model_name)?;
         let resolved = crate::virtual_members::resolve_class_fully_cached(
             &model_class,

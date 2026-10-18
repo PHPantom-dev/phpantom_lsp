@@ -13,10 +13,11 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::{document_changes_edit, multi_file_edit};
+use crate::names::resolve_to_fqn;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
 use crate::types::FileContext;
-use crate::util::{resolve_to_fqn, short_name, strip_fqn_prefix};
+use crate::util::{short_name, strip_fqn_prefix};
 
 use super::RenameOutcome;
 

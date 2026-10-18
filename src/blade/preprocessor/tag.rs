@@ -171,11 +171,11 @@ pub(super) fn bound_attr(
                 .as_mut()
                 .and_then(|call| call.take(&name))
                 .map(|variable| format!(" {variable} = "));
-            let (prefix, suffix) = match &argument {
-                Some(prefix) => (prefix.as_str(), ";"),
-                None => (" blade_bound_attr_directive(", ");"),
+            let (prefix, suffix) = match argument {
+                Some(prefix) => (prefix, ";"),
+                None => (format!(" {}(", crate::blade::markers::BOUND_ATTR), ");"),
             };
-            replacement = prefix.to_string();
+            replacement = prefix;
             bound_attr.suffix = suffix;
 
             if shorthand {

@@ -1,5 +1,3 @@
-use mago_span::HasSpan;
-
 use super::*;
 
 // ─── Anonymous class ─────────────────────────────────────────────────────────
@@ -16,23 +14,15 @@ pub(super) fn extract_anonymous_class_expr<'a>(
 
     if let Some(ref extends) = anon.extends {
         for ident in extends.types.iter() {
-            let raw = bytes_to_str(ident.value()).to_string();
-            ctx.spans.push(class_ref_span(
-                ident.span().start.offset,
-                ident.span().end.offset,
-                &raw,
-            ));
+            ctx.spans
+                .push(identifier_class_ref(ident, ClassRefContext::Other));
         }
     }
 
     if let Some(ref implements) = anon.implements {
         for ident in implements.types.iter() {
-            let raw = bytes_to_str(ident.value()).to_string();
-            ctx.spans.push(class_ref_span(
-                ident.span().start.offset,
-                ident.span().end.offset,
-                &raw,
-            ));
+            ctx.spans
+                .push(identifier_class_ref(ident, ClassRefContext::Other));
         }
     }
 

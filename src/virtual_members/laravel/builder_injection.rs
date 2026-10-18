@@ -301,25 +301,24 @@ fn inject_scopes_and_model_methods(
         // Base resolution carries the column lists the model inherits
         // without re-entering the virtual-member providers.
         let model_class = resolve_class_base_cached(&model_class, class_loader);
-        let existing = lowercase_method_names(&result.methods);
+        let mut existing = lowercase_method_names(&result.methods);
         let where_methods = build_where_property_methods_for_class(&model_class, &existing);
         for mut method in where_methods {
-            if !result
-                .methods
-                .iter()
-                .any(|m| m.name.eq_ignore_ascii_case(&method.name))
-            {
-                // These are built fresh rather than interned, so the
-                // forwarded return is applied in place.
-                if let Some(forwarded) = forwarded
-                    && let Some(ref ret) = method.return_type
-                    && let Some(rewritten) =
-                        forwarded_builder_return(ret, &forwarded.ty, false, class_loader)
-                {
-                    method.return_type = Some(rewritten);
-                }
-                result.methods.push(Arc::new(method));
+            // Two columns can spell the same method name in different case
+            // (`foo_bar` and `foobar`); PHP calls them the same method.
+            if !existing.insert(method.name.to_ascii_lowercase()) {
+                continue;
             }
+            // These are built fresh rather than interned, so the forwarded
+            // return is applied in place.
+            if let Some(forwarded) = forwarded
+                && let Some(ref ret) = method.return_type
+                && let Some(rewritten) =
+                    forwarded_builder_return(ret, &forwarded.ty, false, class_loader)
+            {
+                method.return_type = Some(rewritten);
+            }
+            result.methods.push(Arc::new(method));
         }
     }
 }

@@ -249,4 +249,29 @@ class Bar extends Foo {
 "#;
         assert!(collect(php).is_empty());
     }
+
+    /// A stored parent is the class it names, not whatever the checking
+    /// file imports under the same short name.
+    #[test]
+    fn global_parent_shadowed_by_import() {
+        let php = r#"<?php
+namespace {
+    class Base {
+        public function make(): self { return $this; }
+    }
+}
+namespace Lib {
+    class Base {
+        public function make(): static { return $this; }
+    }
+}
+namespace App {
+    use Lib\Base;
+    class Child extends \Base {
+        public function make(): self { return $this; }
+    }
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
 }

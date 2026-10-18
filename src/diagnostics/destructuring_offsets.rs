@@ -23,13 +23,11 @@ use crate::Backend;
 use crate::atom::literal_bytes_to_str;
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::resolver::{LendsLoaders, VarResolutionCtx};
 use crate::type_engine::variable::forward_walk::{
     destructured_element_type, destructuring_rhs_type,
 };
-use crate::types::ClassInfo;
 
-use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
+use super::helpers::make_diagnostic;
 
 /// An offset a destructuring element reads, as PHP stores it: a decimal
 /// integer string such as `'1'` is the integer key `1`.
@@ -79,12 +77,7 @@ impl Backend {
     ) {
         let file_ctx = self.file_context(uri);
         let _parse_guard = with_parse_cache(content);
-        let class_loaders = self.class_loaders(&file_ctx);
-        let function_loaders = self.function_loaders(&file_ctx);
-        let constant_loaders = file_ctx.per_block(|use_map, namespace| {
-            self.constant_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace)
-        });
-        let default_class = ClassInfo::default();
+        let loaders = self.file_loaders(&file_ctx);
 
         let issues: Vec<OffsetIssue> =
             with_parsed_program(content, "destructuring_offset_diagnostics", |program, _| {
@@ -100,26 +93,7 @@ impl Backend {
                     if !super::incremental::reports_site(offset) {
                         continue;
                     }
-                    let enclosing = find_innermost_enclosing_class(&file_ctx.classes, offset);
-                    let current_class = enclosing.unwrap_or(&default_class);
-
-                    let owned_loaders = self.diagnostic_loaders_over(
-                        function_loaders.at(offset),
-                        constant_loaders.at(offset),
-                    );
-                    let var_ctx = VarResolutionCtx {
-                        backend: Some(self),
-                        loaders: owned_loaders.loaders(),
-                        resolved_class_cache: Some(&self.resolved_class_cache),
-                        ..VarResolutionCtx::new(
-                            "",
-                            current_class,
-                            &file_ctx.classes,
-                            content,
-                            offset,
-                            class_loaders.at(offset),
-                        )
-                    };
+                    let var_ctx = loaders.var_ctx_at(content, offset);
 
                     if let Some(rhs_type) = destructuring_rhs_type(assignment, &var_ctx) {
                         check_pattern(assignment.lhs, &rhs_type, &mut issues);

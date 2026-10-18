@@ -25,6 +25,7 @@
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
+use crate::parser::for_each_nested_statement_list;
 use crate::types::ResolvedType;
 
 use super::ScopeState;
@@ -105,9 +106,11 @@ fn collect_static_declarations<'b>(
         }
         return;
     }
-    for nested in nested_statements(stmt) {
-        collect_static_declarations(nested, names, initialisers, depth + 1);
-    }
+    for_each_nested_statement_list(stmt, |nested| {
+        for inner in nested {
+            collect_static_declarations(inner, names, initialisers, depth + 1);
+        }
+    });
 }
 
 /// Add the types of every `$name = expr` in a statement tree to `seeds`,
@@ -131,9 +134,11 @@ fn collect_assigned_types<'b>(
             add_expression_types(seeds, name, assignment.rhs, scope, ctx);
         }
     }
-    for nested in nested_statements(stmt) {
-        collect_assigned_types(nested, seeds, scope, ctx, depth + 1);
-    }
+    for_each_nested_statement_list(stmt, |nested| {
+        for inner in nested {
+            collect_assigned_types(inner, seeds, scope, ctx, depth + 1);
+        }
+    });
 }
 
 /// Resolve `expr` against the seeding scope and union it into `name`'s entry.
@@ -150,86 +155,5 @@ fn add_expression_types(
     let resolved = super::assignment::resolve_rhs_with_scope(expr, scope, ctx);
     if !resolved.is_empty() {
         ResolvedType::extend_unique(&mut entry.1, resolved);
-    }
-}
-
-/// The statements nested directly inside `stmt`.
-///
-/// Only the block-structuring statements are descended into.  A `static`
-/// declaration inside a closure or a nested function belongs to that
-/// body's own scope, not this one, so those are deliberately not followed.
-fn nested_statements<'b>(stmt: &'b Statement<'b>) -> Vec<&'b Statement<'b>> {
-    let mut out: Vec<&'b Statement<'b>> = Vec::new();
-    match stmt {
-        Statement::Block(block) => out.extend(block.statements.iter()),
-        Statement::Namespace(ns) => out.extend(ns.statements().iter()),
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => {
-                out.push(body.statement);
-                for clause in body.else_if_clauses.iter() {
-                    out.push(clause.statement);
-                }
-                if let Some(clause) = &body.else_clause {
-                    out.push(clause.statement);
-                }
-            }
-            IfBody::ColonDelimited(body) => {
-                out.extend(body.statements.iter());
-                for clause in body.else_if_clauses.iter() {
-                    out.extend(clause.statements.iter());
-                }
-                if let Some(clause) = &body.else_clause {
-                    out.extend(clause.statements.iter());
-                }
-            }
-        },
-        Statement::While(w) => out.extend(loop_body_statements(&w.body)),
-        Statement::DoWhile(dw) => out.push(dw.statement),
-        Statement::For(f) => out.extend(for_body_statements(&f.body)),
-        Statement::Foreach(f) => out.extend(foreach_body_statements(&f.body)),
-        Statement::Switch(switch) => match &switch.body {
-            SwitchBody::BraceDelimited(b) => {
-                for case in b.cases.iter() {
-                    out.extend(case.statements().iter());
-                }
-            }
-            SwitchBody::ColonDelimited(b) => {
-                for case in b.cases.iter() {
-                    out.extend(case.statements().iter());
-                }
-            }
-        },
-        Statement::Try(try_stmt) => {
-            out.extend(try_stmt.block.statements.iter());
-            for catch in try_stmt.catch_clauses.iter() {
-                out.extend(catch.block.statements.iter());
-            }
-            if let Some(finally) = &try_stmt.finally_clause {
-                out.extend(finally.block.statements.iter());
-            }
-        }
-        _ => {}
-    }
-    out
-}
-
-fn loop_body_statements<'b>(body: &'b WhileBody<'b>) -> Vec<&'b Statement<'b>> {
-    match body {
-        WhileBody::Statement(s) => vec![s],
-        WhileBody::ColonDelimited(b) => b.statements.iter().collect(),
-    }
-}
-
-fn for_body_statements<'b>(body: &'b ForBody<'b>) -> Vec<&'b Statement<'b>> {
-    match body {
-        ForBody::Statement(s) => vec![s],
-        ForBody::ColonDelimited(b) => b.statements.iter().collect(),
-    }
-}
-
-fn foreach_body_statements<'b>(body: &'b ForeachBody<'b>) -> Vec<&'b Statement<'b>> {
-    match body {
-        ForeachBody::Statement(s) => vec![s],
-        ForeachBody::ColonDelimited(b) => b.statements.iter().collect(),
     }
 }

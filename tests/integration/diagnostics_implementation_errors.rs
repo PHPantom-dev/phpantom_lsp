@@ -606,4 +606,76 @@ class Concrete {
         assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
         assert!(diags[0].message.contains("innerMethod()"));
     }
+
+    /// An abstract method a parent picks up from its trait is still abstract
+    /// in the parent, so the concrete child has to implement it.
+    #[test]
+    fn abstract_method_of_a_parents_trait_detected() {
+        let php = r#"<?php
+trait Greets {
+    abstract public function name(): string;
+}
+
+abstract class Base {
+    use Greets;
+}
+
+class Child extends Base {
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
+        assert!(diags[0].message.contains("name()"));
+        assert!(
+            diags[0].message.contains("from class 'Base'"),
+            "the requirement should be traced to the parent: {}",
+            diags[0].message
+        );
+    }
+
+    /// The interface a requirement comes from is named even when it extends
+    /// one with the same short name in another namespace.
+    #[test]
+    fn requirement_through_same_named_interface_names_the_interface() {
+        let php = r#"<?php
+namespace Lib {
+    interface Repository { public function find(): void; }
+}
+namespace App {
+    interface Repository extends \Lib\Repository {}
+    class Users implements Repository {}
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
+        assert!(
+            diags[0]
+                .message
+                .contains("from interface 'App\\Repository'"),
+            "got: {}",
+            diags[0].message
+        );
+    }
+
+    /// A stored parent is the class it names, not whatever the checking
+    /// file imports under the same short name.
+    #[test]
+    fn global_parent_shadowed_by_import() {
+        let php = r#"<?php
+namespace {
+    abstract class Base { abstract public function run(): void; }
+}
+namespace Lib {
+    abstract class Base { abstract public function other(): void; }
+}
+namespace App {
+    use Lib\Base;
+    class Impl extends \Base {
+        public function run(): void {}
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    }
 }

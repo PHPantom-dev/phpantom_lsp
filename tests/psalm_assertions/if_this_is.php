@@ -15,7 +15,7 @@ namespace PsalmTest_if_this_is_1 {
          */
         public function unwrap()
         {
-            throw new RuntimeException("???");
+            throw new \RuntimeException("???");
         }
     }
 
@@ -70,7 +70,7 @@ namespace PsalmTest_if_this_is_2 {
     final class Option
     {
         /** @return T|null */
-        public function unwrap() { throw new RuntimeException("???"); }
+        public function unwrap() { throw new \RuntimeException("???"); }
     }
 
     /**
@@ -80,7 +80,7 @@ namespace PsalmTest_if_this_is_2 {
     final class Either
     {
         /** @return R|null */
-        public function unwrap() { throw new RuntimeException("???"); }
+        public function unwrap() { throw new \RuntimeException("???"); }
     }
 
     /**
@@ -124,7 +124,7 @@ namespace PsalmTest_if_this_is_2 {
         }
     }
 
-    /** @var ArrayList<Either<Exception, int>|Option<int>> $list */
+    /** @var ArrayList<Either<\Exception, int>|Option<int>> $list */
     $list = new ArrayList([]);
     $numbers = $list->compact();
 

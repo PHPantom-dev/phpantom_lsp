@@ -1,12 +1,36 @@
 use std::sync::Arc;
 
-use super::enrich_builder_type_in_scope;
+use super::{VarQuery, enrich_builder_type_in_scope};
 use crate::atom::atom;
 use crate::php_type::PhpType;
 use crate::test_fixtures::make_class;
 
 use crate::type_engine::resolver::Loaders;
 use crate::types::{ClassInfo, ResolvedType};
+
+/// A variable query with no imports, backend or cross-file loaders: only
+/// `all_classes` and `class_loader` to resolve class names with.
+fn query<'a>(
+    var_name: &'a str,
+    content: &'a str,
+    cursor_offset: u32,
+    current_class: &'a ClassInfo,
+    all_classes: &'a [Arc<ClassInfo>],
+    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> VarQuery<'a> {
+    VarQuery {
+        var_name,
+        cursor_offset,
+        content,
+        current_class: Some(current_class),
+        all_classes,
+        class_loader,
+        source_class_loader: class_loader,
+        source_imports: None,
+        backend: None,
+        loaders: Loaders::default(),
+    }
+}
 
 fn make_model(name: &str) -> ClassInfo {
     let mut class = make_class(name);
@@ -297,16 +321,14 @@ function test() {
     // meaningful line.  We need an offset inside `function test()`.
     let cursor_offset = content.find("$result->").unwrap() as u32 + 9; // after `->`
 
-    let results = ResolvedType::into_classes(super::resolve_variable_types(
+    let results = ResolvedType::into_classes(super::resolve_variable_types(query(
         "$result",
-        &ClassInfo::default(),
-        &all_classes,
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &all_classes,
         &class_loader,
-        None,
-        Loaders::default(),
-    ));
+    )));
 
     let names: Vec<&str> = results.iter().map(|c| c.name.as_str()).collect();
     assert!(
@@ -419,7 +441,7 @@ function test() {
     let model_base_c = model_base.clone();
     let has_factory_c = has_factory_trait.clone();
     let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
-        match name {
+        match name.trim_start_matches('\\') {
             "User" | "App\\Models\\User" => Some(Arc::new(user_c.clone())),
             "UserFactory" | "Database\\Factories\\UserFactory" => {
                 Some(Arc::new(user_factory_c.clone()))
@@ -439,16 +461,14 @@ function test() {
 
     let cursor_offset = content.find("$user->").unwrap() as u32 + 7;
 
-    let results = ResolvedType::into_classes(super::resolve_variable_types(
+    let results = ResolvedType::into_classes(super::resolve_variable_types(query(
         "$user",
-        &ClassInfo::default(),
-        &all_classes,
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &all_classes,
         &class_loader,
-        None,
-        Loaders::default(),
-    ));
+    )));
 
     let names: Vec<&str> = results.iter().map(|c| c.name.as_str()).collect();
     assert!(
@@ -468,16 +488,14 @@ function test(bool $flag): void {
 "#;
     let cursor_offset = content.find("echo $choice").unwrap() as u32 + 5;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$choice",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert_eq!(
         ResolvedType::types_joined(&results).to_string(),
@@ -487,16 +505,14 @@ function test(bool $flag): void {
 
 fn resolve_literal_test_var(content: &str, var_name: &str) -> String {
     let cursor_offset = content.rfind(var_name).unwrap() as u32;
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         var_name,
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
     ResolvedType::types_joined(&results).to_string()
 }
 
@@ -1048,16 +1064,14 @@ function test() {
 "#;
     let cursor_offset = content.find("$data['x']").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$data",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $data to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -1084,16 +1098,14 @@ function test() {
 "#;
     let cursor_offset = content.find("$config['x']").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$config",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $config to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -1117,16 +1129,14 @@ function test() {
 "#;
     let cursor_offset = content.find("$data['x']").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$data",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $data to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -1170,16 +1180,14 @@ function test() {
 
     let cursor_offset = content.find("$items[0]->").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$items",
-        &ClassInfo::default(),
-        &all_classes,
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &all_classes,
         &class_loader,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $items to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -1209,16 +1217,14 @@ function test() {
 "#;
     let cursor_offset = content.find("$items[0]").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$items",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $items to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -1244,16 +1250,14 @@ function test() {
 "#;
     let cursor_offset = content.find("$items[0]").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$items",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $items to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -1281,16 +1285,14 @@ function test() {
 "#;
     let cursor_offset = content.find("$x[0]").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$x",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $x to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -1418,16 +1420,14 @@ class LoggedConnection extends BaseConnector {
 
     let cursor_offset = content.find("$response->").unwrap() as u32 + 11;
 
-    let results = ResolvedType::into_classes(super::resolve_variable_types(
+    let results = ResolvedType::into_classes(super::resolve_variable_types(query(
         "$response",
-        &logged,
-        &all_classes,
         content,
         cursor_offset,
+        &logged,
+        &all_classes,
         &class_loader,
-        None,
-        Loaders::default(),
-    ));
+    )));
 
     let names: Vec<&str> = results.iter().map(|c| c.name.as_str()).collect();
     assert!(
@@ -1449,16 +1449,14 @@ function test() {
 "#;
     let cursor_offset = content.find("$b['x']").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$b",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $b to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -1480,16 +1478,14 @@ function test() {
 "#;
     let cursor_offset = content.find("$config['x']").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$config",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $config to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -1512,16 +1508,14 @@ function test() {
 "#;
     let cursor_offset = content.find("$data['x']").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$data",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $data to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -1566,19 +1560,20 @@ function test() {
         }
     };
 
-    let results = super::resolve_variable_types(
-        "$result",
-        &ClassInfo::default(),
-        &[],
-        content,
-        cursor_offset,
-        &|_| None,
-        None,
-        Loaders {
+    let results = super::resolve_variable_types(VarQuery {
+        loaders: Loaders {
             function_loader: Some(&func_loader),
             ..Loaders::default()
         },
-    );
+        ..query(
+            "$result",
+            content,
+            cursor_offset,
+            &ClassInfo::default(),
+            &[],
+            &|_| None,
+        )
+    });
 
     assert!(!results.is_empty(), "Should resolve $result to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -1607,19 +1602,20 @@ function test() {
         }
     };
 
-    let results = super::resolve_variable_types(
-        "$result",
-        &ClassInfo::default(),
-        &[],
-        content,
-        cursor_offset,
-        &|_| None,
-        None,
-        Loaders {
+    let results = super::resolve_variable_types(VarQuery {
+        loaders: Loaders {
             function_loader: Some(&func_loader),
             ..Loaders::default()
         },
-    );
+        ..query(
+            "$result",
+            content,
+            cursor_offset,
+            &ClassInfo::default(),
+            &[],
+            &|_| None,
+        )
+    });
 
     assert!(!results.is_empty(), "Should resolve $result to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -1627,6 +1623,50 @@ function test() {
         ts, "int",
         "array_product over int literals should return int"
     );
+}
+
+/// Resolve `var_name` at its last occurrence in `content`, with the classes
+/// and functions `content` declares parsed and loaded by name the way the
+/// backend loads an indexed file's, so a call reads its callee's declared
+/// signature.
+fn resolve_with_declared_symbols(content: &str, var_name: &str) -> String {
+    let backend = crate::test_fixtures::make_backend();
+    let classes: Vec<Arc<ClassInfo>> = backend
+        .parse_php_resolved(content)
+        .into_iter()
+        .map(Arc::new)
+        .collect();
+    let functions = backend.parse_functions(content);
+    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let name = name.trim_start_matches('\\');
+        classes
+            .iter()
+            .find(|class| class.fqn().eq_ignore_ascii_case(name))
+            .cloned()
+    };
+    let function_loader = |name: &str, _offset: u32| -> Option<crate::types::FunctionInfo> {
+        let name = crate::util::short_name(name);
+        functions
+            .iter()
+            .find(|function| function.name.eq_ignore_ascii_case(name))
+            .cloned()
+    };
+    let cursor_offset = content.rfind(var_name).unwrap() as u32;
+
+    let results = super::resolve_variable_types(VarQuery {
+        loaders: Loaders::with_function(Some(&function_loader)),
+        ..query(
+            var_name,
+            content,
+            cursor_offset,
+            &crate::class_lookup::class_context_placeholder(content, cursor_offset),
+            &classes,
+            &class_loader,
+        )
+    });
+
+    assert!(!results.is_empty(), "Should resolve {var_name} to a type");
+    ResolvedType::types_joined(&results).to_string()
 }
 
 #[test]
@@ -1646,22 +1686,7 @@ c(function () use (&$foo) {
 
 $foo;
 "#;
-    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
-
-    let results = super::resolve_variable_types(
-        "$foo",
-        &ClassInfo::default(),
-        &[],
-        content,
-        cursor_offset,
-        &|_| None,
-        None,
-        Loaders::default(),
-    );
-
-    assert!(!results.is_empty(), "Should resolve $foo to a type");
-    let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "1");
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "1");
 }
 
 #[test]
@@ -1683,22 +1708,7 @@ c(function () use (&$foo) {
 
 $foo;
 "#;
-    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
-
-    let results = super::resolve_variable_types(
-        "$foo",
-        &ClassInfo::default(),
-        &[],
-        content,
-        cursor_offset,
-        &|_| None,
-        None,
-        Loaders::default(),
-    );
-
-    assert!(!results.is_empty(), "Should resolve $foo to a type");
-    let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "1");
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "1");
 }
 
 #[test]
@@ -1718,22 +1728,7 @@ c(function () use (&$foo) {
 
 $foo;
 "#;
-    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
-
-    let results = super::resolve_variable_types(
-        "$foo",
-        &ClassInfo::default(),
-        &[],
-        content,
-        cursor_offset,
-        &|_| None,
-        None,
-        Loaders::default(),
-    );
-
-    assert!(!results.is_empty(), "Should resolve $foo to a type");
-    let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "1");
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "1");
 }
 
 #[test]
@@ -1755,22 +1750,26 @@ c(function () use (&$foo) {
 
 $foo;
 "#;
-    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "null|1");
+}
 
-    let results = super::resolve_variable_types(
-        "$foo",
-        &ClassInfo::default(),
-        &[],
-        content,
-        cursor_offset,
-        &|_| None,
-        None,
-        Loaders::default(),
-    );
+#[test]
+fn by_ref_closure_capture_widens_when_callable_tagged_with_a_vendor_prefix() {
+    let content = r#"<?php
+/** @phpstan-param-later-invoked-callable $x */
+function c(callable $x) {
+    $x();
+}
 
-    assert!(!results.is_empty(), "Should resolve $foo to a type");
-    let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "null|1");
+$foo = null;
+
+c(function () use (&$foo) {
+    $foo = 1;
+});
+
+$foo;
+"#;
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "null|1");
 }
 
 #[test]
@@ -1793,31 +1792,7 @@ $a->c(function () use (&$foo) {
 
 $foo;
 "#;
-    let a_class = make_class("A");
-    let all_classes: Vec<Arc<ClassInfo>> = vec![Arc::new(a_class.clone())];
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
-        if name == "A" {
-            Some(Arc::new(a_class.clone()))
-        } else {
-            None
-        }
-    };
-    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
-
-    let results = super::resolve_variable_types(
-        "$foo",
-        &ClassInfo::default(),
-        &all_classes,
-        content,
-        cursor_offset,
-        &class_loader,
-        None,
-        Loaders::default(),
-    );
-
-    assert!(!results.is_empty(), "Should resolve $foo to a type");
-    let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "null|1");
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "null|1");
 }
 
 #[test]
@@ -1837,31 +1812,7 @@ $a->c(function () use (&$foo) {
 
 $foo;
 "#;
-    let a_class = make_class("A");
-    let all_classes: Vec<Arc<ClassInfo>> = vec![Arc::new(a_class.clone())];
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
-        if name == "A" {
-            Some(Arc::new(a_class.clone()))
-        } else {
-            None
-        }
-    };
-    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
-
-    let results = super::resolve_variable_types(
-        "$foo",
-        &ClassInfo::default(),
-        &all_classes,
-        content,
-        cursor_offset,
-        &class_loader,
-        None,
-        Loaders::default(),
-    );
-
-    assert!(!results.is_empty(), "Should resolve $foo to a type");
-    let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "1");
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "1");
 }
 
 #[test]
@@ -1883,31 +1834,78 @@ $a->c(function () use (&$foo) {
 
 $foo;
 "#;
-    let a_class = make_class("A");
-    let all_classes: Vec<Arc<ClassInfo>> = vec![Arc::new(a_class.clone())];
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
-        if name == "A" || name == "App\\A" {
-            Some(Arc::new(a_class.clone()))
-        } else {
-            None
-        }
-    };
-    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "1");
+}
 
-    let results = super::resolve_variable_types(
-        "$foo",
-        &ClassInfo::default(),
-        &all_classes,
-        content,
-        cursor_offset,
-        &class_loader,
-        None,
-        Loaders::default(),
-    );
+#[test]
+fn by_ref_closure_capture_propagates_for_immediately_invoked_static_method_callable() {
+    let content = r#"<?php
+class A {
+    /** @param-immediately-invoked-callable $x */
+    public static function c(callable $x) {}
+}
 
-    assert!(!results.is_empty(), "Should resolve $foo to a type");
-    let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "1");
+$foo = null;
+
+A::c(function () use (&$foo) {
+    $foo = 1;
+});
+
+$foo;
+"#;
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "1");
+}
+
+#[test]
+fn by_ref_closure_capture_propagates_through_an_inherited_immediately_invoked_tag() {
+    // An override that does not say when it runs the callable keeps the
+    // promise of the method it overrides.
+    let content = r#"<?php
+class Base {
+    /** @param-immediately-invoked-callable $x */
+    public function c(callable $x) {}
+}
+class A extends Base {
+    public function c(callable $x) {}
+}
+
+$a = new A();
+$foo = null;
+
+$a->c(function () use (&$foo) {
+    $foo = 1;
+});
+
+$foo;
+"#;
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "1");
+}
+
+#[test]
+fn by_ref_closure_capture_widens_when_one_receiver_class_keeps_the_callable() {
+    // `$a` may hold either class, and only one of them runs the callable
+    // before returning, so the capture may still hold what it held before.
+    let content = r#"<?php
+class A {
+    /** @param-immediately-invoked-callable $x */
+    public function c(callable $x) {}
+}
+class B {
+    public function c(callable $x) {}
+}
+
+/** @var A|B $a */
+$a = new A();
+$foo = null;
+
+$a->c(function () use (&$foo) {
+    $foo = 1;
+});
+
+$foo;
+"#;
+    assert_eq!(resolve_with_declared_symbols(content, "$a"), "A|B");
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "null|1");
 }
 
 #[test]
@@ -1931,22 +1929,7 @@ c(b: function () use (&$foo) {
 
 $foo;
 "#;
-    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
-
-    let results = super::resolve_variable_types(
-        "$foo",
-        &ClassInfo::default(),
-        &[],
-        content,
-        cursor_offset,
-        &|_| None,
-        None,
-        Loaders::default(),
-    );
-
-    assert!(!results.is_empty(), "Should resolve $foo to a type");
-    let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "null|1");
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "null|1");
 }
 
 #[test]
@@ -1970,31 +1953,65 @@ $a->c(b: function () use (&$foo) {
 
 $foo;
 "#;
-    let a_class = make_class("A");
-    let all_classes: Vec<Arc<ClassInfo>> = vec![Arc::new(a_class.clone())];
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
-        if name == "A" {
-            Some(Arc::new(a_class.clone()))
-        } else {
-            None
-        }
-    };
-    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "1");
+}
 
-    let results = super::resolve_variable_types(
-        "$foo",
-        &ClassInfo::default(),
-        &all_classes,
-        content,
-        cursor_offset,
-        &class_loader,
-        None,
-        Loaders::default(),
-    );
+#[test]
+fn by_ref_closure_capture_widens_for_an_untyped_function_parameter() {
+    // Only a parameter typed as a callable is taken to run what it is
+    // handed before returning; an untyped one may just store it.
+    let content = r#"<?php
+function on(string $event, $handler) {
+    $GLOBALS['handlers'][$event][] = $handler;
+}
 
-    assert!(!results.is_empty(), "Should resolve $foo to a type");
-    let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "1");
+$foo = null;
+
+on('boot', function () use (&$foo) {
+    $foo = 1;
+});
+
+$foo;
+"#;
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "null|1");
+}
+
+#[test]
+fn by_ref_closure_capture_widens_when_passed_on_as_a_plain_argument() {
+    // The closure lands in `...$args`, which are handed to the callback
+    // whenever it runs, not run by the call itself.
+    let content = r#"<?php
+function defer_call(callable $callback, mixed ...$args) {}
+
+$foo = null;
+
+defer_call('var_dump', function () use (&$foo) {
+    $foo = 1;
+});
+
+$foo;
+"#;
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "null|1");
+}
+
+#[test]
+fn by_ref_closure_capture_propagates_through_a_variadic_callable_parameter() {
+    let content = r#"<?php
+function run_all(callable ...$callbacks) {
+    foreach ($callbacks as $callback) {
+        $callback();
+    }
+}
+
+$foo = null;
+
+run_all(function () {}, function () use (&$foo) {
+    $foo = 1;
+});
+
+$foo;
+"#;
+    assert_eq!(resolve_with_declared_symbols(content, "$foo"), "1");
 }
 
 #[test]
@@ -2014,16 +2031,14 @@ $foo;
 "#;
     let cursor_offset = content.rfind("$foo;").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$foo",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -2049,16 +2064,14 @@ $foo;
 "#;
     let cursor_offset = content.rfind("$foo;").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$foo",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -2083,16 +2096,14 @@ $foo;
 "#;
     let cursor_offset = content.rfind("$foo;").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$foo",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -2115,16 +2126,14 @@ $foo;
 "#;
     let cursor_offset = content.rfind("$foo;").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$foo",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -2147,16 +2156,14 @@ $foo;
 "#;
     let cursor_offset = content.rfind("$foo;").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$foo",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -2178,16 +2185,14 @@ $foo;
 "#;
     let cursor_offset = content.rfind("$foo;").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$foo",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -2213,16 +2218,14 @@ $foo;
 "#;
     let cursor_offset = content.rfind("$foo;").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$foo",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -2265,16 +2268,14 @@ function run() {
     };
     let cursor_offset = content.rfind("$executionEnd;").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$executionEnd",
-        &ClassInfo::default(),
-        &all_classes,
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &all_classes,
         &class_loader,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(
         !results.is_empty(),
@@ -2329,19 +2330,20 @@ function test() {
 
     let cursor_offset = content.find("$result->").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
-        "$result",
-        &ClassInfo::default(),
-        &all_classes,
-        content,
-        cursor_offset,
-        &class_loader,
-        None,
-        Loaders {
+    let results = super::resolve_variable_types(VarQuery {
+        loaders: Loaders {
             function_loader: Some(&func_loader),
             ..Loaders::default()
         },
-    );
+        ..query(
+            "$result",
+            content,
+            cursor_offset,
+            &ClassInfo::default(),
+            &all_classes,
+            &class_loader,
+        )
+    });
 
     assert!(!results.is_empty(), "Should resolve $result to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
@@ -2379,6 +2381,7 @@ fn stub_function_info(name: &str, return_type: Option<PhpType>) -> crate::types:
         is_pure: false,
         is_impure: false,
         reads_func_args: false,
+        unverified_doc_types: Default::default(),
     }
 }
 

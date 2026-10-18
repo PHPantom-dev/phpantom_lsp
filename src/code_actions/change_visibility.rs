@@ -24,8 +24,6 @@
 //! This is a single-file edit — it does not update call sites or
 //! subclass overrides in other files.
 
-use std::sync::Arc;
-
 #[cfg(test)]
 use mago_allocator::LocalArena;
 use mago_span::HasSpan;
@@ -250,94 +248,40 @@ impl Backend {
         member_kind: &MemberKind,
     ) -> Option<u8> {
         // Find the enclosing ClassInfo from the uri_classes_index.
-        let local_classes: Vec<Arc<ClassInfo>> = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
+        let enclosing = self.class_at_offset(uri, cursor_offset)?;
 
-        let enclosing = crate::class_lookup::find_class_at_offset(&local_classes, cursor_offset)?;
-
-        // Collect all ancestors: parent class chain + interfaces + traits.
+        let class_loader = |name: &str| self.find_or_load_class(name);
         let mut best_level: Option<u8> = None;
-
-        if let Some(ref parent_name) = enclosing.parent_class {
-            self.walk_ancestor_visibility(parent_name, member_kind, &mut best_level, 0);
+        let mut interfaces = enclosing.interfaces.clone();
+        for (_, parent) in crate::inheritance::ancestors(&enclosing, &class_loader) {
+            if let Some(level) = find_member_visibility_in_class(&parent, member_kind) {
+                best_level = Some(best_level.map_or(level, |prev| prev.max(level)));
+            }
+            interfaces.extend_from_slice(&parent.interfaces);
         }
 
-        // Interfaces always require public.
-        for iface_name in &enclosing.interfaces {
-            self.walk_interface_visibility(iface_name, member_kind, &mut best_level, 0);
+        // An interface member is public, which nothing can widen, so the
+        // first interface that declares it settles the question.
+        let mut visited = std::collections::HashSet::new();
+        while let Some(iface_name) = interfaces.pop() {
+            if !visited.insert(iface_name) {
+                continue;
+            }
+            let Some(iface) = self.find_or_load_class(&iface_name) else {
+                continue;
+            };
+            let declares = match member_kind {
+                MemberKind::Method(name) => iface.has_method(name),
+                MemberKind::Constant(name) => iface.constants.iter().any(|c| c.name == *name),
+                MemberKind::Property(_) => false,
+            };
+            if declares {
+                return Some(2);
+            }
+            interfaces.extend_from_slice(&iface.interfaces);
         }
 
         best_level
-    }
-
-    /// Recursively walk the parent class chain looking for the member
-    /// and recording its visibility.
-    fn walk_ancestor_visibility(
-        &self,
-        class_name: &str,
-        member_kind: &MemberKind,
-        best_level: &mut Option<u8>,
-        depth: usize,
-    ) {
-        if depth > 20 {
-            return; // guard against cycles
-        }
-        let cls = match self.find_or_load_class(class_name) {
-            Some(c) => c,
-            None => return,
-        };
-
-        if let Some(level) = find_member_visibility_in_class(&cls, member_kind) {
-            *best_level = Some(best_level.map_or(level, |prev: u8| prev.max(level)));
-        }
-
-        if let Some(ref parent) = cls.parent_class {
-            self.walk_ancestor_visibility(parent, member_kind, best_level, depth + 1);
-        }
-
-        // Also check interfaces of this parent (they require public).
-        for iface in &cls.interfaces {
-            self.walk_interface_visibility(iface, member_kind, best_level, depth + 1);
-        }
-    }
-
-    /// Check if an interface (or its parents) declares the member.
-    /// Interface members are always public.
-    fn walk_interface_visibility(
-        &self,
-        iface_name: &str,
-        member_kind: &MemberKind,
-        best_level: &mut Option<u8>,
-        depth: usize,
-    ) {
-        if depth > 20 {
-            return;
-        }
-        let cls = match self.find_or_load_class(iface_name) {
-            Some(c) => c,
-            None => return,
-        };
-
-        let has_member = match member_kind {
-            MemberKind::Method(name) => cls.has_method(name),
-            MemberKind::Constant(name) => cls.constants.iter().any(|c| c.name == *name),
-            MemberKind::Property(_) => false, // interfaces don't have properties
-        };
-
-        if has_member {
-            // Interface members are always public.
-            *best_level = Some(best_level.map_or(2, |prev: u8| prev.max(2)));
-        }
-
-        // Walk parent interfaces.
-        for parent_iface in &cls.interfaces {
-            self.walk_interface_visibility(parent_iface, member_kind, best_level, depth + 1);
-        }
     }
 
     /// Find a PHPStan `method.visibility` or `property.visibility`

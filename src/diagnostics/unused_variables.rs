@@ -467,15 +467,11 @@ fn frame_owns_import(
     if offset < frame.start || offset > frame.end {
         return false;
     }
-    !frames.iter().any(|f| {
-        f.start > frame.start
-            && f.end < frame.end
-            && offset >= f.start
-            && offset <= f.end
-            && matches!(
-                f.kind,
-                FrameKind::Closure | FrameKind::ArrowFunction | FrameKind::Function
-            )
+    !frame.nested_frames_at(frames, offset).any(|f| {
+        matches!(
+            f.kind,
+            FrameKind::Closure | FrameKind::ArrowFunction | FrameKind::Function
+        )
     })
 }
 
@@ -486,13 +482,9 @@ fn is_in_nested_closure(
     parent: &crate::scope_collector::Frame,
     frames: &[crate::scope_collector::Frame],
 ) -> bool {
-    frames.iter().any(|f| {
-        f.start > parent.start
-            && f.end < parent.end
-            && offset >= f.start
-            && offset <= f.end
-            && f.kind == FrameKind::Closure
-    })
+    parent
+        .nested_frames_at(frames, offset)
+        .any(|f| f.kind == FrameKind::Closure)
 }
 
 /// Check whether a variable at the given offset is a catch frame's
@@ -519,9 +511,7 @@ fn is_in_nested_frame(
     parent: &crate::scope_collector::Frame,
     frames: &[crate::scope_collector::Frame],
 ) -> bool {
-    frames.iter().any(|f| {
-        f.start > parent.start && f.end < parent.end && offset >= f.start && offset <= f.end
-    })
+    parent.nested_frames_at(frames, offset).next().is_some()
 }
 
 /// Check whether a write access at `offset` for variable `name` is

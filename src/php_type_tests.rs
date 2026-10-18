@@ -277,6 +277,97 @@ fn callable_variadic_parameter_spellings() {
 }
 
 #[test]
+fn callable_return_suffix_binds_to_return_type() {
+    for (input, expected) in [
+        (
+            "(callable(string):string[])|null",
+            "(callable(string): array<string>)|null",
+        ),
+        ("callable(): string[][]", "callable(): array<array<string>>"),
+        ("Closure(int): string[]", "Closure(int): array<string>"),
+        (r"\Closure(int): string[]", r"\Closure(int): array<string>"),
+        ("pure-callable(): string[]", "callable(): array<string>"),
+        ("pure-closure(): string[]", r"\Closure(): array<string>"),
+        (
+            "callable(): (string|int)[]",
+            "callable(): array<string|int>",
+        ),
+        (
+            "callable(): callable(): string[][]",
+            "callable(): callable(): array<array<string>>",
+        ),
+        (
+            "callable(): (callable(): string)[]",
+            "callable(): array<callable(): string>",
+        ),
+        (
+            "array{cb: callable(string[]): string[]}",
+            "array{cb: callable(array<string>): array<string>}",
+        ),
+        (
+            "callable(callable(int): string[]): bool",
+            "callable(callable(int): array<string>): bool",
+        ),
+        (
+            "callable(string=, int...): string[]",
+            "callable(string=, int...): array<string>",
+        ),
+        ("callable(...): string[]", "callable(...): array<string>"),
+    ] {
+        assert_eq!(
+            PhpType::parse(input).to_string(),
+            PhpType::parse(expected).to_string(),
+            "{input}"
+        );
+    }
+}
+
+#[test]
+fn callable_return_suffix_preserves_index_access_order() {
+    for (input, expected) in [
+        ("callable(): T[K]", "callable(): (T[K])"),
+        ("callable(): T[K][]", "callable(): array<T[K]>"),
+        ("callable(): T[][K]", "callable(): (array<T>[K])"),
+        ("callable(): T[K][V]", "callable(): (T[K][V])"),
+    ] {
+        assert_eq!(
+            PhpType::parse(input).to_string(),
+            PhpType::parse(expected).to_string(),
+            "{input}"
+        );
+    }
+    assert_eq!(
+        PhpType::parse("(callable(): T)[K]"),
+        PhpType::index_access(PhpType::parse("callable(): T"), PhpType::named(atom("K")))
+    );
+}
+
+#[test]
+fn callable_return_suffix_respects_parentheses_and_missing_return_types() {
+    for (input, expected) in [
+        ("(callable(): string)[]", "array<callable(): string>"),
+        (
+            "(callable(): string[])[][]",
+            "array<array<callable(): array<string>>>",
+        ),
+        (
+            "(callable(): string[]|null)[]",
+            "array<(callable(): array<string>)|null>",
+        ),
+        ("callable[]", "array<callable>"),
+        ("callable()[]", "array<callable()>"),
+        ("Closure[]", "array<Closure>"),
+        ("callable(): callable[]", "callable(): array<callable>"),
+    ] {
+        assert_eq!(
+            PhpType::parse(input).to_string(),
+            PhpType::parse(expected).to_string(),
+            "{input}"
+        );
+    }
+}
+
+#[test]
 fn round_trip_class_string() {
     // mago Display bug: class-string<Foo> → class-string<<Foo>>
     assert_round_trip_expected("class-string<Foo>", "class-string<Foo>");
@@ -5336,6 +5427,23 @@ fn benevolence_survives_a_rewrite() {
     );
     assert_eq!(resolved.to_string(), "App\\Foo|false");
     assert!(ty.shorten().is_benevolent());
+}
+
+#[test]
+fn benevolence_survives_a_trip_through_text() {
+    // The displayed form hides the marker, so text the type engine reads
+    // back has to spell it.
+    let ty = PhpType::parse("__benevolent<string|false>");
+    assert_eq!(ty.to_reparseable_string(), "__benevolent<string|false>");
+    assert!(PhpType::parse(&ty.to_reparseable_string()).is_benevolent());
+
+    let nested = PhpType::parse("array<int, __benevolent<string|false>>|null");
+    let spelled = nested.to_reparseable_string();
+    assert_eq!(spelled, "array<int, __benevolent<string|false>>|null");
+    assert_eq!(PhpType::parse(&spelled).to_reparseable_string(), spelled);
+
+    let plain = PhpType::parse("array<string, int|false>|null");
+    assert_eq!(plain.to_reparseable_string(), plain.to_string());
 }
 
 #[test]

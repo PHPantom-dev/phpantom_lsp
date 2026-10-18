@@ -275,19 +275,9 @@ fn class_like_argument(arg: &PartialArgument<'_>, content: &str) -> Option<(Stri
 
 /// The subject text and span of a `Foo::class` argument.
 fn class_constant_argument<'a>(arg: &'a PartialArgument<'a>) -> Option<(String, Span)> {
-    let Some(Expression::Access(Access::ClassConstant(access))) = arg.value() else {
-        return None;
-    };
-    let names_class_constant = matches!(
-        &access.constant,
-        ClassLikeConstantSelector::Identifier(ident)
-            if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
-    );
-    if !names_class_constant {
-        return None;
-    }
-    let subject = expr_to_subject_text(access.class);
-    (!subject.is_empty()).then(|| (subject, access.class.span()))
+    let class = crate::parser::class_fetch_target(arg.value()?)?;
+    let subject = expr_to_subject_text(class);
+    (!subject.is_empty()).then(|| (subject, class.span()))
 }
 
 /// The content of a plain string-literal argument and the span it occupies
@@ -307,16 +297,6 @@ fn string_argument<'a>(arg: &PartialArgument<'_>, content: &'a str) -> Option<(&
         Position::new(end),
     );
     Some((&content[start as usize..end as usize], inner))
-}
-
-/// Whether `name` is a plain PHP identifier, so that prose such as
-/// `#[CoversMethod(Foo::class, 'not a name')]` is not turned into a symbol.
-fn is_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// [`is_identifier`] for a name that may carry a namespace.

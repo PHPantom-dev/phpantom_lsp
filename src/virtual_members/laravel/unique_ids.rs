@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use crate::atom::AtomSet;
-use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, MAX_TRAIT_DEPTH};
+use crate::inheritance::{ancestors, find_declaring_trait};
+use crate::types::ClassInfo;
 
 use super::ELOQUENT_MODEL_FQN;
 
@@ -14,30 +14,21 @@ pub(super) fn uses_unique_string_ids(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
-    let mut visited = AtomSet::default();
-    if traits_use_unique_string_ids(class, class_loader, &mut visited, 0) {
-        return true;
-    }
-
-    let mut parent_name = class.parent_class;
-    for _ in 0..MAX_INHERITANCE_DEPTH {
-        let Some(name) = parent_name else {
-            break;
-        };
-        // The framework base model has no UUID/ULID trait. Avoid walking
-        // its internal concerns for every ordinary application model.
-        if name.eq_ignore_ascii_case(ELOQUENT_MODEL_FQN) {
-            break;
-        }
-        let Some(parent) = class_loader(&name) else {
-            break;
-        };
-        if traits_use_unique_string_ids(&parent, class_loader, &mut visited, 0) {
-            return true;
-        }
-        parent_name = parent.parent_class;
-    }
-    false
+    // The trait is recognised by the name a class uses it by, so it is
+    // found even when its own source cannot be loaded.
+    let uses_directly = |c: &ClassInfo| {
+        c.used_traits.iter().any(|name| {
+            let fqn = name.trim_start_matches('\\');
+            fqn.eq_ignore_ascii_case("Illuminate\\Database\\Eloquent\\Concerns\\HasUuids")
+                || fqn.eq_ignore_ascii_case("Illuminate\\Database\\Eloquent\\Concerns\\HasUlids")
+        })
+    };
+    let uses_through_traits = |c: &ClassInfo| {
+        uses_directly(c)
+            || find_declaring_trait(&c.used_traits, class_loader, &uses_directly).is_some()
+    };
+    uses_through_traits(class)
+        || model_ancestors(class, class_loader).any(|parent| uses_through_traits(&parent))
 }
 
 /// Whether the traits generate `key`, mirroring their `getKeyType()`
@@ -49,52 +40,26 @@ pub(super) fn unique_ids_include(
     key: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
-    if let Some(ids) = class.laravel().and_then(|l| l.unique_ids.as_ref()) {
-        return ids.iter().any(|id| id == key);
-    }
-    let mut parent_name = class.parent_class;
-    for _ in 0..MAX_INHERITANCE_DEPTH {
-        let Some(name) = parent_name else {
-            break;
-        };
-        if name.eq_ignore_ascii_case(ELOQUENT_MODEL_FQN) {
-            break;
-        }
-        let Some(parent) = class_loader(&name) else {
-            break;
-        };
-        if let Some(ids) = parent.laravel().and_then(|l| l.unique_ids.as_ref()) {
-            return ids.iter().any(|id| id == key);
-        }
-        parent_name = parent.parent_class;
-    }
-    true
+    let unique_ids = |c: &ClassInfo| {
+        c.laravel()
+            .and_then(|l| l.unique_ids.as_ref())
+            .map(|ids| ids.iter().any(|id| id == key))
+    };
+    unique_ids(class)
+        .or_else(|| model_ancestors(class, class_loader).find_map(|parent| unique_ids(&parent)))
+        .unwrap_or(true)
 }
 
-fn traits_use_unique_string_ids(
+/// The parents of a model up to the framework's base model, which has no
+/// UUID/ULID trait: walking its internal concerns for every ordinary
+/// application model would find nothing.
+fn model_ancestors<'a>(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    visited: &mut AtomSet,
-    depth: u32,
-) -> bool {
-    if depth >= MAX_TRAIT_DEPTH {
-        return false;
-    }
-    for name in &class.used_traits {
-        let fqn = name.trim_start_matches('\\');
-        if fqn.eq_ignore_ascii_case("Illuminate\\Database\\Eloquent\\Concerns\\HasUuids")
-            || fqn.eq_ignore_ascii_case("Illuminate\\Database\\Eloquent\\Concerns\\HasUlids")
-        {
-            return true;
-        }
-        if visited.insert(*name)
-            && let Some(trait_class) = class_loader(name)
-            && traits_use_unique_string_ids(&trait_class, class_loader, visited, depth + 1)
-        {
-            return true;
-        }
-    }
-    false
+    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> impl Iterator<Item = Arc<ClassInfo>> + use<'a> {
+    ancestors(class, class_loader)
+        .take_while(|(name, _)| !name.eq_ignore_ascii_case(ELOQUENT_MODEL_FQN))
+        .map(|(_, parent)| parent)
 }
 
 #[cfg(test)]

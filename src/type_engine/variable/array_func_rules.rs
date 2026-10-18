@@ -1,22 +1,23 @@
-/// Return-type rules for the array-producing and element-extracting
-/// standard library functions.
-///
-/// The rules themselves live here, independent of where the call's
-/// arguments come from.  Two callers reach a call expression from
-/// opposite directions and both need the same answers:
-///
-/// * the AST walker, when the call is an assignment right-hand side and
-///   a parsed `ArgumentList` is in hand (see
-///   [`super::raw_type_inference`]), and
-/// * the text-driven call resolver, when the call appears inline (as a
-///   subject, an array-access base, or another call's argument) and only
-///   the raw argument source text is available (see
-///   `type_engine::call_resolution`).
-///
-/// [`ArrayFuncArgs`] is the seam between the two: each caller answers
-/// the handful of questions the rules ask about an argument, and the
-/// rules stay in one place so a fix to `array_map`'s element type
-/// reaches every consumer.
+//! Return-type rules for the array-producing and element-extracting
+//! standard library functions.
+//!
+//! The rules themselves live here, independent of where the call's
+//! arguments come from.  Two callers reach a call expression from
+//! opposite directions and both need the same answers:
+//!
+//! * the AST walker, when the call is an assignment right-hand side and
+//!   a parsed `ArgumentList` is in hand (see
+//!   [`super::raw_type_inference`]), and
+//! * the text-driven call resolver, when the call appears inline (as a
+//!   subject, an array-access base, or another call's argument) and only
+//!   the raw argument source text is available (see
+//!   `type_engine::call_resolution`).
+//!
+//! [`ArrayFuncArgs`] is the seam between the two: each caller answers
+//! the handful of questions the rules ask about an argument, and the
+//! rules stay in one place so a fix to `array_map`'s element type
+//! reaches every consumer.
+
 use crate::php_type::{
     LiteralValue, PhpType, ShapeEntry, TypeKind, canonical_int_key, is_array_like_name,
 };

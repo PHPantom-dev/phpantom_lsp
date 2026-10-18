@@ -76,11 +76,11 @@ fn resolve_static_property_key_type(
             Some(parent) => parent.to_string(),
             None => return Vec::new(),
         },
-        other => other.to_string(),
+        other => ctx.written_names().resolve_class(other),
     };
     let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &PhpType::named(crate::atom::atom(&class_name)),
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -226,7 +226,7 @@ fn resolve_member_key_type(
         };
         let resolved_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &hint,
-            &ctx.current_class.name,
+            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         );

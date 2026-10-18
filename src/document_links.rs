@@ -43,7 +43,7 @@ impl Backend {
         if let Some(dir) = file_dir {
             let mut include_links = Vec::new();
             for stmt in program.statements.iter() {
-                collect_include_links_from_statement(stmt, content, dir, &mut include_links);
+                collect_include_links_from_statement(stmt, dir, &mut include_links);
             }
             for il in include_links {
                 if let Ok(target_url) = Url::from_file_path(&il.resolved_path) {
@@ -84,98 +84,82 @@ impl Backend {
 /// Walk a statement looking for include/require constructs.
 fn collect_include_links_from_statement(
     stmt: &Statement<'_>,
-    content: &str,
     file_dir: &Path,
     links: &mut Vec<IncludeLink>,
 ) {
     match stmt {
         Statement::Expression(expr_stmt) => {
-            collect_include_links_from_expression(expr_stmt.expression, content, file_dir, links);
+            collect_include_links_from_expression(expr_stmt.expression, file_dir, links);
         }
         Statement::Namespace(ns) => {
             for s in ns.statements().iter() {
-                collect_include_links_from_statement(s, content, file_dir, links);
+                collect_include_links_from_statement(s, file_dir, links);
             }
         }
         Statement::Block(block) => {
             for s in block.statements.iter() {
-                collect_include_links_from_statement(s, content, file_dir, links);
+                collect_include_links_from_statement(s, file_dir, links);
             }
         }
         Statement::If(if_stmt) => {
             // Main body statements.
             for s in if_stmt.body.statements() {
-                collect_include_links_from_statement(s, content, file_dir, links);
+                collect_include_links_from_statement(s, file_dir, links);
             }
             // Else-if clauses.
             for stmts in if_stmt.body.else_if_statements() {
                 for s in stmts {
-                    collect_include_links_from_statement(s, content, file_dir, links);
+                    collect_include_links_from_statement(s, file_dir, links);
                 }
             }
             // Else clause.
             if let Some(else_stmts) = if_stmt.body.else_statements() {
                 for s in else_stmts {
-                    collect_include_links_from_statement(s, content, file_dir, links);
+                    collect_include_links_from_statement(s, file_dir, links);
                 }
             }
         }
         Statement::Try(try_stmt) => {
             for s in try_stmt.block.statements.iter() {
-                collect_include_links_from_statement(s, content, file_dir, links);
+                collect_include_links_from_statement(s, file_dir, links);
             }
             for catch in try_stmt.catch_clauses.iter() {
                 for s in catch.block.statements.iter() {
-                    collect_include_links_from_statement(s, content, file_dir, links);
+                    collect_include_links_from_statement(s, file_dir, links);
                 }
             }
             if let Some(ref finally) = try_stmt.finally_clause {
                 for s in finally.block.statements.iter() {
-                    collect_include_links_from_statement(s, content, file_dir, links);
+                    collect_include_links_from_statement(s, file_dir, links);
                 }
             }
         }
         Statement::Foreach(foreach) => {
             for s in foreach.body.statements() {
-                collect_include_links_from_statement(s, content, file_dir, links);
+                collect_include_links_from_statement(s, file_dir, links);
             }
         }
         Statement::For(for_stmt) => {
             for s in for_stmt.body.statements() {
-                collect_include_links_from_statement(s, content, file_dir, links);
+                collect_include_links_from_statement(s, file_dir, links);
             }
         }
         Statement::While(while_stmt) => {
             for s in while_stmt.body.statements() {
-                collect_include_links_from_statement(s, content, file_dir, links);
+                collect_include_links_from_statement(s, file_dir, links);
             }
         }
         Statement::DoWhile(do_while) => {
-            collect_include_links_from_statement(do_while.statement, content, file_dir, links);
+            collect_include_links_from_statement(do_while.statement, file_dir, links);
         }
         Statement::Function(func) => {
             for s in func.body.statements.iter() {
-                collect_include_links_from_statement(s, content, file_dir, links);
+                collect_include_links_from_statement(s, file_dir, links);
             }
         }
-        Statement::Class(class) => {
-            for member in class.members.iter() {
-                collect_include_links_from_class_member(member, content, file_dir, links);
-            }
-        }
-        Statement::Interface(iface) => {
-            for member in iface.members.iter() {
-                collect_include_links_from_class_member(member, content, file_dir, links);
-            }
-        }
-        Statement::Trait(trait_def) => {
-            for member in trait_def.members.iter() {
-                collect_include_links_from_class_member(member, content, file_dir, links);
-            }
-        }
-        Statement::Enum(enum_def) => {
-            for member in enum_def.members.iter() {
-                collect_include_links_from_class_member(member, content, file_dir, links);
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            for member in body.members {
+                collect_include_links_from_class_member(member, file_dir, links);
             }
         }
         Statement::Switch(switch) => {
@@ -189,18 +173,18 @@ fn collect_include_links_from_statement(
                     SwitchCase::Default(c) => &c.statements,
                 };
                 for s in stmts.iter() {
-                    collect_include_links_from_statement(s, content, file_dir, links);
+                    collect_include_links_from_statement(s, file_dir, links);
                 }
             }
         }
         Statement::Return(ret) => {
             if let Some(val) = &ret.value {
-                collect_include_links_from_expression(val, content, file_dir, links);
+                collect_include_links_from_expression(val, file_dir, links);
             }
         }
         Statement::Echo(echo) => {
             for val in echo.values.iter() {
-                collect_include_links_from_expression(val, content, file_dir, links);
+                collect_include_links_from_expression(val, file_dir, links);
             }
         }
         _ => {}
@@ -210,7 +194,6 @@ fn collect_include_links_from_statement(
 /// Walk a class-like member for include/require constructs.
 fn collect_include_links_from_class_member(
     member: &ClassLikeMember<'_>,
-    content: &str,
     file_dir: &Path,
     links: &mut Vec<IncludeLink>,
 ) {
@@ -218,7 +201,7 @@ fn collect_include_links_from_class_member(
         && let MethodBody::Concrete(body) = &method.body
     {
         for s in body.statements.iter() {
-            collect_include_links_from_statement(s, content, file_dir, links);
+            collect_include_links_from_statement(s, file_dir, links);
         }
     }
 }
@@ -226,7 +209,6 @@ fn collect_include_links_from_class_member(
 /// Walk an expression looking for include/require constructs.
 fn collect_include_links_from_expression(
     expr: &Expression<'_>,
-    content: &str,
     file_dir: &Path,
     links: &mut Vec<IncludeLink>,
 ) {
@@ -240,14 +222,14 @@ fn collect_include_links_from_expression(
                 _ => None,
             };
             if let Some(value_expr) = include_value {
-                try_resolve_include(value_expr, content, file_dir, links);
+                try_resolve_include(value_expr, file_dir, links);
             }
         }
         Expression::Parenthesized(p) => {
-            collect_include_links_from_expression(p.expression, content, file_dir, links);
+            collect_include_links_from_expression(p.expression, file_dir, links);
         }
         Expression::Assignment(a) => {
-            collect_include_links_from_expression(a.rhs, content, file_dir, links);
+            collect_include_links_from_expression(a.rhs, file_dir, links);
         }
         _ => {}
     }
@@ -261,13 +243,7 @@ fn collect_include_links_from_expression(
 /// - `dirname(__DIR__) . '/relative.php'`
 /// - `dirname(__FILE__) . '/relative.php'`
 /// - `dirname(__DIR__, 2) . '/relative.php'` (nested dirname)
-fn try_resolve_include(
-    expr: &Expression<'_>,
-    content: &str,
-    file_dir: &Path,
-    links: &mut Vec<IncludeLink>,
-) {
-    let _ = content;
+fn try_resolve_include(expr: &Expression<'_>, file_dir: &Path, links: &mut Vec<IncludeLink>) {
     let span = expr.span();
     let start = span.start.offset as usize;
     let end = span.end.offset as usize;

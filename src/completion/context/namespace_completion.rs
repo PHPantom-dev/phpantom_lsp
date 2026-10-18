@@ -1,11 +1,12 @@
-/// Namespace declaration completions.
-///
-/// This module builds completion items for `namespace` declarations,
-/// suggesting namespace names that fall under known PSR-4 prefixes.
-///
-/// When the file's path falls under a PSR-4 source directory, the
-/// namespace inferred from the path is boosted to the top of the list.
-/// If multiple PSR-4 roots match, the longest match is ranked first.
+//! Namespace declaration completions.
+//!
+//! This module builds completion items for `namespace` declarations,
+//! suggesting namespace names that fall under known PSR-4 prefixes.
+//!
+//! When the file's path falls under a PSR-4 source directory, the
+//! namespace inferred from the path is boosted to the top of the list.
+//! If multiple PSR-4 roots match, the longest match is ranked first.
+
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -123,7 +124,7 @@ impl Backend {
         position: Position,
         uri: &str,
     ) -> (Vec<CompletionItem>, bool) {
-        let prefix_lower = prefix.to_lowercase();
+        let prefix_lower = prefix.to_ascii_lowercase();
         let mut namespaces: HashSet<String> = HashSet::new();
 
         // Collect the project's own PSR-4 prefixes (without trailing
@@ -265,7 +266,7 @@ impl Backend {
         // ── Filter and build items ──────────────────────────────────
         let mut items: Vec<CompletionItem> = namespaces
             .into_iter()
-            .filter(|ns| ns.to_lowercase().contains(&prefix_lower))
+            .filter(|ns| crate::ci_map::contains_folded(ns, &prefix_lower))
             .map(|ns| {
                 let sn = ns.rsplit('\\').next().unwrap_or(&ns);
 

@@ -31,7 +31,8 @@ use crate::atom::bytes_to_str;
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
 use crate::util::short_name;
 
-use super::helpers::{beats_best, enclosing_body, extract_string_literal, walk_before_cursor};
+use super::expr_walker::{beats_best, enclosing_body, walk_before_cursor};
+use super::helpers::extract_string_literal;
 
 /// The FQN of Laravel's base form-request class.
 pub(crate) const FORM_REQUEST_FQN: &str = "Illuminate\\Foundation\\Http\\FormRequest";
@@ -128,7 +129,7 @@ pub(crate) struct RulesFile {
 }
 
 /// Which file a resolved rules array was parsed from.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum RulesSource {
     /// The rules live in the file the cursor is in — the caller already
     /// holds its content, so nothing is cloned.
@@ -138,7 +139,7 @@ pub(crate) enum RulesSource {
 }
 
 /// A validation rules array located for a cursor position.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ResolvedRules {
     /// Where the rules were parsed from.
     pub source: RulesSource,
@@ -315,26 +316,7 @@ fn element_enum_class(element: &ArrayElement<'_>) -> Option<String> {
 /// `self::class` and friends are relative to a declaration site the rules
 /// array does not carry, so they name nothing here.
 fn class_const_name(expr: &Expression<'_>) -> Option<String> {
-    let Expression::Access(Access::ClassConstant(access)) = expr else {
-        return None;
-    };
-    let ClassLikeConstantSelector::Identifier(constant) = &access.constant else {
-        return None;
-    };
-    if !bytes_to_str(constant.value).eq_ignore_ascii_case("class") {
-        return None;
-    }
-    let Expression::Identifier(class) = access.class else {
-        return None;
-    };
-    let name = bytes_to_str(class.value());
-    if matches!(
-        name.to_ascii_lowercase().as_str(),
-        "self" | "static" | "parent"
-    ) {
-        return None;
-    }
-    Some(name.to_string())
+    crate::parser::class_fetch_identifier(expr).map(|class| bytes_to_str(class.value()).to_string())
 }
 
 /// Resolve the enum class names in `rules` against the imports of the file
@@ -352,12 +334,12 @@ fn resolve_enum_names_in_program(rules: &mut RulesArray, program: &Program<'_>) 
     }
 
     let mut use_map = HashMap::new();
-    Backend::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
+    Backend::extract_use_statements_from_statements(program.statements.iter(), &mut use_map, None);
     let namespace = Backend::extract_namespace_from_statements(program.statements.iter());
 
     for entry in &mut rules.entries {
         if let Some(name) = &entry.enum_class {
-            entry.enum_class = Some(crate::util::resolve_to_fqn(name, &use_map, &namespace));
+            entry.enum_class = Some(crate::names::resolve_to_fqn(name, &use_map, &namespace));
         }
     }
 }
@@ -439,12 +421,17 @@ pub(crate) fn inline_validate_rules(content: &str, offset: usize) -> Option<Rule
         return None;
     }
 
-    let arena = LocalArena::new();
-    let file_id = FileId::new(b"input.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
+    crate::parser::with_parsed_program(content, "inline_validate_rules", |program, content| {
+        inline_validate_rules_in(program, content, offset as u32)
+    })
+}
 
-    let body = enclosing_body(Node::Program(program), offset as u32)?;
-    let cursor = offset as u32;
+fn inline_validate_rules_in(
+    program: &Program<'_>,
+    content: &str,
+    cursor: u32,
+) -> Option<RulesArray> {
+    let body = enclosing_body(Node::Program(program), cursor)?;
 
     let mut in_force: Option<RulesArray> = None;
     walk_candidate_calls(body, cursor, false, &mut |node, conditional| {
@@ -621,12 +608,13 @@ pub(crate) fn safe_source_variable(content: &str, offset: usize, variable: &str)
     // so the file is not worth parsing.
     memchr::memmem::find(content.as_bytes(), b"safe(")?;
 
-    let arena = LocalArena::new();
-    let file_id = FileId::new(b"input.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
+    crate::parser::with_parsed_program(content, "safe_source_variable", |program, _| {
+        safe_source_variable_in(program, offset as u32, variable)
+    })
+}
 
-    let body = enclosing_body(Node::Program(program), offset as u32)?;
-    let cursor = offset as u32;
+fn safe_source_variable_in(program: &Program<'_>, cursor: u32, variable: &str) -> Option<String> {
+    let body = enclosing_body(Node::Program(program), cursor)?;
 
     let mut best: Option<(u32, String)> = None;
     walk_before_cursor(body, cursor, &mut |node| {
@@ -722,13 +710,46 @@ pub(crate) fn form_request_rules(
     current_uri: &str,
     current_content: &str,
 ) -> Option<ResolvedRules> {
-    form_request_rules_within(
+    let fqn = class.fqn();
+    let key = (fqn.to_string(), current_uri.to_string());
+    if let Some(hit) = RULES_MEMO.with(|memo| memo.borrow().as_ref()?.get(&key).cloned()) {
+        return hit;
+    }
+    let rules = form_request_rules_within(
         backend,
-        &class.fqn(),
+        &fqn,
         current_uri,
         current_content,
         MAX_INHERITANCE_DEPTH,
-    )
+    );
+    RULES_MEMO.with(|memo| {
+        if let Some(memo) = memo.borrow_mut().as_mut() {
+            memo.insert(key, rules.clone());
+        }
+    });
+    rules
+}
+
+/// A `FormRequest`'s rules by (class FQN, requesting file URI); the URI is
+/// part of the key because rules read from the requesting file itself
+/// point into its content.
+type RulesMemo = HashMap<(String, String), Option<ResolvedRules>>;
+
+thread_local! {
+    /// When `Some`, memoizes [`form_request_rules`] for the current pass:
+    /// every `validated()` call and request-field lookup on the same
+    /// request class would otherwise re-read the class, its parents and
+    /// its traits.
+    static RULES_MEMO: std::cell::RefCell<Option<RulesMemo>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The guard [`with_rules_memo`] hands back.
+pub(crate) type RulesMemoGuard = crate::type_engine::MemoGuard<RulesMemo>;
+
+/// Activate the `FormRequest` rules memo for the current thread.
+pub(crate) fn with_rules_memo() -> RulesMemoGuard {
+    crate::type_engine::activate_memo(&RULES_MEMO)
 }
 
 /// [`form_request_rules`] with an explicit budget of parent-chain steps.
@@ -934,16 +955,19 @@ pub(crate) fn rules_in_scope(
 
 /// Parse the array returned by `class_name`'s `rules()` method.
 pub(crate) fn rules_from_class_source(content: &str, class_name: &str) -> RulesArray {
-    let arena = LocalArena::new();
-    let file_id = FileId::new(b"input.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
-
-    let mut out = RulesArray::new();
-    collect_rules_method(Node::Program(program), class_name, content, &mut out);
-    // An enum rule names its class in this file's terms, and this file is
-    // already parsed — resolving here saves the caller a second pass over it.
-    resolve_enum_names_in_program(&mut out, program);
-    out
+    crate::parser::with_parsed_program(content, "rules_from_class_source", |program, content| {
+        let mut out = RulesArray::new();
+        collect_rules_method(Node::Program(program), class_name, content, &mut out);
+        // An enum rule names its class in this file's terms, and this file is
+        // already parsed — resolving here saves the caller a second pass over it.
+        resolve_enum_names_in_program(&mut out, program);
+        Some(out)
+    })
+    // A parse that failed outright read no keys, not all of them.
+    .unwrap_or_else(|| RulesArray {
+        keys_complete: false,
+        ..RulesArray::new()
+    })
 }
 
 fn collect_rules_method(node: Node<'_, '_>, class_name: &str, content: &str, out: &mut RulesArray) {

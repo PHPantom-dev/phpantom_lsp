@@ -258,6 +258,7 @@ impl Backend {
         // A template is diagnosed as the PHP it lowers to, through a source
         // map; neither the lowering nor the map is tracked here.
         if let Some(virtual_php) = self.blade_virtual_php_arc(uri) {
+            let _parse_guard = crate::parser::with_parse_cache_arc(Arc::clone(&virtual_php));
             let mut diagnostics = Vec::new();
             self.collect_slow_diagnostics(uri, &virtual_php, &mut diagnostics);
             return SlowPass {

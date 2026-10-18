@@ -201,41 +201,7 @@ impl Backend {
                 );
                 let package_roots = std::mem::take(&mut vendor_scan.package_roots);
 
-                // Origins ride alongside the winning path: only record
-                // one for a vendor entry when it actually wins the merge
-                // (the workspace scan didn't already provide this FQN),
-                // so a symbol's recorded origin always matches the file
-                // it resolves to.
-                for (fqcn, path) in vendor_scan.classmap {
-                    if let std::collections::hash_map::Entry::Vacant(e) =
-                        scan.classmap.entry(fqcn.clone())
-                    {
-                        e.insert(path);
-                        if let Some(&origin) = vendor_scan.class_origins.get(&fqcn) {
-                            scan.class_origins.insert(fqcn, origin);
-                        }
-                    }
-                }
-                for (fqn, path) in vendor_scan.function_index {
-                    if let std::collections::hash_map::Entry::Vacant(e) =
-                        scan.function_index.entry(fqn.clone())
-                    {
-                        e.insert(path);
-                        if let Some(&origin) = vendor_scan.function_origins.get(&fqn) {
-                            scan.function_origins.insert(fqn, origin);
-                        }
-                    }
-                }
-                for (name, path) in vendor_scan.constant_index {
-                    if let std::collections::hash_map::Entry::Vacant(e) =
-                        scan.constant_index.entry(name.clone())
-                    {
-                        e.insert(path);
-                        if let Some(&origin) = vendor_scan.constant_origins.get(&name) {
-                            scan.constant_origins.insert(name, origin);
-                        }
-                    }
-                }
+                scan.absorb_missing(vendor_scan);
 
                 self.populate_autoload_indices(&scan);
                 (

@@ -1,6 +1,7 @@
-/// Callable target resolution: resolving a call expression string to a
-/// `ResolvedCallableTarget` with label, parameters, and return type, used
-/// by signature help and named-argument completion.
+//! Callable target resolution: resolving a call expression string to a
+//! `ResolvedCallableTarget` with label, parameters, and return type, used
+//! by signature help and named-argument completion.
+
 use std::sync::Arc;
 
 use crate::Backend;
@@ -16,8 +17,8 @@ use crate::type_engine::resolver::{CtxLoaders, ResolutionCtx};
 
 use tower_lsp::lsp_types::Position;
 
+use super::constant_operands::evaluate_constant_operands;
 use super::target_cache::CALLABLE_TARGET_CACHE;
-use super::template_subs::evaluate_constant_operands;
 
 impl Backend {
     /// Bind a method's declaration to one call site: substitute the
@@ -69,7 +70,7 @@ impl Backend {
             return (bound, self_bound_params);
         };
 
-        let split_args = crate::type_engine::types::conditional::split_text_args(at);
+        let split_args = crate::text_scan::split_top_level_commas(at);
         let method_subs = Self::build_method_template_subs(owner, method_name, &split_args, rctx);
         if !method_subs.is_empty() {
             crate::inheritance::apply_substitution_to_method(&mut bound, &method_subs);
@@ -107,8 +108,9 @@ impl Backend {
                     at,
                     None,
                     crate::type_engine::types::conditional::ConditionalClassContext {
-                        calling: rctx.current_class.map(|c| c.name.as_str()),
+                        calling: rctx.current_class.map(|c| c.fqn().as_str()),
                         declaring: Some(owner.fqn().as_str()),
+                        written_class: Some(&|name: &str| rctx.written_names().resolve_class(name)),
                     },
                     rctx.class_loader,
                     &tpl,
@@ -379,11 +381,10 @@ impl Backend {
         if let Some(at) = args_text
             && !func.template_params.is_empty()
         {
-            let split_args: Vec<String> =
-                crate::type_engine::types::conditional::split_text_args(at)
-                    .into_iter()
-                    .map(|s| s.to_string())
-                    .collect();
+            let split_args: Vec<String> = crate::text_scan::split_top_level_commas(at)
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect();
             let subs = crate::type_engine::variable::rhs_resolution::build_function_template_subs(
                 func,
                 &split_args,
@@ -466,7 +467,7 @@ impl Backend {
         if let Some(at) = args_text
             && !ctor.template_bindings().is_empty()
         {
-            let split_args = crate::type_engine::types::conditional::split_text_args(at);
+            let split_args = crate::text_scan::split_top_level_commas(at);
             let subs = Self::build_method_template_subs(&merged, "__construct", &split_args, rctx);
             if !subs.is_empty() {
                 let self_bound_params = super::template_subs::self_bound_template_params(
@@ -607,9 +608,15 @@ impl Backend {
         // block covering this call site.
         let namespace = file_ctx.namespace_at(cursor_offset);
         let use_map = file_ctx.use_map_at(cursor_offset);
+        let function_imports = &file_ctx.symbol_imports_at(cursor_offset).functions;
         let class_loader = self.class_loader_with(&file_ctx.classes, use_map, namespace);
-        let function_loader_cl =
-            self.function_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace);
+        let resolved_class_loader = self.resolved_class_loader_with(&file_ctx.classes);
+        let function_loader_cl = self.function_loader_with(
+            file_ctx.resolved_names.as_deref(),
+            use_map,
+            function_imports,
+            namespace,
+        );
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
@@ -619,11 +626,27 @@ impl Backend {
             content,
             cursor_offset,
             CtxLoaders::new(
+                &resolved_class_loader,
                 &class_loader,
                 &function_loader_cl,
                 &laravel_macro_this_resolver,
-            ),
+            )
+            .with_imports(use_map),
         );
+
+        // ── Invoked value: `($this->handler)(…)` ──────────────────
+        // The call runs whatever the expression evaluates to, so it is
+        // checked against that value's signature, never against a method
+        // that happens to share the property's name.
+        if let Some(value) = invoked_value_text(expr) {
+            let mut target = Self::resolve_invoked_value_callable(
+                &SubjectExpr::parse(value),
+                &rctx,
+                call_args_text,
+            )?;
+            evaluate_constant_operands_in_target(&mut target, &rctx);
+            return Some(target);
+        }
 
         let parsed = SubjectExpr::parse(expr);
 
@@ -650,19 +673,13 @@ impl Backend {
                 // source-level reference so a same-namespace class wins
                 // over a global stub of the same short name.
                 let resolved_class_name = if resolved_class_name == *class_name {
-                    let ns = rctx.current_class.and_then(|c| c.file_namespace.as_deref());
-                    crate::util::resolve_source_class_name(
-                        class_name,
-                        ns,
-                        rctx.all_classes,
-                        &class_loader,
-                    )
+                    rctx.written_names().resolve_class(class_name)
                 } else {
                     resolved_class_name
                 };
                 Self::resolve_constructor_callable(
                     &resolved_class_name,
-                    &class_loader,
+                    &resolved_class_loader,
                     &self.resolved_class_cache,
                     effective_args_text,
                     &rctx,
@@ -681,7 +698,8 @@ impl Backend {
 
             // ── Standalone function call: `functionName(…)` ─────────
             SubjectExpr::FunctionCall(name) => {
-                let func = self.resolve_function_name(name, use_map, namespace)?;
+                let func =
+                    self.resolve_function_name(name, use_map, function_imports, namespace)?;
                 Some(Self::function_to_callable_with_subs(
                     &func,
                     effective_args_text,
@@ -713,7 +731,8 @@ impl Backend {
             // as `ClassName` (since it can't distinguish class names
             // from function names without context).
             SubjectExpr::ClassName(name) => {
-                let func = self.resolve_function_name(name, use_map, namespace)?;
+                let func =
+                    self.resolve_function_name(name, use_map, function_imports, namespace)?;
                 Some(Self::function_to_callable_with_subs(
                     &func,
                     effective_args_text,
@@ -775,6 +794,73 @@ impl Backend {
 
         result
     }
+}
+
+impl Backend {
+    /// Resolve what invoking `value` accepts: a typed callable
+    /// (`Closure(A, B): void`) contributes its parameters, a bare
+    /// `callable` or `Closure` accepts anything, and an object is invoked
+    /// through its `__invoke()` method.
+    fn resolve_invoked_value_callable(
+        value: &SubjectExpr,
+        rctx: &ResolutionCtx<'_>,
+        args_text: Option<&str>,
+    ) -> Option<ResolvedCallableTarget> {
+        let resolved = crate::type_engine::resolver::resolve_target_classes_expr(
+            value,
+            crate::AccessKind::Arrow,
+            rctx,
+        );
+        let mut untyped = None;
+        for ty in invoked_value_types(value, &resolved, rctx) {
+            if let Some(target) = callable_type_as_target(&ty) {
+                if !target.accepts_any_args {
+                    return Some(target);
+                }
+                untyped.get_or_insert(target);
+            }
+        }
+        untyped
+            .or_else(|| Self::resolve_instance_method_callable(value, "__invoke", rctx, args_text))
+    }
+}
+
+/// The types a value invoked as a callable can hold, from its resolved
+/// subject types.
+///
+/// Subject resolution keeps only class-typed results, so a property whose
+/// type is a bare `callable(…): T` comes back empty; its declared hint is
+/// read from the owning class instead.
+pub(crate) fn invoked_value_types(
+    value: &SubjectExpr,
+    resolved: &[ResolvedType],
+    ctx: &ResolutionCtx<'_>,
+) -> Vec<PhpType> {
+    let mut types: Vec<PhpType> = resolved.iter().map(|rt| rt.type_string.clone()).collect();
+    if types.is_empty()
+        && let SubjectExpr::PropertyChain { base, property } = value
+    {
+        let owners = ResolvedType::into_arced_classes(
+            crate::type_engine::resolver::resolve_target_classes_expr(
+                base,
+                crate::AccessKind::Arrow,
+                ctx,
+            ),
+        );
+        types.extend(owners.iter().filter_map(|owner| {
+            crate::inheritance::resolve_property_type_hint(owner, property, ctx.class_loader)
+        }));
+    }
+    types
+}
+
+/// The expression a call expression invokes the value of, when it is one
+/// parenthesised group (`($this->handler)`) rather than a function or
+/// method name.
+fn invoked_value_text(expr: &str) -> Option<&str> {
+    let inner = expr.strip_prefix('(')?.strip_suffix(')')?;
+    (crate::text_scan::find_matching_forward(expr, 0, b'(', b')')? == expr.len() - 1)
+        .then_some(inner)
 }
 
 /// Evaluate the type operators a target's parameter and return types read
@@ -850,6 +936,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                     is_reference: false,
                     closure_this_type: None,
                     param_out_type: None,
+                    callable_invocation: None,
                 })
                 .collect();
             Some(ResolvedCallableTarget {

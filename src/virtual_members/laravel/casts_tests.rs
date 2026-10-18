@@ -293,7 +293,7 @@ fn cast_custom_class_canonical_fqn() {
         }
     };
     // Input is canonical (no leading `\`) — ingestion boundary in
-    // ast_update.rs strips the prefix before values reach this function.
+    // parser/name_resolution.rs strips the prefix before values reach this function.
     assert_eq!(
         cast_type_to_php_type("App\\Casts\\MoneyCast", &loader).to_string(),
         "App\\Money"
@@ -346,7 +346,7 @@ fn cast_enum_canonical_fqn() {
         }
     };
     // Input is canonical (no leading `\`) — ingestion boundary in
-    // ast_update.rs strips the prefix before values reach this function.
+    // parser/name_resolution.rs strips the prefix before values reach this function.
     assert_eq!(
         cast_type_to_php_type("App\\Enums\\Status", &loader).to_string(),
         "App\\Enums\\Status"

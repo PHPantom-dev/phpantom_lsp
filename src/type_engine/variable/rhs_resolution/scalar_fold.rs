@@ -1,15 +1,16 @@
-/// Folding operators over operands that each hold one known scalar value.
-///
-/// `'1' . 'a'`, `(int) '1'`, `"$a"` and `'1' <=> 'a'` all have exactly one
-/// value when their operands do, and PHP's own conversion rules decide what
-/// it is. An operand that is not pinned to one scalar, or a conversion PHP
-/// answers with a warning, an error, or a value that depends on runtime
-/// configuration beyond the defaults, leaves the operation unfolded so the
-/// caller falls back to the operator's base type.
-///
-/// Only operands that are cheap to look up are ever resolved for folding
-/// (see [`is_cheap_scalar_operand`]): a cast of a method call does not pay
-/// for resolving the call just to learn it cannot be folded.
+//! Folding operators over operands that each hold one known scalar value.
+//!
+//! `'1' . 'a'`, `(int) '1'`, `"$a"` and `'1' <=> 'a'` all have exactly one
+//! value when their operands do, and PHP's own conversion rules decide what
+//! it is. An operand that is not pinned to one scalar, or a conversion PHP
+//! answers with a warning, an error, or a value that depends on runtime
+//! configuration beyond the defaults, leaves the operation unfolded so the
+//! caller falls back to the operator's base type.
+//!
+//! Only operands that are cheap to look up are ever resolved for folding
+//! (see [`is_cheap_scalar_operand`]): a cast of a method call does not pay
+//! for resolving the call just to learn it cannot be folded.
+
 use std::cmp::Ordering;
 
 use mago_syntax::cst::string::{CompositeString, StringPart};

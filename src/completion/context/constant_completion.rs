@@ -1,12 +1,14 @@
-/// Global constant name completions.
-///
-/// This module builds completion items for standalone constants
-/// (`define()` constants and built-in PHP constants from stubs).
+//! Global constant name completions.
+//!
+//! This module builds completion items for standalone constants
+//! (`define()` constants and built-in PHP constants from stubs).
+
 use std::collections::HashSet;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::ci_map::contains_folded;
 use crate::completion::builder::deprecation_tag;
 use crate::completion::context::symbol_ranking::{flat_symbol_sort_text, origin_sort_tier};
 use crate::completion::resolve::CompletionItemData;
@@ -82,7 +84,7 @@ impl Backend {
         uri: &str,
         position: Position,
     ) -> (Vec<CompletionItem>, bool) {
-        let prefix_lower = strip_fqn_prefix(prefix).to_lowercase();
+        let prefix_lower = strip_fqn_prefix(prefix).to_ascii_lowercase();
         let mut seen: HashSet<String> = HashSet::new();
         let mut items: Vec<CompletionItem> = Vec::new();
 
@@ -110,7 +112,7 @@ impl Backend {
         {
             let dmap = self.symbols.global_defines.read();
             for (name, info) in dmap.iter() {
-                if !name.to_lowercase().contains(&prefix_lower) {
+                if !contains_folded(name, &prefix_lower) {
                     continue;
                 }
                 if !seen.insert(name.clone()) {
@@ -143,7 +145,7 @@ impl Backend {
             let idx = self.symbols.autoload_constant_index.read();
             let dmap = self.symbols.global_defines.read();
             for name in idx.keys() {
-                if !name.to_lowercase().contains(&prefix_lower) {
+                if !contains_folded(name, &prefix_lower) {
                     continue;
                 }
                 if !seen.insert(name.clone()) {
@@ -176,7 +178,7 @@ impl Backend {
         // hover / resolve, same as stub functions.
         let stub_const_idx = self.stub_constant_index.read();
         for &name in stub_const_idx.keys() {
-            if !name.to_lowercase().contains(&prefix_lower) {
+            if !contains_folded(name, &prefix_lower) {
                 continue;
             }
             if !seen.insert(name.to_string()) {

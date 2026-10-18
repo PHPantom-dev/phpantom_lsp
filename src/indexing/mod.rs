@@ -13,12 +13,15 @@
 //! - [`watch`] — applying `didChangeWatchedFiles` batches to the indexes.
 //! - [`reconcile`] — realigning the indexes with the file filters when
 //!   those change mid-session.
+//! - [`reindex`] — re-scanning a batch of files that changed on disk, the
+//!   step [`watch`] and [`reconcile`] share.
 
 use std::path::{Path, PathBuf};
 
 mod init;
 pub(crate) mod preload;
 mod reconcile;
+mod reindex;
 mod scan;
 mod watch;
 

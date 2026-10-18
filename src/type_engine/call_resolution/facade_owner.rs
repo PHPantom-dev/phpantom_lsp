@@ -25,7 +25,7 @@ pub(crate) fn facade_concrete_owner(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
     backend: Option<&Backend>,
-) -> Option<ClassInfo> {
+) -> Option<Arc<ClassInfo>> {
     if !class_has_method(owner, method_name, class_loader, cache) {
         return facade_accessor_concrete_owner(owner, method_name, class_loader, cache, backend);
     }
@@ -181,7 +181,7 @@ fn facade_accessor_concrete_owner(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
     backend: Option<&Backend>,
-) -> Option<ClassInfo> {
+) -> Option<Arc<ClassInfo>> {
     let merged =
         crate::virtual_members::resolve_class_fully_maybe_cached(facade, class_loader, cache);
 
@@ -195,7 +195,7 @@ fn facade_accessor_concrete_owner(
         .and_then(|name| class_loader(&name))
         .filter(|class| class_has_method(class, method_name, class_loader, cache))
     {
-        return Some(Arc::unwrap_or_clone(concrete));
+        return Some(concrete);
     }
 
     if let Some(accessor) = facade
@@ -214,7 +214,7 @@ fn facade_accessor_concrete_owner(
         && let Some(concrete) = class_loader(&concrete_name)
         && class_has_method(&concrete, method_name, class_loader, cache)
     {
-        return Some(Arc::unwrap_or_clone(concrete));
+        return Some(concrete);
     }
 
     facade
@@ -223,8 +223,7 @@ fn facade_accessor_concrete_owner(
         .chain(merged.mixins.iter())
         .find_map(|mixin| {
             let class = class_loader(mixin.as_str())?;
-            class_has_method(&class, method_name, class_loader, cache)
-                .then(|| Arc::unwrap_or_clone(class))
+            class_has_method(&class, method_name, class_loader, cache).then_some(class)
         })
 }
 

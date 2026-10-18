@@ -7,8 +7,8 @@
 namespace PsalmTest_template_class_template_1 {
     $input = range("a", "z");
 
-    $arrayIterator = new ArrayIterator($input);
-    $decoratorIterator = new CachingIterator($arrayIterator);
+    $arrayIterator = new \ArrayIterator($input);
+    $decoratorIterator = new \CachingIterator($arrayIterator);
     $next = $decoratorIterator->hasNext();
     $key = $decoratorIterator->key();
     $value = $decoratorIterator->current();
@@ -21,8 +21,8 @@ namespace PsalmTest_template_class_template_1 {
 namespace PsalmTest_template_class_template_2 {
     $input = range("a", "z");
 
-    $arrayIterator = new ArrayIterator($input);
-    $decoratorIterator = new InfiniteIterator($arrayIterator);
+    $arrayIterator = new \ArrayIterator($input);
+    $decoratorIterator = new \InfiniteIterator($arrayIterator);
     $key = $decoratorIterator->key();
     $value = $decoratorIterator->current();
 
@@ -33,8 +33,8 @@ namespace PsalmTest_template_class_template_2 {
 namespace PsalmTest_template_class_template_3 {
     $input = range("a", "z");
 
-    $arrayIterator = new ArrayIterator($input);
-    $decoratorIterator = new LimitIterator($arrayIterator, 1, 1);
+    $arrayIterator = new \ArrayIterator($input);
+    $decoratorIterator = new \LimitIterator($arrayIterator, 1, 1);
     $key = $decoratorIterator->key();
     $value = $decoratorIterator->current();
 
@@ -45,8 +45,8 @@ namespace PsalmTest_template_class_template_3 {
 namespace PsalmTest_template_class_template_4 {
     $input = range("a", "z");
 
-    $arrayIterator = new ArrayIterator($input);
-    $decoratorIterator = new CallbackFilterIterator(
+    $arrayIterator = new \ArrayIterator($input);
+    $decoratorIterator = new \CallbackFilterIterator(
         $arrayIterator,
         static function (string $value): bool {return "a" === $value;}
     );
@@ -60,8 +60,8 @@ namespace PsalmTest_template_class_template_4 {
 namespace PsalmTest_template_class_template_5 {
     $input = range("a", "z");
 
-    $arrayIterator = new ArrayIterator($input);
-    $decoratorIterator = new NoRewindIterator($arrayIterator);
+    $arrayIterator = new \ArrayIterator($input);
+    $decoratorIterator = new \NoRewindIterator($arrayIterator);
     $key = $decoratorIterator->key();
     $value = $decoratorIterator->current();
 
@@ -476,12 +476,12 @@ namespace PsalmTest_template_class_template_14 {
 
 // Test: doublyLinkedListConstructor
 namespace PsalmTest_template_class_template_15 {
-    $list = new SplDoublyLinkedList();
+    $list = new \SplDoublyLinkedList();
     $list->add(5, "hello");
     $list->add(5, 1);
 
-    /** @var SplDoublyLinkedList<string> */
-    $templated_list = new SplDoublyLinkedList();
+    /** @var \SplDoublyLinkedList<string> */
+    $templated_list = new \SplDoublyLinkedList();
     $templated_list->add(5, "hello");
     $a = $templated_list->bottom();
 
@@ -704,8 +704,8 @@ namespace PsalmTest_template_class_template_21 {
 
 // Test: weakReferenceIsTyped
 namespace PsalmTest_template_class_template_22 {
-    $e = new Exception;
-    $r = WeakReference::create($e);
+    $e = new \Exception;
+    $r = \WeakReference::create($e);
     $ex = $r->get();
 
     assertType('Exception|null', $ex);
@@ -892,11 +892,11 @@ namespace PsalmTest_template_class_template_29 {
     /**
      * @template TTObject
      *
-     * @extends Future<ArrayObject<int, TTObject>>
+     * @extends Future<\ArrayObject<int, TTObject>>
      */
     class FutureB extends Future {
         /** @param TTObject $data */
-        public function __construct($data) { parent::__construct(new ArrayObject([$data])); }
+        public function __construct($data) { parent::__construct(new \ArrayObject([$data])); }
     }
 
     $a = new FutureB(123);

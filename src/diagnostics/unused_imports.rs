@@ -41,7 +41,10 @@ impl Backend {
         // that block alone.
         let blocks = self.import_blocks(uri);
 
-        if blocks.iter().all(|block| block.use_map.is_empty()) {
+        if blocks
+            .iter()
+            .all(|block| block.use_map.is_empty() && block.symbol_imports.is_empty())
+        {
             return;
         }
 
@@ -69,11 +72,6 @@ impl Backend {
         // body) and each span covers a wrapped group import in full.
         let use_statement_spans = compute_use_statement_spans(content);
 
-        // ── Also compute byte ranges of class/interface/trait/enum
-        //    declaration lines so the content safety-net doesn't count
-        //    a class declaration bearing the same short name as a usage. ──
-        let decl_line_ranges = compute_declaration_line_ranges(content);
-
         // ── Collect all referenced short names from the symbol map ──────
         //
         // A `use Foo\Bar;` import is considered "used" if `Bar` appears as:
@@ -85,8 +83,10 @@ impl Backend {
         // We also check docblock type references, which are already emitted
         // as ClassReference spans by the symbol map extraction.
         //
-        // One set per block, holding the aliases referenced inside it.
-        let mut referenced_aliases: Vec<HashSet<&str>> = vec![HashSet::new(); blocks.len()];
+        // One entry per block, holding the aliases referenced inside it.
+        let mut referenced_aliases: Vec<ReferencedAliases<'_>> = (0..blocks.len())
+            .map(|_| ReferencedAliases::default())
+            .collect();
 
         for span in &symbol_map.spans {
             // Skip spans that fall on `use` statement lines — those are
@@ -95,11 +95,14 @@ impl Backend {
                 continue;
             }
 
-            let name = match &span.kind {
+            // Which import table a bare name is looked up in.  A qualified
+            // name's first segment is always a namespace, imported with a
+            // class-style `use`.
+            let (name, kind) = match &span.kind {
                 // The name may be fully qualified, partially qualified,
                 // or unqualified.  We need to check if the first segment
                 // (or the whole name for unqualified) matches a use alias.
-                SymbolKind::ClassReference { name, .. } => name.as_str(),
+                SymbolKind::ClassReference { name, .. } => (name.as_str(), ImportKind::Class),
 
                 SymbolKind::MemberAccess {
                     subject_text,
@@ -115,23 +118,32 @@ impl Backend {
                     {
                         continue;
                     }
-                    trimmed
+                    (trimmed, ImportKind::Class)
                 }
 
-                // `use function` imports are tracked in the use_map,
-                // so this marks them as referenced (preventing false
-                // "unused import" diagnostics).
-                SymbolKind::FunctionCall { name, .. } => name.as_str(),
+                SymbolKind::FunctionCall { name, .. } => (name.as_str(), ImportKind::Function),
 
-                SymbolKind::ConstantReference { name, .. } => name.as_str(),
+                SymbolKind::ConstantReference { name, .. } => (name.as_str(), ImportKind::Constant),
 
                 _ => continue,
             };
 
             let index = ImportBlock::index_at(&blocks, span.start as usize);
+            let block = &blocks[index];
+            let referenced = &mut referenced_aliases[index];
             let first_segment = extract_first_segment(name);
-            if let Some((alias, _)) = blocks[index].use_map.get_key_value(first_segment) {
-                referenced_aliases[index].insert(alias.as_str());
+            let (table, set) = match kind {
+                _ if first_segment.len() != name.len() => (&block.use_map, &mut referenced.classes),
+                ImportKind::Class => (&block.use_map, &mut referenced.classes),
+                ImportKind::Function => {
+                    (&block.symbol_imports.functions, &mut referenced.functions)
+                }
+                ImportKind::Constant => {
+                    (&block.symbol_imports.constants, &mut referenced.constants)
+                }
+            };
+            if let Some((alias, _)) = table.get_key_value(first_segment) {
+                set.insert(alias.as_str());
             }
         }
 
@@ -141,34 +153,37 @@ impl Backend {
                 content,
                 block,
                 referenced,
-                &UseRanges {
-                    use_lines: &use_line_ranges,
-                    use_statements: &use_statement_spans,
-                    declaration_lines: &decl_line_ranges,
-                },
+                &use_statement_spans,
                 out,
             );
         }
     }
 
-    /// Report the imports of one `namespace` block that neither the symbol
-    /// map (`referenced`) nor the content safety net finds a use of inside
-    /// the block.
+    /// Report the imports of one `namespace` block that the symbol map
+    /// (`referenced`) finds no use of inside the block.
     fn report_unused_imports_in_block(
         &self,
         uri: &str,
         content: &str,
         block: &ImportBlock,
-        referenced: &HashSet<&str>,
-        ranges: &UseRanges<'_>,
+        referenced: &ReferencedAliases<'_>,
+        use_statements: &[ByteRange],
         out: &mut Vec<Diagnostic>,
     ) {
         // Filter to only aliases the symbol map didn't find.
-        let unused_aliases: Vec<(&String, &String)> = block
-            .use_map
-            .iter()
-            .filter(|(alias, _)| !referenced.contains(alias.as_str()))
-            .collect();
+        let imports = &block.symbol_imports;
+        let unused_aliases: Vec<(&String, &String)> = [
+            (&block.use_map, &referenced.classes),
+            (&imports.functions, &referenced.functions),
+            (&imports.constants, &referenced.constants),
+        ]
+        .into_iter()
+        .flat_map(|(table, seen)| {
+            table
+                .iter()
+                .filter(|(alias, _)| !seen.contains(alias.as_str()))
+        })
+        .collect();
 
         if unused_aliases.is_empty() {
             return;
@@ -178,8 +193,7 @@ impl Backend {
 
         // Only this block's own statements: another block importing the
         // same name has its own statement, reported with that block.
-        let block_statements: Vec<ByteRange> = ranges
-            .use_statements
+        let block_statements: Vec<ByteRange> = use_statements
             .iter()
             .copied()
             .filter(|&(start, _)| start >= search_range.0 && start <= search_range.1)
@@ -191,25 +205,7 @@ impl Backend {
         // read once an import turns out to be unused.
         let mut template = None;
 
-        // ── Safety-net: scan raw content for missed references ──────────
-        //
-        // For each still-unused alias, scan the block's content for the
-        // alias appearing as an identifier outside of `use` statement and
-        // class declaration lines.  This catches references in attributes,
-        // annotations, or other contexts the symbol map might have missed.
-        //
-        // This avoids false positives for edge cases.
         for (alias, fqn) in unused_aliases {
-            if alias_is_referenced_in_content(
-                content,
-                search_range,
-                alias,
-                ranges.use_lines,
-                ranges.declaration_lines,
-            ) {
-                continue;
-            }
-
             let template = template.get_or_insert_with(|| {
                 self.is_blade_file(uri)
                     .then(|| self.get_file_content_arc(uri))
@@ -234,50 +230,24 @@ impl Backend {
     }
 }
 
-/// The byte ranges of a file's `use` statements and class declaration
-/// lines, computed once and shared by every `namespace` block.
-struct UseRanges<'a> {
-    /// Namespace-level `use` lines (see [`compute_use_line_ranges`]).
-    use_lines: &'a [ByteRange],
-    /// Whole `use` statements (see [`compute_use_statement_spans`]).
-    use_statements: &'a [ByteRange],
-    /// Class-like declaration lines.
-    declaration_lines: &'a [ByteRange],
+/// The kind of import a reference can use, by the symbol table PHP looks
+/// its name up in.
+#[derive(Clone, Copy)]
+enum ImportKind {
+    Class,
+    Function,
+    Constant,
+}
+
+/// The aliases one `namespace` block's references use, per import kind.
+#[derive(Default)]
+struct ReferencedAliases<'a> {
+    classes: HashSet<&'a str>,
+    functions: HashSet<&'a str>,
+    constants: HashSet<&'a str>,
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Compute the byte ranges of class / interface / trait / enum declaration
-/// lines.
-///
-/// These lines contain the declared name as an identifier, which could
-/// collide with an import alias of the same short name.  We exclude them
-/// from the content safety-net scan.
-fn compute_declaration_line_ranges(content: &str) -> Vec<ByteRange> {
-    let mut ranges = Vec::new();
-    let mut offset: usize = 0;
-
-    for line in content.split('\n') {
-        let trimmed = line.trim_start();
-        if (trimmed.starts_with("class ")
-            || trimmed.starts_with("interface ")
-            || trimmed.starts_with("trait ")
-            || trimmed.starts_with("enum ")
-            || trimmed.starts_with("abstract class ")
-            || trimmed.starts_with("final class ")
-            || trimmed.starts_with("readonly class ")
-            || trimmed.starts_with("final readonly class ")
-            || trimmed.starts_with("readonly final class "))
-            // Quick sanity: actual declarations, not comments/strings
-            && !trimmed.starts_with("//")
-        {
-            ranges.push((offset, offset + line.len()));
-        }
-        offset += line.len() + 1;
-    }
-
-    ranges
-}
 
 /// Extract the first segment of a potentially qualified name.
 ///
@@ -285,151 +255,6 @@ fn compute_declaration_line_ranges(content: &str) -> Vec<ByteRange> {
 /// - `"Foo\\Bar"` → `"Foo"`
 fn extract_first_segment(name: &str) -> &str {
     name.split('\\').next().unwrap_or(name)
-}
-
-/// Check whether an alias name appears as an identifier reference in the
-/// `search` byte range of the file content, outside of `use` statements and
-/// class declarations.
-///
-/// This is a simple heuristic safety-net to reduce false positives.  It
-/// looks for the alias name preceded and followed by a non-identifier
-/// character (word boundary simulation), skipping occurrences on `use`
-/// statement lines and class declaration lines.
-fn alias_is_referenced_in_content(
-    content: &str,
-    search: ByteRange,
-    alias: &str,
-    use_ranges: &[ByteRange],
-    decl_ranges: &[ByteRange],
-) -> bool {
-    let alias_bytes = alias.as_bytes();
-    let content_bytes = content.as_bytes();
-    let alias_len = alias_bytes.len();
-    let search_end = search.1.min(content_bytes.len());
-
-    if alias_len == 0 {
-        return false;
-    }
-
-    let mut search_from = search.0;
-    while search_from + alias_len <= search_end {
-        // Find the next occurrence of the alias string
-        let pos = match content[search_from..search_end].find(alias) {
-            Some(p) => search_from + p,
-            None => break,
-        };
-
-        // Check word boundaries.
-        //
-        // A backslash *after* the alias is a valid boundary: `Assert\Uuid`
-        // means the file uses `Assert` as a namespace-alias prefix, which
-        // counts as a real usage of the `use … as Assert` import.
-        //
-        // A backslash *before* the alias is NOT a valid boundary:
-        // `Foo\Assert` does not reference a top-level `Assert` alias.
-        let before_ok = if pos == 0 {
-            true
-        } else {
-            !is_ident_char(content_bytes[pos - 1])
-        };
-
-        let after_ok = if pos + alias_len >= content_bytes.len() {
-            true
-        } else {
-            let next_byte = content_bytes[pos + alias_len];
-            next_byte == b'\\' || !is_ident_char(next_byte)
-        };
-
-        if before_ok && after_ok {
-            // Skip if this occurrence falls on a `use` statement line.
-            if is_offset_in_ranges(pos as u32, use_ranges) {
-                search_from = pos + alias_len;
-                continue;
-            }
-
-            // Skip if this occurrence falls on a class/interface/trait/enum
-            // declaration line (the declared name matches the alias).
-            if is_offset_in_ranges(pos as u32, decl_ranges) {
-                search_from = pos + alias_len;
-                continue;
-            }
-
-            // Skip occurrences inside single-line comments and docblock
-            // prose, but allow matches on docblock lines that contain
-            // PHPDoc type tags (`@var`, `@param`, `@return`, etc.) since
-            // those are legitimate type references.
-            let line_start = content[..pos].rfind('\n').map_or(0, |p| p + 1);
-            let line_end = content[pos..].find('\n').map_or(content.len(), |p| pos + p);
-            let line_prefix = &content[line_start..pos];
-            let full_line = &content[line_start..line_end];
-            if line_prefix.contains("//") {
-                search_from = pos + alias_len;
-                continue;
-            }
-            if (line_prefix.trim_start().starts_with('*')
-                || line_prefix.trim_start().starts_with("/**"))
-                && !line_contains_phpdoc_type_tag(full_line)
-            {
-                search_from = pos + alias_len;
-                continue;
-            }
-
-            // Found a real reference outside excluded lines
-            return true;
-        }
-
-        // Step past the match's first character, which an alias starting
-        // with a non-ASCII letter spells in more than one byte.
-        search_from = pos + content[pos..].chars().next().map_or(1, char::len_utf8);
-    }
-
-    false
-}
-
-/// PHPDoc tags whose values contain type references that count as real
-/// usages of imported classes.
-const PHPDOC_TYPE_TAGS: &[&str] = &[
-    "@var",
-    "@param",
-    "@return",
-    "@throws",
-    "@template",
-    "@extends",
-    "@implements",
-    "@use",
-    "@mixin",
-    "@method",
-    "@property",
-    "@property-read",
-    "@property-write",
-    "@phpstan-type",
-    "@psalm-type",
-    "@phpstan-import-type",
-    "@phpstan-param",
-    "@phpstan-return",
-    "@phpstan-var",
-    "@psalm-param",
-    "@psalm-return",
-    "@psalm-var",
-    "@phpstan-extends",
-    "@phpstan-implements",
-    "@phpstan-require-extends",
-    "@phpstan-require-implements",
-    "@phpstan-sealed",
-    "@psalm-extends",
-    "@psalm-implements",
-];
-
-/// Check whether a docblock line contains a PHPDoc tag that carries type
-/// references (e.g. `@var list<Subscription>`).
-fn line_contains_phpdoc_type_tag(line: &str) -> bool {
-    let trimmed = line.trim();
-    PHPDOC_TYPE_TAGS.iter().any(|tag| trimmed.contains(tag))
-}
-
-/// Check whether a byte is a valid PHP identifier character.
-fn is_ident_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_' || b == b'\\' || b > 0x7F
 }
 
 /// The range of the `@use` directive in `template`, a Blade template's own
@@ -473,102 +298,6 @@ fn find_use_statement_range(
 mod tests {
     use super::*;
     use crate::diagnostics::use_statements::find_use_member;
-
-    /// Helper: no use-statement or declaration ranges to exclude.
-    fn referenced(content: &str, alias: &str) -> bool {
-        alias_is_referenced_in_content(content, (0, content.len()), alias, &[], &[])
-    }
-
-    #[test]
-    fn backslash_after_alias_counts_as_reference() {
-        // `Assert\Uuid` uses the `Assert` alias as a namespace prefix.
-        let content = r#"<?php
-use Symfony\Component\Validator\Constraints as Assert;
-
-class Dto {
-    public function __construct(
-        #[Assert\Uuid(message: 'bad')]
-        public string $id,
-    ) {}
-}
-"#;
-        let use_ranges = compute_use_line_ranges(content);
-        assert!(
-            alias_is_referenced_in_content(content, (0, content.len()), "Assert", &use_ranges, &[]),
-            "Assert\\Uuid should count as a usage of the Assert alias"
-        );
-    }
-
-    #[test]
-    fn backslash_before_alias_does_not_count() {
-        // `Foo\Assert` does NOT reference a top-level `Assert` alias.
-        assert!(!referenced(r#"Foo\Assert"#, "Assert"));
-    }
-
-    #[test]
-    fn standalone_alias_still_detected() {
-        assert!(referenced("new Assert();", "Assert"));
-    }
-
-    #[test]
-    fn alias_inside_longer_word_not_detected() {
-        // `Assertion` contains `Assert` but is a different identifier.
-        assert!(!referenced("new Assertion();", "Assert"));
-    }
-
-    #[test]
-    fn alias_with_static_access_through_namespace() {
-        // `Assert\Uuid::V7_MONOTONIC` — the alias `Assert` is used.
-        assert!(referenced("Assert\\Uuid::V7_MONOTONIC", "Assert"));
-    }
-
-    #[test]
-    fn alias_on_use_line_not_counted() {
-        let content = "use Foo\\Bar as Assert;\n";
-        let use_ranges = compute_use_line_ranges(content);
-        assert!(
-            !alias_is_referenced_in_content(
-                content,
-                (0, content.len()),
-                "Assert",
-                &use_ranges,
-                &[]
-            ),
-            "Alias on a use-statement line should not count as a reference"
-        );
-    }
-
-    #[test]
-    fn alias_in_comment_not_counted() {
-        assert!(!referenced("// Assert is great\n", "Assert"));
-    }
-
-    #[test]
-    fn alias_in_docblock_prose_not_counted() {
-        assert!(!referenced(" * Assert something here\n", "Assert"));
-    }
-
-    #[test]
-    fn alias_in_docblock_type_tag_counted() {
-        assert!(referenced(" * @param Assert $x\n", "Assert"));
-    }
-
-    /// A match the boundary check rejects is stepped past by a whole
-    /// character, so an alias spelled with a non-ASCII first letter keeps
-    /// the scan on character boundaries rather than slicing inside one.
-    #[test]
-    fn alias_starting_with_a_multibyte_letter_is_scanned_safely() {
-        let content = "use App\\Models\\Øl;\n\nfunction f(): void {}\n";
-        let use_ranges = compute_use_line_ranges(content);
-        assert!(!alias_is_referenced_in_content(
-            content,
-            (0, content.len()),
-            "Øl",
-            &use_ranges,
-            &[]
-        ));
-        assert!(referenced("\\Ølx; new Øl();", "Øl"));
-    }
 
     // ── Group import member lookup ──────────────────────────────────
 

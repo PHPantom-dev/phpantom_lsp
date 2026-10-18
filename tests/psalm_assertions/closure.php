@@ -65,12 +65,12 @@ namespace PsalmTest_closure_5 {
     class C {}
 
     /**
-     * @param Closure(B):A $f
-     * @param Closure(C):B $g
+     * @param \Closure(B):A $f
+     * @param \Closure(C):B $g
      *
-     * @return Closure(C):A
+     * @return \Closure(C):A
      */
-    function foo(Closure $f, Closure $g) : Closure {
+    function foo(\Closure $f, \Closure $g) : \Closure {
         return function (C $x) use ($f, $g) : A {
             return $f($g($x));
         };
@@ -92,12 +92,12 @@ namespace PsalmTest_closure_6 {
     class C2 extends C {}
 
     /**
-     * @param Closure(B):A $f
-     * @param Closure(C):B $g
+     * @param \Closure(B):A $f
+     * @param \Closure(C):B $g
      *
-     * @return Closure(C2):A
+     * @return \Closure(C2):A
      */
-    function foo(Closure $f, Closure $g) : Closure {
+    function foo(\Closure $f, \Closure $g) : \Closure {
         return function (C $x) use ($f, $g) : A {
             return $f($g($x));
         };
@@ -119,12 +119,12 @@ namespace PsalmTest_closure_7 {
     class A2 extends A {}
 
     /**
-     * @param Closure(B):A2 $f
-     * @param Closure(C):B $g
+     * @param \Closure(B):A2 $f
+     * @param \Closure(C):B $g
      *
-     * @return Closure(C):A
+     * @return \Closure(C):A
      */
-    function foo(Closure $f, Closure $g) : Closure {
+    function foo(\Closure $f, \Closure $g) : \Closure {
         return function (C $x) use ($f, $g) : A2 {
             return $f($g($x));
         };
@@ -140,7 +140,7 @@ namespace PsalmTest_closure_7 {
 
 // Test: singleLineClosures
 namespace PsalmTest_closure_8 {
-    $a = function() : Closure { return function() : string { return "hello"; }; };
+    $a = function() : \Closure { return function() : string { return "hello"; }; };
     $b = $a()();
 
     // PHPantom is more precise than Psalm here: the inner closure's body
@@ -161,7 +161,7 @@ namespace PsalmTest_closure_9 {
           return new $className(...$args);
        };
     }
-    $maker = maker(stdClass::class);
+    $maker = maker(\stdClass::class);
     $result = array_map($maker, ["abc"]);
 
     assertType('list{stdClass}', $result);
@@ -191,7 +191,7 @@ namespace PsalmTest_closure_10 {
          *
          * @return list<$callback is true ? array : TMappedValue>
          */
-        public function toArray1(Closure|true $callback): array {
+        public function toArray1(\Closure|true $callback): array {
             return [];
         }
         /**
@@ -202,7 +202,7 @@ namespace PsalmTest_closure_10 {
          *
          * @return list<TMappedValue>
          */
-        public function toArray2(Closure $callback): array {
+        public function toArray2(\Closure $callback): array {
             return [];
         }
         /**
@@ -212,7 +212,7 @@ namespace PsalmTest_closure_10 {
          *
          * @return list<TMappedValue>
          */
-        public function toArray3(Closure $callback): array {
+        public function toArray3(\Closure $callback): array {
             return [];
         }
     }
@@ -417,7 +417,7 @@ namespace PsalmTest_closure_22 {
         }
 
         /**
-         * @param Closure():void $closure
+         * @param \Closure():void $closure
          * @return void
          */
         private function push(\Closure $closure): void {

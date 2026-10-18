@@ -24,6 +24,7 @@ fn complete(source: &str) -> Option<Vec<CompletionItem>> {
     let code = code_context_at(&content, cursor)?;
     let ctx = FileContext {
         use_map: backend.parse_use_statements(&content),
+        symbol_imports: Default::default(),
         classes: Vec::new(),
         namespace: None,
         namespace_spans: None,

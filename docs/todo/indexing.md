@@ -395,14 +395,15 @@ link to get there. Canonicalize the extra roots when they are
 registered and drop the ones contained in another, the same containment
 test `LinkClaims::claim` already does.
 
-**Switch every walker together.** `collect_php_files_gitignore`,
+**Switch every walker together.** Every serial walk goes through
+`visit_workspace_files_gitignore` (`classmap_scanner/walk.rs`):
+`collect_php_files_gitignore` (namespace rename, go-to-implementation),
 `collect_workspace_index_files_gitignore` (the one find-references
-walks), `util::collect_php_files`, and `analyse::collect_php_files` each
-take a single root, so only `walk_roots` is multi-root today. Leaving
-the serial ones behind would index classes from an extra root while
-find-references, rename, and go-to-implementation never see them, which
-is the half-wired state the symlink change avoided by moving all four
-walkers at once. (`[indexing] include` gets away with one walk of its own
+walks), and `analyse::collect_php_files`. It takes a single root, so
+only `walk_roots` is multi-root today. Leaving the serial walk behind
+would index classes from an extra root while find-references, rename,
+and go-to-implementation never see them, which is the half-wired state
+the symlink change avoided by moving all the walkers at once. (`[indexing] include` gets away with one walk of its own
 because its paths are few and named. Discovery and the full background
 index both list them, and namespace rename and go-to-implementation read
 them back out of the indexes. An extra root is a whole project tree, so

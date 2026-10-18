@@ -523,6 +523,45 @@ class Consumer {
 }
 
 #[tokio::test]
+async fn an_ability_checked_through_a_nullsafe_call_is_checked_too() {
+    // `auth()->user()` is `null` for a guest, so `?->can()` is the usual
+    // spelling of the check.
+    let consumer = "\
+<?php
+namespace App;
+class Consumer {
+    public function go(): void {
+        auth()->user()?->can('manage-billing', 'pro');
+        auth()->user()?->can('manage-billling', 'pro');
+    }
+}
+";
+    let (backend, _dir, uri) = workspace(consumer).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+    let flagged = ability_diagnostics(&diags);
+    assert_eq!(
+        flagged.len(),
+        1,
+        "only the typo should be flagged, got {flagged:?}"
+    );
+    assert!(
+        flagged[0].message.contains("manage-billling"),
+        "message should name the bad ability, got {:?}",
+        flagged[0].message
+    );
+
+    let targets = definition_uris(&backend, &uri, position_after(consumer, "can('mana")).await;
+    assert!(
+        targets
+            .iter()
+            .any(|t| t.ends_with("/Providers/AuthServiceProvider.php")),
+        "should offer the Gate::define() site, got {targets:?}"
+    );
+}
+
+#[tokio::test]
 async fn an_ability_of_another_model_is_flagged_for_the_model_checked() {
     // `publish` is a real ability — but of `Video`, not `Post`.
     let consumer = "\

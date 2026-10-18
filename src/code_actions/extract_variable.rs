@@ -8,13 +8,13 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::CodeActionData;
 use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
-use crate::code_actions::find_identical_occurrences;
 use crate::code_actions::naming::{snake_to_camel, to_camel_case};
-use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::ScopeMap;
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::text_position::offset_to_position;
+use crate::text_scan::{ScanStep, scan_top_level};
 
 // ─── Name generation ────────────────────────────────────────────────────────
 
@@ -354,120 +354,32 @@ fn extract_function_call_name(expr: &str) -> Option<String> {
 
 /// Find the last `->` or `?->` member access at the top nesting level
 /// and return the part after it.
-fn find_last_member_access(expr: &str) -> Option<String> {
-    let mut depth_paren = 0i32;
-    let mut depth_bracket = 0i32;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut last_arrow_end = None;
-    let bytes = expr.as_bytes();
-
-    let mut i = 0;
-    while i < bytes.len() {
-        let ch = bytes[i];
-
-        // Skip escaped characters inside strings
-        if (in_single_quote || in_double_quote) && ch == b'\\' {
-            i += 2;
-            continue;
-        }
-
-        if ch == b'\'' && !in_double_quote {
-            in_single_quote = !in_single_quote;
-        } else if ch == b'"' && !in_single_quote {
-            in_double_quote = !in_double_quote;
-        }
-
-        if in_single_quote || in_double_quote {
-            i += 1;
-            continue;
-        }
-
-        match ch {
-            b'(' => depth_paren += 1,
-            b')' => depth_paren -= 1,
-            b'[' => depth_bracket += 1,
-            b']' => depth_bracket -= 1,
-            b'-' if depth_paren == 0
-                && depth_bracket == 0
-                && i + 1 < bytes.len()
-                && bytes[i + 1] == b'>' =>
-            {
-                last_arrow_end = Some(i + 2);
-                i += 2;
-                continue;
-            }
-            b'?' if depth_paren == 0
-                && depth_bracket == 0
-                && i + 2 < bytes.len()
-                && bytes[i + 1] == b'-'
-                && bytes[i + 2] == b'>' =>
-            {
-                last_arrow_end = Some(i + 3);
-                i += 3;
-                continue;
-            }
-            _ => {}
-        }
-
-        i += 1;
-    }
-
-    let arrow_end = last_arrow_end?;
-    let after = &expr[arrow_end..];
-    if after.is_empty() {
-        return None;
-    }
-    Some(after.to_string())
+fn find_last_member_access(expr: &str) -> Option<&str> {
+    let arrow_end = std::cell::Cell::new(None);
+    scan_top_level(expr.as_bytes(), |bytes, i| {
+        let arrow_len = if bytes[i..].starts_with(b"->") {
+            2
+        } else if bytes[i..].starts_with(b"?->") {
+            3
+        } else {
+            return ScanStep::Skip(1);
+        };
+        arrow_end.set(Some(i + arrow_len));
+        ScanStep::Skip(arrow_len)
+    });
+    let after = &expr[arrow_end.get()?..];
+    (!after.is_empty()).then_some(after)
 }
 
 /// Find `::` at the top level (outside parens/brackets/strings).
 fn find_top_level_double_colon(expr: &str) -> Option<usize> {
-    let mut depth_paren = 0i32;
-    let mut depth_bracket = 0i32;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let bytes = expr.as_bytes();
-
-    let mut i = 0;
-    while i < bytes.len() {
-        let ch = bytes[i];
-
-        if (in_single_quote || in_double_quote) && ch == b'\\' {
-            i += 2;
-            continue;
+    scan_top_level(expr.as_bytes(), |bytes, i| {
+        if bytes[i..].starts_with(b"::") {
+            ScanStep::Stop
+        } else {
+            ScanStep::Skip(1)
         }
-
-        if ch == b'\'' && !in_double_quote {
-            in_single_quote = !in_single_quote;
-        } else if ch == b'"' && !in_single_quote {
-            in_double_quote = !in_double_quote;
-        }
-
-        if in_single_quote || in_double_quote {
-            i += 1;
-            continue;
-        }
-
-        match ch {
-            b'(' => depth_paren += 1,
-            b')' => depth_paren -= 1,
-            b'[' => depth_bracket += 1,
-            b']' => depth_bracket -= 1,
-            b':' if depth_paren == 0
-                && depth_bracket == 0
-                && i + 1 < bytes.len()
-                && bytes[i + 1] == b':' =>
-            {
-                return Some(i);
-            }
-            _ => {}
-        }
-
-        i += 1;
-    }
-
-    None
+    })
 }
 
 /// Strip common accessor prefixes (`get`, `is`, `has`) from a method name
@@ -556,16 +468,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        if params.range.start == params.range.end {
+        let Some((start_offset, end_offset)) =
+            crate::code_actions::selected_byte_range(content, params.range)
+        else {
             return;
-        }
-
-        let start_offset = position_to_byte_offset(content, params.range.start);
-        let end_offset = position_to_byte_offset(content, params.range.end);
-
-        if start_offset >= end_offset || end_offset > content.len() {
-            return;
-        }
+        };
 
         let in_executable_body = crate::parser::with_parsed_program(
             content,
@@ -645,57 +552,16 @@ impl Backend {
         // Scope map building, name generation, and edit construction
         // are deferred to Phase 2.
 
-        // Cheap text search: does the trimmed expression appear more
-        // than once in the file?  This avoids building a scope map
-        // just to decide whether to show the "all occurrences" variant.
         let trimmed = selected_text.trim();
-        let has_other_occurrences = {
-            let first = content.find(trimmed);
-            match first {
-                Some(pos) => content[pos + trimmed.len()..].contains(trimmed),
-                None => false,
-            }
-        };
-
-        let title = if has_other_occurrences {
-            "Extract variable (this occurrence)"
-        } else {
-            "Extract variable"
-        };
-
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
-            title: title.to_string(),
-            kind: Some(CodeActionKind::REFACTOR_EXTRACT),
-            diagnostics: None,
-            edit: None,
-            command: None,
-            is_preferred: Some(false),
-            disabled: None,
-            data: Some(make_code_action_data(
-                "refactor.extractVariable",
-                uri,
-                &params.range,
-                serde_json::json!({ "all_occurrences": false }),
-            )),
-        }));
-
-        if has_other_occurrences {
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: "Extract variable (all occurrences)".to_string(),
-                kind: Some(CodeActionKind::REFACTOR_EXTRACT),
-                diagnostics: None,
-                edit: None,
-                command: None,
-                is_preferred: Some(false),
-                disabled: None,
-                data: Some(make_code_action_data(
-                    "refactor.extractVariableAll",
-                    uri,
-                    &params.range,
-                    serde_json::json!({ "all_occurrences": true }),
-                )),
-            }));
-        }
+        crate::code_actions::push_extract_actions(
+            out,
+            uri,
+            &params.range,
+            content,
+            trimmed,
+            "variable",
+            "refactor.extractVariable",
+        );
     }
 
     /// Resolve a deferred "Extract Variable" code action by computing
@@ -708,18 +574,11 @@ impl Backend {
         data: &CodeActionData,
         content: &str,
     ) -> Option<WorkspaceEdit> {
-        let all_occurrences = data
-            .extra
-            .get("all_occurrences")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(data.action_kind == "refactor.extractVariableAll");
+        let all_occurrences =
+            crate::code_actions::extract_wants_all_occurrences(data, "refactor.extractVariableAll");
 
-        let start_offset = position_to_byte_offset(content, data.range.start);
-        let end_offset = position_to_byte_offset(content, data.range.end);
-
-        if start_offset >= end_offset || end_offset > content.len() {
-            return None;
-        }
+        let (start_offset, end_offset) =
+            crate::code_actions::selected_byte_range(content, data.range)?;
 
         let selected_text = &content[start_offset..end_offset];
         let trimmed = selected_text.trim();
@@ -748,23 +607,13 @@ impl Backend {
                 .map(|f| (f.start as usize, f.end as usize))
                 .unwrap_or((0, content.len()));
 
-            let trim_start_delta = selected_text.len() - selected_text.trim_start().len();
-            let trim_end_delta = selected_text.len() - selected_text.trim_end().len();
-            let trimmed_start = start_offset + trim_start_delta;
-            let trimmed_end = end_offset - trim_end_delta;
-
-            let other_occurrences = find_identical_occurrences(
+            let all_offsets = crate::code_actions::selection_and_identical_occurrences(
                 content,
-                trimmed,
-                trimmed_start,
-                trimmed_end,
+                start_offset,
+                end_offset,
                 scope_start,
                 scope_end,
             );
-
-            let mut all_offsets: Vec<(usize, usize)> = vec![(start_offset, end_offset)];
-            all_offsets.extend(&other_occurrences);
-            all_offsets.sort_by_key(|&(s, _)| s);
 
             // Insert before the first occurrence's enclosing statement.
             let (first_start, _) = all_offsets[0];
@@ -781,17 +630,11 @@ impl Backend {
                 new_text: insert_text,
             }];
 
-            for &(occ_start, occ_end) in &all_offsets {
-                let start_pos = offset_to_position(content, occ_start);
-                let end_pos = offset_to_position(content, occ_end);
-                edits.push(TextEdit {
-                    range: Range {
-                        start: start_pos,
-                        end: end_pos,
-                    },
-                    new_text: replacement_text.clone(),
-                });
-            }
+            edits.extend(crate::code_actions::replace_spans_edits(
+                content,
+                &all_offsets,
+                &replacement_text,
+            ));
 
             Some(crate::code_actions::single_file_edit(doc_uri, edits))
         } else {

@@ -33,7 +33,6 @@ use parking_lot::RwLock;
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
-use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 use tower_lsp::lsp_types::Url;
@@ -58,6 +57,11 @@ pub(crate) struct LaravelAliases {
     /// Global facade class alias → facade class FQN
     /// (e.g. `"App"` → `"Illuminate\\Support\\Facades\\App"`).
     pub(crate) facade: HashMap<String, String>,
+    /// Facade FQN → the concrete class its `getFacadeAccessor()` names,
+    /// filled on first use by [`Backend::facade_macro_concrete`].  Facades
+    /// are framework source, so the answer holds until the tables are
+    /// rebuilt.
+    facade_concrete: RwLock<HashMap<String, Option<String>>>,
 }
 
 impl LaravelAliases {
@@ -205,28 +209,6 @@ impl Backend {
         self.find_or_load_class(fqn)
     }
 
-    /// Like [`resolve_laravel_alias`](Self::resolve_laravel_alias), but only
-    /// consults the container string-binding table, never the facade
-    /// class-alias table.
-    ///
-    /// Used by [`resolve_class_name`](crate::resolution::Backend::resolve_class_name)'s
-    /// namespace-friendly fallback for an unqualified name: a container key
-    /// (`'sentry'`, `'blade.compiler'`) is an arbitrary runtime string a
-    /// provider binds, never real class-name syntax, so no namespace rule
-    /// ever applies to it and it is always safe to resolve. A facade alias
-    /// (`Cache`, `Auth`, …) IS a class name PHP's own namespace rules apply
-    /// to, and Laravel's `class_alias()` only ever lands it in the global
-    /// namespace, so it must not be reached this way from inside a
-    /// namespace.
-    pub(crate) fn resolve_laravel_container_alias(&self, name: &str) -> Option<Arc<ClassInfo>> {
-        let aliases = self.laravel_aliases();
-        if aliases.is_empty() {
-            return None;
-        }
-        let fqn = aliases.container.get(name)?;
-        self.find_or_load_class(fqn)
-    }
-
     /// The concrete class FQN a container string alias (e.g. `'app'`, as
     /// returned by a facade's `getFacadeAccessor()`) is bound to, without
     /// loading the class. Used when a caller needs the name itself rather
@@ -314,11 +296,20 @@ impl Backend {
         if !aliases.facade.values().any(|fqn| fqn == target) {
             return None;
         }
-        let source = read_source_by_fqn(self, target)?;
-        match parse_facade_accessor(&source)? {
-            FacadeAccessor::Alias(key) => aliases.container.get(key.as_str()).cloned(),
-            FacadeAccessor::Class(fqn) => Some(fqn.to_string()),
+        if let Some(concrete) = aliases.facade_concrete.read().get(target) {
+            return concrete.clone();
         }
+        let concrete = read_source_by_fqn(self, target)
+            .and_then(|source| parse_facade_accessor(&source))
+            .and_then(|accessor| match accessor {
+                FacadeAccessor::Alias(key) => aliases.container.get(key.as_str()).cloned(),
+                FacadeAccessor::Class(fqn) => Some(fqn.to_string()),
+            });
+        aliases
+            .facade_concrete
+            .write()
+            .insert(target.to_string(), concrete.clone());
+        concrete
     }
 
     /// The memoized Laravel alias tables, built on first use from the installed
@@ -390,7 +381,11 @@ fn build_laravel_aliases(backend: &Backend) -> LaravelAliases {
         }
     }
 
-    LaravelAliases { container, facade }
+    LaravelAliases {
+        container,
+        facade,
+        facade_concrete: RwLock::default(),
+    }
 }
 
 // ─── Source access ────────────────────────────────────────────────────────
@@ -514,7 +509,8 @@ fn parse_facade_default_aliases(content: &str) -> Option<HashMap<String, String>
 /// `'Alias' => Class::class` pair found anywhere inside the `aliases` value.
 fn parse_config_facade_aliases(content: &str) -> HashMap<String, String> {
     with_parsed(content, |program, resolved| {
-        let Some(aliases_value) = find_return_array_entry(program, "aliases") else {
+        let Some(aliases_value) = super::array_file::returned_array_entry(program, "aliases")
+        else {
             return HashMap::new();
         };
         let mut arrays = Vec::new();
@@ -610,7 +606,7 @@ fn array_values_are_class_consts(array: &Array<'_>) -> bool {
     let mut any = false;
     for (_, value) in key_value_elements(array) {
         any = true;
-        if !is_class_const(value) {
+        if crate::parser::class_fetch_target(value).is_none() {
             return false;
         }
     }
@@ -621,11 +617,7 @@ fn array_values_are_class_consts(array: &Array<'_>) -> bool {
 fn first_array_element<'ast, 'arena>(
     expr: &'ast Expression<'arena>,
 ) -> Option<&'ast Expression<'arena>> {
-    let elements = match expr {
-        Expression::Array(arr) => &arr.elements,
-        Expression::LegacyArray(arr) => &arr.elements,
-        _ => return None,
-    };
+    let elements = crate::parser::array_literal_elements(expr)?;
     elements.iter().find_map(|element| match element {
         ArrayElement::Value(v) => Some(v.value),
         _ => None,
@@ -651,19 +643,6 @@ fn collect_string_class_pairs(
     out
 }
 
-/// Whether `expr` is a `Something::class` constant access.
-fn is_class_const(expr: &Expression<'_>) -> bool {
-    matches!(
-        expr,
-        Expression::Access(Access::ClassConstant(cca))
-            if matches!(
-                &cca.constant,
-                ClassLikeConstantSelector::Identifier(id)
-                    if bytes_to_str(id.value).eq_ignore_ascii_case("class")
-            )
-    )
-}
-
 /// Extract the fully-qualified name from a `Something::class` expression,
 /// resolving short names through the file's namespace and use statements.
 /// Returns `None` for non-`::class` expressions and for `parent::class` /
@@ -676,59 +655,17 @@ fn class_const_fqn(
     resolved: &OwnedResolvedNames,
     self_fqn: Option<&str>,
 ) -> Option<String> {
-    let Expression::Access(Access::ClassConstant(cca)) = expr else {
-        return None;
-    };
-    let ClassLikeConstantSelector::Identifier(constant) = &cca.constant else {
-        return None;
-    };
-    if !bytes_to_str(constant.value).eq_ignore_ascii_case("class") {
-        return None;
-    }
     // `self::class` / `static::class` are their own expression variants (not
     // `Expression::Identifier`); resolve them to `self_fqn` when the caller
     // knows which class's source is being parsed. `parent::class` is
     // relative and carries no useful concrete for an alias table.
-    if matches!(cca.class, Expression::Self_(_) | Expression::Static(_)) {
-        return self_fqn.map(|fqn| fqn.trim_start_matches('\\').to_string());
-    }
-    let Expression::Identifier(ident) = cca.class else {
-        return None;
-    };
-    let raw = bytes_to_str(ident.value());
-    let offset = ident.span().start.offset;
-    if let Some(fqn) = resolved.get(offset) {
-        return Some(fqn.trim_start_matches('\\').to_string());
-    }
-    // Fall back to the written name when the resolver did not track it.
-    (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string())
-}
-
-/// The value expression for a top-level `return [ 'key' => … ]` entry.
-fn find_return_array_entry<'ast, 'arena>(
-    program: &'ast Program<'arena>,
-    key: &str,
-) -> Option<&'ast Expression<'arena>> {
-    for stmt in program.statements.iter() {
-        if let Statement::Return(ret) = stmt
-            && let Some(value) = ret.value
-        {
-            let elements = match value {
-                Expression::Array(arr) => &arr.elements,
-                Expression::LegacyArray(arr) => &arr.elements,
-                _ => continue,
-            };
-            for (k, v) in elements.iter().filter_map(|e| match e {
-                ArrayElement::KeyValue(kv) => Some((kv.key, kv.value)),
-                _ => None,
-            }) {
-                if string_literal_matches(k, key) {
-                    return Some(v);
-                }
-            }
+    match crate::parser::class_fetch_target(expr)? {
+        Expression::Self_(_) | Expression::Static(_) => {
+            self_fqn.map(|fqn| fqn.trim_start_matches('\\').to_string())
         }
+        Expression::Identifier(ident) => resolved.class_fqn(ident),
+        _ => None,
     }
-    None
 }
 
 /// The [`Node`] for an expression, so it can be fed to [`collect_arrays`].
@@ -739,17 +676,6 @@ fn node_of_expression<'ast, 'arena>(expr: &'ast Expression<'arena>) -> Node<'ast
 /// Extract a string-literal's content (without quotes) from an expression.
 fn string_literal(expr: &Expression<'_>, content: &str) -> Option<String> {
     super::helpers::extract_string_literal(expr, content).map(|(text, _, _)| text.to_string())
-}
-
-/// Whether `expr` is a string literal equal to `expected`.
-fn string_literal_matches(expr: &Expression<'_>, expected: &str) -> bool {
-    // Only the raw source text is available without content here, so match via
-    // the literal's own value.
-    matches!(
-        expr,
-        Expression::Literal(literal::Literal::String(s))
-            if s.value.is_some_and(|v| v == expected.as_bytes())
-    )
 }
 
 #[cfg(test)]

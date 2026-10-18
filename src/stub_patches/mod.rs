@@ -120,6 +120,16 @@
 //!     hand-written function, because the list runs to a couple of hundred
 //!     entries.
 //!
+//! 12. **Later-invoked callbacks** -- `set_error_handler`,
+//!     `set_exception_handler`, `spl_autoload_register`,
+//!     `register_shutdown_function`, `register_tick_function`,
+//!     `header_register_callback` and `pcntl_signal` keep the callable they
+//!     are handed to run later, but a function is taken to run its
+//!     callable arguments before it returns unless it says otherwise. Each
+//!     gets the `@param-later-invoked-callable` PHPStan's `core.stub`
+//!     declares, so what the callback writes through a by-reference
+//!     capture widens the variable after the call instead of replacing it.
+//!
 //! ### Class patches
 //!
 //! 1. **`IteratorIterator`** -- phpstorm-stubs lack `@template` and `@mixin`.

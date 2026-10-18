@@ -57,7 +57,6 @@ impl Backend {
             // Only a tag on a class docblock needs the source text, to tell a
             // block that documents the class from one that documents whatever
             // sits between it and the declaration.
-            let file_content = std::cell::OnceCell::new();
 
             let classes = match self.symbols.uri_classes_index.read().get(file_uri) {
                 Some(classes) => classes.clone(),
@@ -85,9 +84,7 @@ impl Backend {
 
                 // The class the metadata belongs to is the covering test,
                 // whether the tag sat on the class or on one of its methods.
-                let content = file_content
-                    .get_or_init(|| self.get_file_content_arc(file_uri).unwrap_or_default());
-                let Some(covering_fqn) = covering_class_fqn(&classes, content, span.start) else {
+                let Some(covering_fqn) = covering_class_fqn(&classes, span.start) else {
                     continue;
                 };
                 if found.iter().any(|(fqn, _)| *fqn == covering_fqn) {
@@ -106,6 +103,6 @@ impl Backend {
 
 /// The class a coverage tag at `offset` belongs to, whether the tag sat on
 /// the class docblock or on one of its methods.
-fn covering_class_fqn(classes: &[Arc<ClassInfo>], content: &str, offset: u32) -> Option<Atom> {
-    find_documented_class_at_offset(classes, content, offset).map(|class| class.fqn())
+fn covering_class_fqn(classes: &[Arc<ClassInfo>], offset: u32) -> Option<Atom> {
+    find_documented_class_at_offset(classes, offset).map(|class| class.fqn())
 }

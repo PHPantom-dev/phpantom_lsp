@@ -36,7 +36,6 @@
 //! | `$var?->`                    | `?->`    | `$var`                  |
 
 use crate::types::AccessKind;
-use crate::util::strip_fqn_prefix;
 
 // ─── Character-level helpers ────────────────────────────────────────────────
 //
@@ -116,9 +115,8 @@ fn check_new_keyword_before(
             !prev.is_alphanumeric() && prev != '_'
         };
         if before_ok {
-            // Strip leading `\` from FQN if present.
-            let name = strip_fqn_prefix(class_name);
-            return Some(name.to_string());
+            // A leading `\` stays: it marks an explicit global reference.
+            return Some(class_name.to_string());
         }
     }
     None
@@ -231,8 +229,7 @@ fn extract_new_expression_inside_parens(
     if k == name_start {
         return None;
     }
-    let class_name: String = chars[name_start..k].iter().collect();
-    let name = strip_fqn_prefix(&class_name);
+    let name: String = chars[name_start..k].iter().collect();
 
     // Skip whitespace after the class name.
     while k < inner_end && chars[k] == ' ' {

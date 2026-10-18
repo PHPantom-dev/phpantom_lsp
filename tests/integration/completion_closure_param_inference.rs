@@ -345,6 +345,49 @@ async fn test_static_method_callable_param_inference() {
     );
 }
 
+/// `$class::process(function ($item) { $item->… })` with `$class` holding
+/// the class name, or an instance, infers from the method the same way.
+#[tokio::test]
+async fn test_static_method_callable_param_inference_on_a_value() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_static_value_infer.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Order {\n",
+        "    public function getTotal(): float { return 0.0; }\n",
+        "}\n",
+        "class Processor {\n",
+        "    /**\n",
+        "     * @param callable(Order): void $handler\n",
+        "     */\n",
+        "    public static function handle(callable $handler): void {}\n",
+        "}\n",
+        "class Runner {\n",
+        "    public function run(Processor $processor): void {\n",
+        "        $class = Processor::class;\n",
+        "        $class::handle(function ($order) {\n",
+        "            $order->\n",
+        "        });\n",
+        "        $processor::handle(function ($other) {\n",
+        "            $other->\n",
+        "        });\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 14: `            $order->`, line 17: `            $other->`
+    for (line, character) in [(14, 20), (17, 20)] {
+        let items = complete_at(&backend, &uri, src, line, character).await;
+        let names = method_names(&items);
+        assert!(
+            names.contains(&"getTotal"),
+            "Expected getTotal from inferred Order type on line {line}, got: {:?}",
+            names,
+        );
+    }
+}
+
 // ─── Multiple callable parameters ──────────────────────────────────────────
 
 /// When a method has multiple parameters and the callable is not at
@@ -1115,7 +1158,7 @@ async fn test_example_php_exact_layout_chunk_foreach() {
     let src = concat!(
         "<?php\n",                                                            // 0
         "namespace Demo {\n",                                                 // 1
-        "\n",                                                                 // 2
+        "use Illuminate\\Database\\Eloquent\\Collection;\n",                  // 2
         "class BlogAuthor extends \\Illuminate\\Database\\Eloquent\\Model\n", // 3
         "{\n",                                                                // 4
         "    public function posts(): mixed { return null; }\n",              // 5

@@ -147,8 +147,8 @@ impl Backend {
             }));
         }
 
-        let vc_handle = self.blade_virtual_content.read();
-        let effective_content = vc_handle.get(uri).map(|s| s.as_str()).unwrap_or(content);
+        let virtual_php = self.blade_virtual_php_arc(uri);
+        let effective_content = virtual_php.as_deref().map_or(content, String::as_str);
 
         let mut tokens = self.collect_tokens(&symbol_map, effective_content, uri, &ctx, mode);
 
@@ -296,11 +296,11 @@ impl Backend {
                     } else if self.is_template_param(name, span.start, symbol_map) {
                         (TT_TYPE_PARAMETER, 0)
                     } else {
-                        let mods = self.resolve_class_modifiers(name, *is_fqn, ctx, span.start);
+                        let (tt, mods) =
+                            self.resolve_class_reference_token(name, *is_fqn, ctx, span.start);
                         if mode == SemanticTokensMode::Contextual && mods == 0 {
                             continue;
                         }
-                        let tt = self.resolve_class_token_type(name, *is_fqn, ctx, span.start);
                         (tt, mods)
                     }
                 }
@@ -309,10 +309,8 @@ impl Backend {
                     if mode == SemanticTokensMode::Contextual {
                         continue;
                     }
-                    let tt = self.resolve_declaration_token_type(name, uri, ctx);
-                    let mut mods = TM_DECLARATION;
-                    mods |= self.resolve_class_declaration_modifiers(name, uri, ctx);
-                    (tt, mods)
+                    let (tt, mods) = resolve_declaration_token(name, span.start, ctx);
+                    (tt, mods | TM_DECLARATION)
                 }
 
                 SymbolKind::MemberAccess {
@@ -495,50 +493,31 @@ impl Backend {
         // comment token covering `/** @var \App\Foo $x */` would hide
         // the more specific inner tokens.
         if mode == SemanticTokensMode::Full {
-            for span in crate::phpstan_ignore::phpstan_ignore_tag_spans(content) {
-                let length = span.end.saturating_sub(span.start) as u32;
+            // `@phpstan-ignore` tags read as keywords, the identifiers they
+            // list as constants.
+            let ignore_spans = crate::phpstan_ignore::phpstan_ignore_tag_spans(content)
+                .into_iter()
+                .map(|span| (span.start, span.end, TT_KEYWORD))
+                .chain(
+                    crate::phpstan_ignore::phpstan_ignore_code_spans(content)
+                        .into_iter()
+                        .map(|span| (span.start, span.end, TT_ENUM_MEMBER)),
+                );
+            for (start, end, token_type) in ignore_spans {
+                let length = end.saturating_sub(start) as u32;
                 if length == 0 {
                     continue;
                 }
-                let position = line_index.position(span.start);
+                let position = line_index.position(start);
                 if !crate::completion::comment_position::is_inside_non_doc_comment(
                     content, position,
                 ) && !crate::completion::comment_position::is_inside_docblock(content, position)
                 {
                     continue;
                 }
-                if let Some(abs) = offset_to_absolute(
-                    content,
-                    &line_index,
-                    span.start as u32,
-                    length,
-                    TT_KEYWORD,
-                    0,
-                ) {
-                    tokens.push(abs);
-                }
-            }
-
-            for span in crate::phpstan_ignore::phpstan_ignore_code_spans(content) {
-                let length = span.end.saturating_sub(span.start) as u32;
-                if length == 0 {
-                    continue;
-                }
-                let position = line_index.position(span.start);
-                if !crate::completion::comment_position::is_inside_non_doc_comment(
-                    content, position,
-                ) && !crate::completion::comment_position::is_inside_docblock(content, position)
+                if let Some(abs) =
+                    offset_to_absolute(content, &line_index, start as u32, length, token_type, 0)
                 {
-                    continue;
-                }
-                if let Some(abs) = offset_to_absolute(
-                    content,
-                    &line_index,
-                    span.start as u32,
-                    length,
-                    TT_ENUM_MEMBER,
-                    0,
-                ) {
                     tokens.push(abs);
                 }
             }
@@ -549,114 +528,30 @@ impl Backend {
         tokens
     }
 
-    /// Resolve a class reference name to the appropriate token type
-    /// (class, interface, enum, or type).
-    fn resolve_class_token_type(
+    /// Resolve a class reference to its token type (class, interface,
+    /// enum, or type) and modifiers (deprecated).  An unresolved
+    /// reference is a plain class.
+    fn resolve_class_reference_token(
         &self,
         name: &str,
         is_fqn: bool,
         ctx: &crate::types::FileContext,
         offset: u32,
-    ) -> u32 {
+    ) -> (u32, u32) {
         let fqn = if is_fqn {
             name.to_string()
         } else {
             ctx.resolve_name_at(name, offset)
         };
 
-        // First check in-file classes (fast path).
-        for class in &ctx.classes {
-            let class_fqn = match &class.file_namespace {
-                Some(ns) => format!("{}\\{}", ns, class.name),
-                None => class.name.to_string(),
-            };
-            if class_fqn == fqn || class.name == fqn {
-                return kind_to_token_type(class.kind);
-            }
+        // First check in-file classes (fast path), then the global class
+        // index / stubs.
+        match ctx.classes.iter().find(|class| class.fqn() == fqn.as_str()) {
+            Some(class) => class_token(class),
+            None => self
+                .find_or_load_class(&fqn)
+                .map_or((TT_CLASS, 0), |class| class_token(&class)),
         }
-
-        // Try resolving from the global class index / stubs.
-        if let Some(class_info) = self.find_or_load_class(&fqn) {
-            return kind_to_token_type(class_info.kind);
-        }
-
-        // Fall back to CLASS for unresolved references.
-        TT_CLASS
-    }
-
-    /// Resolve modifiers for a class reference (e.g. deprecated).
-    fn resolve_class_modifiers(
-        &self,
-        name: &str,
-        is_fqn: bool,
-        ctx: &crate::types::FileContext,
-        offset: u32,
-    ) -> u32 {
-        let fqn = if is_fqn {
-            name.to_string()
-        } else {
-            ctx.resolve_name_at(name, offset)
-        };
-
-        // Check in-file classes.
-        for class in &ctx.classes {
-            let class_fqn = match &class.file_namespace {
-                Some(ns) => format!("{}\\{}", ns, class.name),
-                None => class.name.to_string(),
-            };
-            if class_fqn == fqn || class.name == fqn {
-                if class.deprecation_message.is_some() {
-                    return TM_DEPRECATED;
-                }
-                return 0;
-            }
-        }
-
-        if let Some(class_info) = self.find_or_load_class(&fqn)
-            && class_info.deprecation_message.is_some()
-        {
-            return TM_DEPRECATED;
-        }
-
-        0
-    }
-
-    /// Resolve the token type for a class declaration by looking up
-    /// the class in the file's AST.
-    fn resolve_declaration_token_type(
-        &self,
-        name: &str,
-        _uri: &str,
-        ctx: &crate::types::FileContext,
-    ) -> u32 {
-        for class in &ctx.classes {
-            if class.name == name {
-                return kind_to_token_type(class.kind);
-            }
-        }
-        TT_CLASS
-    }
-
-    /// Resolve modifiers for a class declaration (deprecated, abstract).
-    fn resolve_class_declaration_modifiers(
-        &self,
-        name: &str,
-        _uri: &str,
-        ctx: &crate::types::FileContext,
-    ) -> u32 {
-        let mut mods = 0u32;
-        for class in &ctx.classes {
-            if class.name == name {
-                if class.deprecation_message.is_some() {
-                    mods |= TM_DEPRECATED;
-                }
-                if class.is_abstract {
-                    mods |= TM_ABSTRACT;
-                }
-                break;
-            }
-        }
-        mods
     }
 
     /// Resolve member-level token type and modifiers by looking up the
@@ -700,13 +595,8 @@ impl Backend {
 
         let base: Arc<ClassInfo> = match subject_text {
             "$this" | "self" | "static" | "parent" => {
-                // Innermost class whose byte range contains the access
-                // (handles nested anonymous classes).
-                let Some(enclosing) = ctx
-                    .classes
-                    .iter()
-                    .filter(|c| offset >= c.start_offset && offset <= c.end_offset)
-                    .max_by_key(|c| c.start_offset)
+                let Some(enclosing) =
+                    crate::class_lookup::find_shared_class_at_offset(&ctx.classes, offset)
                 else {
                     return unverified;
                 };
@@ -717,11 +607,10 @@ impl Backend {
                     return unverified;
                 }
                 if subject_text == "parent" {
-                    let Some(ref parent_name) = enclosing.parent_class else {
+                    let Some(parent_name) = enclosing.parent_class else {
                         return unverified;
                     };
-                    let fqn = ctx.resolve_name_at(parent_name, offset);
-                    match self.find_or_load_class(&fqn) {
+                    match self.find_or_load_class(&parent_name) {
                         Some(c) => c,
                         None => return unverified,
                     }
@@ -902,12 +791,10 @@ impl Backend {
         if *ssp_kind == crate::symbol_map::SelfStaticParentKind::Parent {
             // Try to resolve the parent class kind.
             if let Some(class) = crate::class_lookup::find_class_at_offset(&ctx.classes, offset)
-                && let Some(ref parent_name) = class.parent_class
+                && let Some(parent_name) = class.parent_class
+                && let Some(parent_info) = self.find_or_load_class(&parent_name)
             {
-                let fqn = ctx.resolve_name_at(parent_name, offset);
-                if let Some(parent_info) = self.find_or_load_class(&fqn) {
-                    return kind_to_token_type(parent_info.kind);
-                }
+                return kind_to_token_type(parent_info.kind);
             }
         }
         TT_TYPE
@@ -1127,6 +1014,37 @@ fn member_extra_modifiers(
 }
 
 /// Map a [`ClassLikeKind`] to a semantic token type index.
+/// The token type and modifiers a class's kind and deprecation give it.
+fn class_token(class: &ClassInfo) -> (u32, u32) {
+    let mods = if class.deprecation_message.is_some() {
+        TM_DEPRECATED
+    } else {
+        0
+    };
+    (kind_to_token_type(class.kind), mods)
+}
+
+/// The token type and modifiers (deprecated, abstract) for the
+/// declaration of the class `name` whose name sits at `offset`.
+fn resolve_declaration_token(
+    name: &str,
+    offset: u32,
+    ctx: &crate::types::FileContext,
+) -> (u32, u32) {
+    ctx.classes
+        .iter()
+        .find(|class| {
+            class.name == name && class.keyword_offset <= offset && offset < class.start_offset
+        })
+        .map_or((TT_CLASS, 0), |class| {
+            let (tt, mut mods) = class_token(class);
+            if class.is_abstract {
+                mods |= TM_ABSTRACT;
+            }
+            (tt, mods)
+        })
+}
+
 fn kind_to_token_type(kind: ClassLikeKind) -> u32 {
     match kind {
         ClassLikeKind::Class => TT_CLASS,

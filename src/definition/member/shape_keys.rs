@@ -36,12 +36,11 @@ impl Backend {
         // look for the key.
 
         let mut matches: Vec<(usize, u32, u32)> = Vec::new(); // (byte_offset, line, col)
-        let mut byte_offset: usize = 0;
         let mut in_docblock = false;
 
-        for (line_idx, line) in content.lines().enumerate() {
-            let line_len = line.len() + 1; // +1 for newline
-
+        for (line_idx, (byte_offset, line)) in
+            crate::text_position::lines_with_offsets(content).enumerate()
+        {
             // Track docblock boundaries.
             if line.contains("/**") {
                 in_docblock = true;
@@ -59,8 +58,6 @@ impl Backend {
             if line.contains("*/") {
                 in_docblock = false;
             }
-
-            byte_offset += line_len;
         }
 
         // Pick the match closest to the cursor.  When no near_offset
@@ -158,78 +155,30 @@ impl Backend {
         None
     }
 
-    /// Find a string literal entry inside an Eloquent array property.
+    /// Find the string literal that names `member_name` in the Eloquent
+    /// attribute arrays (`$casts`, `$fillable`, …) of the class declared at
+    /// `class_range` in `content`.
     ///
-    /// Searches for `'member_name'` or `"member_name"` inside `$casts`,
-    /// `$dates`, `$attributes`, `$fillable`, `$guarded`, `$hidden`,
-    /// `$visible`, and `$appends` property declarations within the given
-    /// class range.
-    /// Returns the position of the string literal so go-to-definition
-    /// can jump to it.
+    /// Returns the position of the literal's first character inside the
+    /// quotes, so go-to-definition can jump to it.
     pub(in crate::definition) fn find_eloquent_array_entry(
         content: &str,
         member_name: &str,
         class_range: Option<(usize, usize)>,
     ) -> Option<Position> {
-        let single_pattern = format!("'{member_name}'");
-        let double_pattern = format!("\"{member_name}\"");
-        let targets = [
-            "$casts",
-            "$dates",
-            "$attributes",
-            "$fillable",
-            "$guarded",
-            "$hidden",
-            "$visible",
-            "$appends",
-        ];
-
-        // Track whether we're inside one of the target property arrays.
-        let mut in_target_property = false;
-        let mut byte_offset: usize = 0;
-
-        for (line_idx, line) in content.lines().enumerate() {
-            let line_len = line.len() + 1;
-            let in_range = match class_range {
-                Some((start, end)) => byte_offset >= start && byte_offset < end,
-                None => true,
-            };
-            if in_range {
-                let trimmed = line.trim();
-                // Detect property declarations for target arrays.
-                if targets.iter().any(|t| trimmed.contains(t)) {
-                    in_target_property = true;
-                }
-                // Also detect the casts() method body.
-                if trimmed.contains("function casts(") {
-                    in_target_property = true;
-                }
-
-                if in_target_property {
-                    // Look for the member name as a string key.
-                    if let Some(col) = line.find(&single_pattern) {
-                        // Position cursor inside the quotes on the first
-                        // letter of the column name.
-                        return Some(Position {
-                            line: line_idx as u32,
-                            character: (col + 1) as u32,
-                        });
-                    }
-                    if let Some(col) = line.find(&double_pattern) {
-                        return Some(Position {
-                            line: line_idx as u32,
-                            character: (col + 1) as u32,
-                        });
-                    }
-
-                    // A line ending with `];` or just `];` closes the array.
-                    if trimmed == "];" || trimmed.ends_with("];") {
-                        in_target_property = false;
-                    }
-                }
-            }
-            byte_offset += line_len;
-        }
-        None
+        let (class_start, _) = class_range?;
+        let offset =
+            crate::parser::with_parsed_program(content, "eloquent_array_entry", |program, _| {
+                let members = crate::parser::innermost_node_at(
+                    mago_syntax::cst::Node::Program(program),
+                    class_start as u32,
+                    crate::parser::class_like_members,
+                )?;
+                crate::virtual_members::laravel::attribute_entry_offset(members, member_name)
+            })?;
+        Some(crate::text_position::offset_to_position(
+            content,
+            offset as usize,
+        ))
     }
 }

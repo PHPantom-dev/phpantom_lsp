@@ -982,3 +982,138 @@ class Foo {
         );
     }
 }
+
+// ── Class names in the body ─────────────────────────────────────────────────
+
+/// The `@return` the update action writes for `return Foo::NAMES;` inside
+/// `namespace App`, where `Foo` is a global class and `imports` is the
+/// block's `use` list.  `None` when no update is offered.
+fn updated_return_for_global_class_constant(imports: &str) -> Option<String> {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = format!(
+        r#"<?php
+namespace {{
+    class Foo {{ const NAMES = ['a', 'b']; }}
+}}
+namespace App {{
+    {imports}
+    /**
+     * Names.
+     */
+    function names(): array {{
+        return Foo::NAMES;
+    }}
+}}
+"#
+    );
+    backend.update_ast(uri, &content);
+
+    let actions = get_code_actions_at(&backend, uri, &content, 7, 8);
+    let action = find_action_containing(&actions, "Update docblock")?;
+    extract_edit_text(action)
+        .lines()
+        .find(|line| line.contains("@return"))
+        .map(str::to_string)
+}
+
+/// An unimported `Foo` inside a namespace is `App\Foo`, so the global
+/// class's constant does not shape the `@return` the action writes.
+#[test]
+fn return_enrichment_does_not_read_unimported_global_class() {
+    let imported = updated_return_for_global_class_constant("use Foo;");
+    assert!(
+        imported.as_deref().is_some_and(|line| line.contains("'a'")),
+        "`use Foo;` names the global class, got: {imported:?}"
+    );
+    let unimported = updated_return_for_global_class_constant("");
+    assert!(
+        unimported
+            .as_deref()
+            .is_none_or(|line| !line.contains("'a'")),
+        "`Foo` is `App\\Foo` without an import, got: {unimported:?}"
+    );
+}
+
+/// The `@throws` the action adds for a class the file neither imports nor
+/// shares a namespace with is fully qualified, and reads back as the same
+/// class, so the action is not offered again.
+#[test]
+fn added_throws_tag_names_a_global_exception_fully_qualified() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace {
+    class Boom extends \Exception {}
+}
+namespace App {
+    class Worker {
+        /**
+         * Work.
+         */
+        public function run(): void {
+            throw new \Boom();
+        }
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    let actions = get_code_actions_at(&backend, uri, content, 7, 10);
+    let action =
+        find_action_containing(&actions, "Update docblock").expect("should offer Update docblock");
+    let new_doc = extract_edit_text(action);
+    assert!(
+        new_doc.contains("@throws \\Boom"),
+        "should name the global class, got: {new_doc}"
+    );
+
+    let updated = content.replace(
+        "         * Work.\n",
+        "         * Work.\n         *\n         * @throws \\Boom\n",
+    );
+    backend.update_ast(uri, &updated);
+    let actions = get_code_actions_at(&backend, uri, &updated, 7, 10);
+    assert!(
+        find_action_containing(&actions, "Update docblock").is_none(),
+        "the written `@throws \\Boom` covers the throw"
+    );
+}
+
+/// A `@return` inferred from the body names classes the way the file can
+/// read them: through its imports, else fully qualified.
+#[test]
+fn return_enrichment_qualifies_classes_the_file_does_not_import() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace {
+    class Glob {}
+}
+namespace Lib {
+    class Item {}
+}
+namespace App {
+    /**
+     * Items.
+     */
+    function items(): array {
+        return [new \Glob(), new \Lib\Item()];
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    let actions = get_code_actions_at(&backend, uri, content, 9, 8);
+    let action =
+        find_action_containing(&actions, "Update docblock").expect("should offer Update docblock");
+    let ret = extract_edit_text(action)
+        .lines()
+        .find(|line| line.contains("@return"))
+        .map(str::to_string)
+        .expect("should write a @return");
+    assert!(
+        ret.contains("\\Glob") && ret.contains("\\Lib\\Item") && !ret.contains("App\\"),
+        "got: {ret}"
+    );
+}

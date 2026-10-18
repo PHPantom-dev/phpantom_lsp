@@ -271,12 +271,6 @@ pub(crate) fn split_array_access_key(key: &str) -> Option<(&str, &str)> {
     Some((base, key_name))
 }
 
-/// Strip `null` from a specific array shape key on a variable.
-///
-/// Given variable `$a` typed as `array{test: ?int}` and key `"test"`,
-/// rewrites the variable's type to `array{test: int}`.  This modifies
-/// the base variable's type directly so the narrowed shape survives
-/// scope merges (unlike synthetic scope entries which are stripped).
 /// Remove `null` from an array element a check proved non-null.
 ///
 /// A constant shape records each element's type inline, so the refinement
@@ -339,6 +333,12 @@ pub(super) fn strip_null_from_subject_shape(
     }
 }
 
+/// Strip `null` from a specific array shape key on a variable.
+///
+/// Given variable `$a` typed as `array{test: ?int}` and key `"test"`,
+/// rewrites the variable's type to `array{test: int}`.  This modifies
+/// the base variable's type directly so the narrowed shape survives
+/// scope merges (unlike synthetic scope entries which are stripped).
 pub(crate) fn strip_null_from_array_shape_key(
     base_var: &str,
     key_name: &str,

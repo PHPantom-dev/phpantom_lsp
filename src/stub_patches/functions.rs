@@ -2,7 +2,7 @@
 
 use crate::atom::atom;
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::FunctionInfo;
+use crate::types::{CallableInvocation, FunctionInfo};
 
 /// Apply all registered stub patches to a freshly-parsed function.
 ///
@@ -56,7 +56,16 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         | "preg_filter" => patch_replace_family(func, "$subject", true),
         "str_replace" | "str_ireplace" => patch_replace_family(func, "$subject", false),
         "substr_replace" => patch_replace_family(func, "$string", false),
-        "spl_autoload_register" => patch_spl_autoload_register(func),
+        "spl_autoload_register" => {
+            patch_spl_autoload_register(func);
+            mark_later_invoked(func, "$callback");
+        }
+        "set_error_handler"
+        | "set_exception_handler"
+        | "register_shutdown_function"
+        | "register_tick_function"
+        | "header_register_callback" => mark_later_invoked(func, "$callback"),
+        "pcntl_signal" => mark_later_invoked(func, "$handler"),
         "define" => widen_parameter_to_mixed(func, "$value"),
         name if name.starts_with("ctype_") => widen_parameter_to_mixed(func, "$text"),
         _ => {}
@@ -90,6 +99,21 @@ fn widen_parameter_to_mixed(func: &mut FunctionInfo, param_name: &str) {
         if param.name == param_name {
             param.type_hint = Some(PhpType::mixed());
             param.native_type_hint = Some(PhpType::mixed());
+        }
+    }
+}
+
+/// Record that a builtin keeps the callable it is handed for later rather
+/// than running it before it returns, as PHPStan's own stubs tag it with
+/// `@param-later-invoked-callable`.
+///
+/// Every other builtin that takes a callable (`array_map`, `usort`,
+/// `call_user_func`, …) runs it immediately, which is already what a
+/// function is taken to do when its stub says nothing.
+fn mark_later_invoked(func: &mut FunctionInfo, param_name: &str) {
+    for param in func.parameters.make_mut() {
+        if param.name == param_name {
+            param.callable_invocation = Some(CallableInvocation::Later);
         }
     }
 }

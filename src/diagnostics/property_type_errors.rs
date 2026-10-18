@@ -22,12 +22,13 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::parser::with_parsed_program;
+use crate::class_lookup::find_class_at_offset;
+use crate::parser::{for_each_nested_statement_list, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::resolver::{LendsLoaders, VarResolutionCtx};
+use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 
-use super::helpers::{TypeCheckCtx, collect_type_check, find_innermost_enclosing_class};
+use super::helpers::{TypeCheckCtx, collect_type_check};
 use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for property type mismatch diagnostics.
@@ -67,28 +68,8 @@ struct PropertyCheckCtx<'a> {
 /// Walk a top-level statement collecting property assignments.
 fn collect_from_statement(stmt: &Statement<'_>, ctx: &mut PropertyCheckCtx<'_>) {
     match stmt {
-        Statement::Namespace(ns) => {
-            for inner in ns.statements().iter() {
-                collect_from_statement(inner, ctx);
-            }
-        }
-        Statement::Class(class) => {
-            for member in class.members.iter() {
-                collect_from_class_member(member, ctx);
-            }
-        }
-        Statement::Interface(iface) => {
-            for member in iface.members.iter() {
-                collect_from_class_member(member, ctx);
-            }
-        }
-        Statement::Trait(trait_def) => {
-            for member in trait_def.members.iter() {
-                collect_from_class_member(member, ctx);
-            }
-        }
-        Statement::Enum(enum_def) => {
-            for member in enum_def.members.iter() {
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            for member in body.members {
                 collect_from_class_member(member, ctx);
             }
         }
@@ -105,64 +86,11 @@ fn collect_from_statement(stmt: &Statement<'_>, ctx: &mut PropertyCheckCtx<'_>) 
                 check_expression_for_property_assignment(val, ctx);
             }
         }
-        Statement::If(if_stmt) => {
-            collect_from_if_body(&if_stmt.body, ctx);
-        }
-        Statement::While(w) => {
-            for s in w.body.statements() {
-                collect_from_statement(s, ctx);
+        _ => for_each_nested_statement_list(stmt, |nested| {
+            for inner in nested {
+                collect_from_statement(inner, ctx);
             }
-        }
-        Statement::DoWhile(dw) => {
-            collect_from_statement(dw.statement, ctx);
-        }
-        Statement::For(f) => {
-            for s in f.body.statements() {
-                collect_from_statement(s, ctx);
-            }
-        }
-        Statement::Foreach(fe) => {
-            for s in fe.body.statements() {
-                collect_from_statement(s, ctx);
-            }
-        }
-        Statement::Switch(sw) => {
-            collect_from_switch_body(&sw.body, ctx);
-        }
-        Statement::Try(t) => {
-            for s in t.block.statements.iter() {
-                collect_from_statement(s, ctx);
-            }
-            for catch in t.catch_clauses.iter() {
-                for s in catch.block.statements.iter() {
-                    collect_from_statement(s, ctx);
-                }
-            }
-            if let Some(ref finally) = t.finally_clause {
-                for s in finally.block.statements.iter() {
-                    collect_from_statement(s, ctx);
-                }
-            }
-        }
-        Statement::Block(block) => {
-            for s in block.statements.iter() {
-                collect_from_statement(s, ctx);
-            }
-        }
-        Statement::Declare(declare) => {
-            use mago_syntax::cst::declare::DeclareBody;
-            match &declare.body {
-                DeclareBody::Statement(inner) => {
-                    collect_from_statement(inner, ctx);
-                }
-                DeclareBody::ColonDelimited(body) => {
-                    for s in body.statements.iter() {
-                        collect_from_statement(s, ctx);
-                    }
-                }
-            }
-        }
-        _ => {}
+        }),
     }
 }
 
@@ -178,62 +106,6 @@ fn collect_from_class_member(
     {
         for s in block.statements.iter() {
             collect_from_statement(s, ctx);
-        }
-    }
-}
-
-fn collect_from_if_body(
-    body: &mago_syntax::cst::control_flow::r#if::IfBody<'_>,
-    ctx: &mut PropertyCheckCtx<'_>,
-) {
-    use mago_syntax::cst::control_flow::r#if::IfBody;
-    match body {
-        IfBody::Statement(inner) => {
-            collect_from_statement(inner.statement, ctx);
-            for c in inner.else_if_clauses.iter() {
-                collect_from_statement(c.statement, ctx);
-            }
-            if let Some(ref c) = inner.else_clause {
-                collect_from_statement(c.statement, ctx);
-            }
-        }
-        IfBody::ColonDelimited(body) => {
-            for s in body.statements.iter() {
-                collect_from_statement(s, ctx);
-            }
-            for c in body.else_if_clauses.iter() {
-                for s in c.statements.iter() {
-                    collect_from_statement(s, ctx);
-                }
-            }
-            if let Some(ref c) = body.else_clause {
-                for s in c.statements.iter() {
-                    collect_from_statement(s, ctx);
-                }
-            }
-        }
-    }
-}
-
-fn collect_from_switch_body(
-    body: &mago_syntax::cst::control_flow::switch::SwitchBody<'_>,
-    ctx: &mut PropertyCheckCtx<'_>,
-) {
-    use mago_syntax::cst::control_flow::switch::SwitchBody;
-    match body {
-        SwitchBody::BraceDelimited(b) => {
-            for case in b.cases.iter() {
-                for s in case.statements().iter() {
-                    collect_from_statement(s, ctx);
-                }
-            }
-        }
-        SwitchBody::ColonDelimited(b) => {
-            for case in b.cases.iter() {
-                for s in case.statements().iter() {
-                    collect_from_statement(s, ctx);
-                }
-            }
         }
     }
 }
@@ -266,7 +138,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
             };
 
             let offset = pa.object.span().start.offset;
-            let enclosing = find_innermost_enclosing_class(&ctx.file_ctx.classes, offset);
+            let enclosing = find_class_at_offset(&ctx.file_ctx.classes, offset);
             match enclosing {
                 Some(cls) => (name, cls),
                 None => return,
@@ -294,7 +166,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
             };
 
             let offset = spa.class.span().start.offset;
-            let enclosing = find_innermost_enclosing_class(&ctx.file_ctx.classes, offset);
+            let enclosing = find_class_at_offset(&ctx.file_ctx.classes, offset);
             match enclosing {
                 Some(cls) => (prop_name, cls),
                 None => return,
@@ -316,7 +188,8 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
     };
 
     let site = assign.rhs.span().start.offset;
-    let class_loader = ctx.type_ctx.class_loader_at(site);
+    let class_loader = ctx.type_ctx.loaders.class_loader_at(site);
+    let resolved_class_loader = ctx.type_ctx.loaders.resolved_class_loader();
 
     // Resolve `self`/`static`/`parent`/`$this` in the declared property
     // type, then expand any remaining short class names to their
@@ -330,7 +203,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
             if name.contains("__anonymous@") {
                 return name.to_string();
             }
-            if let Some(cls) = class_loader(name) {
+            if let Some(cls) = resolved_class_loader(name) {
                 cls.fqn().to_string()
             } else {
                 name.to_string()
@@ -342,15 +215,10 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
     let rhs_start = rhs_span.start.offset as usize;
     let rhs_end = rhs_span.end.offset as usize;
 
-    let owned_loaders = ctx.backend.diagnostic_loaders_over(
-        ctx.type_ctx.function_loader_at(site),
-        ctx.type_ctx.constant_loader_at(site),
-    );
-    let loaders = owned_loaders.loaders();
-
     let var_ctx = VarResolutionCtx {
+        source_imports: Some(ctx.type_ctx.file_ctx.use_map_at(site)),
         backend: Some(ctx.backend),
-        loaders,
+        loaders: ctx.type_ctx.loaders.loaders_at(site),
         resolved_class_cache: Some(&ctx.backend.resolved_class_cache),
         ..VarResolutionCtx::new(
             "",
@@ -358,6 +226,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
             &ctx.file_ctx.classes,
             ctx.content,
             rhs_start as u32,
+            resolved_class_loader,
             class_loader,
         )
     };
@@ -377,7 +246,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         if name.contains("__anonymous@") {
             return name.to_string();
         }
-        if let Some(cls) = class_loader(name) {
+        if let Some(cls) = resolved_class_loader(name) {
             cls.fqn().to_string()
         } else {
             name.to_string()
@@ -435,7 +304,7 @@ impl Backend {
                 if is_type_compatible(
                     &assignment.rhs_type,
                     &assignment.declared_type,
-                    ctx.class_loader_at(assignment.start as u32),
+                    ctx.loaders.resolved_class_loader(),
                     ctx.strict_types,
                 ) {
                     return None;

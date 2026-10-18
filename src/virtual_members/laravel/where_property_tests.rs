@@ -8,12 +8,7 @@ use crate::virtual_members::laravel::where_property::{
     build_where_property_methods_for_class, lowercase_method_names,
 };
 
-fn make_class(name: &str) -> ClassInfo {
-    ClassInfo {
-        name: crate::atom::atom(name),
-        ..Default::default()
-    }
-}
+use crate::test_fixtures::make_class;
 
 fn make_model(name: &str) -> ClassInfo {
     let mut c = make_class(name);

@@ -1,32 +1,45 @@
-/// `use` statement and namespace extraction.
-///
-/// This module handles parsing PHP `use` statements and namespace
-/// declarations from the AST, building a mapping of short (imported)
-/// names to their fully-qualified equivalents.
+//! `use` statement and namespace extraction.
+//!
+//! This module handles parsing PHP `use` statements and namespace
+//! declarations from the AST, building a mapping of short (imported)
+//! names to their fully-qualified equivalents.
+
 use std::collections::HashMap;
 
 use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::types::SymbolImports;
 use crate::util::short_name;
 
 impl Backend {
     /// Walk statements and extract `use` statement mappings.
+    ///
+    /// Class imports go to `use_map`.  Function and constant imports go to
+    /// `symbol_imports` when the caller wants them, and are dropped
+    /// otherwise; they never land in `use_map`, where they would answer
+    /// for a class of the same short name.
     pub(crate) fn extract_use_statements_from_statements<'a>(
         statements: impl Iterator<Item = &'a Statement<'a>>,
         use_map: &mut HashMap<String, String>,
+        mut symbol_imports: Option<&mut SymbolImports>,
     ) {
         for statement in statements {
             match statement {
                 Statement::Use(use_stmt) => {
-                    Self::extract_use_items(&use_stmt.items, use_map);
+                    Self::extract_use_items(
+                        &use_stmt.items,
+                        use_map,
+                        symbol_imports.as_deref_mut(),
+                    );
                 }
                 Statement::Namespace(namespace) => {
                     // Recurse into namespace bodies to find use statements
                     Self::extract_use_statements_from_statements(
                         namespace.statements().iter(),
                         use_map,
+                        symbol_imports.as_deref_mut(),
                     );
                 }
                 _ => {}
@@ -34,43 +47,59 @@ impl Backend {
         }
     }
 
-    /// Extract individual use items from a `UseItems` node.
-    pub(crate) fn extract_use_items(items: &UseItems, use_map: &mut HashMap<String, String>) {
+    /// Extract individual use items from a `UseItems` node, sorting them
+    /// by kind as [`extract_use_statements_from_statements`](Self::extract_use_statements_from_statements)
+    /// describes.
+    pub(crate) fn extract_use_items(
+        items: &UseItems,
+        use_map: &mut HashMap<String, String>,
+        mut symbol_imports: Option<&mut SymbolImports>,
+    ) {
+        let mut register = |item: &UseItem, prefix: Option<&str>, kind: Option<&UseType>| {
+            let table = match kind {
+                None => &mut *use_map,
+                Some(UseType::Function(_)) => match symbol_imports.as_deref_mut() {
+                    Some(imports) => &mut imports.functions,
+                    None => return,
+                },
+                Some(UseType::Const(_)) => match symbol_imports.as_deref_mut() {
+                    Some(imports) => &mut imports.constants,
+                    None => return,
+                },
+            };
+            Self::register_use_item(item, prefix, table);
+        };
         match items {
             UseItems::Sequence(seq) => {
                 // `use Foo\Bar;` or `use Foo\Bar, Baz\Qux;`
                 for item in seq.items.iter() {
-                    Self::register_use_item(item, None, use_map);
+                    register(item, None, None);
                 }
             }
             UseItems::TypedSequence(seq) => {
                 // `use function Foo\bar;` or `use const Foo\BAR;`
-                // Function and constant imports are included in the
-                // use_map so that `resolve_function_name` /
-                // `resolve_class_name` can find them.  Class resolution
-                // harmlessly ignores entries that don't match a class.
                 for item in seq.items.iter() {
-                    Self::register_use_item(item, None, use_map);
+                    register(item, None, Some(&seq.r#type));
                 }
             }
             UseItems::TypedList(list) => {
                 // `use function Foo\{bar, baz};` or `use const Foo\{BAR, BAZ};`
                 let prefix = bytes_to_str(list.namespace.value());
                 for item in list.items.iter() {
-                    Self::register_use_item(item, Some(prefix), use_map);
+                    register(item, Some(prefix), Some(&list.r#type));
                 }
             }
             UseItems::MixedList(list) => {
                 // `use Foo\{Bar, function baz, const QUX};`
                 let prefix = bytes_to_str(list.namespace.value());
                 for maybe_typed in list.items.iter() {
-                    Self::register_use_item(&maybe_typed.item, Some(prefix), use_map);
+                    register(&maybe_typed.item, Some(prefix), maybe_typed.r#type.as_ref());
                 }
             }
         }
     }
 
-    /// Register a single `UseItem` into the use_map.
+    /// Register a single `UseItem` into an import table.
     ///
     /// If `group_prefix` is `Some`, the item name is relative to that prefix
     /// (e.g. for `use Foo\{Bar}`, prefix is `"Foo"` and item name is `"Bar"`,
@@ -78,11 +107,11 @@ impl Backend {
     fn register_use_item(
         item: &UseItem,
         group_prefix: Option<&str>,
-        use_map: &mut HashMap<String, String>,
+        table: &mut HashMap<String, String>,
     ) {
         // `use \Foo\Bar;` is legal PHP, but every FQN this codebase stores
         // is unprefixed, so normalize here rather than leaving each
-        // consumer of the use_map to strip it.
+        // consumer of the table to strip it.
         let item_name = bytes_to_str(item.name.value()).trim_start_matches('\\');
 
         let fqn = if let Some(prefix) = group_prefix {
@@ -98,7 +127,7 @@ impl Backend {
             short_name(&fqn).to_string()
         };
 
-        use_map.insert(alias_name, fqn);
+        table.insert(alias_name, fqn);
     }
 
     /// Walk statements and extract the first namespace declaration found.
@@ -283,9 +312,14 @@ class RegistrationController {
         assert_eq!(rn.get(ret_offset), Some("Models\\Common\\TeamMembers"));
     }
 
-    /// `use function Foo\bar;` should populate the use_map.
+    /// The function and constant imports of `uri`, read from the index.
+    fn symbol_imports(backend: &Backend, uri: &str) -> SymbolImports {
+        backend.symbol_imports_for(uri)
+    }
+
+    /// `use function Foo\bar;` is a function import, not a class import.
     #[test]
-    fn use_function_populates_use_map() {
+    fn use_function_populates_function_imports() {
         let backend = Backend::new_test();
         let uri = "file:///test.php";
         let content = r#"<?php
@@ -298,26 +332,21 @@ class MyTest {}
 "#;
         backend.update_ast(uri, content);
 
-        let use_map = backend.file_imports.read();
-        let file_map = use_map
-            .get(uri)
-            .expect("use_map should have an entry for the file");
-
+        let imports = symbol_imports(&backend, uri);
         assert_eq!(
-            file_map.get("assertSame"),
+            imports.functions.get("assertSame"),
             Some(&"PHPUnit\\Framework\\assertSame".to_string()),
-            "use function should add assertSame to use_map"
         );
         assert_eq!(
-            file_map.get("assertCount"),
+            imports.functions.get("assertCount"),
             Some(&"PHPUnit\\Framework\\assertCount".to_string()),
-            "use function should add assertCount to use_map"
         );
+        assert!(backend.file_use_map(uri).is_empty());
     }
 
-    /// `use function Foo\{bar, baz};` (grouped) should populate the use_map.
+    /// `use function Foo\{bar, baz};` (grouped) is a function import too.
     #[test]
-    fn use_function_grouped_populates_use_map() {
+    fn use_function_grouped_populates_function_imports() {
         let backend = Backend::new_test();
         let uri = "file:///test.php";
         let content = r#"<?php
@@ -329,26 +358,21 @@ class MyTest {}
 "#;
         backend.update_ast(uri, content);
 
-        let use_map = backend.file_imports.read();
-        let file_map = use_map
-            .get(uri)
-            .expect("use_map should have an entry for the file");
-
+        let imports = symbol_imports(&backend, uri);
         assert_eq!(
-            file_map.get("assertSame"),
+            imports.functions.get("assertSame"),
             Some(&"PHPUnit\\Framework\\assertSame".to_string()),
-            "grouped use function should add assertSame to use_map"
         );
         assert_eq!(
-            file_map.get("assertCount"),
+            imports.functions.get("assertCount"),
             Some(&"PHPUnit\\Framework\\assertCount".to_string()),
-            "grouped use function should add assertCount to use_map"
         );
+        assert!(backend.file_use_map(uri).is_empty());
     }
 
-    /// `use const Foo\BAR;` should populate the use_map.
+    /// `use const Foo\BAR;` is a constant import.
     #[test]
-    fn use_const_populates_use_map() {
+    fn use_const_populates_constant_imports() {
         let backend = Backend::new_test();
         let uri = "file:///test.php";
         let content = r#"<?php
@@ -360,45 +384,39 @@ class MyClass {}
 "#;
         backend.update_ast(uri, content);
 
-        let use_map = backend.file_imports.read();
-        let file_map = use_map
-            .get(uri)
-            .expect("use_map should have an entry for the file");
-
+        let imports = symbol_imports(&backend, uri);
         assert_eq!(
-            file_map.get("JSON_THROW_ON_ERROR"),
+            imports.constants.get("JSON_THROW_ON_ERROR"),
             Some(&"JSON_THROW_ON_ERROR".to_string()),
-            "use const should add JSON_THROW_ON_ERROR to use_map"
         );
+        assert!(backend.file_use_map(uri).is_empty());
     }
 
-    /// Mixed `use Foo\{Bar, function baz, const QUX};` should include all items.
+    /// Mixed `use Foo\{Bar, function baz, const QUX};` sorts each item
+    /// into the table for its kind.
     #[test]
-    fn mixed_use_includes_functions_and_consts() {
+    fn mixed_use_sorts_items_by_kind() {
         let backend = Backend::new_test();
         let uri = "file:///test.php";
         let content = "<?php\nuse App\\{MyClass, function myFunc, const MY_CONST};\n";
         backend.update_ast(uri, content);
 
-        let use_map = backend.file_imports.read();
-        let file_map = use_map
-            .get(uri)
-            .expect("use_map should have an entry for the file");
+        let use_map = backend.file_use_map(uri);
+        assert_eq!(use_map.get("MyClass"), Some(&"App\\MyClass".to_string()));
+        assert_eq!(
+            use_map.len(),
+            1,
+            "only the class import is a class: {use_map:?}"
+        );
 
+        let imports = symbol_imports(&backend, uri);
         assert_eq!(
-            file_map.get("MyClass"),
-            Some(&"App\\MyClass".to_string()),
-            "mixed use should include class import"
+            imports.functions.get("myFunc"),
+            Some(&"App\\myFunc".to_string())
         );
         assert_eq!(
-            file_map.get("myFunc"),
-            Some(&"App\\myFunc".to_string()),
-            "mixed use should include function import"
-        );
-        assert_eq!(
-            file_map.get("MY_CONST"),
-            Some(&"App\\MY_CONST".to_string()),
-            "mixed use should include const import"
+            imports.constants.get("MY_CONST"),
+            Some(&"App\\MY_CONST".to_string())
         );
     }
 }

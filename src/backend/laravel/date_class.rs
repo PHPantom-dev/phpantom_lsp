@@ -19,12 +19,11 @@ impl Backend {
         // provider-registration files are seeds too: editing them changes which
         // providers are registered, so a `Date::use()` in a newly added (or
         // removed) provider is picked up on the next scan.
-        let mut seed_uris: std::collections::HashSet<String> = std::collections::HashSet::new();
-        if let Some(root) = self.workspace.workspace_root.read().clone() {
-            for rel in ["bootstrap/providers.php", "config/app.php"] {
-                seed_uris.insert(crate::util::path_to_uri(&root.join(rel)));
-            }
-        }
+        let mut seed_uris: std::collections::HashSet<String> = self
+            .laravel_provider_list_uris()
+            .into_iter()
+            .flatten()
+            .collect();
         for fqn in providers.fqns() {
             let Some(uri) = self.resolve_class_uri(fqn) else {
                 continue;

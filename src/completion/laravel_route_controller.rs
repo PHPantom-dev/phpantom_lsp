@@ -26,8 +26,9 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::symbol_map::extraction::laravel::ROUTE_HTTP_METHODS;
 use crate::text_position::position_to_offset;
-use crate::types::{AccessKind, FileContext};
+use crate::types::FileContext;
 
 // ─── Context ────────────────────────────────────────────────────────────────
 
@@ -41,10 +42,6 @@ pub(crate) struct LaravelRouteControllerContext {
     /// The partial method name the user has typed so far.
     pub prefix: String,
 }
-
-// ─── Route HTTP methods ─────────────────────────────────────────────────────
-
-const ROUTE_HTTP_METHODS: &[&str] = &["get", "post", "put", "patch", "delete", "options", "any"];
 
 // ─── Detection (text scanning + AST) ────────────────────────────────────────
 
@@ -66,28 +63,7 @@ pub(crate) fn detect_laravel_route_controller_context(
     }
 
     // ── Step 1: Find the opening quote before the cursor ────────────
-    let mut quote_pos = None;
-    let mut i = cursor_offset;
-    while i > 0 {
-        i -= 1;
-        let ch = bytes[i];
-        if ch == b'\'' || ch == b'"' {
-            let mut backslashes = 0;
-            let mut j = i;
-            while j > 0 && bytes[j - 1] == b'\\' {
-                backslashes += 1;
-                j -= 1;
-            }
-            if backslashes % 2 == 0 {
-                quote_pos = Some(i);
-                break;
-            }
-        }
-        if ch == b'\n' {
-            return None;
-        }
-    }
-    let quote_pos = quote_pos?;
+    let quote_pos = crate::text_scan::open_quote_before(content, cursor_offset)?;
     let prefix = content[quote_pos + 1..cursor_offset].to_string();
 
     // Validate prefix is identifier-like (or empty).
@@ -118,17 +94,9 @@ pub(crate) fn detect_laravel_route_controller_context(
     let mut k = inner.len();
     while k > 0 {
         k -= 1;
-        if inner_bytes[k] == closing_quote_byte {
-            let mut bs = 0;
-            let mut j = k;
-            while j > 0 && inner_bytes[j - 1] == b'\\' {
-                bs += 1;
-                j -= 1;
-            }
-            if bs % 2 == 0 {
-                open_pos = Some(k);
-                break;
-            }
+        if inner_bytes[k] == closing_quote_byte && !crate::text_scan::is_escaped(inner_bytes, k) {
+            open_pos = Some(k);
+            break;
         }
     }
     let open_pos = open_pos?;
@@ -251,20 +219,9 @@ fn find_chain_controller(expr: &Expression<'_>) -> Option<String> {
 /// Extract the class name from the first `X::class` argument.
 fn extract_class_arg(args: &ArgumentList<'_>) -> Option<String> {
     let first_arg = args.arguments.iter().next()?;
-    if let Expression::Access(Access::ClassConstant(cca)) = first_arg.value() {
-        let is_class = matches!(
-            &cca.constant,
-            ClassLikeConstantSelector::Identifier(ident)
-                if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
-        );
-        if is_class && let Expression::Identifier(id) = cca.class {
-            let name = bytes_to_str(id.value()).to_string();
-            if !name.is_empty() {
-                return Some(name);
-            }
-        }
-    }
-    None
+    let class = crate::parser::class_fetch_identifier(first_arg.value())?;
+    let name = bytes_to_str(class.value());
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// Return the byte range of a closure body (between braces).
@@ -295,57 +252,16 @@ impl Backend {
         ctx: &FileContext,
     ) -> Option<CompletionResponse> {
         let rc_ctx = detect_laravel_route_controller_context(content, position)?;
-
-        let class_loader = self.class_loader(ctx);
-
-        // Resolve the controller class name to FQN and load.
         let fqn =
-            super::array_callable::resolve_class_name_to_fqn(self, &rc_ctx.controller_class, ctx)?;
-        let class_info = class_loader(&fqn)?;
-
-        // Build completion items using the standard builder.
-        let candidates = vec![class_info];
-        let cursor_offset = position_to_offset(content, position);
-        let current_class = crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
-        let mut items = super::builder::build_union_completion_items(
-            &candidates,
-            AccessKind::Arrow,
-            current_class,
-            &class_loader,
-            &self.resolved_class_cache,
+            super::array_callable::resolve_class_name_to_fqn(self, &rc_ctx.controller_class, ctx);
+        let class_info = self.resolved_class_loader(ctx)(&fqn)?;
+        self.string_method_name_completions(
             uri,
-        );
-
-        // Post-process: we are inserting into a string literal, so
-        // replace snippet insert text with the plain method name.
-        for item in &mut items {
-            if item.kind == Some(CompletionItemKind::METHOD) {
-                if let Some(ref filter) = item.filter_text {
-                    item.insert_text = Some(filter.clone());
-                }
-                item.insert_text_format = None;
-            }
-        }
-
-        // Only methods (no properties/constants).
-        items.retain(|item| item.kind == Some(CompletionItemKind::METHOD));
-
-        // Filter by prefix.
-        if !rc_ctx.prefix.is_empty() {
-            let prefix_lower = rc_ctx.prefix.to_lowercase();
-            items.retain(|item| {
-                item.filter_text
-                    .as_ref()
-                    .or(Some(&item.label))
-                    .is_some_and(|t| t.to_lowercase().starts_with(&prefix_lower))
-            });
-        }
-
-        if items.is_empty() {
-            None
-        } else {
-            Some(CompletionResponse::Array(items))
-        }
+            ctx,
+            position_to_offset(content, position),
+            class_info,
+            &rc_ctx.prefix,
+        )
     }
 }
 

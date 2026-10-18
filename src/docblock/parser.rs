@@ -1343,6 +1343,21 @@ mod tests {
     }
 
     #[test]
+    fn invocation_tags_name_their_parameter() {
+        let doc = "/**\n * @param-immediately-invoked-callable $now\n * @phpstan-param-later-invoked-callable $later\n */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        let immediate = info
+            .first_tag_by_kind(TagKind::ParamImmediatelyInvokedCallable)
+            .expect("should have param-immediately-invoked-callable");
+        assert_eq!(immediate.variable().as_deref(), Some("$now"));
+        let later = info
+            .first_tag_by_kind(TagKind::ParamLaterInvokedCallable)
+            .expect("should have phpstan-param-later-invoked-callable");
+        assert_eq!(later.vendor, Some(TagVendor::PhpStan));
+        assert_eq!(later.variable().as_deref(), Some("$later"));
+    }
+
+    #[test]
     fn phpstan_extends_tag_is_an_extends_tag() {
         let doc = "/**\n * @phpstan-extends Collection<int, User>\n */";
         let info = parse_docblock_for_tags(doc).expect("should parse");

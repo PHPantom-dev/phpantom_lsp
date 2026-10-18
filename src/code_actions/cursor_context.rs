@@ -4,12 +4,16 @@
 //! declaration and which member is the cursor on?"  This module
 //! provides a single AST walk that answers that question, so that
 //! individual code actions don't each need their own copy of the
-//! namespace → class-like → member traversal.
+//! namespace → class-like → member traversal.  [`find_enclosing_function`]
+//! answers the narrower "which function is this offset in?" for the
+//! actions that edit a function wherever it is declared, and
+//! [`innermost_at`] finds the construct under the cursor for the actions
+//! that rewrite one.
 
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::constant::ClassLikeConstant;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
-use mago_syntax::cst::class_like::method::Method;
+use mago_syntax::cst::class_like::method::{Method, MethodBody};
 use mago_syntax::cst::class_like::property::Property;
 use mago_syntax::cst::function_like::function::Function;
 use mago_syntax::cst::*;
@@ -62,6 +66,26 @@ pub(crate) enum CursorContext<'a> {
     None,
 }
 
+/// Which declarations [`find_enclosing_function`] stops at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FunctionKinds {
+    /// Functions and methods.  A closure belongs to the one it is written
+    /// in, the way PHPStan charges an exception thrown inside it to that
+    /// function.
+    Named,
+    /// Closures and arrow functions as well.
+    All,
+}
+
+/// A function-like declaration [`find_enclosing_function`] found.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EnclosingFunction {
+    /// From its first attribute, modifier or keyword to its end.
+    pub(crate) span: mago_span::Span,
+    /// The offsets of the braces around its body, when it has one.
+    pub(crate) body_braces: Option<(u32, u32)>,
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /// Walk the AST to find the cursor context at the given byte offset.
@@ -79,6 +103,74 @@ pub(crate) fn find_cursor_context<'a>(
         }
     }
     CursorContext::None
+}
+
+/// The innermost function-like declaration of `kinds` whose span contains
+/// `offset`, wherever it is declared: at the top level, in a namespace, in
+/// a class-like or anonymous class, or nested in another body.
+pub(crate) fn find_enclosing_function<'a>(
+    statements: &'a Sequence<'a, Statement<'a>>,
+    offset: u32,
+    kinds: FunctionKinds,
+) -> Option<EnclosingFunction> {
+    use mago_syntax::walker::Walker;
+
+    let walker = InnermostFunction { offset, kinds };
+    let mut found = None;
+    for statement in statements.iter() {
+        walker.walk_statement(statement, &mut found);
+    }
+    found
+}
+
+/// What `pick` makes of the innermost node holding `offset` that it
+/// accepts, for an action that rewrites the construct under the cursor.
+///
+/// The walk is generic over [`Node`], so it reaches every construct the
+/// parser produces (`elseif` and `else` branches, `match` arms, closure
+/// bodies, anonymous classes), and it only descends into the subtree
+/// holding `offset`, so it costs the depth of the cursor rather than the
+/// size of the file.  Spans are inclusive at both ends: a cursor just past
+/// a construct is still on it.
+pub(crate) fn innermost_at<'ast, 'arena, T>(
+    program: &'ast Program<'arena>,
+    offset: u32,
+    pick: impl FnMut(Node<'ast, 'arena>) -> Option<T>,
+) -> Option<T> {
+    crate::parser::innermost_node_at(Node::Program(program), offset, pick)
+}
+
+/// A `$var = value;` statement: a plain `=` to a variable other than
+/// `$this`.
+pub(crate) struct PlainAssignment<'ast, 'arena> {
+    /// The whole statement, `;` included.
+    pub(crate) statement: &'ast ExpressionStatement<'arena>,
+    pub(crate) variable: &'ast DirectVariable<'arena>,
+    pub(crate) value: &'ast Expression<'arena>,
+}
+
+/// The innermost `$var = value;` statement under `offset`; see
+/// [`PlainAssignment`].
+pub(crate) fn plain_assignment_at<'ast, 'arena>(
+    program: &'ast Program<'arena>,
+    offset: u32,
+) -> Option<PlainAssignment<'ast, 'arena>> {
+    innermost_at(program, offset, |node| {
+        let Node::ExpressionStatement(statement) = node else {
+            return None;
+        };
+        let Expression::Assignment(assignment) = statement.expression else {
+            return None;
+        };
+        let Expression::Variable(Variable::Direct(variable)) = assignment.lhs else {
+            return None;
+        };
+        (assignment.operator.is_assign() && variable.name != b"$this").then_some(PlainAssignment {
+            statement,
+            variable,
+            value: assignment.rhs,
+        })
+    })
 }
 
 // ── AST walk (private) ─────────────────────────────────────────────────────
@@ -186,6 +278,65 @@ fn find_member_at_cursor<'a>(
         };
     }
     MemberContext::None
+}
+
+/// Records each declaration holding the offset as the walk reaches it, so
+/// what is left once the walk ends is the innermost one.
+struct InnermostFunction {
+    offset: u32,
+    kinds: FunctionKinds,
+}
+
+impl InnermostFunction {
+    fn consider(
+        &self,
+        span: mago_span::Span,
+        body: Option<&Block<'_>>,
+        found: &mut Option<EnclosingFunction>,
+    ) {
+        if span.start.offset <= self.offset && self.offset <= span.end.offset {
+            *found = Some(EnclosingFunction {
+                span,
+                body_braces: body.map(|b| (b.left_brace.start.offset, b.right_brace.start.offset)),
+            });
+        }
+    }
+}
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Option<EnclosingFunction>>
+    for InnermostFunction
+{
+    fn walk_in_function(
+        &self,
+        node: &'ast Function<'arena>,
+        found: &mut Option<EnclosingFunction>,
+    ) {
+        self.consider(node.span(), Some(&node.body), found);
+    }
+
+    fn walk_in_method(&self, node: &'ast Method<'arena>, found: &mut Option<EnclosingFunction>) {
+        let body = match &node.body {
+            MethodBody::Concrete(block) => Some(block),
+            MethodBody::Abstract(_) => None,
+        };
+        self.consider(node.span(), body, found);
+    }
+
+    fn walk_in_closure(&self, node: &'ast Closure<'arena>, found: &mut Option<EnclosingFunction>) {
+        if self.kinds == FunctionKinds::All {
+            self.consider(node.span(), Some(&node.body), found);
+        }
+    }
+
+    fn walk_in_arrow_function(
+        &self,
+        node: &'ast ArrowFunction<'arena>,
+        found: &mut Option<EnclosingFunction>,
+    ) {
+        if self.kinds == FunctionKinds::All {
+            self.consider(node.span(), None, found);
+        }
+    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

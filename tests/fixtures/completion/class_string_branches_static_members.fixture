@@ -1,0 +1,23 @@
+// test: completion after a class name assigned in both branches offers both classes' static members
+// feature: completion
+// expect: grow(
+// expect: ripen(
+---
+<?php
+
+class Apple {
+    public static function grow(): void {}
+}
+
+class Pear {
+    public static function ripen(): void {}
+}
+
+function pick(bool $flag): void {
+    if ($flag) {
+        $class = Apple::class;
+    } else {
+        $class = Pear::class;
+    }
+    $class::<>
+}

@@ -1,10 +1,14 @@
-//! Strategies for completion inside a `/** … */` docblock: `@tag` name
-//! completion, and type/variable completion after a recognised tag
+//! Strategies for completion inside comments: PHPStan error identifiers
+//! after `@phpstan-ignore`, and, inside a `/** … */` docblock, `@tag` name
+//! completion and type/variable completion after a recognised tag
 //! (`@param `, `@return `, `@throws `, `@var `).
+
+use std::collections::BTreeSet;
+use std::ops::ControlFlow;
 
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, CompletionResponse, CompletionTextEdit,
-    Position, Range, TextEdit,
+    NumberOrString, Position, Range, TextEdit,
 };
 
 use crate::Backend;
@@ -13,7 +17,117 @@ use crate::docblock::type_strings::PHPDOC_TYPE_KEYWORDS;
 use crate::php_type::PhpType;
 use crate::types::FileContext;
 
+use super::{CompletionSite, Stage};
+
 impl Backend {
+    /// Completion inside a comment: PHPStan error identifiers after
+    /// `@phpstan-ignore`, docblock generation on `/**`, `@tag` names, and
+    /// the type or variable after a tag.  Answers for every position
+    /// inside a comment (a non-doc comment takes no completion), so
+    /// comment text never completes as code.
+    pub(super) fn comment_completion(&self, site: &CompletionSite) -> Stage {
+        let CompletionSite {
+            uri,
+            content,
+            position,
+            ctx,
+            ..
+        } = site;
+        let position = *position;
+
+        // Scanning for a comment costs a pass over the file, so each
+        // answer is taken once and reused by the checks below.
+        let in_non_doc_comment =
+            crate::completion::comment_position::is_inside_non_doc_comment(content, position);
+        let in_docblock = !in_non_doc_comment
+            && crate::completion::comment_position::is_inside_docblock(content, position);
+
+        if (in_non_doc_comment || in_docblock)
+            && let Some(prefix) =
+                crate::phpstan_ignore::phpstan_ignore_code_prefix(content, position)
+        {
+            return ControlFlow::Break(Some(self.complete_phpstan_ignore_code(uri, &prefix)));
+        }
+
+        // ── Suppress completion inside non-doc comments ─────────
+        if in_non_doc_comment {
+            return ControlFlow::Break(None);
+        }
+
+        // ── PHPDoc block generation on `/**` ────────────────────
+        // When the user types `/**` above a declaration, generate
+        // a complete docblock skeleton as a single snippet item.
+        // Must run before the docblock-interior checks below.
+        let class_loader = self.class_loader(ctx);
+        let function_loader = self.function_loader(ctx);
+        if let Some(response) = crate::completion::phpdoc::generation::try_generate_docblock(
+            content,
+            position,
+            &ctx.use_map,
+            &ctx.namespace,
+            &ctx.classes,
+            &class_loader,
+            Some(self),
+            Some(&function_loader),
+            uri,
+        ) {
+            return ControlFlow::Break(Some(response));
+        }
+
+        // ── PHPDoc tag completion ────────────────────────────────
+        // Always short-circuits when an `@` prefix is detected
+        // inside a docblock — even when the item list is empty.
+        if let Some(prefix) = crate::completion::phpdoc::extract_phpdoc_prefix(content, position) {
+            return ControlFlow::Break(Some(
+                self.complete_phpdoc_tag(content, &prefix, position, ctx, uri),
+            ));
+        }
+
+        // ── Docblock type / variable completion ─────────────────
+        // Always short-circuits when inside a docblock.
+        if in_docblock {
+            return ControlFlow::Break(
+                self.complete_docblock_type_or_variable(content, position, ctx, uri),
+            );
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    fn complete_phpstan_ignore_code(&self, uri: &str, prefix: &str) -> CompletionResponse {
+        let prefix_lower = prefix.to_ascii_lowercase();
+        let mut identifiers: BTreeSet<String> = BTreeSet::new();
+
+        let cache = self.phpstan_tool.last_diags.lock();
+        if let Some(diags) = cache.get(uri) {
+            for diag in diags {
+                let Some(NumberOrString::String(code)) = &diag.code else {
+                    continue;
+                };
+                if code.is_empty() || code == "phpstan" || code.starts_with("ignore.unmatched") {
+                    continue;
+                }
+                identifiers.insert(code.clone());
+            }
+        }
+
+        let items = identifiers
+            .into_iter()
+            .filter(|id| id.to_ascii_lowercase().starts_with(&prefix_lower))
+            .enumerate()
+            .map(|(idx, id)| CompletionItem {
+                label: id.clone(),
+                kind: Some(CompletionItemKind::VALUE),
+                detail: Some("PHPStan error identifier".to_string()),
+                insert_text: Some(id),
+                sort_text: Some(format!("0_{idx:03}")),
+                ..CompletionItem::default()
+            })
+            .collect();
+
+        CompletionResponse::Array(items)
+    }
+
     // ─── Strategy: PHPDoc tag completion ─────────────────────────────────
 
     /// Build completions for `@tag` names inside a `/** … */` docblock.
@@ -44,7 +158,7 @@ impl Backend {
                     &sym,
                     content,
                     position,
-                    &ctx.classes,
+                    ctx,
                     &class_loader,
                     Some(self),
                     Some(
@@ -61,6 +175,7 @@ impl Backend {
             class_loader: Some(&class_loader),
             function_loader: Some(&function_loader),
             import_target: Some((self, uri)),
+            local_classes: &ctx.classes,
         };
         let items = crate::completion::phpdoc::build_phpdoc_completions(
             content,

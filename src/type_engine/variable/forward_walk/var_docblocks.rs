@@ -11,15 +11,109 @@ use crate::atom::bytes_to_str;
 use crate::php_type::PhpType;
 use crate::types::ResolvedType;
 
-pub(crate) fn preceding_docblock_text(content: &str, node_start: usize) -> Option<&str> {
-    let before = content.get(..node_start)?;
-    let doc_end = before.rfind("*/")? + 2;
-    let between = &before[doc_end..];
-    if between.contains(';') || between.contains('{') || between.contains('}') {
-        return None;
+use crate::parser::{CommentKind, with_comments};
+
+/// Visit the docblocks stacked directly above `offset`, nearest first,
+/// until `visit` returns `false`.
+///
+/// The docblocks of a stack are separated only by whitespace and other
+/// comments; any code ends it, since a `@var` above code that has run since
+/// may no longer hold.  A preprocessed Blade template puts a plain comment
+/// between a template's `@var` block and the code it annotates for every
+/// `{{-- --}}` comment and every component tag.
+pub(crate) fn for_each_docblock_above<'c>(
+    content: &'c str,
+    offset: usize,
+    mut visit: impl FnMut(&'c str) -> bool,
+) {
+    if !may_end_with_comment(content, offset) {
+        return;
     }
-    let doc_start = before[..doc_end].rfind("/**")?;
-    Some(&before[doc_start..doc_end])
+    with_comments(content, |comments| {
+        let bytes = content.as_bytes();
+        let mut covered_from = offset.min(content.len());
+        let above = comments.partition_point(|c| c.end as usize <= covered_from);
+        for comment in comments[..above].iter().rev() {
+            let gap = bytes.get(comment.end as usize..covered_from).unwrap_or(&[]);
+            if !gap.iter().all(u8::is_ascii_whitespace) {
+                return;
+            }
+            if comment.kind == CommentKind::Doc {
+                let Some(doc) = content.get(comment.start as usize..comment.end as usize) else {
+                    return;
+                };
+                if !visit(doc) {
+                    return;
+                }
+            }
+            covered_from = comment.start as usize;
+        }
+    });
+}
+
+/// Whether the text before `offset` can end with a comment, judged from
+/// the text alone so that the many statements with none above them skip
+/// the comment lookup.
+fn may_end_with_comment(content: &str, offset: usize) -> bool {
+    let Some(before) = content.get(..offset) else {
+        return false;
+    };
+    let before = before.trim_end();
+    if before.ends_with("*/") {
+        return true;
+    }
+    // Otherwise only a line comment can, which the last line would hold.
+    let window = before.len().saturating_sub(MAX_LINE_LOOKBACK);
+    let tail = &before.as_bytes()[window..];
+    match tail.iter().rposition(|&b| b == b'\n') {
+        Some(newline) => {
+            let line = &tail[newline + 1..];
+            line.contains(&b'#') || line.windows(2).any(|pair| pair == b"//")
+        }
+        // A line too long to look through: let the comment index decide.
+        None => window > 0 || tail.contains(&b'#') || tail.windows(2).any(|pair| pair == b"//"),
+    }
+}
+
+/// How far back [`may_end_with_comment`] looks for the start of the last
+/// line before giving the question to the comment index.
+const MAX_LINE_LOOKBACK: usize = 512;
+
+/// The docblocks stacked directly above `offset` that can carry a `@var`
+/// tag, nearest first (see [`for_each_docblock_above`]).  Every spelling
+/// of the tag ends in `var`, so a docblock without it (an empty one a
+/// template leaves behind, a `@return` above a closure) is passed over.
+fn docblocks_above(content: &str, offset: usize) -> Vec<&str> {
+    let mut docs = Vec::new();
+    for_each_docblock_above(content, offset, |doc| {
+        if doc.contains("var") {
+            docs.push(doc);
+        }
+        true
+    });
+    docs
+}
+
+/// The docblock directly above `offset` (see [`for_each_docblock_above`]).
+pub(crate) fn docblock_above(content: &str, offset: usize) -> Option<&str> {
+    let mut found = None;
+    for_each_docblock_above(content, offset, |doc| {
+        found = Some(doc);
+        false
+    });
+    found
+}
+
+/// The docblock whose closing `*/` ends exactly at byte `end`.
+pub(crate) fn docblock_ending_at(content: &str, end: usize) -> Option<&str> {
+    let (start, end) = with_comments(content, |comments| {
+        let at = comments.partition_point(|c| (c.end as usize) < end);
+        comments
+            .get(at)
+            .filter(|c| c.end as usize == end && c.kind == CommentKind::Doc)
+            .map(|c| (c.start as usize, c.end as usize))
+    })?;
+    content.get(start..end)
 }
 
 /// Try to process an inline `/** @var Type $x */` docblock override.
@@ -36,13 +130,10 @@ pub(crate) fn try_process_inline_var_override<'b>(
     }
 
     // Look for `/** @var Type $varName */` before this expression.
-    let before = &ctx.content[..offset.min(ctx.content.len())];
-    let trimmed = trim_trailing_line_comments(before);
-
-    let Some(doc_text) = trailing_docblock(trimmed) else {
+    let docs = docblocks_above(ctx.content, offset);
+    let Some((&doc_text, further)) = docs.split_first() else {
         return VarOverrideResult::None;
     };
-    let doc_start = trimmed.len() - doc_text.len();
 
     // Try multi-@var first: a single docblock may declare several
     // variables (e.g. `/** @var App $app  @var array{…} $params */`).
@@ -51,7 +142,7 @@ pub(crate) fn try_process_inline_var_override<'b>(
         // A name this docblock declares carries the type written closest
         // to the expression, so the blocks further back skip it.
         let mut declared: Vec<String> = multi.iter().map(|(name, _)| name.clone()).collect();
-        apply_var_docblock_stack(&trimmed[..doc_start], scope, ctx, |_| true, &mut declared);
+        apply_var_docblock_stack(further, scope, ctx, |_| true, &mut declared);
         // When the cursor is inside the RHS of an assignment, skip
         // overriding the LHS variable so that hover/completion on the
         // RHS sees the pre-override type.  E.g.:
@@ -153,7 +244,7 @@ pub(crate) fn try_process_inline_var_override<'b>(
 
                 let var_name = bytes_to_str(dv.name).to_string();
                 // Scan for preceding docblocks first, so this one wins.
-                apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
+                apply_preceding_var_docblocks(further, scope, ctx);
                 scope.set(&var_name, resolved);
                 return VarOverrideResult::NoVar;
             } else if let Expression::ArrayAccess(array_access) = assignment.lhs {
@@ -174,13 +265,13 @@ pub(crate) fn try_process_inline_var_override<'b>(
                     return VarOverrideResult::None;
                 }
 
-                apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
+                apply_preceding_var_docblocks(further, scope, ctx);
                 process_array_key_write(array_access, resolved, scope, ctx);
                 return VarOverrideResult::NoVar;
             }
         } else if let Expression::Variable(Variable::Direct(dv)) = expr {
             let var_name = bytes_to_str(dv.name).to_string();
-            apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
+            apply_preceding_var_docblocks(further, scope, ctx);
             scope.set(&var_name, resolved);
             return VarOverrideResult::NoVar;
         }
@@ -189,20 +280,18 @@ pub(crate) fn try_process_inline_var_override<'b>(
     VarOverrideResult::None
 }
 
-/// Scan backwards through `before` (content before a docblock we already
-/// processed) for additional standalone `/** @var Type $var */` blocks.
-/// Each discovered block's `@var` tags are applied to `scope`.  Stops as
-/// soon as the text no longer ends with `*/` (after trimming).
+/// Apply the `@var` tags of `docs`, a stack of docblocks nearest first
+/// (see [`for_each_docblock_above`]), to `scope`.
 ///
 /// Returns whether any `@var` annotation was applied, so callers that
 /// recorded a diagnostic scope snapshot before this call know to
 /// re-record it afterward.
 pub(crate) fn apply_preceding_var_docblocks(
-    before: &str,
+    docs: &[&str],
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
-    apply_var_docblock_stack(before, scope, ctx, |_| true, &mut Vec::new())
+    apply_var_docblock_stack(docs, scope, ctx, |_| true, &mut Vec::new())
 }
 
 /// [`apply_preceding_var_docblocks`], restricted to the variables `applies`
@@ -213,22 +302,15 @@ pub(crate) fn apply_preceding_var_docblocks(
 /// seeded by the caller) is not overwritten by a further one that repeats
 /// it.
 fn apply_var_docblock_stack(
-    before: &str,
+    docs: &[&str],
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
     applies: impl Fn(&str) -> bool,
     declared: &mut Vec<String>,
 ) -> bool {
     let mut applied = false;
-    let mut remaining = trim_trailing_line_comments(before);
-    // Keep scanning as long as the preceding text ends with a docblock.
-    while let Some(doc_text) = trailing_docblock(remaining) {
-        let doc_start = remaining.len() - doc_text.len();
+    for doc_text in docs {
         let vars = parse_var_docblock_pairs(doc_text);
-        if vars.is_empty() {
-            // Not a @var docblock — stop scanning.
-            break;
-        }
         for (var_name, php_type) in &vars {
             if !applies(var_name) || declared.iter().any(|seen| seen == var_name) {
                 continue;
@@ -236,78 +318,11 @@ fn apply_var_docblock_stack(
             let resolved = resolve_type_to_resolved_types(php_type, ctx);
             scope.set(var_name, resolved);
             declared.push(var_name.clone());
+            applied = true;
         }
-        applied = true;
-        remaining = trim_trailing_line_comments(&remaining[..doc_start]);
     }
     applied
 }
-
-/// The `/** … */` docblock `text` ends with, or `None` when it ends with
-/// something else.
-///
-/// The comment that ends the text opens at the first `/*` no earlier
-/// comment closes.  An ordinary `/* … */` block is not a docblock, and
-/// searching past it for the nearest `/**` would take everything in
-/// between — including whole statements — for the docblock's body, and
-/// read out of it a `@var` annotation that the code in between has
-/// already superseded.  A preprocessed Blade template is full of such
-/// blocks (every `{{-- --}}` comment and every component tag becomes
-/// one), but so is any PHP file with a commented-out line between two
-/// annotated assignments.
-fn trailing_docblock(text: &str) -> Option<&str> {
-    let body = text.strip_suffix("*/")?;
-    let after_previous = body.rfind("*/").map_or(0, |pos| pos + 2);
-    let start = after_previous + body[after_previous..].find("/*")?;
-    text.get(start..).filter(|doc| doc.starts_with("/**"))
-}
-
-/// Trim trailing whitespace and whole-line `//` / `#` comments from
-/// `before`, so that a `/** @var Type $var */` block separated from the
-/// code it annotates by ordinary comment lines is still discovered.
-///
-/// Only comments that occupy a whole line are removed: a `//` following
-/// code on the same line may well sit inside a string literal
-/// (`$url = 'https://…';`), and `#[` opens an attribute rather than a
-/// comment.
-///
-/// This runs once per statement the forward walker visits, so the search
-/// for the start of the trailing line is capped at
-/// [`MAX_COMMENT_LINE_LOOKBACK`] bytes.  Beyond that the line is far too
-/// long to be a comment worth stepping over, and an unbounded scan would
-/// be quadratic on a file written as one very long line.
-pub(crate) fn trim_trailing_line_comments(before: &str) -> &str {
-    let mut head = before.trim_end();
-    loop {
-        // A docblock ends the search: the caller wants exactly this.
-        if head.ends_with("*/") {
-            return head;
-        }
-        let line_start = match head
-            .as_bytes()
-            .iter()
-            .rev()
-            .take(MAX_COMMENT_LINE_LOOKBACK)
-            .position(|&b| b == b'\n')
-        {
-            // `position` counts back from the end, so the byte after the
-            // newline sits at `len - offset`.  That is a char boundary.
-            Some(offset) => head.len() - offset,
-            None if head.len() <= MAX_COMMENT_LINE_LOOKBACK => 0,
-            None => return head,
-        };
-        let line = head[line_start..].trim_start();
-        if line.starts_with("//") || (line.starts_with('#') && !line.starts_with("#[")) {
-            head = head[..line_start].trim_end();
-        } else {
-            return head;
-        }
-    }
-}
-
-/// How far back [`trim_trailing_line_comments`] looks for the start of
-/// the line it is inspecting.
-const MAX_COMMENT_LINE_LOOKBACK: usize = 512;
 
 /// Apply `/** @var Type $var */` docblocks that precede a statement
 /// without being attached to an assignment.
@@ -330,7 +345,110 @@ pub(crate) fn apply_standalone_var_docblocks(
     if offset == 0 {
         return false;
     }
-    apply_preceding_var_docblocks(&ctx.content[..offset], scope, ctx)
+    apply_preceding_var_docblocks(&docblocks_above(ctx.content, offset), scope, ctx)
+}
+
+/// Apply the `@var` docblocks above the code at the cursor when the parser
+/// dropped that code's statement, as it does with one still being typed
+/// (`$x->` at the end of a file).  The walk never reaches such a statement,
+/// so the docblocks written above it would otherwise go unread.
+///
+/// A statement the parser drops can take the control structures around it
+/// down too (`foreach ($xs as $x) { $x-> }`), so the docblocks above each of
+/// those apply as well, outermost first.
+///
+/// Returns whether any `@var` annotation was applied.
+pub(crate) fn apply_var_docblocks_above_unparsed_cursor(
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let cursor = ctx.cursor_offset as usize;
+    let starts = unparsed_statement_starts(ctx.content, cursor);
+    let mut applied = false;
+    for &start in starts.iter().rev().filter(|&&start| start <= cursor) {
+        applied |= apply_preceding_var_docblocks(&docblocks_above(ctx.content, start), scope, ctx);
+    }
+    applied
+}
+
+/// Where the statement holding `cursor` starts, judged from the text, and
+/// then where each control structure around it starts, innermost first.
+///
+/// A statement starts just past the nearest `;`, `}` or unclosed `{` before
+/// it that no bracket, string or comment encloses.  The climb continues
+/// through an unclosed `{` only while it opens the body of a control
+/// structure; the body of a function or class is where the walk itself
+/// started.
+fn unparsed_statement_starts(content: &str, cursor: usize) -> Vec<usize> {
+    let bytes = content.as_bytes();
+    with_comments(content, |comments| {
+        let mut starts = Vec::new();
+        let mut before = comments.partition_point(|c| c.end as usize <= cursor.min(bytes.len()));
+        let mut depth: u32 = 0;
+        let mut i = cursor.min(bytes.len());
+        while i > 0 {
+            if before > 0 && comments[before - 1].end as usize == i {
+                before -= 1;
+                i = comments[before].start as usize;
+                continue;
+            }
+            i -= 1;
+            match bytes[i] {
+                quote @ (b'\'' | b'"') => {
+                    while i > 0 {
+                        i -= 1;
+                        if bytes[i] == quote && !crate::text_scan::is_escaped(bytes, i) {
+                            break;
+                        }
+                    }
+                }
+                b')' | b']' => depth += 1,
+                b'(' | b'[' => depth = depth.saturating_sub(1),
+                b'}' if depth > 0 => depth += 1,
+                b'{' if depth > 0 => depth -= 1,
+                b'{' => {
+                    starts.push(crate::text_scan::skip_php_trivia(bytes, i + 1));
+                    if !opens_control_structure_body(&content[..i]) {
+                        return starts;
+                    }
+                }
+                b';' | b'}' if depth == 0 => {
+                    starts.push(crate::text_scan::skip_php_trivia(bytes, i + 1));
+                    return starts;
+                }
+                _ => {}
+            }
+        }
+        starts
+    })
+}
+
+/// Whether a `{` written after `before` opens the body of a control
+/// structure: it follows `else`, `try`, `do` or `finally`, or the
+/// parenthesised head of `if`, `elseif`, `foreach`, `for`, `while`,
+/// `switch` or `catch`.
+fn opens_control_structure_body(before: &str) -> bool {
+    use crate::text_scan::keyword_ends_at;
+    let before_text = before.trim_end();
+    let before = before_text.as_bytes();
+    let end = before.len();
+    if ["else", "try", "do", "finally"]
+        .iter()
+        .any(|kw| keyword_ends_at(before, end, kw.as_bytes()))
+    {
+        return true;
+    }
+    if end == 0 || before[end - 1] != b')' {
+        return false;
+    }
+    let Some(open) = crate::text_scan::find_matching_backward(before_text, end - 1, b'(', b')')
+    else {
+        return false;
+    };
+    let head = before[..open].trim_ascii_end();
+    ["if", "elseif", "foreach", "for", "while", "switch", "catch"]
+        .iter()
+        .any(|kw| keyword_ends_at(head, head.len(), kw.as_bytes()))
 }
 
 /// Apply the `@var` docblocks above a `global` statement to the variables
@@ -351,16 +469,18 @@ pub(crate) fn apply_global_var_docblocks(
     if offset == 0 {
         return false;
     }
-    let before = &ctx.content[..offset];
+    let docs = docblocks_above(ctx.content, offset);
     if let [only] = imported
-        && let Some(php_type) = find_preceding_nameless_var_cast(ctx.content, offset)
+        && let Some(php_type) = docs
+            .first()
+            .and_then(|doc| parse_inline_var_docblock_no_var(doc))
     {
         let resolved = resolve_type_to_resolved_types(&php_type, ctx);
         scope.set(only, resolved);
         return true;
     }
     apply_var_docblock_stack(
-        before,
+        &docs,
         scope,
         ctx,
         |name| imported.contains(&name),
@@ -385,10 +505,7 @@ pub(crate) fn find_preceding_nameless_var_cast(
     if offset == 0 {
         return None;
     }
-    let before = &content[..offset];
-    let trimmed = trim_trailing_line_comments(before);
-    let doc_text = trailing_docblock(trimmed)?;
-    parse_inline_var_docblock_no_var(doc_text)
+    parse_inline_var_docblock_no_var(docblock_above(content, offset)?)
 }
 
 /// The type the `@var` docblock above the statement at `stmt_start` gives
@@ -402,8 +519,7 @@ pub(crate) fn preceding_var_type_of_value(
     stmt_start: usize,
     value_var: Option<&str>,
 ) -> Option<PhpType> {
-    let before = content.get(..stmt_start)?;
-    let doc_text = trailing_docblock(trim_trailing_line_comments(before))?;
+    let doc_text = docblock_above(content, stmt_start)?;
     if let Some(value_var) = value_var
         && let Some((_, php_type)) = parse_var_docblock_pairs(doc_text)
             .into_iter()
@@ -479,56 +595,48 @@ pub(crate) fn parse_inline_var_docblock_no_var(doc_text: &str) -> Option<PhpType
 mod tests {
     use super::*;
 
-    #[test]
-    fn trailing_line_comments_are_stepped_over_to_reach_a_docblock() {
-        // Whole-line `//` and `#` comments separate the block from the
-        // code but do not detach it.
-        assert!(trim_trailing_line_comments("/** @var Foo $x */\n// short\n").ends_with("*/"));
-        assert!(trim_trailing_line_comments("/** @var Foo $x */\n\n# short\n\n").ends_with("*/"));
-        assert!(trim_trailing_line_comments("/** @var Foo $x */\n// a\n  // b\n").ends_with("*/"));
-
-        // A `//` after code on the same line may be inside a string.
-        assert_eq!(
-            trim_trailing_line_comments("/** @var Foo $x */\n$url = 'https://example.test';"),
-            "/** @var Foo $x */\n$url = 'https://example.test';"
-        );
-
-        // `#[` opens an attribute, not a comment.
-        assert_eq!(
-            trim_trailing_line_comments("/** @var Foo $x */\n#[Attr]"),
-            "/** @var Foo $x */\n#[Attr]"
-        );
-
-        // A comment line longer than the look-back window is left alone
-        // rather than triggering an unbounded backward scan.
-        let long = format!("/** @var Foo $x */\n// {}\n", "x".repeat(600));
-        assert!(!trim_trailing_line_comments(&long).ends_with("*/"));
-
-        // Nothing but comments: the scan bottoms out at an empty string.
-        assert_eq!(trim_trailing_line_comments("// only\n"), "");
-        assert_eq!(trim_trailing_line_comments(""), "");
+    fn above_end(content: &str) -> Vec<&str> {
+        docblocks_above(content, content.len())
     }
 
     #[test]
-    fn only_a_docblock_ends_the_backward_search_for_one() {
+    fn line_comments_are_stepped_over_to_reach_a_docblock() {
         assert_eq!(
-            trailing_docblock("$a = 1; /** @var Foo $x */"),
-            Some("/** @var Foo $x */")
+            above_end("<?php\n/** @var Foo $x */\n// short\n"),
+            ["/** @var Foo $x */"]
         );
-        // An ordinary block comment is where the search stops: reading
-        // past it would take the statements in between for the body of
-        // the docblock beyond them.
         assert_eq!(
-            trailing_docblock("/** @var Foo $x */ $x = 1; /* note */"),
-            None
+            above_end("<?php\n/** @var Foo $x */\n\n# short\n\n"),
+            ["/** @var Foo $x */"]
         );
-        assert_eq!(trailing_docblock("$a = 1;"), None);
-        assert_eq!(trailing_docblock(""), None);
-        // PHP block comments do not nest, so a `/*` written inside a
-        // docblock is part of its body rather than a comment of its own.
         assert_eq!(
-            trailing_docblock("/** @var Foo $x  see /* the note */"),
-            Some("/** @var Foo $x  see /* the note */")
+            above_end("<?php\n/** @var Foo $x */ // trailing\n"),
+            ["/** @var Foo $x */"]
+        );
+        // Code in between detaches the docblock, even when a comment
+        // follows the code on its line.
+        assert!(above_end("<?php\n/** @var Foo $x */\n$url = 'https://x'; // c\n").is_empty());
+        // `#[` opens an attribute, not a comment.
+        assert!(above_end("<?php\n/** @var Foo $x */\n#[Attr]\n").is_empty());
+    }
+
+    #[test]
+    fn only_a_docblock_continues_the_stack() {
+        assert_eq!(
+            above_end("<?php\n/** @var A $a */\n/** @var B $b */\n"),
+            ["/** @var B $b */", "/** @var A $a */"]
+        );
+        // Plain comments are stepped over; code is where the search stops.
+        assert_eq!(
+            above_end("<?php\n/** @var Foo $x */\n/* x-component */\n"),
+            ["/** @var Foo $x */"]
+        );
+        assert!(above_end("<?php\n/** @var Foo $x */ $x = 1; /* note */\n").is_empty());
+        assert!(above_end("<?php\n$a = 1;").is_empty());
+        // A `/*` inside a string is not a comment.
+        assert_eq!(
+            above_end("<?php\n$f = glob('src/*.php');\n/** @var Foo $x */\n"),
+            ["/** @var Foo $x */"]
         );
     }
 

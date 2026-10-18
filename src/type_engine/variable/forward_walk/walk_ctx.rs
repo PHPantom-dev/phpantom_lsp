@@ -9,7 +9,7 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 
 use crate::php_type::PhpType;
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{Loaders, VarResolutionCtx, WrittenNames};
 use crate::types::{ClassInfo, ResolvedType};
 
 /// Context for the forward walk.
@@ -17,6 +17,7 @@ use crate::types::{ClassInfo, ResolvedType};
 /// Bundles the immutable context that every statement/expression handler
 /// needs — the class loader, function loader, current class info, source
 /// text, etc.  The mutable `ScopeState` is passed separately as `&mut`.
+#[derive(Clone)]
 pub(crate) struct ForwardWalkCtx<'a> {
     /// The class containing the method being analyzed (or a dummy for
     /// top-level functions).
@@ -28,8 +29,12 @@ pub(crate) struct ForwardWalkCtx<'a> {
     /// Byte offset of the cursor.  The walk stops when a statement's
     /// start offset reaches or exceeds this value.
     pub cursor_offset: u32,
-    /// Cross-file class resolution callback.
+    /// Cross-file class resolution callback for already-resolved names.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_class_loader`](crate::type_engine::resolver::ResolutionCtx::source_class_loader).
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_imports`](crate::type_engine::resolver::ResolutionCtx::source_imports).
+    pub source_imports: crate::type_engine::resolver::SourceImports<'a>,
     /// Server state for project-wide answers.  See
     /// [`ResolutionCtx::backend`](crate::type_engine::resolver::ResolutionCtx::backend).
     pub backend: Option<&'a crate::Backend>,
@@ -115,9 +120,21 @@ impl<'a> ForwardWalkCtx<'a> {
     pub(crate) fn resolved_types_for(&self, hint: PhpType) -> Vec<ResolvedType> {
         crate::type_engine::type_resolution::resolved_types_for_hint(
             hint,
-            &self.current_class.name,
+            &self.current_class.fqn(),
             self.all_classes,
             self.class_loader,
+        )
+    }
+
+    /// How a class name written at the cursor reads.
+    pub(in crate::type_engine) fn written_names(&self) -> WrittenNames<'a> {
+        WrittenNames::new(
+            Some(self.current_class),
+            self.all_classes,
+            self.content,
+            self.cursor_offset,
+            self.source_imports,
+            self.source_class_loader,
         )
     }
 
@@ -130,19 +147,48 @@ impl<'a> ForwardWalkCtx<'a> {
         ctx: &crate::type_engine::resolver::VarResolutionCtx<'a>,
     ) -> ForwardWalkCtx<'a> {
         ForwardWalkCtx {
+            enclosing_return_type: ctx.enclosing_return_type.clone(),
+            top_level_scope: ctx.top_level_scope.clone(),
+            ..Self::fresh_from_var_ctx(ctx)
+        }
+    }
+
+    /// Build a walk context for a body of its own from a
+    /// variable-resolution context: the same file, classes, loaders and
+    /// cursor, but none of the per-body state (see [`Self::fresh`]).
+    pub(crate) fn fresh_from_var_ctx(
+        ctx: &crate::type_engine::resolver::VarResolutionCtx<'a>,
+    ) -> ForwardWalkCtx<'a> {
+        ForwardWalkCtx {
             current_class: ctx.current_class,
             all_classes: ctx.all_classes,
             content: ctx.content,
             cursor_offset: ctx.cursor_offset,
             class_loader: ctx.class_loader,
+            source_class_loader: ctx.source_class_loader,
+            source_imports: ctx.source_imports,
             backend: ctx.backend,
             loaders: ctx.loaders,
             resolved_class_cache: ctx.resolved_class_cache,
-            enclosing_return_type: ctx.enclosing_return_type.clone(),
-            top_level_scope: ctx.top_level_scope.clone(),
+            enclosing_return_type: None,
+            top_level_scope: None,
             in_loop: false,
             template_markers: None,
             cursor_scope: None,
+        }
+    }
+
+    /// Return a copy of this context for walking a body of its own: no
+    /// enclosing return type, top-level scope, template markers or cursor
+    /// scope, and not inside a loop.
+    pub(crate) fn fresh(&self) -> ForwardWalkCtx<'a> {
+        ForwardWalkCtx {
+            enclosing_return_type: None,
+            top_level_scope: None,
+            in_loop: false,
+            template_markers: None,
+            cursor_scope: None,
+            ..*self
         }
     }
 
@@ -154,19 +200,8 @@ impl<'a> ForwardWalkCtx<'a> {
     /// cursor position.
     pub(crate) fn with_cursor_offset(&self, cursor_offset: u32) -> ForwardWalkCtx<'a> {
         ForwardWalkCtx {
-            current_class: self.current_class,
-            all_classes: self.all_classes,
-            content: self.content,
             cursor_offset,
-            class_loader: self.class_loader,
-            backend: self.backend,
-            loaders: self.loaders,
-            resolved_class_cache: self.resolved_class_cache,
-            enclosing_return_type: self.enclosing_return_type.clone(),
-            top_level_scope: self.top_level_scope.clone(),
-            in_loop: self.in_loop,
-            template_markers: self.template_markers.clone(),
-            cursor_scope: self.cursor_scope,
+            ..self.clone()
         }
     }
 
@@ -174,19 +209,8 @@ impl<'a> ForwardWalkCtx<'a> {
     /// (or not). See [`ForwardWalkCtx::in_loop`].
     pub(crate) fn with_in_loop(&self, in_loop: bool) -> ForwardWalkCtx<'a> {
         ForwardWalkCtx {
-            current_class: self.current_class,
-            all_classes: self.all_classes,
-            content: self.content,
-            cursor_offset: self.cursor_offset,
-            class_loader: self.class_loader,
-            backend: self.backend,
-            loaders: self.loaders,
-            resolved_class_cache: self.resolved_class_cache,
-            enclosing_return_type: self.enclosing_return_type.clone(),
-            top_level_scope: self.top_level_scope.clone(),
             in_loop,
-            template_markers: self.template_markers.clone(),
-            cursor_scope: self.cursor_scope,
+            ..self.clone()
         }
     }
 
@@ -197,33 +221,29 @@ impl<'a> ForwardWalkCtx<'a> {
         cursor_scope: Option<&'c CursorScope>,
     ) -> ForwardWalkCtx<'c> {
         ForwardWalkCtx {
-            current_class: self.current_class,
-            all_classes: self.all_classes,
-            content: self.content,
-            cursor_offset: self.cursor_offset,
-            class_loader: self.class_loader,
-            backend: self.backend,
-            loaders: self.loaders,
-            resolved_class_cache: self.resolved_class_cache,
-            enclosing_return_type: self.enclosing_return_type.clone(),
-            top_level_scope: self.top_level_scope.clone(),
-            in_loop: self.in_loop,
-            template_markers: self.template_markers.clone(),
             cursor_scope,
+            ..self.clone()
         }
     }
 
     /// Return a copy of this context for walking the body of the
     /// declaration starting at `decl_start`, with that declaration's
-    /// bounded templates as [`template_markers`](Self::template_markers).
+    /// bounded templates as [`template_markers`](Self::template_markers)
+    /// and its docblock's `@return` type as the
+    /// [`enclosing_return_type`](Self::enclosing_return_type).
     pub(crate) fn for_declaration(&self, decl_start: u32) -> ForwardWalkCtx<'a> {
+        use crate::type_engine::variable::resolution::{
+            declaration_template_markers, declared_return_docblock_type,
+        };
+        let names = self.written_names();
         ForwardWalkCtx {
-            template_markers:
-                crate::type_engine::variable::resolution::declaration_template_markers(
-                    self.content,
-                    decl_start as usize,
-                ),
-            enclosing_return_type: self.enclosing_return_type.clone(),
+            template_markers: declaration_template_markers(
+                self.content,
+                decl_start as usize,
+                &names,
+            ),
+            enclosing_return_type: declared_return_docblock_type(self.content, decl_start as usize)
+                .map(|ty| names.resolve_type(&ty)),
             top_level_scope: self.top_level_scope.clone(),
             ..*self
         }
@@ -243,6 +263,8 @@ impl<'a> ForwardWalkCtx<'a> {
             content: self.content,
             cursor_offset: self.cursor_offset,
             class_loader: self.class_loader,
+            source_class_loader: self.source_class_loader,
+            source_imports: self.source_imports,
             backend: self.backend,
             laravel_macro_this_resolver: None,
             function_loader: self.loaders.function_loader,
@@ -269,6 +291,7 @@ impl<'a> ForwardWalkCtx<'a> {
         'a: 'b,
     {
         VarResolutionCtx {
+            source_imports: self.source_imports,
             backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
@@ -283,6 +306,7 @@ impl<'a> ForwardWalkCtx<'a> {
                 self.content,
                 cursor_offset,
                 self.class_loader,
+                self.source_class_loader,
             )
         }
     }

@@ -20,7 +20,7 @@ use crate::types::FileContext;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
+use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, SymbolSpan, VarDefKind};
 use crate::text_position::byte_range_to_lsp_range;
 use crate::util::build_fqn;
 
@@ -38,8 +38,8 @@ impl Backend {
         // earlier for end-of-token edge cases).
         let span = self.lookup_symbol_at_position(uri, content, position)?;
 
-        let maps = self.symbol_maps.read();
-        let symbol_map = maps.get(uri)?;
+        let symbol_map = self.symbol_maps.read().get(uri)?.clone();
+        let symbol_map = &*symbol_map;
 
         let highlights = match &span.kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
@@ -58,18 +58,9 @@ impl Backend {
                     self.highlight_variable(symbol_map, content, name, span.start)
                 }
             }
-            SymbolKind::ClassReference { name, is_fqn, .. } => {
+            kind @ (SymbolKind::ClassReference { .. } | SymbolKind::ClassDeclaration { .. }) => {
                 let ctx = self.file_context(uri);
-                let fqn = if *is_fqn {
-                    name.to_string()
-                } else {
-                    ctx.resolve_name_at(name, span.start)
-                };
-                self.highlight_class(symbol_map, content, &fqn, &ctx)
-            }
-            SymbolKind::ClassDeclaration { name } => {
-                let ctx = self.file_context(uri);
-                let fqn = build_fqn(name, ctx.namespace_at(span.start).as_deref());
+                let fqn = class_span_fqn(kind, span.start, &ctx)?;
                 self.highlight_class(symbol_map, content, &fqn, &ctx)
             }
             SymbolKind::MemberAccess { member_name, .. } => {
@@ -85,11 +76,7 @@ impl Backend {
                 self.highlight_constant(symbol_map, content, name)
             }
             SymbolKind::SelfStaticParent(ssp_kind) => {
-                if *ssp_kind == SelfStaticParentKind::This {
-                    self.highlight_this(symbol_map, content, span.start, uri)
-                } else {
-                    self.highlight_keyword(symbol_map, content, *ssp_kind, span.start, uri)
-                }
+                self.highlight_keyword(symbol_map, content, *ssp_kind, span.start, uri)
             }
             SymbolKind::NamespaceDeclaration { .. }
             | SymbolKind::LaravelStringKey { .. }
@@ -116,34 +103,23 @@ impl Backend {
         cursor_offset: u32,
     ) -> Vec<DocumentHighlight> {
         let scope_start = symbol_map.find_variable_scope(var_name, cursor_offset);
-        let mut highlights = Vec::new();
         let mut seen_offsets = std::collections::HashSet::new();
 
-        for span in &symbol_map.spans {
+        let mut highlights = collect_highlights(symbol_map, content, |span| {
             let name = match &span.kind {
                 SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => name,
-                _ => continue,
+                _ => return None,
             };
-            if name != var_name {
-                continue;
-            }
-            let span_scope = symbol_map.find_variable_scope(name, span.start);
-            if span_scope != scope_start {
-                continue;
+            if name != var_name || symbol_map.find_variable_scope(name, span.start) != scope_start {
+                return None;
             }
             seen_offsets.insert(span.start);
-
-            let kind = if symbol_map.var_def_kind_at(name, span.start).is_some() {
+            Some(if symbol_map.var_def_kind_at(name, span.start).is_some() {
                 DocumentHighlightKind::WRITE
             } else {
                 DocumentHighlightKind::READ
-            };
-
-            highlights.push(DocumentHighlight {
-                range: byte_range_to_lsp_range(content, span.start as usize, span.end as usize),
-                kind: Some(kind),
-            });
-        }
+            })
+        });
 
         // Include var_def sites that may not have a matching Variable span
         // (e.g. parameters, foreach bindings).
@@ -168,45 +144,6 @@ impl Backend {
         highlights
     }
 
-    /// Highlight all `$this` references within the same class body.
-    fn highlight_this(
-        &self,
-        symbol_map: &SymbolMap,
-        content: &str,
-        cursor_offset: u32,
-        uri: &str,
-    ) -> Vec<DocumentHighlight> {
-        let ctx_classes: Vec<std::sync::Arc<crate::types::ClassInfo>> = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let current_class = crate::class_lookup::find_class_at_offset(&ctx_classes, cursor_offset);
-        let (class_start, class_end) = match current_class {
-            Some(cc) => (cc.start_offset, cc.end_offset),
-            None => (0, u32::MAX),
-        };
-
-        let mut highlights = Vec::new();
-
-        for span in &symbol_map.spans {
-            if span.start < class_start || span.start > class_end {
-                continue;
-            }
-            if let SymbolKind::SelfStaticParent(SelfStaticParentKind::This) = &span.kind {
-                highlights.push(DocumentHighlight {
-                    range: byte_range_to_lsp_range(content, span.start as usize, span.end as usize),
-                    kind: Some(DocumentHighlightKind::READ),
-                });
-            }
-        }
-
-        highlights.sort_by(cmp_highlight_range);
-        highlights
-    }
-
     /// Highlight all occurrences of a class/interface/trait/enum name
     /// (by FQN) in the file.
     fn highlight_class(
@@ -216,37 +153,10 @@ impl Backend {
         target_fqn: &str,
         ctx: &FileContext,
     ) -> Vec<DocumentHighlight> {
-        let mut highlights = Vec::new();
-
-        for span in &symbol_map.spans {
-            let fqn = match &span.kind {
-                SymbolKind::ClassReference { name, is_fqn, .. } => {
-                    if *is_fqn {
-                        name.to_string()
-                    } else {
-                        Self::resolve_to_fqn(
-                            name,
-                            ctx.use_map_at(span.start),
-                            ctx.namespace_at(span.start),
-                        )
-                    }
-                }
-                SymbolKind::ClassDeclaration { name } => {
-                    build_fqn(name, ctx.namespace_at(span.start).as_deref())
-                }
-                _ => continue,
-            };
-
-            if fqn == target_fqn {
-                highlights.push(DocumentHighlight {
-                    range: byte_range_to_lsp_range(content, span.start as usize, span.end as usize),
-                    kind: Some(DocumentHighlightKind::READ),
-                });
-            }
-        }
-
-        highlights.sort_by(cmp_highlight_range);
-        highlights
+        collect_highlights(symbol_map, content, |span| {
+            (class_span_fqn(&span.kind, span.start, ctx)? == target_fqn)
+                .then_some(DocumentHighlightKind::READ)
+        })
     }
 
     /// Highlight all member accesses and declarations with the same name.
@@ -260,52 +170,24 @@ impl Backend {
         content: &str,
         target_name: &str,
     ) -> Vec<DocumentHighlight> {
-        let mut highlights = Vec::new();
-
-        for span in &symbol_map.spans {
-            match &span.kind {
-                SymbolKind::MemberAccess { member_name, .. } if member_name == target_name => {
-                    highlights.push(DocumentHighlight {
-                        range: byte_range_to_lsp_range(
-                            content,
-                            span.start as usize,
-                            span.end as usize,
-                        ),
-                        kind: Some(DocumentHighlightKind::READ),
-                    });
-                }
-                SymbolKind::MemberDeclaration { name, .. } if name == target_name => {
-                    highlights.push(DocumentHighlight {
-                        range: byte_range_to_lsp_range(
-                            content,
-                            span.start as usize,
-                            span.end as usize,
-                        ),
-                        kind: Some(DocumentHighlightKind::WRITE),
-                    });
-                }
-                // Also match property declarations that appear as Variable spans.
-                SymbolKind::Variable { name }
-                    if name == target_name
-                        && symbol_map
-                            .var_def_kind_at(name, span.start)
-                            .is_some_and(|k| *k == VarDefKind::Property) =>
-                {
-                    highlights.push(DocumentHighlight {
-                        range: byte_range_to_lsp_range(
-                            content,
-                            span.start as usize,
-                            span.end as usize,
-                        ),
-                        kind: Some(DocumentHighlightKind::WRITE),
-                    });
-                }
-                _ => {}
+        collect_highlights(symbol_map, content, |span| match &span.kind {
+            SymbolKind::MemberAccess { member_name, .. } if member_name == target_name => {
+                Some(DocumentHighlightKind::READ)
             }
-        }
-
-        highlights.sort_by(cmp_highlight_range);
-        highlights
+            SymbolKind::MemberDeclaration { name, .. } if name == target_name => {
+                Some(DocumentHighlightKind::WRITE)
+            }
+            // Also match property declarations that appear as Variable spans.
+            SymbolKind::Variable { name }
+                if name == target_name
+                    && symbol_map
+                        .var_def_kind_at(name, span.start)
+                        .is_some_and(|k| *k == VarDefKind::Property) =>
+            {
+                Some(DocumentHighlightKind::WRITE)
+            }
+            _ => None,
+        })
     }
 
     /// Highlight all occurrences of a standalone function name.
@@ -315,21 +197,10 @@ impl Backend {
         content: &str,
         target_name: &str,
     ) -> Vec<DocumentHighlight> {
-        let mut highlights = Vec::new();
-
-        for span in &symbol_map.spans {
-            if let SymbolKind::FunctionCall { name, .. } = &span.kind
-                && name == target_name
-            {
-                highlights.push(DocumentHighlight {
-                    range: byte_range_to_lsp_range(content, span.start as usize, span.end as usize),
-                    kind: Some(DocumentHighlightKind::READ),
-                });
-            }
-        }
-
-        highlights.sort_by(cmp_highlight_range);
-        highlights
+        collect_highlights(symbol_map, content, |span| {
+            matches!(&span.kind, SymbolKind::FunctionCall { name, .. } if name == target_name)
+                .then_some(DocumentHighlightKind::READ)
+        })
     }
 
     /// Highlight all occurrences of a constant name.
@@ -339,25 +210,14 @@ impl Backend {
         content: &str,
         target_name: &str,
     ) -> Vec<DocumentHighlight> {
-        let mut highlights = Vec::new();
-
-        for span in &symbol_map.spans {
-            if let SymbolKind::ConstantReference { name, .. } = &span.kind
-                && name == target_name
-            {
-                highlights.push(DocumentHighlight {
-                    range: byte_range_to_lsp_range(content, span.start as usize, span.end as usize),
-                    kind: Some(DocumentHighlightKind::READ),
-                });
-            }
-        }
-
-        highlights.sort_by(cmp_highlight_range);
-        highlights
+        collect_highlights(symbol_map, content, |span| {
+            matches!(&span.kind, SymbolKind::ConstantReference { name, .. } if name == target_name)
+                .then_some(DocumentHighlightKind::READ)
+        })
     }
 
-    /// Highlight all occurrences of `self`, `static`, or `parent` within
-    /// the same class body.
+    /// Highlight all occurrences of `self`, `static`, `parent`, or `$this`
+    /// within the same class body.
     fn highlight_keyword(
         &self,
         symbol_map: &SymbolMap,
@@ -366,37 +226,56 @@ impl Backend {
         cursor_offset: u32,
         uri: &str,
     ) -> Vec<DocumentHighlight> {
-        let ctx_classes: Vec<std::sync::Arc<crate::types::ClassInfo>> = self
+        let (class_start, class_end) = self
             .symbols
             .uri_classes_index
             .read()
             .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let current_class = crate::class_lookup::find_class_at_offset(&ctx_classes, cursor_offset);
-        let (class_start, class_end) = match current_class {
-            Some(cc) => (cc.start_offset, cc.end_offset),
-            None => (0, u32::MAX),
-        };
+            .and_then(|classes| crate::class_lookup::find_class_at_offset(classes, cursor_offset))
+            .map_or((0, u32::MAX), |class| {
+                (class.start_offset, class.end_offset)
+            });
 
-        let mut highlights = Vec::new();
+        collect_highlights(symbol_map, content, |span| {
+            ((class_start..=class_end).contains(&span.start)
+                && matches!(span.kind, SymbolKind::SelfStaticParent(kind) if kind == target_kind))
+            .then_some(DocumentHighlightKind::READ)
+        })
+    }
+}
 
-        for span in &symbol_map.spans {
-            if span.start < class_start || span.start > class_end {
-                continue;
-            }
-            if let SymbolKind::SelfStaticParent(ssp_kind) = &span.kind
-                && *ssp_kind == target_kind
-            {
-                highlights.push(DocumentHighlight {
-                    range: byte_range_to_lsp_range(content, span.start as usize, span.end as usize),
-                    kind: Some(DocumentHighlightKind::READ),
-                });
-            }
+/// Highlight every span of `symbol_map` that `kind_of` gives a highlight
+/// kind, in position order.
+fn collect_highlights(
+    symbol_map: &SymbolMap,
+    content: &str,
+    mut kind_of: impl FnMut(&SymbolSpan) -> Option<DocumentHighlightKind>,
+) -> Vec<DocumentHighlight> {
+    symbol_map
+        .spans
+        .iter()
+        .filter_map(|span| {
+            Some(DocumentHighlight {
+                range: byte_range_to_lsp_range(content, span.start as usize, span.end as usize),
+                kind: Some(kind_of(span)?),
+            })
+        })
+        .collect()
+}
+
+/// The FQN of the class a class reference or declaration span names, with
+/// a reference resolved by the rule for the place it is written.
+fn class_span_fqn(kind: &SymbolKind, offset: u32, ctx: &FileContext) -> Option<String> {
+    match kind {
+        SymbolKind::ClassReference { name, is_fqn, .. } => Some(if *is_fqn {
+            name.to_string()
+        } else {
+            ctx.resolve_name_at(name, offset)
+        }),
+        SymbolKind::ClassDeclaration { name } => {
+            Some(build_fqn(name, ctx.namespace_at(offset).as_deref()))
         }
-
-        highlights.sort_by(cmp_highlight_range);
-        highlights
+        _ => None,
     }
 }
 

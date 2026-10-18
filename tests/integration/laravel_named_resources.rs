@@ -1,6 +1,6 @@
 //! End-to-end coverage for direct Laravel config-backed resource names.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{create_psr4_workspace, position_after};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -49,14 +49,6 @@ fn position_at_offset(content: &str, offset: usize) -> Position {
             .rsplit_once('\n')
             .map_or(before.len(), |(_, tail)| tail.len()) as u32,
     )
-}
-
-fn position_after(content: &str, unique_prefix: &str) -> Position {
-    let offset = content
-        .find(unique_prefix)
-        .unwrap_or_else(|| panic!("missing `{unique_prefix}`"))
-        + unique_prefix.len();
-    position_at_offset(content, offset)
 }
 
 fn position_of_config_key(content: &str, key: &str) -> Position {

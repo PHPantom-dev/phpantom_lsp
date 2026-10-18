@@ -10,7 +10,11 @@ class Foobar
     public function hello(): void {}
 }
 
-$collection = [];
+// A literal `[]` would never run the loop body; the collection is only
+// known to be an array.
+function collection(): array { return []; }
+
+$collection = collection();
 
 /** @var Foobar $foobar */
 foreach ($collection as $foobar) {

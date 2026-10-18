@@ -284,7 +284,151 @@ function wrapCase(string $code, string $namespaceName, array $asserts): string
         return $out . "\n";
     }
 
+    $code = qualifyGlobalClassNames($code);
     return sprintf("namespace %s {\n", $namespaceName) . indent($code) . "\n" . $assertLines . "}\n\n";
+}
+
+/**
+ * Prefix `\` to the built-in classes a case names: in code (`new Foo`,
+ * `Foo::`, `instanceof Foo`, `catch (Foo $e)`, `extends` and `implements`
+ * lists, attributes, and parameter, property and return types) and in
+ * docblock types.
+ *
+ * Psalm runs these cases in the global namespace, where an unqualified name
+ * reaches a built-in class. Wrapped in a generated namespace, PHP would read
+ * it as a class of that namespace instead, so the reference has to be made
+ * explicit. A class the case declares itself stays relative.
+ */
+function qualifyGlobalClassNames(string $code): string
+{
+    $tokens = token_get_all("<?php " . $code);
+    array_shift($tokens);
+
+    $declared = [];
+    $previous = null;
+    foreach ($tokens as $token) {
+        if (is_array($token) && $token[0] === T_WHITESPACE) {
+            continue;
+        }
+        if (is_array($token) && $token[0] === T_STRING && is_array($previous)
+            && in_array($previous[0], [T_CLASS, T_INTERFACE, T_TRAIT, T_ENUM], true)) {
+            $declared[strtolower($token[1])] = true;
+        }
+        $previous = $token;
+    }
+
+    $isGlobalClass = static fn(string $name): bool =>
+        !isset($declared[strtolower($name)])
+        && !in_array(strtolower($name), ['self', 'parent', 'static'], true)
+        && (class_exists($name) || interface_exists($name) || enum_exists($name));
+
+    $significant = static function (int $from, int $step) use ($tokens): ?int {
+        for ($i = $from + $step; $i >= 0 && $i < count($tokens); $i += $step) {
+            if (!is_array($tokens[$i]) || !in_array($tokens[$i][0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                return $i;
+            }
+        }
+        return null;
+    };
+
+    // Tokens a native type is spelled with, between its first and last name.
+    $isTypePart = static fn(mixed $token): bool =>
+        in_array($token, ['?', '|', '(', ')'], true)
+        || (is_array($token) && in_array($token[0], [
+            T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_NAME_RELATIVE,
+            T_ARRAY, T_CALLABLE, T_STATIC, T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG,
+        ], true));
+
+    // A name in a type that ends at a parameter, property or caught variable.
+    $endsAtVariable = static function (int $i) use ($tokens, $significant, $isTypePart): bool {
+        for ($j = $significant($i, 1); $j !== null; $j = $significant($j, 1)) {
+            $t = $tokens[$j];
+            if (is_array($t) && in_array($t[0], [T_VARIABLE, T_ELLIPSIS, T_AMPERSAND_FOLLOWED_BY_VAR_OR_VARARG], true)) {
+                return true;
+            }
+            if (!$isTypePart($t) || $t === '(') {
+                return false;
+            }
+        }
+        return false;
+    };
+
+    // A name in a return type: the type starts at a `:` that follows a `)`.
+    $isReturnType = static function (int $i) use ($tokens, $significant, $isTypePart): bool {
+        for ($j = $significant($i, -1); $j !== null; $j = $significant($j, -1)) {
+            $t = $tokens[$j];
+            if ($t === ':') {
+                $before = $significant($j, -1);
+                return $before !== null && $tokens[$before] === ')';
+            }
+            if (!$isTypePart($t) || $t === ')') {
+                return false;
+            }
+        }
+        return false;
+    };
+
+    $out = '';
+    $inCatch = false;
+    $inHeritage = false;
+    foreach ($tokens as $i => $token) {
+        if (!is_array($token)) {
+            if ($token === ')') {
+                $inCatch = false;
+            } elseif ($token === '{') {
+                $inHeritage = false;
+            }
+            $out .= $token;
+            continue;
+        }
+        if ($token[0] === T_CATCH) {
+            $inCatch = true;
+        } elseif ($token[0] === T_EXTENDS || $token[0] === T_IMPLEMENTS) {
+            $inHeritage = true;
+        }
+        $text = $token[1];
+        if ($token[0] === T_DOC_COMMENT) {
+            $text = qualifyDocblockClassNames($text, $isGlobalClass);
+        } elseif ($token[0] === T_STRING && $isGlobalClass($text)) {
+            $before = $significant($i, -1);
+            $after = $significant($i, 1);
+            $beforeToken = $before === null ? null : $tokens[$before];
+            $afterToken = $after === null ? null : $tokens[$after];
+            $isMemberName = is_array($beforeToken)
+                && in_array($beforeToken[0], [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR, T_DOUBLE_COLON, T_FUNCTION, T_CONST], true);
+            $isCodePosition =
+                (is_array($beforeToken) && in_array($beforeToken[0], [T_NEW, T_INSTANCEOF, T_ATTRIBUTE], true))
+                || (is_array($afterToken) && $afterToken[0] === T_DOUBLE_COLON)
+                || ($inCatch && ($beforeToken === '(' || $beforeToken === '|'))
+                || (!$isMemberName && ($inHeritage || $endsAtVariable($i) || $isReturnType($i)));
+            if ($isCodePosition) {
+                $text = '\\' . $text;
+            }
+        }
+        $out .= $text;
+    }
+    return $out;
+}
+
+/**
+ * Prefix `\` to the built-in classes named in a docblock's tags. A name that
+ * is a member (`Foo::BAR`'s `BAR`), part of a longer name, or an array-shape
+ * key is left alone. The summary above the first tag is prose and is skipped.
+ *
+ * @param callable(string): bool $isGlobalClass
+ */
+function qualifyDocblockClassNames(string $doc, callable $isGlobalClass): string
+{
+    $firstTag = strpos($doc, '@');
+    if ($firstTag === false) {
+        return $doc;
+    }
+    $tags = preg_replace_callback(
+        '/(?<![\w\\\\$@\'"-])(?<!::)(?<!->)[A-Za-z_]\w*(?![\w\\\\])(?!\??:(?!:))/',
+        static fn(array $m): string => $isGlobalClass($m[0]) ? '\\' . $m[0] : $m[0],
+        substr($doc, $firstTag),
+    );
+    return substr($doc, 0, $firstTag) . $tags;
 }
 
 function indent(string $code): string

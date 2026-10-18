@@ -18,9 +18,16 @@ mod pivots;
 mod provider_resources;
 mod schema;
 mod storage;
+mod string_key_cache;
+
+pub(crate) use string_key_cache::{LaravelStringKeyBuildLocks, LaravelStringKeyCache};
 
 use crate::Backend;
 use crate::virtual_members::laravel::file_contributions::{Contribution, FileContributions};
+
+/// The app's provider registration files: `bootstrap/providers.php`
+/// (Laravel 11+) and `config/app.php` (Laravel 10 and older).
+const PROVIDER_LIST_FILES: [&str; 2] = ["bootstrap/providers.php", "config/app.php"];
 
 /// The service providers a Laravel project registers, each tagged with how
 /// it was registered so a container key two of them bind can be settled the
@@ -104,24 +111,21 @@ impl Backend {
             }
         }
 
-        if let Some(root) = self.workspace.workspace_root.read().clone() {
-            for rel in ["bootstrap/providers.php", "config/app.php"] {
-                let uri = crate::util::path_to_uri(&root.join(rel));
-                if let Some(content) = self.get_file_content(&uri) {
-                    for fqn in crate::virtual_members::laravel::parse_provider_class_list(&content)
-                    {
-                        // The configured list is registered `Illuminate\*`
-                        // first, then the auto-discovered packages, then the
-                        // rest, which is the order
-                        // `registerConfiguredProviders()` partitions it into.
-                        let origin = if fqn.starts_with("Illuminate\\") {
-                            ProviderOrigin::Framework
-                        } else {
-                            ProviderOrigin::Application
-                        };
-                        push(&mut providers, fqn, origin);
-                    }
-                }
+        for uri in self.laravel_provider_list_uris().into_iter().flatten() {
+            let Some(content) = self.get_file_content(&uri) else {
+                continue;
+            };
+            for fqn in crate::virtual_members::laravel::parse_provider_class_list(&content) {
+                // The configured list is registered `Illuminate\*` first,
+                // then the auto-discovered packages, then the rest, which is
+                // the order `registerConfiguredProviders()` partitions it
+                // into.
+                let origin = if fqn.starts_with("Illuminate\\") {
+                    ProviderOrigin::Framework
+                } else {
+                    ProviderOrigin::Application
+                };
+                push(&mut providers, fqn, origin);
             }
         }
 
@@ -182,17 +186,20 @@ impl Backend {
         self.symbols.fqn_uri_index.read().get(fqn).cloned()
     }
 
+    /// The URIs of the app's provider registration files
+    /// ([`PROVIDER_LIST_FILES`]), or none outside a workspace.
+    fn laravel_provider_list_uris(&self) -> Option<[String; 2]> {
+        let root = self.workspace.workspace_root.read().clone()?;
+        Some(PROVIDER_LIST_FILES.map(|rel| crate::util::path_to_uri(&root.join(rel))))
+    }
+
     /// Whether `uri` is one of the app's provider registration files
     /// (`bootstrap/providers.php` / `config/app.php`), whose macro-relevant
     /// references are the provider class list rather than method-body class
     /// references.
     fn is_laravel_provider_list_uri(&self, uri: &str) -> bool {
-        let Some(root) = self.workspace.workspace_root.read().clone() else {
-            return false;
-        };
-        ["bootstrap/providers.php", "config/app.php"]
-            .iter()
-            .any(|rel| crate::util::path_to_uri(&root.join(rel)) == uri)
+        self.laravel_provider_list_uris()
+            .is_some_and(|uris| uris.iter().any(|list_uri| list_uri == uri))
     }
 
     /// Drop what a file deleted from disk contributed to the Laravel

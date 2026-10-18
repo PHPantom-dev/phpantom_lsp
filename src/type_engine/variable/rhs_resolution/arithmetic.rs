@@ -1,9 +1,10 @@
-/// Binary-operator result-type inference.
-///
-/// Shared by [`resolve_rhs_expression`](super::resolve_rhs_expression) and
-/// the forward walker's compound-assignment handling (`+=`, `-=`, …), so a
-/// fix here reaches every consumer that asks "what type does this operator
-/// produce?" rather than being answered twice.
+//! Binary-operator result-type inference.
+//!
+//! Shared by [`resolve_rhs_expression`](super::resolve_rhs_expression) and
+//! the forward walker's compound-assignment handling (`+=`, `-=`, …), so a
+//! fix here reaches every consumer that asks "what type does this operator
+//! produce?" rather than being answered twice.
+
 use mago_syntax::cst::binary::{Binary, BinaryOperator};
 use mago_syntax::cst::unary::UnaryPrefixOperator;
 use mago_syntax::cst::{Expression, Literal, Variable};

@@ -564,7 +564,7 @@ impl<'b> ExprWalk<'b> {
         // call left there: `$m` in `preg_match('/(a)/', $s, $m)`.
         if let Some(cursor_scope) = ctx.cursor_scope
             && let Some(written) = argument_at_cursor(expr, ctx.cursor_offset)
-            && narrowing_changed_types(scope.get(written), after.get(written))
+            && !same_types(scope.get(written), after.get(written))
         {
             cursor_scope.record(&after);
         }

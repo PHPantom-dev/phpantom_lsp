@@ -166,6 +166,7 @@ impl Backend {
                     ctx.file.resolved_names.as_deref(),
                     span.start,
                     ctx.file.use_map_at(span.start),
+                    &ctx.file.symbol_imports_at(span.start).functions,
                     ctx.file.namespace_at(span.start),
                 )
                 .is_some()

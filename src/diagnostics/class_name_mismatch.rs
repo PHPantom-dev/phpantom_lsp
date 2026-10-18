@@ -4,7 +4,7 @@ use crate::Backend;
 use crate::diagnostics::helpers::make_diagnostic;
 use crate::diagnostics::namespace_mismatch::psr4_expectation;
 use crate::text_position::offset_to_position;
-use crate::types::{ClassInfo, ClassLikeKind};
+use crate::types::ClassInfo;
 
 impl Backend {
     pub fn collect_class_name_mismatch_diagnostics(
@@ -52,19 +52,22 @@ pub(crate) fn class_name_mismatch_diagnostic(
     ))
 }
 
+/// The range of `class`'s name in its declaration.
 pub(crate) fn class_name_range(content: &str, class: &ClassInfo) -> Option<Range> {
-    let keyword = match class.kind {
-        ClassLikeKind::Class => "class",
-        ClassLikeKind::Interface => "interface",
-        ClassLikeKind::Trait => "trait",
-        ClassLikeKind::Enum => "enum",
-    };
-    let kw_off = class.keyword_offset as usize;
-    let slice = content.get(kw_off..)?;
-    let after_kw = slice.strip_prefix(keyword)?;
-    let ws = after_kw.len() - after_kw.trim_start().len();
-    let name_start = kw_off + keyword.len() + ws;
-    let name_end = name_start + class.name.len();
+    let (name_start, name_end) =
+        crate::parser::with_parsed_program(content, "class_name_range", |program, _| {
+            use mago_syntax::cst::Node;
+            crate::parser::innermost_node_at(Node::Program(program), class.keyword_offset, |node| {
+                let name = match node {
+                    Node::Class(class) => class.name.span,
+                    Node::Interface(interface) => interface.name.span,
+                    Node::Trait(trait_) => trait_.name.span,
+                    Node::Enum(enum_) => enum_.name.span,
+                    _ => return None,
+                };
+                Some((name.start.offset as usize, name.end.offset as usize))
+            })
+        })?;
     Some(Range {
         start: offset_to_position(content, name_start),
         end: offset_to_position(content, name_end),

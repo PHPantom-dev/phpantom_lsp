@@ -31,6 +31,21 @@ pub(crate) fn fold(key: &str) -> Cow<'_, str> {
     }
 }
 
+/// Whether `s` contains `needle_lower`, an already ASCII-lowercased
+/// string, ignoring ASCII case and without allocating.
+pub(crate) fn contains_folded(s: &str, needle_lower: &str) -> bool {
+    let s = s.as_bytes();
+    let needle = needle_lower.as_bytes();
+    if needle.is_empty() {
+        return true;
+    }
+    if s.len() < needle.len() {
+        return false;
+    }
+    s.windows(needle.len())
+        .any(|w| w.eq_ignore_ascii_case(needle))
+}
+
 /// A map keyed by ASCII-lowercased symbol name.
 ///
 /// The original (as-inserted) key spelling is kept alongside the value
@@ -97,6 +112,15 @@ impl<V> CiMap<V> {
     /// Iterate over `(original_key, value)` pairs.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &V)> {
         self.inner.values().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// Iterate over `(folded_key, original_key, value)` triples, so a
+    /// case-insensitive filter over every entry can match the folded key
+    /// the map already stores instead of folding each name again.
+    pub fn iter_folded(&self) -> impl Iterator<Item = (&str, &str, &V)> {
+        self.inner
+            .iter()
+            .map(|(folded, (k, v))| (folded.as_str(), k.as_str(), v))
     }
 
     /// Memory-audit tooling: approximate heap bytes of the map (bucket
@@ -276,6 +300,21 @@ mod tests {
         assert_eq!(map.remove("foo\\bar"), Some(1));
         map.retain(|k, _| k != "Foo\\Baz");
         assert!(map.is_empty());
+    }
+
+    #[test]
+    fn iter_folded_pairs_each_key_with_its_folded_form() {
+        let mut map = CiMap::new();
+        map.insert("App\\Foo", 1);
+        let entries: Vec<_> = map.iter_folded().collect();
+        assert_eq!(entries, vec![("app\\foo", "App\\Foo", &1)]);
+    }
+
+    #[test]
+    fn contains_folded_ignores_ascii_case() {
+        assert!(contains_folded("MyFooBar", "foo"));
+        assert!(!contains_folded("MyBar", "foo"));
+        assert!(contains_folded("Anything", ""));
     }
 
     #[test]

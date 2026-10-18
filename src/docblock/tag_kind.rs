@@ -26,6 +26,10 @@ pub enum TagKind {
     ParamOut,
     /// `@param-closure-this`
     ParamClosureThis,
+    /// `@param-immediately-invoked-callable`
+    ParamImmediatelyInvokedCallable,
+    /// `@param-later-invoked-callable`
+    ParamLaterInvokedCallable,
     /// `@return`
     Return,
     /// `@var`
@@ -105,6 +109,8 @@ pub(crate) fn tag_kind(tag: &Tag<'_>) -> TagKind {
         TagValue::Param(_) | TagValue::TypelessParam(_) => TagKind::Param,
         TagValue::ParamOut(_) => TagKind::ParamOut,
         TagValue::ParamClosureThis(_) => TagKind::ParamClosureThis,
+        TagValue::ParamImmediatelyInvokedCallable(_) => TagKind::ParamImmediatelyInvokedCallable,
+        TagValue::ParamLaterInvokedCallable(_) => TagKind::ParamLaterInvokedCallable,
         TagValue::Return(_) | TagValue::RealReturn(_) => TagKind::Return,
         TagValue::Var(_) => TagKind::Var,
         TagValue::Throws(_) => TagKind::Throws,
@@ -175,6 +181,8 @@ fn tag_kind_from_name(name: &[u8]) -> TagKind {
         b"param" => TagKind::Param,
         b"paramout" => TagKind::ParamOut,
         b"paramclosurethis" => TagKind::ParamClosureThis,
+        b"paramimmediatelyinvokedcallable" => TagKind::ParamImmediatelyInvokedCallable,
+        b"paramlaterinvokedcallable" => TagKind::ParamLaterInvokedCallable,
         b"return" | b"realreturn" => TagKind::Return,
         b"var" => TagKind::Var,
         b"throws" => TagKind::Throws,

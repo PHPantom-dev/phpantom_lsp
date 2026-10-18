@@ -63,6 +63,40 @@ it should:
 
 ---
 
+## T49. A closure passed to a constructor gets no parameter types from it
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+class Foo {
+    /** @param callable(Bar): void $cb */
+    public function __construct(callable $cb) {}
+}
+
+new Foo(function ($bar) {
+    $bar->  // PHPantom: nothing. Passed to a method instead: Bar
+});
+```
+
+A closure passed to a function's or method's typed callable parameter gets
+its parameter types from it, but `infer_callable_params_for_call`
+(`forward_walk/callable_inference.rs`) only takes a `Call`, so a
+constructor argument gets none. The diagnostic walk passes no call for an
+`Instantiation`'s arguments (`walk_closures_in_call_args` in
+`diagnostic_walk.rs`), and the cursor walk (`try_enter_closure` in
+`forward_walk/closures.rs`) only enters closures among a `Call`'s
+arguments. Completion, hover and diagnostics inside the body all see an
+untyped parameter. An anonymous class's constructor arguments
+(`walk_closure_in_partial_call_args`) have the same gap.
+
+**Plan.** Teach the inference an `Instantiation` and an anonymous class's
+argument list: resolve the class the way `new` resolves it, read the
+callable parameter of `__construct` at the argument's position the way
+`infer_callable_params_from_static_receiver_fw` does for a static call,
+and use it from both walks so diagnostics and completion agree.
+
+---
+
 ## T34. `static::CONST` over-narrows to the declaring class's value
 **Impact: Medium · Complexity: Medium-High**
 
@@ -95,7 +129,7 @@ untyped.
 **Where to change:** `class_expression_name` (`src/class_lookup.rs`) maps
 `Expression::Static` to the current class exactly like `Expression::Self_`,
 and `$this::` lands in the same place through the expression branch.
-`class_constant_type` (`type_engine/call_resolution/return_types.rs`) then
+`class_constant_type` (`type_engine/call_resolution/return_types/class_constants.rs`) then
 always prefers the initializer's value and never asks whether the class or
 the constant is final.
 
@@ -314,7 +348,7 @@ once, for whichever of the two lands first.
 `rhs_resolution/instantiation.rs`, `call_resolution/template_binding.rs`,
 `forward_walk/mod.rs` (`resolve_in_method_body`, next to the existing
 whole-body pre-passes `seed_static_locals` and
-`try_generator_yield_inference`), `forward_walk/assignment.rs`
+`try_generator_yield_inference`), `forward_walk/statements.rs`
 (`process_expression_statement`, where receiver calls are already visited).
 
 ---
@@ -386,7 +420,7 @@ nested closures typed from an expected return type, generator escapes.
 
 **Where to look:** ours: `forward_walk/closures.rs`,
 `forward_walk/callable_inference.rs`, `diagnostic_walk.rs`
-(`walk_closures_in_call`, `seed_closure_params`), `rhs_resolution/calls.rs`
+(`walk_closures_in_call`, `seed_closure_params`), `rhs_resolution/function_calls.rs`
 (`$f()` reads only the variable's callable return type today).
 
 ---

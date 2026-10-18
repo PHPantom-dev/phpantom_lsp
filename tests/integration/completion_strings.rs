@@ -142,6 +142,33 @@ async fn completion_works_with_braces_in_double_quoted_string() {
     );
 }
 
+/// An apostrophe in a `#` comment opens no string.
+#[tokio::test]
+async fn completion_works_after_a_hash_comment_with_an_apostrophe() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///str_hash_comment.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Foo {\n",
+        "    public function bar(): void {}\n",
+        "}\n",
+        "# Don't call it twice\n",
+        "$f = new Foo();\n",
+        "$f->\n",
+    );
+
+    let result = complete_at_raw(&backend, &uri, text, 6, 4).await;
+    let labels: Vec<String> = result
+        .unwrap_or_default()
+        .into_iter()
+        .map(|item| item.label)
+        .collect();
+    assert!(
+        labels.iter().any(|label| label.starts_with("bar")),
+        "Should complete after a `#` comment. Got: {labels:?}"
+    );
+}
+
 #[tokio::test]
 async fn completion_works_with_simple_interpolation_in_double_quoted_string() {
     let backend = create_test_backend();

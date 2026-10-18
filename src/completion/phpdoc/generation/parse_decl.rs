@@ -12,44 +12,50 @@ use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 
-/// Classify the PHP symbol from the first meaningful tokens after the
-/// trigger.
-pub(super) fn classify_declaration(text: &str) -> DocblockContext {
-    let mut tokens = Vec::new();
+/// The lines of the declaration that follows the trigger, each as the raw
+/// line and the declaration text on it.
+///
+/// Blank lines, docblock lines (which shouldn't follow the trigger, but be
+/// safe) and PHP 8 attributes are skipped; an attribute can span lines, and
+/// whatever follows one on its own line is kept.
+pub(super) fn declaration_lines(text: &str) -> impl Iterator<Item = (&str, &str)> {
     let mut attr_depth = 0i32;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
+    text.lines().filter_map(move |line| {
+        let mut rest = line.trim();
+        if rest.starts_with('*') || rest.starts_with("/**") {
+            return None;
         }
-        // Skip lines that look like docblock continuation (shouldn't
-        // happen after our trigger, but be safe).
-        if trimmed.starts_with('*') || trimmed.starts_with("/**") {
-            continue;
-        }
-        // Skip PHP 8 attribute lines (#[...]).  Track bracket nesting
-        // depth so that array literals inside attributes (e.g.
-        // `#[Route(methods: ['GET'])]`) don't prematurely end tracking.
-        if attr_depth > 0 || trimmed.starts_with("#[") {
-            for ch in trimmed.chars() {
+        // Track bracket nesting so that array literals inside attributes
+        // (e.g. `#[Route(methods: ['GET'])]`) don't end them early.
+        while attr_depth > 0 || rest.starts_with("#[") {
+            let mut attribute_end = None;
+            for (i, ch) in rest.char_indices() {
                 match ch {
                     '[' => attr_depth += 1,
-                    ']' => attr_depth -= 1,
+                    ']' => {
+                        attr_depth -= 1;
+                        if attr_depth == 0 {
+                            attribute_end = Some(i + 1);
+                            break;
+                        }
+                    }
                     _ => {}
                 }
             }
-            continue;
+            rest = rest[attribute_end?..].trim_start();
         }
-        for word in trimmed.split_whitespace() {
-            tokens.push(word.to_lowercase());
-            if tokens.len() >= 8 {
-                break;
-            }
-        }
-        if tokens.len() >= 8 {
-            break;
-        }
-    }
+        (!rest.is_empty()).then_some((line, rest))
+    })
+}
+
+/// Classify the PHP symbol from the first meaningful tokens after the
+/// trigger.
+pub(super) fn classify_declaration(text: &str) -> DocblockContext {
+    let tokens: Vec<String> = declaration_lines(text)
+        .flat_map(|(_, decl)| decl.split_whitespace())
+        .take(8)
+        .map(str::to_lowercase)
+        .collect();
 
     if tokens.is_empty() {
         return DocblockContext::Unknown;
@@ -114,31 +120,10 @@ pub(super) fn parse_declaration_info(text: &str) -> SymbolInfo {
 
     // Collect the declaration — may span multiple lines until `{` or `;`.
     let mut decl = String::new();
-    let mut attr_depth = 0i32;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if trimmed.starts_with('*') || trimmed.starts_with("/**") {
-            continue;
-        }
-        // Skip PHP 8 attribute lines (#[...]).  Track bracket nesting
-        // depth so that array literals inside attributes don't
-        // prematurely end tracking.
-        if attr_depth > 0 || trimmed.starts_with("#[") {
-            for ch in trimmed.chars() {
-                match ch {
-                    '[' => attr_depth += 1,
-                    ']' => attr_depth -= 1,
-                    _ => {}
-                }
-            }
-            continue;
-        }
+    for (_, line) in declaration_lines(text) {
         decl.push(' ');
-        decl.push_str(trimmed);
-        if trimmed.contains('{') || trimmed.contains(';') {
+        decl.push_str(line);
+        if line.contains('{') || line.contains(';') {
             break;
         }
     }

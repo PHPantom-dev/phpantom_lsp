@@ -1,27 +1,19 @@
-//! Throws analysis: scanning, catch-block filtering, and uncaught detection.
+//! Throws analysis: the exceptions a function lets escape, and the ones a
+//! `try` block throws.
 //!
-//! This module provides a complete throws-analysis pipeline used by both
-//! `phpdoc.rs` (for `@throws` tag completion) and `catch_completion.rs`
-//! (for catch-clause exception suggestions).
-//!
-//! - [`scanning`] — low-level scanning primitives shared by every caller:
-//!   `throw` statement/expression scanning, `@throws` propagation, and
-//!   method return-type / `@throws` lookup.
-//! - [`catch`] — `try/catch` block scanning and `throw $variable`
-//!   resolution through the enclosing catch clause.
-//! - [`cross_file`] — high-level uncaught-throws analysis, including
-//!   cross-file `@throws` propagation via [`ThrowsContext`].
-//!
-//! Callers that only need type names can map `ThrowInfo::type_name`;
-//! callers that need offset information (e.g. for catch-block filtering)
-//! use the full `ThrowInfo` struct.
+//! - [`uncaught`] — the exceptions a function or method lets escape, read
+//!   from its AST with receivers typed by the forward walker.  What `@throws`
+//!   completion, docblock generation and "Update docblock" report.
+//! - [`scanning`] — text scanners for catch-clause completion, which runs
+//!   on a `try` body that may not parse yet: `throw` statements and
+//!   expressions, `@throws` propagated from same-file calls, and inline
+//!   `@throws` annotations.
 
-mod catch;
-mod cross_file;
 mod scanning;
+mod uncaught;
 
-pub(crate) use cross_file::*;
 pub(crate) use scanning::*;
+pub(crate) use uncaught::*;
 
 // ─── Import Helpers ─────────────────────────────────────────────────────────
 

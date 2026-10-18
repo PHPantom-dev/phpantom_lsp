@@ -242,4 +242,23 @@ enum Level {
 "#;
         assert!(collect(php).is_empty());
     }
+
+    /// A comment between the name and the colon does not hide the backing
+    /// type.
+    #[test]
+    fn invalid_backing_type_after_a_comment() {
+        let php = r#"<?php
+enum Ratio /* exact */ : float {
+    case Half = 0.5;
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String(
+                "invalid_enum_backing_type".to_string()
+            ))
+        );
+    }
 }

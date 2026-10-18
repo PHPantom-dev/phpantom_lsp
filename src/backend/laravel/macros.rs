@@ -41,16 +41,12 @@ impl Backend {
         // The app's provider registration files are seeds too: adding a
         // provider there must trigger a rebuild.  Their reference
         // fingerprint is the provider class list itself.
-        if let Some(root) = self.workspace.workspace_root.read().clone() {
-            for rel in ["bootstrap/providers.php", "config/app.php"] {
-                let path = root.join(rel);
-                let uri = crate::util::path_to_uri(&path);
-                let refs = self
-                    .get_file_content(&uri)
-                    .map(|c| crate::virtual_members::laravel::parse_provider_class_list(&c))
-                    .unwrap_or_default();
-                seeds.insert(uri, refs);
-            }
+        for uri in self.laravel_provider_list_uris().into_iter().flatten() {
+            let refs = self
+                .get_file_content(&uri)
+                .map(|c| crate::virtual_members::laravel::parse_provider_class_list(&c))
+                .unwrap_or_default();
+            seeds.insert(uri, refs);
         }
 
         // Every mixin-class file the scan pulled macros from, so an edit to one
@@ -321,8 +317,7 @@ impl Backend {
         content: &str,
     ) {
         let file_ctx = self.file_context(uri);
-        let class_loaders = self.class_loaders(&file_ctx);
-        let function_loaders = self.function_loaders(&file_ctx);
+        let loaders = self.file_loaders(&file_ctx);
         for reg in regs.iter_mut() {
             if reg.method.return_type.is_some() || reg.method.native_return_type.is_some() {
                 continue;
@@ -339,14 +334,11 @@ impl Backend {
                 self.infer_mixin_macro_return_type(reg, &def_uri);
                 continue;
             }
-            let class_loader = class_loaders.at(reg.name_offset);
-            let function_loader = function_loaders.at(reg.name_offset);
-            let laravel_macro_this_resolver = self.laravel_macro_this_resolver(class_loader);
             self.infer_macro_return_type(
                 reg,
                 content,
                 &file_ctx,
-                CtxLoaders::new(class_loader, function_loader, &laravel_macro_this_resolver),
+                loaders.ctx_loaders_at(reg.name_offset),
             );
         }
     }
@@ -367,18 +359,12 @@ impl Backend {
             return;
         };
         let file_ctx = self.file_context_at(def_uri, reg.name_offset);
-        let class_loader = self.class_loader(&file_ctx);
-        let function_loader = self.function_loader(&file_ctx);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let loaders = self.file_loaders(&file_ctx);
         self.infer_macro_return_type(
             reg,
             &content,
             &file_ctx,
-            CtxLoaders::new(
-                &class_loader,
-                &function_loader,
-                &laravel_macro_this_resolver,
-            ),
+            loaders.ctx_loaders_at(reg.name_offset),
         );
     }
 

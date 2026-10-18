@@ -2,7 +2,6 @@
 //! from a classified declaration, plus the type-enrichment helpers
 //! that decide when a native type hint needs a PHPDoc tag at all.
 
-use crate::atom::atom;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -13,22 +12,13 @@ use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::completion::source::throws_analysis::{self, ThrowsContext};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::FunctionLoaderFn;
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FunctionLoader};
 
 // ─── Type Enrichment Helpers ────────────────────────────────────────────────
 
-/// Check whether a `PhpType` is a bare callable/Closure keyword (no signature).
-fn is_callable_keyword(pt: &PhpType) -> bool {
-    pt.is_callable()
-}
-
-/// Check whether a `PhpType` is a bare `array` keyword (no generic params).
-fn is_bare_array(pt: &PhpType) -> bool {
-    pt.is_bare_array()
-}
-
 /// Extract the callable display name from a `PhpType` that satisfies
-/// `is_callable_keyword`.
+/// [`PhpType::is_callable`].
 fn callable_display_name(pt: &PhpType) -> &str {
     match pt.kind() {
         TypeKind::Named(s) => s.as_str(),
@@ -36,86 +26,75 @@ fn callable_display_name(pt: &PhpType) -> &str {
     }
 }
 
-/// Determine whether a native type hint "needs enrichment" via a PHPDoc
-/// tag, and if so return the tag type string to use.
+/// Decide whether a native type hint "needs enrichment" via a PHPDoc tag,
+/// and if so build the type the tag should carry.
 ///
 /// Returns `None` when the native type is fully expressed (scalars,
-/// union types, intersection types, non-generic classes).
+/// nullable and intersection types, unions without a bare `array` or
+/// callable member, non-generic classes). Otherwise:
+/// - Missing type → `mixed`
+/// - `array` → `array<mixed>`
+/// - `Closure` / `callable` → `Closure(): mixed`
+/// - a union → each bare `array` / callable member enriched as above
+/// - a class with templates → `ClassName<T1, T2>`
 ///
-/// Returns `Some(tag_text)` when a PHPDoc tag should be emitted:
-/// - Missing type → `"${N:mixed}"` (snippet) or `"mixed"` (plain)
-/// - `array` → `"${N:array}"` (snippet) or `"array"` (plain)
-/// - Class with templates → `"ClassName<${N:T1}, ${N+1:T2}>"` or plain equivalent
-pub(crate) fn enrichment_snippet(
+/// Each part the user is expected to fill in (the `mixed` placeholders
+/// and the template parameters) is built by `fill` from its default, so
+/// the snippet form can put a tab stop there. Class names are written
+/// through `shorten`.
+fn enrich_type(
     type_hint: Option<&PhpType>,
-    tab_stop: &mut u32,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    use_map: &HashMap<String, String>,
-    file_namespace: &Option<String>,
-) -> Option<String> {
-    let pt = match type_hint {
-        None => {
-            let s = format!("${{{}:mixed}}", *tab_stop);
-            *tab_stop += 1;
-            return Some(s);
-        }
-        Some(t) => t,
+    shorten: &dyn Fn(&str) -> String,
+    fill: &mut dyn FnMut(&str) -> PhpType,
+) -> Option<PhpType> {
+    let Some(pt) = type_hint else {
+        return Some(fill("mixed"));
     };
 
     // `void` is never enriched for return types (caller handles skip).
-    // `array` always needs enrichment.
-    if is_bare_array(pt) {
-        let s = format!("array<${{{}:mixed}}>", *tab_stop);
-        *tab_stop += 1;
-        return Some(s);
+    if pt.is_bare_array() {
+        return Some(PhpType::generic_array_val(fill("mixed")));
     }
 
-    // `Closure` / `callable` need a callable-signature placeholder.
-    if is_callable_keyword(pt) {
-        let name = callable_display_name(pt);
-        let s = format!("({}(): ${{{}:mixed}})", name, *tab_stop);
-        *tab_stop += 1;
-        return Some(s);
+    if pt.is_callable() {
+        return Some(PhpType::callable_spec(
+            callable_display_name(pt),
+            vec![],
+            Some(fill("mixed")),
+        ));
     }
 
     // Union types — enrich individual callable / array parts.
-    // Use union_members to correctly handle generic nesting
-    // (e.g. `Collection<int|string, User>|null` must not be split on the inner `|`).
+    // `union_members` keeps generic nesting intact
+    // (`Collection<int|string, User>|null` is not split on the inner `|`).
     let members = pt.union_members();
     if members.len() > 1 {
-        let needs = members
+        if !members
             .iter()
-            .any(|member| is_bare_array(member) || is_callable_keyword(member));
-        if needs {
-            let enriched_parts: Vec<String> = members
-                .iter()
-                .map(|member| {
-                    if is_callable_keyword(member) {
-                        let name = callable_display_name(member);
-                        format!("({}(): ${{{}:mixed}})", name, {
-                            let t = *tab_stop;
-                            *tab_stop += 1;
-                            t
-                        })
-                    } else if is_bare_array(member) {
-                        let s = format!("array<${{{}:mixed}}>", *tab_stop);
-                        *tab_stop += 1;
-                        s
-                    } else {
-                        member
-                            .resolve_names(&|n| {
-                                crate::util::shorten_from_fqn(n, use_map, file_namespace)
-                            })
-                            .to_string()
-                    }
-                })
-                .collect();
-            return Some(enriched_parts.join("|"));
+            .any(|member| member.is_bare_array() || member.is_callable())
+        {
+            return None;
         }
-        return None;
+        let enriched = members
+            .iter()
+            .map(|member| {
+                if member.is_callable() {
+                    PhpType::callable_spec(
+                        callable_display_name(member),
+                        vec![],
+                        Some(fill("mixed")),
+                    )
+                } else if member.is_bare_array() {
+                    PhpType::generic_array_val(fill("mixed"))
+                } else {
+                    member.resolve_names(shorten)
+                }
+            })
+            .collect();
+        return Some(PhpType::union(enriched));
     }
 
-    // Intersection types (&), nullable (?Type) — skip.
     if matches!(pt.kind(), TypeKind::Intersection(_) | TypeKind::Nullable(_)) {
         return None;
     }
@@ -130,20 +109,27 @@ pub(crate) fn enrichment_snippet(
         && let Some(cls) = class_loader(name)
         && !cls.template_params.is_empty()
     {
-        let short_name = crate::util::shorten_from_fqn(name, use_map, file_namespace);
-        let mut parts = Vec::new();
-        for tp in &cls.template_params {
-            parts.push(format!("${{{}:{}}}", *tab_stop, tp));
-            *tab_stop += 1;
-        }
-        return Some(format!("{}<{}>", short_name, parts.join(", ")));
+        let args = cls.template_params.iter().map(|tp| fill(tp)).collect();
+        return Some(PhpType::generic(shorten(name), args));
     }
 
     None
 }
 
-/// Structured version of [`enrichment_plain`] returning a [`PhpType`]
-/// instead of a display string.
+/// The enriched type for `type_hint` (see [`enrich_type`]) as snippet
+/// text, with tab stops numbered from 1 over the parts the user is
+/// expected to fill in.
+pub(crate) fn enrichment_snippet(
+    type_hint: Option<&PhpType>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
+) -> Option<String> {
+    DocForm::snippet().enrichment_text(type_hint, class_loader, use_map, file_namespace)
+}
+
+/// The enriched type for `type_hint` (see [`enrich_type`]) as a
+/// [`PhpType`], with class names shortened for the file.
 ///
 /// Use this when the enriched type needs to be compared structurally
 /// (via [`PhpType::equivalent`]) rather than by string equality. The
@@ -155,90 +141,15 @@ pub(crate) fn enrichment_plain_typed(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> Option<PhpType> {
-    let enriched = enrichment_plain_typed_fqn(type_hint, class_loader)?;
-    Some(
-        enriched
-            .resolve_names(&|name| crate::util::shorten_from_fqn(name, use_map, file_namespace)),
+    enrich_type(
+        type_hint,
+        class_loader,
+        &|name| crate::names::shorten_from_fqn(name, use_map, file_namespace),
+        &mut |default| PhpType::parse(default),
     )
 }
 
-/// Compute the enriched type with fully-qualified class names, before the
-/// file's `use`-map and namespace shorten them for display.
-fn enrichment_plain_typed_fqn(
-    type_hint: Option<&PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<PhpType> {
-    let pt = match type_hint {
-        None => return Some(PhpType::mixed()),
-        Some(t) => t,
-    };
-
-    if is_bare_array(pt) {
-        return Some(PhpType::generic_array_val(PhpType::mixed()));
-    }
-
-    if is_callable_keyword(pt) {
-        return Some(PhpType::callable_spec(
-            callable_display_name(pt),
-            vec![],
-            Some(PhpType::mixed()),
-        ));
-    }
-
-    // Union types — enrich individual callable / array parts.
-    let members = pt.union_members();
-    if members.len() > 1 {
-        let needs = members
-            .iter()
-            .any(|member| is_bare_array(member) || is_callable_keyword(member));
-        if needs {
-            let enriched: Vec<PhpType> = members
-                .iter()
-                .map(|member| {
-                    if is_callable_keyword(member) {
-                        PhpType::callable_spec(
-                            callable_display_name(member),
-                            vec![],
-                            Some(PhpType::mixed()),
-                        )
-                    } else if is_bare_array(member) {
-                        PhpType::generic_array_val(PhpType::mixed())
-                    } else {
-                        (*member).clone()
-                    }
-                })
-                .collect();
-            return Some(PhpType::union(enriched));
-        }
-        return None;
-    }
-
-    if matches!(pt.kind(), TypeKind::Intersection(_) | TypeKind::Nullable(_)) {
-        return None;
-    }
-
-    // Scalar / built-in types never have template parameters.
-    if pt.is_scalar() {
-        return None;
-    }
-
-    // Try to load the class and check for templates.
-    if let Some(name) = pt.base_name()
-        && let Some(cls) = class_loader(name)
-        && !cls.template_params.is_empty()
-    {
-        let args: Vec<PhpType> = cls
-            .template_params
-            .iter()
-            .map(|s| PhpType::named(atom(s.as_ref())))
-            .collect();
-        return Some(PhpType::generic(name, args));
-    }
-
-    None
-}
-
-/// Plain-text version of `enrichment_snippet` (no tab stops).
+/// Plain-text version of [`enrichment_snippet`] (no tab stops).
 ///
 /// Also used by tag completion (`build_phpdoc_completions`) to enrich
 /// `@param`, `@return`, and `@var` type hints with template parameters.
@@ -252,117 +163,156 @@ pub(crate) fn enrichment_plain(
     file_namespace: &Option<String>,
 ) -> Option<String> {
     let typed = enrichment_plain_typed(type_hint, class_loader, use_map, file_namespace)?;
-
-    // Callable types need parentheses in PHPDoc notation, which
-    // PhpType::Display does not add.
     Some(enrichment_type_to_plain(&typed))
 }
 
-/// Format an enriched `PhpType` as a plain-text PHPDoc type string.
+/// Format an enriched `PhpType` as a PHPDoc type string.
 ///
-/// Callable types are wrapped in parentheses (`(Closure(): mixed)`)
-/// to match PHPDoc inline callable notation. Union members are
-/// formatted individually and joined with `|`.
+/// A callable is wrapped in parentheses (`(Closure(): mixed)`) to match
+/// PHPDoc inline callable notation, which `PhpType`'s `Display` only
+/// does for a callable inside a union.
 fn enrichment_type_to_plain(ty: &PhpType) -> String {
     match ty.kind() {
         TypeKind::Callable { .. } => format!("({})", ty),
-        TypeKind::Union(members) => members
-            .iter()
-            .map(enrichment_type_to_plain)
-            .collect::<Vec<_>>()
-            .join("|"),
         _ => ty.to_string(),
     }
 }
 
 // ─── Snippet / Plain Builder ────────────────────────────────────────────────
 
-/// Build the full docblock as plain text (no tab stops).
-///
-/// Used by the `onTypeFormatting` path where snippets are not supported.
+/// Which of its two forms a generated docblock takes.
+pub(super) enum DocForm<'a> {
+    /// An editor snippet, inserted at the cursor and so not indented, with
+    /// tab stops over the parts the user is expected to fill in.
+    Snippet { next_tab_stop: u32 },
+    /// Plain text for the `onTypeFormatting` path, which takes no
+    /// snippets: every line indented by `indent`, each ending in a newline.
+    Plain { indent: &'a str },
+}
+
+impl DocForm<'_> {
+    pub(super) fn snippet() -> Self {
+        DocForm::Snippet { next_tab_stop: 1 }
+    }
+
+    /// A part the user is expected to fill in, showing `default`: the next
+    /// tab stop in a snippet, `default` itself in plain text.
+    fn field(&mut self, default: &str) -> String {
+        match self {
+            DocForm::Snippet { next_tab_stop } => {
+                let n = *next_tab_stop;
+                *next_tab_stop += 1;
+                if default.is_empty() {
+                    format!("${{{n}}}")
+                } else {
+                    format!("${{{n}:{default}}}")
+                }
+            }
+            DocForm::Plain { .. } => default.to_string(),
+        }
+    }
+
+    /// A parameter name, its `$` escaped in a snippet so the snippet
+    /// parser does not read it as a variable.
+    fn param_name(&self, name: &str) -> String {
+        match self {
+            DocForm::Snippet { .. } => name.replace('$', "\\$"),
+            DocForm::Plain { .. } => name.to_string(),
+        }
+    }
+
+    /// The enriched type for `type_hint` (see [`enrich_type`]) as text in
+    /// this form, a tab stop over each part the user is expected to fill in.
+    pub(super) fn enrichment_text(
+        &mut self,
+        type_hint: Option<&PhpType>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        use_map: &HashMap<String, String>,
+        file_namespace: &Option<String>,
+    ) -> Option<String> {
+        let enriched = enrich_type(
+            type_hint,
+            class_loader,
+            &|name| crate::names::shorten_from_fqn(name, use_map, file_namespace),
+            &mut |default| PhpType::raw(self.field(default)),
+        )?;
+        Some(enrichment_type_to_plain(&enriched))
+    }
+
+    /// [`enrichment_text`](Self::enrichment_text) with the width it
+    /// renders at, which aligns the `@param` names.
+    fn enrich(
+        &mut self,
+        type_hint: Option<&PhpType>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        use_map: &HashMap<String, String>,
+        file_namespace: &Option<String>,
+    ) -> Option<(String, usize)> {
+        let text = self.enrichment_text(type_hint, class_loader, use_map, file_namespace)?;
+        let width = match self {
+            // The `${N:...}` markers inflate the snippet's length, so
+            // measure the plain text it renders as.
+            DocForm::Snippet { .. } => {
+                enrichment_plain(type_hint, class_loader, use_map, file_namespace)
+                    .map_or(text.len(), |plain| plain.len())
+            }
+            DocForm::Plain { .. } => text.len(),
+        };
+        Some((text, width))
+    }
+
+    /// The docblock made of `lines`.
+    fn finish(&self, lines: &[String]) -> String {
+        match self {
+            DocForm::Snippet { .. } => lines.join("\n"),
+            DocForm::Plain { indent } => lines
+                .iter()
+                .map(|line| format!("{indent}{line}\n"))
+                .collect(),
+        }
+    }
+}
+
+/// Build the full docblock for a declaration, in `form`.
 ///
 /// Only called for declaration-level contexts (`FunctionOrMethod`,
 /// `ClassLike`, `Property`, `Constant`).  `Inline` and `Unknown` are
 /// filtered out by the caller before we get here.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn build_docblock_plain(
+pub(super) fn build_docblock(
     context: &DocblockContext,
     sym: &SymbolInfo,
-    indent: &str,
+    form: &mut DocForm<'_>,
     content: &str,
     position: Position,
-    _use_map: &HashMap<String, String>,
-    _file_namespace: &Option<String>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
 ) -> String {
     match context {
-        DocblockContext::FunctionOrMethod => build_function_plain(
+        DocblockContext::FunctionOrMethod => build_function(
             sym,
-            indent,
+            form,
             content,
             position,
-            _use_map,
-            _file_namespace,
+            use_map,
+            file_namespace,
             local_classes,
             class_loader,
             backend,
             function_loader,
         ),
-        DocblockContext::ClassLike => build_class_plain(sym, indent, class_loader),
-        DocblockContext::Property => build_property_plain(sym, indent, class_loader),
-        DocblockContext::Constant => build_constant_plain(sym, indent, class_loader),
+        DocblockContext::ClassLike => build_class(sym, form, class_loader),
+        DocblockContext::Property | DocblockContext::Constant => build_var(sym, form, class_loader),
         // Inline and Unknown are early-returned by the caller.
         DocblockContext::Inline | DocblockContext::Unknown => String::new(),
     }
 }
 
-/// Build the full docblock snippet text.
-///
-/// The snippet uses VSCode-style tab stops (`$1`, `$2`, etc.) so the
-/// user can tab through the placeholders.
-///
-/// Only called for declaration-level contexts (`FunctionOrMethod`,
-/// `ClassLike`, `Property`, `Constant`).  `Inline` and `Unknown` are
-/// filtered out by the caller before we get here.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn build_docblock_snippet(
-    context: &DocblockContext,
-    sym: &SymbolInfo,
-    indent: &str,
-    content: &str,
-    position: Position,
-    _use_map: &HashMap<String, String>,
-    _file_namespace: &Option<String>,
-    local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    backend: Option<&crate::Backend>,
-    function_loader: FunctionLoader<'_>,
-) -> String {
-    match context {
-        DocblockContext::FunctionOrMethod => build_function_snippet(
-            sym,
-            indent,
-            content,
-            position,
-            _use_map,
-            _file_namespace,
-            local_classes,
-            class_loader,
-            backend,
-            function_loader,
-        ),
-        DocblockContext::ClassLike => build_class_snippet(sym, indent, class_loader),
-        DocblockContext::Property => build_property_snippet(sym, indent, class_loader),
-        DocblockContext::Constant => build_constant_snippet(sym, indent, class_loader),
-        // Inline and Unknown are early-returned by the caller.
-        DocblockContext::Inline | DocblockContext::Unknown => String::new(),
-    }
-}
-
-/// Build a docblock snippet for a function or method.
+/// Build the docblock for a function or method.
 ///
 /// Only emits `@param` / `@return` tags when the native type needs
 /// enrichment (missing, `array`, or class with `@template` params).
@@ -370,9 +320,9 @@ pub(super) fn build_docblock_snippet(
 /// Tags are grouped with blank `*` lines between groups.
 /// Parameter names within the `@param` block are space-aligned.
 #[allow(clippy::too_many_arguments)]
-fn build_function_snippet(
+fn build_function(
     sym: &SymbolInfo,
-    _indent: &str,
+    form: &mut DocForm<'_>,
     content: &str,
     position: Position,
     use_map: &HashMap<String, String>,
@@ -386,7 +336,8 @@ fn build_function_snippet(
         class_loader,
         function_loader,
         use_map,
-        file_namespace,
+        local_classes,
+        backend,
     };
     let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
         content,
@@ -394,29 +345,14 @@ fn build_function_snippet(
         Some(&throws_ctx),
     );
 
-    let mut tab_stop = 1u32;
-
     // Collect @param tags that need enrichment.
-    // Each entry is (snippet_type, display_len, escaped_name).
+    // Each entry is (type, rendered width, name).
     let mut param_tags: Vec<(String, usize, String)> = Vec::new();
     for (type_hint, name) in &sym.params {
-        if let Some(enriched) = enrichment_snippet(
-            type_hint.as_ref(),
-            &mut tab_stop,
-            class_loader,
-            use_map,
-            file_namespace,
-        ) {
-            // Use the plain-text version to measure the rendered width for
-            // alignment.  The snippet version contains `${N:...}` markers
-            // that inflate its length.
-            let display_len =
-                enrichment_plain(type_hint.as_ref(), class_loader, use_map, file_namespace)
-                    .map(|p| p.len())
-                    .unwrap_or(enriched.len());
-            // Escape `$` in PHP parameter names so the snippet parser
-            // does not treat them as snippet variables.
-            param_tags.push((enriched, display_len, name.replace('$', "\\$")));
+        if let Some((type_text, width)) =
+            form.enrich(type_hint.as_ref(), class_loader, use_map, file_namespace)
+        {
+            param_tags.push((type_text, width, form.param_name(name)));
         }
     }
 
@@ -437,131 +373,7 @@ fn build_function_snippet(
             position,
             local_classes,
             class_loader,
-            backend,
-            function_loader,
-        );
-        let inferred = body_inferred.filter(|t| {
-            !t.is_void()
-                && !t.is_mixed()
-                && sym.return_type.as_ref().is_none_or(|s| !t.equivalent(s))
-        });
-        // Fall back to signature-based enrichment when body inference
-        // doesn't produce anything useful.
-        if let Some(t) = inferred {
-            Some(
-                t.resolve_names(&|n| crate::util::shorten_from_fqn(n, use_map, file_namespace))
-                    .to_string(),
-            )
-        } else {
-            enrichment_snippet(
-                sym.return_type.as_ref(),
-                &mut tab_stop,
-                class_loader,
-                use_map,
-                file_namespace,
-            )
-        }
-    };
-
-    let has_throws = !uncaught.is_empty();
-
-    let has_any_tag = !param_tags.is_empty() || has_throws || return_tag.is_some();
-
-    let mut lines = Vec::new();
-    lines.push("/**".to_string());
-
-    if !has_any_tag {
-        // No tags — emit a summary-only skeleton.
-        lines.push(" * ${1}".to_string());
-    }
-
-    // @param block with space-aligned names.
-    if !param_tags.is_empty() {
-        let max_display_len = param_tags.iter().map(|(_, dl, _)| *dl).max().unwrap_or(0);
-        for (type_str, display_len, name) in &param_tags {
-            let padding = " ".repeat(max_display_len - display_len);
-            lines.push(format!(" * @param {}{} {}", type_str, padding, name));
-        }
-    }
-
-    // @throws block (blank separator from preceding group).
-    if has_throws {
-        if !param_tags.is_empty() {
-            lines.push(" *".to_string());
-        }
-        for exc in &uncaught {
-            let exc_str = exc.to_string();
-            let display = crate::util::short_name(&exc_str);
-            lines.push(format!(" * @throws {}", display));
-        }
-    }
-
-    // @return tag (blank separator from preceding group).
-    if let Some(ret) = return_tag {
-        if !param_tags.is_empty() || has_throws {
-            lines.push(" *".to_string());
-        }
-        lines.push(format!(" * @return {}", ret));
-    }
-
-    lines.push(" */".to_string());
-    lines.join("\n")
-}
-
-/// Build a plain-text docblock for a function or method (no tab stops).
-///
-/// Same enrichment logic as the snippet builder, but without tab stops.
-#[allow(clippy::too_many_arguments)]
-fn build_function_plain(
-    sym: &SymbolInfo,
-    indent: &str,
-    content: &str,
-    position: Position,
-    use_map: &HashMap<String, String>,
-    file_namespace: &Option<String>,
-    local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    backend: Option<&crate::Backend>,
-    function_loader: FunctionLoader<'_>,
-) -> String {
-    let throws_ctx = ThrowsContext {
-        class_loader,
-        function_loader,
-        use_map,
-        file_namespace,
-    };
-    let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
-        content,
-        position,
-        Some(&throws_ctx),
-    );
-
-    // Collect @param tags that need enrichment.
-    let mut param_tags: Vec<(String, String)> = Vec::new();
-    for (type_hint, name) in &sym.params {
-        if let Some(enriched) =
-            enrichment_plain(type_hint.as_ref(), class_loader, use_map, file_namespace)
-        {
-            param_tags.push((enriched, name.clone()));
-        }
-    }
-
-    // Constructors never get @return.
-    let is_constructor = sym
-        .method_name
-        .as_ref()
-        .is_some_and(|n| n.eq_ignore_ascii_case("__construct"));
-    let is_void = sym.return_type.as_ref().is_some_and(|r| r.is_void());
-    let return_tag = if is_void || is_constructor {
-        None
-    } else {
-        // Try body-based inference first (produces richer types like
-        // `list<string>` instead of `array<mixed>`).
-        let body_inferred = crate::code_actions::phpstan::fix_return_type::enrichment_return_type(
-            content,
-            position,
-            local_classes,
-            class_loader,
+            Some(use_map),
             backend,
             function_loader,
         );
@@ -574,217 +386,110 @@ fn build_function_plain(
         });
         // Fall back to signature-based enrichment when body inference
         // doesn't produce anything useful.
-        inferred
-            .map(|t| {
-                t.resolve_names(&|n| crate::util::shorten_from_fqn(n, use_map, file_namespace))
-                    .to_string()
-            })
-            .or_else(|| {
-                enrichment_plain(
+        match inferred {
+            Some(t) => Some(
+                crate::names::shorten_type_for_file(&t, use_map, file_namespace, class_loader)
+                    .to_string(),
+            ),
+            None => form
+                .enrich(
                     sym.return_type.as_ref(),
                     class_loader,
                     use_map,
                     file_namespace,
                 )
-            })
+                .map(|(type_text, _)| type_text),
+        }
     };
 
     let has_throws = !uncaught.is_empty();
 
     let has_any_tag = !param_tags.is_empty() || has_throws || return_tag.is_some();
 
-    let mut lines = Vec::new();
-    lines.push(format!("{}/**", indent));
+    let mut lines = vec!["/**".to_string()];
 
     if !has_any_tag {
-        lines.push(format!("{} * ", indent));
+        // No tags — emit a summary-only skeleton.
+        lines.push(format!(" * {}", form.field("")));
     }
 
-    if !param_tags.is_empty() {
-        let max_type_len = param_tags.iter().map(|(t, _)| t.len()).max().unwrap_or(0);
-        for (type_str, name) in &param_tags {
-            let padding = " ".repeat(max_type_len - type_str.len());
-            lines.push(format!(
-                "{} * @param {}{} {}",
-                indent, type_str, padding, name
-            ));
-        }
+    // @param block with space-aligned names.
+    let max_width = param_tags.iter().map(|(_, width, _)| *width).max();
+    for (type_text, width, name) in &param_tags {
+        let padding = " ".repeat(max_width.unwrap_or(0) - width);
+        lines.push(format!(" * @param {type_text}{padding} {name}"));
     }
 
+    // @throws block (blank separator from preceding group).
     if has_throws {
         if !param_tags.is_empty() {
-            lines.push(format!("{} *", indent));
+            lines.push(" *".to_string());
         }
         for exc in &uncaught {
             let exc_str = exc.to_string();
-            let display = crate::util::short_name(&exc_str).to_string();
-            lines.push(format!("{} * @throws {}", indent, display));
+            lines.push(format!(" * @throws {}", crate::util::short_name(&exc_str)));
         }
     }
 
+    // @return tag (blank separator from preceding group).
     if let Some(ret) = return_tag {
         if !param_tags.is_empty() || has_throws {
-            lines.push(format!("{} *", indent));
+            lines.push(" *".to_string());
         }
-        lines.push(format!("{} * @return {}", indent, ret));
-    }
-
-    lines.push(format!("{} */", indent));
-    lines.join("\n") + "\n"
-}
-
-/// Build a plain-text docblock for a class (no tab stops).
-///
-/// Generates `@extends` / `@implements` tags when the parent or
-/// interface has `@template` parameters.
-fn build_class_plain(
-    sym: &SymbolInfo,
-    indent: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> String {
-    let mut tag_lines = Vec::new();
-
-    for parent in &sym.extends_names {
-        if let Some(cls) = class_loader(parent)
-            && !cls.template_params.is_empty()
-        {
-            let parts: Vec<&str> = cls.template_params.iter().map(|s| s.as_str()).collect();
-            tag_lines.push(format!(
-                "{} * @extends {}<{}>",
-                indent,
-                parent,
-                parts.join(", ")
-            ));
-        }
-    }
-
-    for iface in &sym.implements_names {
-        if let Some(cls) = class_loader(iface)
-            && !cls.template_params.is_empty()
-        {
-            let parts: Vec<&str> = cls.template_params.iter().map(|s| s.as_str()).collect();
-            tag_lines.push(format!(
-                "{} * @implements {}<{}>",
-                indent,
-                iface,
-                parts.join(", ")
-            ));
-        }
-    }
-
-    if tag_lines.is_empty() {
-        format!("{indent}/**\n{indent} * \n{indent} */\n")
-    } else {
-        let mut lines = Vec::new();
-        lines.push(format!("{}/**", indent));
-        lines.extend(tag_lines);
-        lines.push(format!("{} */", indent));
-        lines.join("\n") + "\n"
-    }
-}
-
-/// Build a plain-text docblock for a property (no tab stops).
-///
-/// Emits a single-line `/** @var Type */` format.
-fn build_property_plain(
-    sym: &SymbolInfo,
-    indent: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> String {
-    let var_type = property_var_type_plain(sym.type_hint.as_ref(), class_loader);
-    format!("{indent}/** @var {var_type} */\n")
-}
-
-/// Build a plain-text docblock for a constant (no tab stops).
-///
-/// Emits a single-line `/** @var Type */` format.
-fn build_constant_plain(
-    sym: &SymbolInfo,
-    indent: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> String {
-    let var_type = property_var_type_plain(sym.type_hint.as_ref(), class_loader);
-    format!("{indent}/** @var {var_type} */\n")
-}
-
-/// Build a docblock snippet for a class, interface, trait, or enum.
-///
-/// Generates `@extends` / `@implements` tags with tab-stop placeholders
-/// when the parent or interface has `@template` parameters.
-fn build_class_snippet(
-    sym: &SymbolInfo,
-    _indent: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> String {
-    let mut tag_lines = Vec::new();
-    let mut tab_stop = 1u32;
-
-    for parent in &sym.extends_names {
-        if let Some(cls) = class_loader(parent)
-            && !cls.template_params.is_empty()
-        {
-            let mut parts = Vec::new();
-            for tp in &cls.template_params {
-                parts.push(format!("${{{}:{}}}", tab_stop, tp));
-                tab_stop += 1;
-            }
-            tag_lines.push(format!(" * @extends {}<{}>", parent, parts.join(", ")));
-        }
-    }
-
-    for iface in &sym.implements_names {
-        if let Some(cls) = class_loader(iface)
-            && !cls.template_params.is_empty()
-        {
-            let mut parts = Vec::new();
-            for tp in &cls.template_params {
-                parts.push(format!("${{{}:{}}}", tab_stop, tp));
-                tab_stop += 1;
-            }
-            tag_lines.push(format!(" * @implements {}<{}>", iface, parts.join(", ")));
-        }
-    }
-
-    let mut lines = Vec::new();
-    lines.push("/**".to_string());
-
-    if tag_lines.is_empty() {
-        // No template tags — emit a summary-only skeleton.
-        lines.push(" * ${1}".to_string());
-    } else {
-        lines.extend(tag_lines);
+        lines.push(format!(" * @return {ret}"));
     }
 
     lines.push(" */".to_string());
-    lines.join("\n")
+    form.finish(&lines)
 }
 
-/// Build a docblock snippet for a property.
+/// Build the docblock for a class, interface, trait, or enum.
 ///
-/// Emits a single-line `/** @var Type */` format.
-/// For missing types, the type is a tab-stop placeholder.
-/// For classes with templates, template names are tab-stop placeholders.
-fn build_property_snippet(
+/// Generates `@extends` / `@implements` tags, their type arguments open
+/// for editing, when the parent or interface has `@template` parameters.
+fn build_class(
     sym: &SymbolInfo,
-    _indent: &str,
+    form: &mut DocForm<'_>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> String {
-    let mut tab_stop = 1u32;
-    let var_type = property_var_type_snippet(sym.type_hint.as_ref(), &mut tab_stop, class_loader);
-    format!("/** @var {} */", var_type)
+    let mut lines = vec!["/**".to_string()];
+
+    for (tag, names) in [
+        ("@extends", &sym.extends_names),
+        ("@implements", &sym.implements_names),
+    ] {
+        for name in names {
+            if let Some(cls) = class_loader(name)
+                && !cls.template_params.is_empty()
+            {
+                let args: Vec<String> = cls
+                    .template_params
+                    .iter()
+                    .map(|tp| form.field(tp))
+                    .collect();
+                lines.push(format!(" * {tag} {name}<{}>", args.join(", ")));
+            }
+        }
+    }
+
+    if lines.len() == 1 {
+        // No template tags — emit a summary-only skeleton.
+        lines.push(format!(" * {}", form.field("")));
+    }
+
+    lines.push(" */".to_string());
+    form.finish(&lines)
 }
 
-/// Build a docblock snippet for a constant.
-///
-/// Emits a single-line `/** @var Type */` format.
-fn build_constant_snippet(
+/// Build the single-line `/** @var Type */` docblock for a property or
+/// constant.
+fn build_var(
     sym: &SymbolInfo,
-    _indent: &str,
+    form: &mut DocForm<'_>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> String {
-    let mut tab_stop = 1u32;
-    let var_type = property_var_type_snippet(sym.type_hint.as_ref(), &mut tab_stop, class_loader);
-    format!("/** @var {} */", var_type)
+    let var_type = var_type(sym.type_hint.as_ref(), form, class_loader);
+    form.finish(&[format!("/** @var {var_type} */")])
 }
 
 /// Attempt to infer the type of an inline variable assignment using the
@@ -796,11 +501,12 @@ pub(crate) fn infer_inline_variable_type(
     sym: &SymbolInfo,
     content: &str,
     position: Position,
-    all_classes: &[Arc<ClassInfo>],
+    file_ctx: &crate::types::FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     backend: Option<&crate::Backend>,
     function_loader: FunctionLoaderFn<'_>,
 ) -> Option<PhpType> {
+    let all_classes = &file_ctx.classes;
     let var_name = sym.variable_name.as_deref()?;
 
     // The cursor is at the `/**` trigger, which is above the variable
@@ -826,16 +532,20 @@ pub(crate) fn infer_inline_variable_type(
 
     let current_class = crate::class_lookup::find_class_at_offset(all_classes, cursor_offset);
 
-    crate::type_engine::variable::resolution::resolve_variable_php_type(
+    let resolved_class_loader =
+        |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
+    crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
         var_name,
-        effective_content,
         cursor_offset,
+        content: effective_content,
         current_class,
         all_classes,
-        class_loader,
+        class_loader: &resolved_class_loader,
+        source_class_loader: class_loader,
+        source_imports: Some(&file_ctx.use_map),
         backend,
-        crate::type_engine::resolver::Loaders::with_function(function_loader),
-    )
+        loaders: crate::type_engine::resolver::Loaders::with_function(function_loader),
+    })
 }
 
 /// Replace the `/**` (or `/** */`) block around `trigger_offset` with
@@ -875,71 +585,37 @@ fn patch_docblock_trigger(content: &str, trigger_offset: usize) -> Option<String
     Some(patched)
 }
 
-/// Compute the `@var` type string for a property/constant snippet.
+/// The `@var` type for a property or constant.
 ///
-/// - Missing type → `${N:mixed}` tab stop
-/// - `array` → `${N:array}` tab stop
-/// - Class with templates → `ClassName<${N:T1}, ...>` tab stops
-/// - Other → literal type string
-fn property_var_type_snippet(
+/// - Missing type → `mixed`, open for editing
+/// - `array` → `array`, open for editing
+/// - Class with templates → `ClassName<T1, ...>`, the arguments open for
+///   editing
+/// - Other → the type as written
+fn var_type(
     type_hint: Option<&PhpType>,
-    tab_stop: &mut u32,
+    form: &mut DocForm<'_>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> String {
     match type_hint {
-        None => {
-            let s = format!("${{{}:mixed}}", *tab_stop);
-            *tab_stop += 1;
-            s
-        }
-        Some(th) if th.is_bare_array() => {
-            let s = format!("${{{}:array}}", *tab_stop);
-            *tab_stop += 1;
-            s
-        }
+        None => form.field("mixed"),
+        Some(th) if th.is_bare_array() => form.field("array"),
         Some(th) => {
             let shortened = th.shorten();
             // Callable types get a signature placeholder.
             if th.is_callable() {
-                let s = format!("(${{{}:{}()}})", *tab_stop, shortened);
-                *tab_stop += 1;
-                return s;
+                return format!("({})", form.field(&format!("{shortened}()")));
             }
             if let Some(name) = shortened.base_name()
                 && let Some(cls) = class_loader(name)
                 && !cls.template_params.is_empty()
             {
-                let mut parts = Vec::new();
-                for tp in &cls.template_params {
-                    parts.push(format!("${{{}:{}}}", *tab_stop, tp));
-                    *tab_stop += 1;
-                }
-                return format!("{}<{}>", name, parts.join(", "));
-            }
-            shortened.to_string()
-        }
-    }
-}
-
-/// Compute the `@var` type string for a property/constant in plain text.
-fn property_var_type_plain(
-    type_hint: Option<&PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> String {
-    match type_hint {
-        None => PhpType::mixed().to_string(),
-        Some(th) if th.is_bare_array() => "array".to_string(),
-        Some(th) => {
-            let shortened = th.shorten();
-            if th.is_callable() {
-                return format!("({}())", shortened);
-            }
-            if let Some(name) = shortened.base_name()
-                && let Some(cls) = class_loader(name)
-                && !cls.template_params.is_empty()
-            {
-                let parts: Vec<&str> = cls.template_params.iter().map(|s| s.as_str()).collect();
-                return format!("{}<{}>", name, parts.join(", "));
+                let args: Vec<String> = cls
+                    .template_params
+                    .iter()
+                    .map(|tp| form.field(tp))
+                    .collect();
+                return format!("{name}<{}>", args.join(", "));
             }
             shortened.to_string()
         }

@@ -9,7 +9,7 @@ use mago_syntax::cst::{Expression, Node};
 use crate::Backend;
 use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::{MorphColumnReceiver, MorphColumnSite, SymbolMap, SymbolSpan};
-use crate::type_engine::resolver::{Loaders, ResolutionCtx, VarResolutionCtx};
+use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::ClassInfo;
 
 /// Confirmed spans with their class-index generation and immutable source map.
@@ -90,9 +90,7 @@ impl Backend {
                 .push(site);
         }
         let file_ctx = self.file_context(uri);
-        let class_loaders = self.class_loaders(&file_ctx);
-        let function_loaders = self.function_loaders(&file_ctx);
-        let default_class = ClassInfo::default();
+        let loaders = self.file_loaders(&file_ctx);
         let mut confirmed = Vec::new();
         crate::parser::with_parsed_program(content, "morph_columns", |program, content| {
             visit_expressions(Node::Program(program), &mut |expr| {
@@ -103,25 +101,7 @@ impl Backend {
                 };
                 let site = candidates[0];
                 let offset = span.start.offset;
-                let class_loader = class_loaders.at(offset);
-                let function_loader = function_loaders.at(offset);
-                let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
-                let current_class =
-                    crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset)
-                        .unwrap_or(&default_class);
-                let var_ctx = VarResolutionCtx {
-                    backend: Some(self),
-                    loaders: Loaders::with_function(Some(&function_loader_cl)),
-                    resolved_class_cache: Some(&self.resolved_class_cache),
-                    ..VarResolutionCtx::new(
-                        "",
-                        current_class,
-                        &file_ctx.classes,
-                        content,
-                        offset,
-                        class_loader,
-                    )
-                };
+                let var_ctx = loaders.var_ctx_at(content, offset);
                 let ty = if matches!(
                     expr,
                     Expression::Identifier(_)
@@ -139,9 +119,10 @@ impl Backend {
                             use_map: file_ctx.use_map_at(offset),
                             namespace: file_ctx.namespace_at(offset),
                             content,
-                            class_loader,
+                            class_loader: var_ctx.class_loader,
+                            source_class_loader: var_ctx.source_class_loader,
                             backend: Some(self),
-                            function_loader: &function_loader_cl,
+                            function_loader: loaders.function_loader_at(offset),
                         },
                     )
                 } else {

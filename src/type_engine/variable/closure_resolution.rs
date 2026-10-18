@@ -1,16 +1,17 @@
-/// Closure and arrow-function helpers for the forward walker.
-///
-/// This module provides:
-///
-/// - **`@param-closure-this` resolution:** detects when the cursor is
-///   inside a closure whose enclosing call site declares a
-///   `@param-closure-this` tag and overrides `$this` accordingly.
-/// - **Callable parameter inference helpers:** shared receiver
-///   resolution and generic-argument recovery used by
-///   `forward_walk/callable_inference.rs` to infer untyped
-///   closure/arrow-function parameter types from the enclosing callable
-///   signature (e.g. `$users->map(fn($u) => …)` infers `$u` from the
-///   `map` method's parameter type).
+//! Closure and arrow-function helpers for the forward walker.
+//!
+//! This module provides:
+//!
+//! - **`@param-closure-this` resolution:** detects when the cursor is
+//!   inside a closure whose enclosing call site declares a
+//!   `@param-closure-this` tag and overrides `$this` accordingly.
+//! - **Callable parameter inference helpers:** shared receiver
+//!   resolution and generic-argument recovery used by
+//!   `forward_walk/callable_inference.rs` to infer untyped
+//!   closure/arrow-function parameter types from the enclosing callable
+//!   signature (e.g. `$users->map(fn($u) => …)` infers `$u` from the
+//!   `map` method's parameter type).
+
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -21,10 +22,7 @@ use mago_syntax::cst::*;
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
-use crate::virtual_members::laravel::{
-    ELOQUENT_BUILDER_FQN, ELOQUENT_MODEL_FQN, RELATION_QUERY_METHODS, extends_eloquent_model,
-    model_builder_type, related_model_type, resolve_relation_chain_details,
-};
+use crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN;
 
 thread_local! {
     /// Positions currently being resolved by
@@ -85,7 +83,7 @@ impl Drop for ClosureThisGuard {
 }
 
 use crate::parser::with_parsed_program;
-use crate::types::{AccessKind, ClassInfo, FunctionInfo, MethodInfo, ResolvedType};
+use crate::types::{ClassInfo, FunctionInfo, MethodInfo, ResolvedType};
 
 // ─── @param-closure-this resolution ─────────────────────────────────────────
 
@@ -99,11 +97,10 @@ use crate::types::{AccessKind, ClassInfo, FunctionInfo, MethodInfo, ResolvedType
 /// closure body refers to a different object.  The
 /// `@param-closure-this` PHPDoc tag declares what `$this` should
 /// resolve to.
-pub(crate) fn find_closure_this_override(ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
+pub(crate) fn find_closure_this_override(ctx: &ResolutionCtx<'_>) -> Option<Arc<ClassInfo>> {
     find_closure_this_types(ctx)?
         .into_iter()
         .find_map(|rt| rt.class_info)
-        .map(Arc::unwrap_or_clone)
 }
 
 /// What `$this` is bound to inside the closure at the cursor, when a call
@@ -166,89 +163,6 @@ fn walk_stmt_for_closure_this(
             .value
             .as_ref()
             .and_then(|v| walk_expr_for_closure_this(v, ctx)),
-        Statement::Block(block) => {
-            for inner in block.statements.iter() {
-                if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => walk_stmt_for_closure_this(body.statement, ctx),
-            IfBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                        return Some(r);
-                    }
-                }
-                None
-            }
-        },
-        Statement::Foreach(foreach) => match &foreach.body {
-            ForeachBody::Statement(inner) => walk_stmt_for_closure_this(inner, ctx),
-            ForeachBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                        return Some(r);
-                    }
-                }
-                None
-            }
-        },
-        Statement::While(while_stmt) => match &while_stmt.body {
-            WhileBody::Statement(inner) => walk_stmt_for_closure_this(inner, ctx),
-            WhileBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                        return Some(r);
-                    }
-                }
-                None
-            }
-        },
-        Statement::For(for_stmt) => match &for_stmt.body {
-            ForBody::Statement(inner) => walk_stmt_for_closure_this(inner, ctx),
-            ForBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                        return Some(r);
-                    }
-                }
-                None
-            }
-        },
-        Statement::DoWhile(dw) => walk_stmt_for_closure_this(dw.statement, ctx),
-        Statement::Namespace(ns) => {
-            for inner in ns.statements().iter() {
-                if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        Statement::Try(try_stmt) => {
-            for inner in try_stmt.block.statements.iter() {
-                if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                    return Some(r);
-                }
-            }
-            for catch in try_stmt.catch_clauses.iter() {
-                for inner in catch.block.statements.iter() {
-                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                        return Some(r);
-                    }
-                }
-            }
-            if let Some(finally) = &try_stmt.finally_clause {
-                for inner in finally.block.statements.iter() {
-                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                        return Some(r);
-                    }
-                }
-            }
-            None
-        }
         Statement::Function(func) => {
             let bsp = func.body.span();
             if ctx.cursor_offset >= bsp.start.offset && ctx.cursor_offset <= bsp.end.offset {
@@ -260,7 +174,9 @@ fn walk_stmt_for_closure_this(
             }
             None
         }
-        _ => None,
+        _ => crate::parser::find_map_nested_statement(stmt, |inner| {
+            walk_stmt_for_closure_this(inner, ctx)
+        }),
     }
 }
 
@@ -374,89 +290,32 @@ fn walk_call_for_closure_this(
     call: &Call<'_>,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    match call {
-        Call::Function(fc) => {
-            let result = walk_args_for_closure_this(&fc.argument_list.arguments, ctx, &|arg_idx| {
-                closure_this_for_argument(call, arg_idx, ctx)
-            });
-            if result.is_some() {
-                return result;
-            }
-            // Recurse into arguments that are not closures (e.g. nested calls).
-            for arg in fc.argument_list.arguments.iter() {
-                let arg_expr = arg.value();
-                if !is_closure_like(arg_expr)
-                    && let Some(r) = walk_expr_for_closure_this(arg_expr, ctx)
-                {
-                    return Some(r);
-                }
-            }
-            None
-        }
+    let (receiver, argument_list) = match call {
+        Call::Function(fc) => (None, &fc.argument_list),
         Call::Method(mc) => {
             if let Some(r) = closure_call_this(mc, ctx) {
                 return Some(r);
             }
-            if let Some(r) = walk_expr_for_closure_this(mc.object, ctx) {
-                return Some(r);
-            }
-            let result = walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
-                closure_this_for_argument(call, arg_idx, ctx)
-            });
-            if result.is_some() {
-                return result;
-            }
-            for arg in mc.argument_list.arguments.iter() {
-                let arg_expr = arg.value();
-                if !is_closure_like(arg_expr)
-                    && let Some(r) = walk_expr_for_closure_this(arg_expr, ctx)
-                {
-                    return Some(r);
-                }
-            }
-            None
+            (Some(mc.object), &mc.argument_list)
         }
-        Call::NullSafeMethod(mc) => {
-            if let Some(r) = walk_expr_for_closure_this(mc.object, ctx) {
-                return Some(r);
-            }
-            let result = walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
-                closure_this_for_argument(call, arg_idx, ctx)
-            });
-            if result.is_some() {
-                return result;
-            }
-            for arg in mc.argument_list.arguments.iter() {
-                let arg_expr = arg.value();
-                if !is_closure_like(arg_expr)
-                    && let Some(r) = walk_expr_for_closure_this(arg_expr, ctx)
-                {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        Call::StaticMethod(sc) => {
-            if let Some(r) = walk_expr_for_closure_this(sc.class, ctx) {
-                return Some(r);
-            }
-            let result = walk_args_for_closure_this(&sc.argument_list.arguments, ctx, &|arg_idx| {
-                closure_this_for_argument(call, arg_idx, ctx)
-            });
-            if result.is_some() {
-                return result;
-            }
-            for arg in sc.argument_list.arguments.iter() {
-                let arg_expr = arg.value();
-                if !is_closure_like(arg_expr)
-                    && let Some(r) = walk_expr_for_closure_this(arg_expr, ctx)
-                {
-                    return Some(r);
-                }
-            }
-            None
-        }
+        Call::NullSafeMethod(mc) => (Some(mc.object), &mc.argument_list),
+        Call::StaticMethod(sc) => (Some(sc.class), &sc.argument_list),
+    };
+    if let Some(r) = receiver.and_then(|receiver| walk_expr_for_closure_this(receiver, ctx)) {
+        return Some(r);
     }
+    walk_args_for_closure_this(&argument_list.arguments, ctx, &|arg_idx| {
+        closure_this_for_argument(call, arg_idx, ctx)
+    })
+    // Recurse into arguments that are not closures (e.g. nested calls).
+    .or_else(|| {
+        argument_list
+            .arguments
+            .iter()
+            .map(|arg| arg.value())
+            .filter(|arg_expr| !is_closure_like(arg_expr))
+            .find_map(|arg_expr| walk_expr_for_closure_this(arg_expr, ctx))
+    })
 }
 
 /// What `$this` is bound to inside a closure passed as argument `arg_idx`
@@ -485,14 +344,7 @@ pub(crate) fn closure_this_for_argument(
         }
         Call::Method(MethodCall { object, method, .. })
         | Call::NullSafeMethod(NullSafeMethodCall { object, method, .. }) => {
-            let obj_span = object.span();
-            closure_this_from_receiver(
-                obj_span.start.offset,
-                obj_span.end.offset,
-                method_name(method)?,
-                arg_idx,
-                ctx,
-            )
+            closure_this_from_receiver(object, method_name(method)?, arg_idx, ctx)
         }
         Call::StaticMethod(sc) => {
             closure_this_from_static_receiver(sc.class, method_name(&sc.method)?, arg_idx, ctx)
@@ -516,8 +368,8 @@ fn closure_call_this(mc: &MethodCall<'_>, ctx: &ResolutionCtx<'_>) -> Option<Vec
     if let Some(nested) = walk_closure_body_for_closure_this(closure, ctx) {
         return Some(nested);
     }
-    let new_this = mc.argument_list.arguments.first()?.value().span();
-    let types = resolve_receiver_types(new_this.start.offset, new_this.end.offset, ctx);
+    let new_this = mc.argument_list.arguments.first()?.value();
+    let types = resolve_receiver_types(new_this, ctx);
     (!types.is_empty()).then_some(types)
 }
 
@@ -615,78 +467,111 @@ fn closure_this_from_function_params(
 //
 // These helpers resolve "the receiver/owner class of a call's method"
 // from the AST, independent of what the caller extracts from the target
-// method once found.  Both the `@param-closure-this` resolution above
-// and the callable-parameter inference in
-// `forward_walk/callable_inference.rs` need this same receiver
-// resolution; they differ only in what they pull out of the matched
-// method (`closure_this_type` vs. `callable(...)` parameter types).
+// method once found.  The `@param-closure-this` resolution above and the
+// forward walker's passes over a call's arguments (callable-parameter
+// inference, relation callbacks, by-reference parameters and captures)
+// all need this same receiver resolution; they differ only in what they
+// pull out of the matched method.
 
-/// Resolve the receiver classes of an instance/nullsafe method call from
-/// its object span.
+/// Resolve the receiver of an instance/nullsafe method call, `object`.
 ///
-/// Overrides `cursor_offset` to the object's start so that variable
-/// resolution looks up the scope snapshot *before* the call (where the
-/// receiver variable is actually in scope), not at a position inside a
-/// later closure argument where the variable doesn't exist yet.
+/// Resolves at the object's start so that variable resolution looks up the
+/// scope snapshot *before* the call (where the receiver variable is
+/// actually in scope), not at a position inside a later closure argument
+/// where the variable doesn't exist yet.
 pub(in crate::type_engine) fn resolve_receiver_types(
-    obj_start: u32,
-    obj_end: u32,
+    object: &Expression<'_>,
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let start = obj_start as usize;
-    let end = obj_end as usize;
-    if end > ctx.content.len() {
-        return vec![];
-    }
-    let obj_text = ctx.content[start..end].trim();
-    let obj_ctx = ResolutionCtx {
-        cursor_offset: obj_start,
-        ..*ctx
-    };
-    crate::type_engine::resolver::resolve_target_classes(obj_text, AccessKind::Arrow, &obj_ctx)
-}
-
-/// Resolve the class name referenced by a static-call receiver
-/// expression (`self`, `static`, `parent`, or a class identifier).
-pub(in crate::type_engine) fn static_receiver_class_name(
-    class_expr: &Expression<'_>,
-    current_class: Option<&ClassInfo>,
-) -> Option<String> {
-    match class_expr {
-        Expression::Self_(_) | Expression::Static(_) => current_class.map(|cc| cc.name.to_string()),
-        Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-        Expression::Parent(_) => {
-            current_class.and_then(|cc| cc.parent_class.map(|a| a.to_string()))
+    let at = object.span().start.offset;
+    let placeholder;
+    let current_class = match ctx.current_class {
+        Some(class) => class,
+        None => {
+            placeholder = crate::class_lookup::class_context_placeholder(ctx.content, at);
+            &placeholder
         }
-        _ => None,
-    }
+    };
+    let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
+        source_imports: ctx.source_imports,
+        backend: ctx.backend,
+        loaders: crate::type_engine::resolver::Loaders::with_function(ctx.function_loader),
+        resolved_class_cache: ctx.resolved_class_cache,
+        scope_var_resolver: ctx.scope_var_resolver,
+        ..crate::type_engine::resolver::VarResolutionCtx::new(
+            "",
+            current_class,
+            ctx.all_classes,
+            ctx.content,
+            at,
+            ctx.class_loader,
+            ctx.source_class_loader,
+        )
+    };
+    super::rhs_resolution::resolve_rhs_expression(object, &var_ctx)
 }
 
-/// Look up a class by name: local classes first, then the cross-file
+/// Look up a class by its FQN: local classes first, then the cross-file
 /// loader.
 pub(in crate::type_engine) fn find_owner_by_name(
-    name: &str,
+    fqn: &str,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<ClassInfo> {
+) -> Option<Arc<ClassInfo>> {
     all_classes
         .iter()
-        .find(|c| c.name == name)
-        .map(|c| ClassInfo::clone(c))
-        .or_else(|| class_loader(name).map(Arc::unwrap_or_clone))
+        .find(|c| c.fqn().eq_ignore_ascii_case(fqn))
+        .map(Arc::clone)
+        .or_else(|| class_loader(fqn))
+}
+
+/// Every class the class expression of a static call or `new` names.
+///
+/// A name, `self`, `static` or `parent` names one class.  Any other
+/// expression (`$class::make()`, `new $class`, `$this->model::query()`) is
+/// evaluated, and names the classes its value names as a class name (a
+/// `class-string<T>`, or a string spelling a class), or else the class of
+/// the object it holds, which PHP dispatches a static call on just the
+/// same.
+pub(in crate::type_engine) fn resolve_static_receiver_classes(
+    class_expr: &Expression<'_>,
+    ctx: &ResolutionCtx<'_>,
+) -> Vec<Arc<ClassInfo>> {
+    if let Some(name) = ctx.written_names().static_receiver_class_name(class_expr) {
+        return find_owner_by_name(&name, ctx.all_classes, ctx.class_loader)
+            .into_iter()
+            .collect();
+    }
+    let held = resolve_receiver_types(class_expr, ctx);
+    let owning_class = ctx.current_class.map(ClassInfo::fqn).unwrap_or_default();
+    let mut named: Vec<Arc<ClassInfo>> = Vec::new();
+    for rt in &held {
+        ClassInfo::extend_unique_arc(
+            &mut named,
+            super::class_string_resolution::classes_named_by_type(
+                &rt.type_string,
+                &owning_class,
+                ctx.all_classes,
+                ctx.class_loader,
+            ),
+        );
+    }
+    if named.is_empty() {
+        ResolvedType::into_arced_classes(held)
+    } else {
+        named
+    }
 }
 
 /// Look up `closure_this_type` on an instance method's parameter at
-/// `arg_idx`, resolving the receiver from the source span.
+/// `arg_idx`, resolving the receiver `object`.
 fn closure_this_from_receiver(
-    obj_start: u32,
-    obj_end: u32,
+    object: &Expression<'_>,
     method_name: &str,
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    let receiver_classes =
-        ResolvedType::into_arced_classes(resolve_receiver_types(obj_start, obj_end, ctx));
+    let receiver_classes = ResolvedType::into_arced_classes(resolve_receiver_types(object, ctx));
     for cls in &receiver_classes {
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             cls,
@@ -711,31 +596,30 @@ fn closure_this_from_static_receiver(
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    let class_name = static_receiver_class_name(class_expr, ctx.current_class)?;
-
-    if method_name.eq_ignore_ascii_case("macro")
-        && arg_idx == 1
-        && let Some(resolve_macro_this) = ctx.laravel_macro_this_resolver
-        && let Some(owner) = resolve_macro_this(&class_name)
-    {
-        return Some(vec![ResolvedType::from_class(Arc::unwrap_or_clone(
-            crate::virtual_members::resolve_class_fully_maybe_cached(
-                &owner,
+    resolve_static_receiver_classes(class_expr, ctx)
+        .iter()
+        .find_map(|owner| {
+            if method_name.eq_ignore_ascii_case("macro")
+                && arg_idx == 1
+                && let Some(resolve_macro_this) = ctx.laravel_macro_this_resolver
+                && let Some(bound) = resolve_macro_this(&owner.fqn())
+            {
+                return Some(vec![ResolvedType::from_arc(
+                    crate::virtual_members::resolve_class_fully_maybe_cached(
+                        &bound,
+                        ctx.class_loader,
+                        ctx.resolved_class_cache,
+                    ),
+                )]);
+            }
+            let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+                owner,
                 ctx.class_loader,
                 ctx.resolved_class_cache,
-            ),
-        ))]);
-    }
-
-    let owner = find_owner_by_name(&class_name, ctx.all_classes, ctx.class_loader)?;
-
-    let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
-        &owner,
-        ctx.class_loader,
-        ctx.resolved_class_cache,
-    );
-    let method = resolved.get_method(method_name)?;
-    closure_this_from_method_params(method, arg_idx, Some(&resolved), ctx)
+            );
+            let method = resolved.get_method(method_name)?;
+            closure_this_from_method_params(method, arg_idx, Some(&resolved), ctx)
+        })
 }
 
 /// Extract `closure_this_type` from a method's parameter at `arg_idx`
@@ -743,7 +627,7 @@ fn closure_this_from_static_receiver(
 fn closure_this_from_method_params(
     method: &MethodInfo,
     arg_idx: usize,
-    owner: Option<&ClassInfo>,
+    owner: Option<&Arc<ClassInfo>>,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     let param = method.parameters.get(arg_idx)?;
@@ -759,16 +643,16 @@ fn closure_this_from_method_params(
 /// through the class loader.
 fn resolve_closure_this_type(
     php_type: &PhpType,
-    owner: Option<&ClassInfo>,
+    owner: Option<&Arc<ClassInfo>>,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     let resolved: Vec<ResolvedType> = match php_type.kind() {
         TypeKind::Intersection(members) => members
             .iter()
             .filter_map(|member| resolve_closure_this_class(member, owner, ctx))
-            .map(ResolvedType::from_class)
+            .map(ResolvedType::from_arc)
             .collect(),
-        _ => vec![ResolvedType::from_class(resolve_closure_this_class(
+        _ => vec![ResolvedType::from_arc(resolve_closure_this_class(
             php_type, owner, ctx,
         )?)],
     };
@@ -777,28 +661,32 @@ fn resolve_closure_this_type(
 
 fn resolve_closure_this_class(
     php_type: &PhpType,
-    owner: Option<&ClassInfo>,
+    owner: Option<&Arc<ClassInfo>>,
     ctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Arc<ClassInfo>> {
     if php_type.is_self_like() {
-        return owner.cloned().or_else(|| ctx.current_class.cloned());
+        return owner
+            .cloned()
+            .or_else(|| ctx.current_class.cloned().map(Arc::new));
     }
 
     // Extract the base class name without stringifying.
     let type_str = php_type.base_name()?;
 
     // Try local classes first, then the cross-file loader.
-    if let Some(cls) = ctx.all_classes.iter().find(|c| c.name == type_str) {
-        return Some(ClassInfo::clone(cls));
+    if let Some(cls) = ctx
+        .all_classes
+        .iter()
+        .find(|c| c.fqn().eq_ignore_ascii_case(type_str))
+    {
+        return Some(Arc::clone(cls));
     }
 
     let resolved = (ctx.class_loader)(type_str)?;
-    Some(Arc::unwrap_or_clone(
-        crate::virtual_members::resolve_class_fully_maybe_cached(
-            &resolved,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        ),
+    Some(crate::virtual_members::resolve_class_fully_maybe_cached(
+        &resolved,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
     ))
 }
 
@@ -819,7 +707,7 @@ fn resolve_closure_this_class(
 ///   `array`; the call site still knows the shape.
 /// * The inferred generic class is a subclass of the explicit bare class,
 ///   such as a custom Eloquent builder passed to a `Builder` parameter.
-fn inferred_type_is_more_specific(
+pub(in crate::type_engine) fn inferred_type_is_more_specific(
     explicit_hint: &PhpType,
     inferred: &PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -885,173 +773,6 @@ fn describes_elements(ty: &PhpType, allow_iterable: bool) -> bool {
 
 // ── Callable parameter inference helpers ────────────────────────────
 
-/// Infer an Eloquent constraint's query from the bound relation argument.
-/// Names retain their literal alternatives through the shared expression
-/// resolver; relation objects supply their own related-model binding.
-fn try_relation_query_override(
-    receivers: &[ResolvedType],
-    method_name: &str,
-    relation: &PhpType,
-    candidates: Option<&PhpType>,
-    rctx: &ResolutionCtx<'_>,
-) -> Option<Vec<PhpType>> {
-    if !RELATION_QUERY_METHODS.contains(&method_name) {
-        return None;
-    }
-    let mut queries = Vec::new();
-    for model in find_models_from_receivers(receivers, rctx) {
-        let query = relation_callback_type(&model, method_name, relation, rctx);
-        if let Some(candidates) = candidates {
-            let fallback = query.unwrap_or_else(|| {
-                PhpType::generic(
-                    ELOQUENT_BUILDER_FQN,
-                    vec![PhpType::named(atom(ELOQUENT_MODEL_FQN))],
-                )
-            });
-            queries.push(morph_candidate_builders(
-                candidates,
-                &fallback,
-                rctx.class_loader,
-            ));
-        } else if let Some(query) = query {
-            queries.push(query);
-        }
-    }
-    (!queries.is_empty()).then(|| vec![PhpType::union(queries).simplified()])
-}
-
-/// The callback parameter for one relation argument type. Every alternative
-/// of a union must resolve: when any of them is unknown (a plain `string`, a
-/// name the relation resolver cannot follow), the declared callback type is
-/// the fallback rather than a narrower union of the known alternatives.
-fn relation_callback_type(
-    model: &ClassInfo,
-    method_name: &str,
-    relation: &PhpType,
-    rctx: &ResolutionCtx<'_>,
-) -> Option<PhpType> {
-    if let TypeKind::Union(parts) = relation.kind() {
-        let queries = parts
-            .iter()
-            .map(|part| relation_callback_type(model, method_name, part, rctx))
-            .collect::<Option<Vec<_>>>()?;
-        return Some(PhpType::union(queries).simplified());
-    }
-    let eager = matches!(method_name, "with" | "withWhereHas" | "withWhereRelation");
-    if let Some(name) = relation
-        .as_literal()
-        .and_then(|value| value.string_content())
-    {
-        // Only withWhereHas strips a column selection before its existence
-        // query. `with($name, $callback)` keys the eager load by the name
-        // verbatim, so `with('rel:id', fn)` names no relation at runtime.
-        let chain = if method_name == "withWhereHas" {
-            name.split_once(':').map_or(name.as_ref(), |(name, _)| name)
-        } else {
-            name.as_ref()
-        };
-        let related = resolve_relation_chain_details(
-            model,
-            chain,
-            rctx.class_loader,
-            rctx.resolved_class_cache,
-        )?;
-        if method_name == "with" {
-            return Some(related.relation_type);
-        }
-        let builder = PhpType::union(
-            related
-                .models
-                .iter()
-                .map(|model| model_builder_type(model, rctx.class_loader))
-                .collect(),
-        )
-        .simplified();
-        return Some(if eager {
-            PhpType::union(vec![builder, related.relation_type])
-        } else {
-            builder
-        });
-    }
-    if eager {
-        return None;
-    }
-
-    // A relation object hands its related model to the `Relation` ancestor;
-    // projecting through the ancestor chain (which applies the object's own
-    // type arguments) copes with subclasses that reorder or fix them.
-    let related = related_model_type(relation, rctx.class_loader)?;
-    let fallback = PhpType::generic(
-        ELOQUENT_BUILDER_FQN,
-        vec![PhpType::named(atom(ELOQUENT_MODEL_FQN))],
-    );
-    Some(morph_model_builders(&related, &fallback, rctx.class_loader))
-}
-
-/// Map candidate class-strings through the same builder selector as model
-/// queries. Unknown candidates contribute the declared relation's fallback;
-/// they must not erase known candidates from a mixed array.
-fn morph_candidate_builders(
-    candidates: &PhpType,
-    fallback: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> PhpType {
-    // Laravel casts `$types` to an array, so a `null` candidate adds no
-    // model: the callback only runs for the others.
-    match candidates.kind() {
-        TypeKind::Nullable(inner) => morph_candidate_builders(inner, fallback, class_loader),
-        TypeKind::Union(parts) if parts.iter().any(|part| !part.is_null()) => PhpType::union(
-            parts
-                .iter()
-                .filter(|part| !part.is_null())
-                .map(|part| morph_candidate_builders(part, fallback, class_loader))
-                .collect(),
-        ),
-        TypeKind::ClassString(Some(model)) => morph_model_builders(model, fallback, class_loader),
-        TypeKind::Literal(value) => value
-            .string_content()
-            .and_then(|name| {
-                class_loader(&name).filter(|model| {
-                    model
-                        .fqn()
-                        .eq_ignore_ascii_case(name.trim_start_matches('\\'))
-                })
-            })
-            .filter(|model| {
-                model.fqn() == ELOQUENT_MODEL_FQN || extends_eloquent_model(model, class_loader)
-            })
-            .map(|model| model_builder_type(&model, class_loader))
-            .unwrap_or_else(|| fallback.clone()),
-        _ => candidates
-            .iterable_element_type()
-            .map(|element| morph_candidate_builders(&element, fallback, class_loader))
-            .unwrap_or_else(|| fallback.clone()),
-    }
-}
-
-fn morph_model_builders(
-    model: &PhpType,
-    fallback: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> PhpType {
-    if let TypeKind::Union(parts) = model.kind() {
-        return PhpType::union(
-            parts
-                .iter()
-                .map(|part| morph_model_builders(part, fallback, class_loader))
-                .collect(),
-        );
-    }
-    model
-        .base_name()
-        .and_then(class_loader)
-        .filter(|model| {
-            model.fqn() == ELOQUENT_MODEL_FQN || extends_eloquent_model(model, class_loader)
-        })
-        .map(|model| model_builder_type(&model, class_loader))
-        .unwrap_or_else(|| fallback.clone())
-}
-
 /// Build a `PhpType` representing the receiver class for `$this`/`static`
 /// replacement in callable parameter inference.
 ///
@@ -1066,7 +787,7 @@ fn morph_model_builders(
 /// This preserves generic args through callable param inference so that
 /// `callable($this)` on `Builder<Product>` infers `Builder<Product>`,
 /// not bare `Builder`.
-fn build_receiver_self_type(
+pub(in crate::type_engine) fn build_receiver_self_type(
     receiver: &ClassInfo,
     _class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> PhpType {
@@ -1145,79 +866,9 @@ fn extract_generic_args_from_methods(class: &ClassInfo, class_fqn: &str) -> Opti
     None
 }
 
-/// Given resolved receivers, find the underlying Eloquent model:
-/// the receiver itself when it is a model class, or the model extracted
-/// from a `Builder<Model>` receiver.
-fn find_models_from_receivers(
-    receivers: &[ResolvedType],
-    rctx: &ResolutionCtx<'_>,
-) -> Vec<Arc<ClassInfo>> {
-    let mut models = Vec::new();
-    for receiver in receivers {
-        let Some(cls) = receiver.class_info.as_ref() else {
-            continue;
-        };
-        if cls.fqn() == ELOQUENT_MODEL_FQN || extends_eloquent_model(cls, rctx.class_loader) {
-            models.push(Arc::clone(cls));
-            continue;
-        }
-        let current_class = rctx
-            .current_class
-            .map_or_else(|| atom(""), |class| class.name);
-        let as_models = |ty: &PhpType| -> Vec<Arc<ClassInfo>> {
-            crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                ty,
-                &current_class,
-                rctx.all_classes,
-                rctx.class_loader,
-            )
-            .into_iter()
-            .filter(|model| {
-                model.fqn() == ELOQUENT_MODEL_FQN
-                    || extends_eloquent_model(model, rctx.class_loader)
-            })
-            .collect()
-        };
-        if cls.fqn() != ELOQUENT_BUILDER_FQN
-            && !crate::virtual_members::laravel::helpers::extends_eloquent_builder(
-                cls,
-                rctx.class_loader,
-            )
-        {
-            // A relation forwards its query methods to a builder over its
-            // related model, so that model is the one the callback sees.
-            if let Some(related) = related_model_type(&receiver.type_string, rctx.class_loader) {
-                models.extend(as_models(&related));
-            }
-            continue;
-        }
-        // Read the receiver's retained generic context before recovering it
-        // from declarations; custom builders need not declare TModel at all.
-        // Each source is tried in turn, so an unsubstituted `TModel` in one
-        // does not hide a concrete model in the next.  A source may name
-        // several models (`Builder<Post|Comment>`), and each is kept.
-        let non_empty = |found: Vec<Arc<ClassInfo>>| (!found.is_empty()).then_some(found);
-        let found = crate::inheritance::extract_generic_arg_from_ancestor(
-            &receiver.type_string,
-            ELOQUENT_BUILDER_FQN,
-            0,
-            rctx.class_loader,
-        )
-        .and_then(|ty| non_empty(as_models(&ty)))
-        .or_else(|| {
-            cls.get_method("getModel")
-                .and_then(|method| method.return_type.as_ref())
-                .and_then(|ty| non_empty(as_models(ty)))
-        })
-        .or_else(|| extract_model_from_builder(cls).and_then(|ty| non_empty(as_models(&ty))));
-        models.extend(found.into_iter().flatten());
-    }
-    models
-}
-
 /// Extract the model type from a resolved `Builder<Model>` class by
 /// scanning its method return types for `Builder<X>` and returning `X`.
-fn extract_model_from_builder(builder: &ClassInfo) -> Option<PhpType> {
+pub(in crate::type_engine) fn extract_model_from_builder(builder: &ClassInfo) -> Option<PhpType> {
     for method in &builder.methods {
         if let Some(ref ret) = method.return_type
             && let TypeKind::Generic(g) = ret.kind()
@@ -1232,38 +883,3 @@ fn extract_model_from_builder(builder: &ClassInfo) -> Option<PhpType> {
     }
     None
 }
-
-// ─── Public wrappers for forward walker ─────────────────────────────────────
-//
-// These thin wrappers expose internal helpers to the forward walker
-// (`forward_walk/callable_inference.rs` and `diagnostic_walk.rs`) so it
-// can perform callable parameter inference without duplicating the logic.
-
-pub(in crate::type_engine) fn try_relation_query_override_pub(
-    receivers: &[ResolvedType],
-    method_name: &str,
-    relation: &PhpType,
-    candidates: Option<&PhpType>,
-    rctx: &ResolutionCtx<'_>,
-) -> Option<Vec<PhpType>> {
-    try_relation_query_override(receivers, method_name, relation, candidates, rctx)
-}
-
-pub(in crate::type_engine) fn build_receiver_self_type_pub(
-    receiver: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> PhpType {
-    build_receiver_self_type(receiver, class_loader)
-}
-
-pub(in crate::type_engine) fn inferred_type_is_more_specific_pub(
-    explicit_hint: &PhpType,
-    inferred: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
-    inferred_type_is_more_specific(explicit_hint, inferred, class_loader)
-}
-
-#[cfg(test)]
-#[path = "closure_resolution_tests.rs"]
-mod tests;

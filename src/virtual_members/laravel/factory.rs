@@ -316,6 +316,7 @@ fn relationship_param(name: &str, type_str: &str) -> ParameterInfo {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     }
 }
 

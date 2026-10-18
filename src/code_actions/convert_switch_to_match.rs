@@ -14,8 +14,9 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::cursor_context::innermost_at;
 use crate::code_actions::indent_of_line_at;
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::text_position::position_to_byte_offset;
 
 impl Backend {
     /// Collect "Convert to match expression" code actions for switch
@@ -39,43 +40,23 @@ impl Backend {
 
         let cursor_offset = position_to_byte_offset(content, params.range.start) as u32;
 
-        let best = crate::parser::with_parsed_program(
+        let found = crate::parser::with_parsed_program(
             content,
             "convert_switch_to_match",
-            |program, content| {
-                let mut best: Option<(u32, u32, String)> = None;
-                for stmt in program.statements.iter() {
-                    find_switch_in_statement(stmt, cursor_offset, content, &mut best);
-                }
-                best
-            },
+            |program, content| convertible_switch_at(program, cursor_offset, content),
         );
-
-        let (switch_start, switch_end, replacement) = match best {
-            Some(b) => b,
-            None => return,
+        let Some((span, replacement)) = found else {
+            return;
         };
 
-        let start_pos = offset_to_position(content, switch_start as usize);
-        let end_pos = offset_to_position(content, switch_end as usize);
-
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
-            title: "Convert to match expression".to_string(),
-            kind: Some(CodeActionKind::new("refactor.rewrite")),
-            diagnostics: None,
-            edit: Some(crate::code_actions::single_edit(
-                doc_uri,
-                Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                replacement,
-            )),
-            command: None,
-            is_preferred: Some(false),
-            disabled: None,
-            data: None,
-        }));
+        out.push(crate::code_actions::rewrite_action(
+            "Convert to match expression".to_string(),
+            doc_uri,
+            content,
+            (span.start.offset as usize, span.end.offset as usize),
+            replacement,
+            false,
+        ));
     }
 }
 
@@ -98,129 +79,17 @@ struct MatchArm {
     body: String,
 }
 
-/// Find switch statements at the cursor and attempt conversion.
-fn find_switch_in_statement(
-    stmt: &Statement<'_>,
+/// The innermost `switch` under `cursor` that can become a `match`, with
+/// its span and the replacement text.
+fn convertible_switch_at(
+    program: &Program<'_>,
     cursor: u32,
     content: &str,
-    best: &mut Option<(u32, u32, String)>,
-) {
-    match stmt {
-        Statement::Switch(sw) => {
-            let span = sw.span();
-            if cursor >= span.start.offset && cursor <= span.end.offset {
-                if let Some(replacement) = try_convert_switch(sw, content) {
-                    // Prefer the innermost (smallest) match.
-                    let size = span.end.offset - span.start.offset;
-                    let dominated = best
-                        .as_ref()
-                        .map(|(s, e, _)| (e - s) >= size)
-                        .unwrap_or(true);
-                    if dominated {
-                        *best = Some((span.start.offset, span.end.offset, replacement));
-                    }
-                }
-                // Also search inside the switch cases for nested switches.
-                for case in sw.body.cases().iter() {
-                    for s in case.statements().iter() {
-                        find_switch_in_statement(s, cursor, content, best);
-                    }
-                }
-            }
-        }
-        Statement::Block(block) => {
-            for s in block.statements.iter() {
-                find_switch_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::Function(func) => {
-            for s in func.body.statements.iter() {
-                find_switch_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::Class(class) => {
-            for member in class.members.iter() {
-                find_switch_in_member(member, cursor, content, best);
-            }
-        }
-        Statement::Trait(tr) => {
-            for member in tr.members.iter() {
-                find_switch_in_member(member, cursor, content, best);
-            }
-        }
-        Statement::Enum(en) => {
-            for member in en.members.iter() {
-                find_switch_in_member(member, cursor, content, best);
-            }
-        }
-        Statement::Interface(iface) => {
-            for member in iface.members.iter() {
-                find_switch_in_member(member, cursor, content, best);
-            }
-        }
-        Statement::If(if_stmt) => {
-            for s in if_stmt.body.statements().iter() {
-                find_switch_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::Foreach(fe) => {
-            for s in fe.body.statements().iter() {
-                find_switch_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::While(w) => {
-            for s in w.body.statements().iter() {
-                find_switch_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::DoWhile(dw) => {
-            find_switch_in_statement(dw.statement, cursor, content, best);
-        }
-        Statement::For(f) => {
-            for s in f.body.statements().iter() {
-                find_switch_in_statement(s, cursor, content, best);
-            }
-        }
-        Statement::Try(t) => {
-            for s in t.block.statements.iter() {
-                find_switch_in_statement(s, cursor, content, best);
-            }
-            for catch in t.catch_clauses.iter() {
-                for s in catch.block.statements.iter() {
-                    find_switch_in_statement(s, cursor, content, best);
-                }
-            }
-            if let Some(finally) = &t.finally_clause {
-                for s in finally.block.statements.iter() {
-                    find_switch_in_statement(s, cursor, content, best);
-                }
-            }
-        }
-        Statement::Namespace(ns) => {
-            for s in ns.statements().iter() {
-                find_switch_in_statement(s, cursor, content, best);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Search class-like members for switch statements.
-fn find_switch_in_member(
-    member: &class_like::member::ClassLikeMember<'_>,
-    cursor: u32,
-    content: &str,
-    best: &mut Option<(u32, u32, String)>,
-) {
-    use class_like::member::ClassLikeMember;
-    use class_like::method::MethodBody;
-    if let ClassLikeMember::Method(method) = member
-        && let MethodBody::Concrete(body) = &method.body
-    {
-        for s in body.statements.iter() {
-            find_switch_in_statement(s, cursor, content, best);
-        }
-    }
+) -> Option<(mago_span::Span, String)> {
+    innermost_at(program, cursor, |node| match node {
+        Node::Switch(switch) => Some((switch.span(), try_convert_switch(switch, content)?)),
+        _ => None,
+    })
 }
 
 /// Attempt to convert a switch statement to a match expression.
@@ -407,36 +276,13 @@ fn source_text(content: &str, span: mago_span::Span) -> &str {
 mod tests {
     use super::*;
 
+    /// The conversion offered with the cursor on the first `switch`.
     fn try_convert(php: &str) -> Option<String> {
         let arena = mago_allocator::LocalArena::new();
         let file_id = mago_database::file::FileId::new(b"test.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
-
-        for stmt in program.statements.iter() {
-            if let Statement::Switch(sw) = stmt {
-                return try_convert_switch(sw, php);
-            }
-            // Check inside namespace/class/function bodies
-            if let Some(result) = find_switch_and_convert(stmt, php) {
-                return Some(result);
-            }
-        }
-        None
-    }
-
-    fn find_switch_and_convert<'a>(stmt: &'a Statement<'a>, content: &str) -> Option<String> {
-        match stmt {
-            Statement::Switch(sw) => try_convert_switch(sw, content),
-            Statement::Block(b) => {
-                for s in b.statements.iter() {
-                    if let Some(r) = find_switch_and_convert(s, content) {
-                        return Some(r);
-                    }
-                }
-                None
-            }
-            _ => None,
-        }
+        let cursor = php.find("switch")? as u32;
+        convertible_switch_at(program, cursor, php).map(|(_, replacement)| replacement)
     }
 
     #[test]
@@ -545,5 +391,37 @@ switch ($x) {
         assert!(result.contains("return match ("));
         assert!(result.contains("1 => 'one'"));
         assert!(result.contains("2 => throw new \\Exception('bad')"));
+    }
+
+    #[test]
+    fn switch_in_else_branch() {
+        let php = r#"<?php
+if ($y) {
+    foo();
+} else {
+    switch ($x) {
+        case 1:
+            return 'one';
+        default:
+            return 'other';
+    }
+}"#;
+        let result = try_convert(php).unwrap();
+        assert!(result.contains("return match ("));
+    }
+
+    #[test]
+    fn switch_in_closure_argument() {
+        let php = r#"<?php
+$items = array_map(function ($x) {
+    switch ($x) {
+        case 1:
+            return 'one';
+        default:
+            return 'other';
+    }
+}, $list);"#;
+        let result = try_convert(php).unwrap();
+        assert!(result.contains("return match ("));
     }
 }

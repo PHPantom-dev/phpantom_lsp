@@ -30,6 +30,7 @@ use tower_lsp::lsp_types::*;
 use super::{CodeActionData, make_code_action_data, range_touches_use_import};
 use crate::Backend;
 use crate::completion::use_edit::{UseBlockInfo, analyze_use_block};
+use crate::text_position::line_ending;
 
 impl Backend {
     /// Collect the "Sort use statements" code action.
@@ -114,11 +115,7 @@ fn compute_sort_use_edits(content: &str) -> Vec<TextEdit> {
 
     let lines: Vec<&str> = content.lines().collect();
     // `lines()` strips the terminator; write back the one the file uses.
-    let eol = if content.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
+    let eol = line_ending(content);
 
     let mut entries: Vec<Entry> = Vec::with_capacity(use_block.existing.len());
     let mut floor = 0usize;

@@ -540,12 +540,12 @@ namespace PsalmTest_array_assignment_39 {
     $a = [];
 
     if (rand(0, 5) > 3) {
-      $a["b"] = new stdClass;
+      $a["b"] = new \stdClass;
     } else {
       $a["b"] = ["e" => "f"];
     }
 
-    if ($a["b"] instanceof stdClass) {
+    if ($a["b"] instanceof \stdClass) {
       $a["b"] = [];
     }
 
@@ -866,12 +866,12 @@ namespace PsalmTest_array_assignment_60 {
 namespace PsalmTest_array_assignment_61 {
     $a = array_map(
         function (string $x) {
-            return new RuntimeException($x);
+            return new \RuntimeException($x);
         },
         ["c" => ""]
     );
 
-    $a += ["e" => new RuntimeException()];
+    $a += ["e" => new \RuntimeException()];
 
     assertType('array{c: RuntimeException, e: RuntimeException}', $a);
 }

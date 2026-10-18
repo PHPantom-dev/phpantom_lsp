@@ -374,36 +374,11 @@ fn build_constructor(props: &[QualifyingProperty], indent: &str) -> String {
     // Parameters with default values must come after required parameters.
     // We preserve declaration order but PHP requires defaults at the end,
     // so we separate them.
-    let mut required_params = Vec::new();
-    let mut optional_params = Vec::new();
-
-    for prop in props {
-        let mut param = String::new();
-
-        if let Some(ref hint) = prop.type_hint {
-            param.push_str(&hint.to_string());
-            param.push(' ');
-        }
-
-        param.push('$');
-        param.push_str(&prop.name);
-
-        if let Some(ref default) = prop.default_value {
-            param.push_str(" = ");
-            param.push_str(default);
-            optional_params.push(param);
-        } else {
-            required_params.push(param);
-        }
-    }
-
-    let all_params: Vec<&str> = required_params
-        .iter()
-        .chain(optional_params.iter())
-        .map(|s| s.as_str())
-        .collect();
-
-    result.push_str(&all_params.join(", "));
+    let params = required_first_params(props, |prop| match prop.type_hint {
+        Some(ref hint) => format!("{hint} ${}", prop.name),
+        None => format!("${}", prop.name),
+    });
+    result.push_str(&params.join(", "));
     result.push_str(")\n");
     result.push_str(indent);
     result.push_str("{\n");
@@ -426,6 +401,28 @@ fn build_constructor(props: &[QualifyingProperty], indent: &str) -> String {
     result
 }
 
+/// One constructor parameter per property, rendered by `declare` with the
+/// property's default appended, the ones without a default first: PHP
+/// deprecates a required parameter after an optional one.
+fn required_first_params(
+    props: &[QualifyingProperty],
+    declare: impl Fn(&QualifyingProperty) -> String,
+) -> Vec<String> {
+    let required = props.iter().filter(|prop| prop.default_value.is_none());
+    let optional = props.iter().filter(|prop| prop.default_value.is_some());
+    required
+        .chain(optional)
+        .map(|prop| {
+            let mut param = declare(prop);
+            if let Some(ref default) = prop.default_value {
+                param.push_str(" = ");
+                param.push_str(default);
+            }
+            param
+        })
+        .collect()
+}
+
 /// Build the promoted constructor source text.  Each property becomes a
 /// promoted parameter (`visibility [readonly] type $name [= default]`)
 /// and the property declarations are removed by the caller.
@@ -437,44 +434,20 @@ fn build_promoted_constructor(props: &[QualifyingProperty], indent: &str) -> Str
     result.push_str("public function __construct(\n");
 
     // Parameters with default values must come after required parameters.
-    let mut required_params = Vec::new();
-    let mut optional_params = Vec::new();
-
-    for prop in props {
-        let mut param = String::new();
-        param.push_str(indent);
-        param.push_str(indent);
-
-        param.push_str(prop.visibility);
-
+    let params = required_first_params(props, |prop| {
+        let mut param = format!("{indent}{indent}{}", prop.visibility);
         if prop.is_readonly {
             param.push_str(" readonly");
         }
-
         if let Some(ref hint) = prop.type_hint {
             param.push(' ');
             param.push_str(&hint.to_string());
         }
-
         param.push_str(" $");
         param.push_str(&prop.name);
-
-        if let Some(ref default) = prop.default_value {
-            param.push_str(" = ");
-            param.push_str(default);
-            optional_params.push(param);
-        } else {
-            required_params.push(param);
-        }
-    }
-
-    let all_params: Vec<&str> = required_params
-        .iter()
-        .chain(optional_params.iter())
-        .map(|s| s.as_str())
-        .collect();
-
-    result.push_str(&all_params.join(",\n"));
+        param
+    });
+    result.push_str(&params.join(",\n"));
     result.push_str(",\n");
 
     result.push_str(indent);

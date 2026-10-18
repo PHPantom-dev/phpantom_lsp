@@ -24,52 +24,52 @@ use crate::scope_collector::ScopeBody;
 
 // ─── @var annotation collection ─────────────────────────────────────────────
 
-/// Scan the source text for `/** @var Type $varName */` inline
-/// docblocks and return each declared variable name paired with the byte
-/// offset of its `$` sigil.
+/// The variables the file's `/** @var Type $varName */` docblocks declare,
+/// each paired with the byte offset of its `$` sigil in the docblock.
 ///
 /// The offset lets callers treat the annotation as a write at that
 /// position so it (a) only defines the variable within the scope it
 /// appears in, and (b) follows the same "prior write in source order"
 /// rule as ordinary assignments.
 pub(super) fn collect_var_annotations(content: &str) -> Vec<(String, u32)> {
-    let mut vars = Vec::new();
-    // Look for patterns like: @var SomeType $varName
-    // The regex-like scan: find `@var ` followed by a type, then `$name`.
-    let mut line_start = 0usize;
-    for line in content.lines() {
-        // `lines()` strips the line terminator; track the running byte
-        // offset so we can report absolute positions.
-        let this_line_start = line_start;
-        line_start += line.len() + 1; // +1 for the stripped '\n'
-
-        // Find the `@var` tag and extract the variable name after the type.
-        if let Some((var_pos, tag_len)) = crate::docblock::find_var_tag(line) {
-            let after_var_off = var_pos + tag_len;
-            let after_var = &line[after_var_off..];
-            let ws = after_var.len() - after_var.trim_start().len();
-            let after_var = after_var.trim_start();
-            // Skip the type (everything before the $).
-            if let Some(dollar_pos) = after_var.find('$') {
-                let var_part = &after_var[dollar_pos..];
-                // Extract the variable name: $[a-zA-Z_][a-zA-Z0-9_]*
-                let name_end = var_part
-                    .char_indices()
-                    .skip(1) // skip the $
-                    .find(|(_, c)| !c.is_alphanumeric() && *c != '_')
-                    .map(|(i, _)| i)
-                    .unwrap_or(var_part.len());
-                let var_name = &var_part[..name_end];
-                // Trim trailing `*/` if present.
-                let var_name = var_name.trim_end_matches("*/").trim();
-                if var_name.len() > 1 {
-                    let dollar_offset = this_line_start + after_var_off + ws + dollar_pos;
-                    vars.push((var_name.to_string(), dollar_offset as u32));
+    crate::parser::with_comments(content, |comments| {
+        let mut vars = Vec::new();
+        for comment in comments {
+            if comment.kind != crate::parser::CommentKind::Doc {
+                continue;
+            }
+            let Some(doc) = content.get(comment.start as usize..comment.end as usize) else {
+                continue;
+            };
+            for (name, _) in
+                crate::type_engine::variable::forward_walk::parse_var_docblock_pairs(doc)
+            {
+                if let Some(at) = tag_variable_offset(doc, &name) {
+                    vars.push((name, comment.start + at as u32));
                 }
             }
         }
+        vars
+    })
+}
+
+/// Where the tag variable `name` is written in `doc`: its last occurrence
+/// as a whole name, since the variable follows the type, which may name
+/// parameters of its own (`Closure(int $x): void $x2`).
+fn tag_variable_offset(doc: &str, name: &str) -> Option<usize> {
+    let bytes = doc.as_bytes();
+    let mut end = doc.len();
+    while let Some(at) = doc[..end].rfind(name) {
+        let after = at + name.len();
+        if bytes
+            .get(after)
+            .is_none_or(|&b| !crate::text_scan::is_ident_byte(b))
+        {
+            return Some(at);
+        }
+        end = at;
     }
-    vars
+    None
 }
 
 // ─── Error suppression (@) offset collection ────────────────────────────────

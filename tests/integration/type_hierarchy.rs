@@ -228,6 +228,34 @@ async fn prepare_on_parent_keyword() {
     assert_eq!(items[0].name, "Base");
 }
 
+#[tokio::test]
+async fn prepare_on_parent_keyword_with_imported_parent() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                    // 0
+        "namespace Lib {\n",                          // 1
+        "    class Base {\n",                         // 2
+        "        public function greet(): void {}\n", // 3
+        "    }\n",                                    // 4
+        "}\n",                                        // 5
+        "namespace App {\n",                          // 6
+        "    use Lib\\Base;\n",                       // 7
+        "    class Child extends Base {\n",           // 8
+        "        public function greet(): void {\n",  // 9
+        "            parent::greet();\n",             // 10
+        "        }\n",                                // 11
+        "    }\n",                                    // 12
+        "}\n",                                        // 13
+    );
+    open_php(&backend, &uri, text).await;
+
+    // Cursor on "parent" on line 10.
+    let items = prepare_at(&backend, &uri, 10, 14).await;
+    assert_eq!(items.len(), 1);
+    assert_eq!(item_fqn(&items[0]), "Lib\\Base");
+}
+
 // ─── Prepare: returns nothing for non-class symbols ─────────────────────────
 
 #[tokio::test]

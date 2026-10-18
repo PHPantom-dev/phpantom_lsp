@@ -3,7 +3,6 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::method::MethodBody;
-use mago_syntax::cst::control_flow::r#if::IfBody;
 use mago_syntax::cst::function_like::function::Function;
 use mago_syntax::cst::{Program, Statement};
 
@@ -61,33 +60,16 @@ fn collect_from_statements<'a>(
             Statement::Namespace(namespace) => {
                 collect_from_statements(namespace.statements().iter(), units)
             }
-            Statement::Class(class) => collect_from_members(class.members.iter(), units),
-            Statement::Interface(interface) => {
-                collect_from_members(interface.members.iter(), units)
+            _ if let Some(body) = crate::parser::class_like_body(statement) => {
+                collect_from_members(body.members.iter(), units)
             }
-            Statement::Trait(trait_def) => collect_from_members(trait_def.members.iter(), units),
-            Statement::Enum(enum_def) => collect_from_members(enum_def.members.iter(), units),
             Statement::Function(function) => units.push(function_unit(function)),
-            Statement::If(if_statement) => match &if_statement.body {
-                IfBody::Statement(body) => match body.statement {
-                    Statement::Block(block) => collect_functions(block.statements.iter(), units),
-                    Statement::Function(function) => units.push(function_unit(function)),
-                    _ => {}
-                },
-                IfBody::ColonDelimited(body) => collect_functions(body.statements.iter(), units),
-            },
+            Statement::If(_) => {
+                crate::parser::for_each_nested_function(statement, &mut |function| {
+                    units.push(function_unit(function))
+                })
+            }
             _ => {}
-        }
-    }
-}
-
-fn collect_functions<'a>(
-    statements: impl Iterator<Item = &'a Statement<'a>>,
-    units: &mut Vec<DiagnosticUnit>,
-) {
-    for statement in statements {
-        if let Statement::Function(function) = statement {
-            units.push(function_unit(function));
         }
     }
 }

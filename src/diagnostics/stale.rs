@@ -162,45 +162,6 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
     false
 }
 
-// The following helpers have no production caller (the `@throws`-based
-// stale detection they supported is now handled by `codeAction/resolve`
-// instead — see the doc comment on `is_stale_phpstan_diagnostic`). They
-// are kept under `#[cfg(test)]` because the tests below exercise them
-// directly.
-
-#[cfg(test)]
-#[allow(dead_code)]
-/// Extract the type name from a `throws.unusedType` or
-/// `throws.notThrowable` message.
-fn extract_throws_diag_type(message: &str, identifier: &str) -> Option<String> {
-    if identifier == "throws.unusedType" {
-        let start = message.find(" has ")? + 5;
-        let rest = &message[start..];
-        let end = rest.find(" in PHPDoc @throws tag")?;
-        Some(rest[..end].trim().to_string())
-    } else {
-        let start = message.find("@throws with type ")? + 18;
-        let rest = &message[start..];
-        let end = rest.find(" is not subtype")?;
-        Some(rest[..end].trim().to_string())
-    }
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-/// Extract the exception FQN from a `missingType.checkedException` message.
-fn extract_checked_exception_fqn(message: &str) -> Option<String> {
-    let marker = "throws checked exception ";
-    let start = message.find(marker)? + marker.len();
-    let rest = &message[start..];
-    let end = rest.find(" but")?;
-    let fqn = crate::util::strip_fqn_prefix(rest[..end].trim());
-    if fqn.is_empty() {
-        return None;
-    }
-    Some(fqn.to_string())
-}
-
 /// Check whether the diagnostic's line (or the line before it) has a
 /// `@phpstan-ignore` comment that lists the given identifier.
 ///
@@ -270,98 +231,6 @@ fn line_has_ignore_for(content: &str, diag_line: u32, identifier: &str) -> bool 
         }
     }
     false
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-/// Find the docblock text for the function/method enclosing `diag_line`.
-///
-/// Searches backward from `diag_line` to find the nearest `function`
-/// keyword (which may be on the diagnostic line itself, e.g. on the
-/// signature, or on a preceding line when the diagnostic is inside the
-/// body or in the docblock above).  Then looks for a preceding
-/// `/** ... */` block.  Returns the raw docblock text (from `/**` to
-/// `*/` inclusive) if found, or an empty string if no docblock exists.
-fn enclosing_docblock_text(content: &str, diag_line: usize) -> String {
-    use crate::util::{contains_function_keyword, strip_trailing_modifiers};
-
-    let lines: Vec<&str> = content.lines().collect();
-    if diag_line >= lines.len() {
-        return String::new();
-    }
-
-    // Scan backward from `diag_line` looking for a line that contains
-    // the `function` keyword.  This handles three cases:
-    //   1. Diagnostic inside the function body → walks up to the
-    //      signature line.
-    //   2. Diagnostic on the signature line → matches immediately.
-    //   3. Diagnostic on the docblock above → walks down would be
-    //      needed, but PHPStan diagnostics land on the signature or
-    //      body, not the docblock lines.  If we reach the docblock
-    //      line we still need to find the function below it.  As a
-    //      pragmatic fallback we also scan forward a few lines.
-    let mut func_line: Option<usize> = None;
-    for idx in (0..=diag_line).rev() {
-        if contains_function_keyword(lines[idx]) {
-            func_line = Some(idx);
-            break;
-        }
-    }
-
-    // Fallback: if the diagnostic is on a docblock line above the
-    // function, scan forward a few lines to find the signature.
-    if func_line.is_none() {
-        let start = diag_line + 1;
-        let limit = (diag_line + 10).min(lines.len());
-        for (i, line) in lines[start..limit].iter().enumerate() {
-            if contains_function_keyword(line) {
-                func_line = Some(start + i);
-                break;
-            }
-        }
-    }
-
-    let func_line = match func_line {
-        Some(l) => l,
-        None => return String::new(),
-    };
-
-    // Compute the byte offset of the `function` keyword on that line.
-    let line_byte_start: usize = lines.iter().take(func_line).map(|l| l.len() + 1).sum();
-    let func_kw_rel = match lines[func_line].find("function") {
-        Some(p) => p,
-        None => return String::new(),
-    };
-    let func_kw_pos = line_byte_start + func_kw_rel;
-
-    // Look for a `/** ... */` block before the function keyword
-    // (skipping modifiers and whitespace).
-    let before_func = &content[..func_kw_pos];
-    let trimmed = before_func.trim_end();
-
-    let after_mods = strip_trailing_modifiers(trimmed);
-    if after_mods.ends_with("*/")
-        && let Some(open) = after_mods.rfind("/**")
-    {
-        return after_mods[open..].to_string();
-    }
-
-    String::new()
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-/// Check whether `scope` (typically a single docblock) contains
-/// `@throws <short_name>` (case-insensitive).
-fn scope_has_throws_tag(scope: &str, short_name: &str) -> bool {
-    let lower = short_name.to_lowercase();
-    crate::docblock::extract_throws_tags(scope)
-        .iter()
-        .any(|ty| {
-            ty.base_name()
-                .map(crate::util::short_name)
-                .is_some_and(|s| s.eq_ignore_ascii_case(&lower))
-        })
 }
 
 #[cfg(test)]
@@ -782,60 +651,6 @@ mod tests {
         assert!(
             !is_stale_phpstan_diagnostic(&baz_diag, content),
             "baz()'s throws.unusedType should NOT be stale via heuristic"
-        );
-    }
-
-    #[test]
-    fn enclosing_docblock_text_finds_correct_docblock() {
-        let content = concat!(
-            "<?php\nclass Foo {\n",
-            "    /**\n",
-            "     * @throws BarException\n",
-            "     */\n",
-            "    public function bar(): void {\n",
-            "        // line 6\n",
-            "    }\n",
-            "    /**\n",
-            "     * @throws BazException\n",
-            "     */\n",
-            "    public function baz(): void {\n",
-            "        // line 12\n",
-            "    }\n",
-            "}\n",
-        );
-        let bar_doc = enclosing_docblock_text(content, 6);
-        assert!(
-            bar_doc.contains("BarException"),
-            "bar()'s docblock should mention BarException, got: {}",
-            bar_doc
-        );
-        assert!(
-            !bar_doc.contains("BazException"),
-            "bar()'s docblock should NOT mention BazException, got: {}",
-            bar_doc
-        );
-
-        let baz_doc = enclosing_docblock_text(content, 12);
-        assert!(
-            baz_doc.contains("BazException"),
-            "baz()'s docblock should mention BazException, got: {}",
-            baz_doc
-        );
-        assert!(
-            !baz_doc.contains("BarException"),
-            "baz()'s docblock should NOT mention BarException, got: {}",
-            baz_doc
-        );
-    }
-
-    #[test]
-    fn enclosing_docblock_text_returns_empty_when_no_docblock() {
-        let content = "<?php\nfunction foo(): void {\n    // line 2\n}\n";
-        let doc = enclosing_docblock_text(content, 2);
-        assert!(
-            doc.is_empty(),
-            "should return empty when no docblock exists, got: {}",
-            doc
         );
     }
 }

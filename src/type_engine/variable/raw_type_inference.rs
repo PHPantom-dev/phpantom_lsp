@@ -1,19 +1,20 @@
-/// Array literal inference and array function helpers.
-///
-/// These are utility helpers that support the forward-walking variable
-/// resolver in [`super::forward_walk`] and the foreach/destructuring
-/// resolution module.
+//! Array literal inference and array function helpers.
+//!
+//! These are utility helpers that support the forward-walking variable
+//! resolver in [`super::forward_walk`] and the foreach/destructuring
+//! resolution module.
+
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::array_func_rules::{ArrayFuncArgs, array_func_element_type, array_func_raw_type};
 
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
-use crate::docblock;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 
 use crate::type_engine::resolver::VarResolutionCtx;
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::ResolvedType;
 
 /// Infer the raw PHPStan-style type for an array literal (`[…]` or
@@ -532,17 +533,13 @@ fn infer_element_type<'b>(
         // ── Object instantiation ──
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {
-                let name = bytes_to_str(ident.value()).to_string();
-                let fqn = crate::util::resolve_source_class_name(
-                    &name,
-                    ctx.current_class.file_namespace.as_deref(),
-                    ctx.all_classes,
-                    ctx.class_loader,
-                );
+                let fqn = ctx
+                    .written_names()
+                    .resolve_class(bytes_to_str(ident.value()));
                 Some(PhpType::named(atom(&fqn)))
             }
-            Expression::Self_(_) => Some(PhpType::named(atom(ctx.current_class.name.as_ref()))),
-            Expression::Static(_) => Some(PhpType::named(atom(ctx.current_class.name.as_ref()))),
+            Expression::Self_(_) => Some(PhpType::named(ctx.current_class.fqn())),
+            Expression::Static(_) => Some(PhpType::named(ctx.current_class.fqn())),
             _ => None,
         },
         Expression::Call(_) => {
@@ -584,19 +581,11 @@ fn infer_element_type<'b>(
             if let Some(t) = scope_type {
                 return Some(t);
             }
-            // A `@var`/`@param` annotation read straight out of the source
-            // (e.g. `@var list<User> $items`), for a variable nothing above
-            // could type.
-            let annotated = || {
-                docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
-                    .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
-            };
             // Inside the forward walker the scope above was the only
-            // narrowing-aware answer on offer: running the full pipeline
-            // here would walk the enclosing body all over again.  The
-            // annotation is what is left.
+            // answer on offer: running the full pipeline here would walk the
+            // enclosing body all over again.
             if ctx.scope_var_resolver.is_some() {
-                return annotated();
+                return None;
             }
             // Outside the walker the full pipeline (parameter type hints,
             // `@param`/`@var` docblocks, assignments, foreach bindings)
@@ -608,19 +597,12 @@ fn infer_element_type<'b>(
             let current_class = ctx
                 .all_classes
                 .iter()
-                .find(|c| c.name == ctx.current_class.name)
+                .find(|c| c.fqn() == ctx.current_class.fqn())
                 .map(|c| c.as_ref());
-            crate::type_engine::variable::resolution::resolve_variable_php_type(
-                &var_text,
-                ctx.content,
-                offset as u32,
+            crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
                 current_class,
-                ctx.all_classes,
-                ctx.class_loader,
-                ctx.backend,
-                ctx.loaders,
-            )
-            .or_else(annotated)
+                ..ctx.var_query(&var_text, offset as u32)
+            })
         }
         // ── Parenthesized ──
         Expression::Parenthesized(p) => infer_element_type(p.expression, ctx),
@@ -668,8 +650,9 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
         // class (`Support\Pen` behind a `use App\Support;`), and it is
         // compared against types that arrived fully qualified, so the
         // spelling is canonicalised on the way out.
-        let qualify = |ty: PhpType| crate::util::resolve_php_type_names(&ty, self.ctx.class_loader);
-        match super::resolution::nth_arg_expr(self.args, index)? {
+        let qualify = |ty: PhpType| self.ctx.written_names().resolve_hint(&ty);
+        let expr = super::resolution::nth_arg_expr(self.args, index)?;
+        match expr {
             Expression::Closure(closure) => closure
                 .return_type_hint
                 .as_ref()
@@ -689,14 +672,8 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
             // `array_map(Row::fromCache(...), $rows)` hands over the method
             // itself, so its declared return is what each element becomes.
             Expression::PartialApplication(pa) => {
-                let span = pa.span();
-                let text = self
-                    .ctx
-                    .content
-                    .get(span.start.offset as usize..span.end.offset as usize)?;
-                crate::completion::source::helpers::resolve_first_class_callable_return_type(
-                    text,
-                    &self.ctx.as_resolution_ctx(),
+                crate::type_engine::variable::rhs_resolution::first_class_callable_return_type(
+                    pa, expr, self.ctx,
                 )
             }
             _ => None,
@@ -730,6 +707,7 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
             param_index,
             subject,
             Some(&self.ctx.class_loader),
+            &self.ctx.written_names(),
         )
     }
 
@@ -793,7 +771,7 @@ pub(in crate::type_engine) fn resolve_string_func_literal_type(
 ///
 /// Returns one `String` per argument by walking the AST nodes and
 /// extracting their spans. This avoids serialising the argument list
-/// to a flat string and then re-splitting with `split_text_args`.
+/// to a flat string and then re-splitting with `split_top_level_commas`.
 pub(in crate::type_engine) fn extract_arg_texts_from_ast(
     argument_list: &mago_syntax::cst::ArgumentList<'_>,
     content: &str,
@@ -882,7 +860,7 @@ fn infer_callback_return_type(
     // on that class with no instantiation to substitute from.
     let seed_member = |ty: &PhpType| -> ResolvedType {
         match ty.base_name().and_then(|name| (ctx.class_loader)(name)) {
-            Some(cls) => ResolvedType::from_both(ty.clone(), (*cls).clone()),
+            Some(cls) => ResolvedType::from_both_arc(ty.clone(), cls),
             None => ResolvedType::from_type_string(ty.clone()),
         }
     };
@@ -927,6 +905,7 @@ fn infer_callback_return_type(
     // Create a synthetic context with the scope resolver.
     let body_offset = body_expr.span().start.offset;
     let infer_ctx = VarResolutionCtx {
+        source_imports: ctx.source_imports,
         backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
@@ -938,6 +917,7 @@ fn infer_callback_return_type(
             ctx.content,
             body_offset,
             ctx.class_loader,
+            ctx.source_class_loader,
         )
     };
 

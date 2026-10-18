@@ -17,7 +17,8 @@ use crate::atom::bytes_to_str;
 use crate::document_links::normalize_path;
 use crate::util::strip_fqn_prefix;
 
-use super::helpers::{extract_string_literal, walk_all_php_expressions, walk_program_expressions};
+use super::expr_walker::{walk_all_php_expressions, walk_program_expressions};
+use super::helpers::extract_string_literal;
 
 /// Every path helper, with the project-root-relative directory it anchors its
 /// argument to.  `lang_path` carries the modern directory here; the one case

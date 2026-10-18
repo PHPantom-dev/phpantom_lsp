@@ -1,3 +1,4 @@
+use mago_span::HasSpan;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
 
 use super::*;
@@ -19,6 +20,35 @@ pub(super) fn expr_to_subject_text(expr: &Expression<'_>) -> String {
     expr_to_subject_expr(expr)
         .map(|se| se.to_subject_text())
         .unwrap_or_default()
+}
+
+/// The [`SubjectText`] of a member access whose subject is `expr`.
+pub(super) fn subject_text_of(expr: &Expression<'_>, content: &str) -> SubjectText {
+    let span = expr.span();
+    SubjectText::new(
+        expr_to_subject_text(expr),
+        span.start.offset,
+        span.end.offset,
+        content,
+    )
+}
+
+/// Render the callee of a function-call expression (`callee(…)`) as the
+/// call expression [`CallSite::call_expression`] stores.
+///
+/// That format reads `base->name` and `Class::name` as method calls, but a
+/// function call's callee is a *value* being invoked: `($this->onClose)()`
+/// calls the closure the property holds, not a method named `onClose`.  A
+/// callee that reads a member therefore keeps its parentheses, which is how
+/// the callable resolver tells an invoked value apart from a method name.
+pub(super) fn invoked_callee_text(callee: &Expression<'_>) -> String {
+    match expr_to_subject_expr(callee) {
+        Some(value @ (SubjectExpr::PropertyChain { .. } | SubjectExpr::StaticAccess { .. })) => {
+            format!("({})", value.to_subject_text())
+        }
+        Some(other) => other.to_subject_text(),
+        None => String::new(),
+    }
 }
 
 /// One link of a receiver spine: `->property` or `->method(args)`.
@@ -371,11 +401,8 @@ pub(super) fn format_arg_expr(expr: &Expression<'_>) -> String {
     match expr {
         // Foo::class
         Expression::Access(Access::ClassConstant(cca)) => {
-            if let ClassLikeConstantSelector::Identifier(ident) = &cca.constant
-                && ident.value == b"class"
-            {
-                let class_text = expr_to_subject_text(cca.class);
-                return format!("{}::class", class_text);
+            if crate::parser::is_class_fetch(cca) {
+                return format!("{}::class", expr_to_subject_text(cca.class));
             }
             "...".to_string()
         }

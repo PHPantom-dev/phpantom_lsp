@@ -32,7 +32,6 @@ use tower_lsp::lsp_types::Location;
 
 use crate::Backend;
 use crate::atom::Atom;
-use crate::class_lookup::find_class_at_offset;
 
 mod cache;
 
@@ -307,14 +306,7 @@ impl Backend {
     }
 
     fn declaration_still_at(&self, item: &PendingCount) -> bool {
-        let classes = {
-            let index = self.symbols.uri_classes_index.read();
-            match index.get(item.uri.as_ref()) {
-                Some(classes) => classes.clone(),
-                None => return false,
-            }
-        };
-        find_class_at_offset(&classes, item.offset)
+        self.class_at_offset(&item.uri, item.offset)
             .is_some_and(|class| class.fqn() == item.class_fqn)
     }
 

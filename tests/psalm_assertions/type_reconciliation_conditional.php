@@ -341,7 +341,7 @@ namespace PsalmTest_type_reconciliation_conditional_24 {
 
 // Test: short_circuited_conditional_test
 namespace PsalmTest_type_reconciliation_conditional_25 {
-    /** @var ?stdClass $existing */
+    /** @var ?\stdClass $existing */
     $existing = null;
 
     /** @var bool $foo */
