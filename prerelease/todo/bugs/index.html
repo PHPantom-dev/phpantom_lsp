@@ -954,17 +954,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b616-phpstan-quick-fixes-write-n-line-endings-into-rn-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B616. PHPStan quick fixes write <code>\n</code> line endings into <code>\r\n</code> files
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -991,6 +980,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B633. Diagnostics forget top-level variables at a braced <code>namespace</code> block
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b634-edits-outside-the-phpstan-quick-fixes-write-n-line-endings-into-rn-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B634. Edits outside the PHPStan quick fixes write <code>\n</code> line endings into <code>\r\n</code> files
       </span>
     </span>
   </a>
@@ -1594,17 +1594,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b616-phpstan-quick-fixes-write-n-line-endings-into-rn-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B616. PHPStan quick fixes write <code>\n</code> line endings into <code>\r\n</code> files
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1631,6 +1620,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B633. Diagnostics forget top-level variables at a braced <code>namespace</code> block
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b634-edits-outside-the-phpstan-quick-fixes-write-n-line-endings-into-rn-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B634. Edits outside the PHPStan quick fixes write <code>\n</code> line endings into <code>\r\n</code> files
       </span>
     </span>
   </a>
@@ -1705,18 +1705,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b616-phpstan-quick-fixes-write-n-line-endings-into-rn-files">B616. PHPStan quick fixes write <code>\n</code> line endings into <code>\r\n</code> files<a class="headerlink" href="#b616-phpstan-quick-fixes-write-n-line-endings-into-rn-files" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>In a file saved with <code>\r\n</code> line endings, the text a PHPStan quick fix
-inserts (an <code>#[Override]</code> line, an <code>@throws</code> or <code>@return</code> tag, a whole new
-docblock) ends its lines with <code>\n</code>, and a docblock the fix rewrites comes
-back with all of its lines ending in <code>\n</code>. The file is left with mixed line
-endings. <code>sort_use_statements</code> and <code>insert_translation_key</code> already use the
-file's own terminator (<code>content.contains("\r\n")</code>, each with its own copy
-of the check); the actions in <code>code_actions/phpstan/</code> and the shared edits
-in <code>code_actions/docblock_edit.rs</code> write a literal <code>\n</code>. One
-<code>line_ending(content)</code> helper in <code>text_position.rs</code> would serve all of
-them.</p>
 <h3 id="b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type">B618. "Update return type" on a closure writes the enclosing method's type<a class="headerlink" href="#b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">public function run(): array {</span>
@@ -1786,6 +1774,24 @@ is untyped in the next and nothing checks the members, arguments or types
 it is used with there. Carry the top-level scope from block to block,
 switching only the loaders and imports, as the recursion's <code>block_ctx</code>
 already does.</p>
+<h3 id="b634-edits-outside-the-phpstan-quick-fixes-write-n-line-endings-into-rn-files">B634. Edits outside the PHPStan quick fixes write <code>\n</code> line endings into <code>\r\n</code> files<a class="headerlink" href="#b634-edits-outside-the-phpstan-quick-fixes-write-n-line-endings-into-rn-files" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>In a file saved with <code>\r\n</code> line endings, most edits other than the PHPStan
+quick fixes end the lines they add with <code>\n</code>: the <code>use</code> line an import adds
+(from completion, "Import class", or the <code>use Override;</code> of "Add
+<code>#[Override]</code>"), a generated constructor, getter, setter or property hook,
+implemented methods, an extracted function, constant or interface, "Update
+docblock", the docblock generated on <code>/**</code>, and an override completion,
+among others. The file is left with mixed line endings. Each builder writes a literal
+<code>\n</code> (<code>build_constructor</code> in <code>generate_constructor.rs</code>,
+<code>extract_function/codegen.rs</code>, <code>update_docblock/rewrite.rs</code>, …) where it
+should write <code>line_ending(content)</code> from <code>text_position.rs</code>, as the PHPStan
+quick fixes and <code>sort_use_statements</code> do. Imports need the terminator
+carried in: <code>UseBlockInfo::import_text</code> (<code>completion/use_edit.rs</code>) and the
+template's <code>@use</code> writer (<code>blade/use_block.rs</code>) build their line without
+the file's content, so <code>analyze_use_block_in</code> and
+<code>analyze_template_use_block</code> would record it in the <code>UseBlockInfo</code>, and
+<code>drop_repeated_separator</code> would strip that terminator instead of <code>\n</code>.</p>
 
 
 
