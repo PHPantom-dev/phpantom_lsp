@@ -1857,8 +1857,8 @@ and <code>is_balanced</code> (<code>types/const_fold.rs</code>), the <code>find(
 pair in <code>call_resolution/template_binding.rs:545-547</code> (wrong for
 <code>new W($a)-&gt;m()</code>), the paren and bracket scanners in <code>subject_expr.rs</code>
 (680-701, 760-825, 901, 959, 985-1053), and <code>resolve_literal_type</code>
-(<code>call_resolution/return_types.rs:1420-1476</code>), which types <code>'a' === 'b'</code>
-as <code>string</code> from its first and last character. Move them onto
+(<code>call_resolution/return_types/literals.rs:169-225</code>), which types
+<code>'a' === 'b'</code> as <code>string</code> from its first and last character. Move them onto
 <code>text_scan</code> (<code>scan_top_level</code>, <code>find_matching_forward</code>,
 <code>split_top_level_commas</code>).</p>
 <h2 id="16-rebuild-throws-analysis-on-the-ast-and-the-shared-resolver">16. Rebuild throws analysis on the AST and the shared resolver<a class="headerlink" href="#16-rebuild-throws-analysis-on-the-ast-and-the-shared-resolver" title="Permanent link">&para;</a></h2>
@@ -1894,90 +1894,8 @@ spans, and delete the line scanners (<code>is_modifier_line</code>,
 <code>#[allow(clippy::too_many_arguments)]</code>, and about 20 callers spell them
 out. They are a <code>VarResolutionCtx</code>'s inputs. Take the context (or a
 <code>FileLoaders</code> plus name and offset) and drop the three allows.</p>
-<h2 id="23-split-the-parsers-class-extraction">23. Split the parser's class extraction<a class="headerlink" href="#23-split-the-parsers-class-extraction" title="Permanent link">&para;</a></h2>
+<h2 id="26-split-the-large-blade-call-site-inference-file">26. Split the large Blade call-site inference file<a class="headerlink" href="#26-split-the-large-blade-call-site-inference-file" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>src/parser/classes.rs</code> (1,717 production lines) is two functions:
-  <code>extract_classes_from_statements</code> (300-909, 610 lines) and
-  <code>extract_class_like_members</code> (920-1683, 764 lines). Make it a directory
-  and give each member kind (methods, properties, constants, enum cases,
-  trait uses and adaptations) and each class-like kind its own function.</li>
-<li><code>src/parser/mod.rs</code> (725 lines): move parameter and property extraction
-  (<code>extract_hint_type</code> through <code>extract_property_info</code>, 89-420) into
-  <code>parser/params.rs</code>, leaving the <code>parse_php*</code> entry points.</li>
-</ul>
-<h2 id="24-split-the-call-resolution-and-conditional-type-files">24. Split the call-resolution and conditional-type files<a class="headerlink" href="#24-split-the-call-resolution-and-conditional-type-files" title="Permanent link">&para;</a></h2>
-<ul>
-<li><code>src/type_engine/call_resolution/template_subs.rs</code> (1,698): move the
-  closure-body return inference (<code>try_closure_return_type_for_template</code>,
-  <code>infer_closure_return_type*</code>, <code>resolve_closure_body_type</code>,
-  <code>walk_closure_body_locals</code>; 109-187, 422-784) into <code>closure_returns.rs</code>
-  and the argument-text typing (<code>resolve_arg_text_to_type</code>,
-  <code>array_literal_element_type</code>, <code>array_literal_shape_type*</code>; 205-412,
-  977-1123) into <code>arg_text_types.rs</code>.</li>
-<li><code>src/type_engine/types/conditional.rs</code> (1,642): move the <code>TextArgs</code>
-  impl (218-729; <code>resolve</code> is 285 lines, <code>class_string_condition</code> 218)
-  into <code>conditional/text_args.rs</code> and the no-argument path
-  (<code>resolve_conditional_without_args*</code>, <code>try_resolve_with_template_default</code>,
-  <code>ThisContext</code>; 1316-1595) into <code>conditional/without_args.rs</code>.</li>
-<li><code>src/type_engine/call_resolution/return_types.rs</code> (1,477): move
-  class-constant and static-access typing (1019-1270) into
-  <code>return_types/class_constants.rs</code> and keyword, literal and operator
-  typing (1275-1476) into <code>return_types/literals.rs</code>. In <code>call_arms.rs</code>,
-  move the Laravel special cases at the top of
-  <code>return_types_of_function_call</code> (432-487: the container string binding,
-  <code>now()</code>/<code>today()</code>, <code>view()</code>) into <code>return_types/laravel.rs</code>.</li>
-<li><code>src/type_engine/types/resolution.rs</code> (951): move type-alias expansion
-  (<code>resolve_type_alias_typed</code> through <code>expand_aliases_in_source</code>, 645-950)
-  into <code>types/type_aliases.rs</code>.</li>
-<li><code>src/class_lookup.rs</code> (1,025) does two jobs, as its own doc says: lookup
-  (27-329) and subtyping (339-1024, with the 383-line
-  <code>is_subtype_of_typed</code>). Move the subtype checks and the constant
-  shape-key evaluation into a module of their own.</li>
-</ul>
-<h2 id="25-split-the-narrowing-and-forward-walk-files">25. Split the narrowing and forward-walk files<a class="headerlink" href="#25-split-the-narrowing-and-forward-walk-files" title="Permanent link">&para;</a></h2>
-<ul>
-<li><code>src/type_engine/types/narrowing/guards.rs</code> (1,385): move
-  statement-exit analysis (<code>statements_unconditionally_exit</code>,
-  <code>statement_leaves_block</code>, <code>contains_entry_label</code>, <code>ExitCtx</code>,
-  <code>ReceiverGuard</code>, the never-call detection; 181-540) into
-  <code>narrowing/exits.rs</code>.</li>
-<li><code>src/type_engine/types/narrowing/assertions.rs</code> (1,220): move
-  conditional-return narrowing (<code>CallReturnInfo</code> through
-  <code>can_hold_a_bool</code>, 967-1219) into <code>narrowing/conditional_returns.rs</code>.</li>
-<li><code>src/type_engine/variable/forward_walk/by_ref.rs</code> (1,268): move
-  <code>extract()</code> handling (529-785) and the built-in by-reference seeding
-  (the 237-line <code>seed_pass_by_ref_primitives</code> and the <code>preg_*</code> helpers;
-  922-1238) into <code>by_ref_builtins.rs</code>.</li>
-<li><code>src/type_engine/variable/forward_walk/assignment.rs</code> (1,253): the
-  walker's statement dispatcher (<code>process_statement</code>,
-  <code>process_echoed_expression</code>, <code>process_expression_statement</code>,
-  <code>flatten_namespaced_statements</code>; 18-344) lives in the assignment file.
-  Move it to <code>forward_walk/statements.rs</code>.</li>
-<li><code>src/type_engine/variable/closure_resolution.rs</code> (1,117): move the
-  Eloquent relation-callback typing (<code>try_relation_query_override</code>
-  through <code>extract_model_from_builder</code>, 742-1085) next to the other
-  relation code, and replace the three <code>*_pub</code> wrappers (1093-1116) with
-  <code>pub(crate)</code> on the functions they forward to.</li>
-<li><code>src/type_engine/variable/rhs_resolution/property_access.rs</code>:
-  <code>resolve_rhs_property_access</code> (25-576) is one 552-line function. Split
-  it into its receiver, declared-type and narrowing phases.</li>
-</ul>
-<h2 id="26-split-the-large-laravel-and-blade-files">26. Split the large Laravel and Blade files<a class="headerlink" href="#26-split-the-large-laravel-and-blade-files" title="Permanent link">&para;</a></h2>
-<ul>
-<li><code>src/virtual_members/laravel/helpers.rs</code> (1,476) is a grab-bag, as its
-  doc lists. Move the English inflector (<code>UNINFLECTED_WORDS</code>,
-  <code>IRREGULAR_SINGULARS</code>, <code>singularize_english_word</code> and helpers; 307-840)
-  into <code>inflector.rs</code>, the expression walker (<code>walk_*</code>, <code>enclosing_body</code>,
-  <code>covers</code>; 981-1135, 1192-1475) into <code>expr_walker.rs</code>, and the route
-  group prefix helpers (214-301, 843-965) next to <code>route_names.rs</code>.</li>
-<li><code>src/virtual_members/laravel/mod.rs</code> (860): move <code>LaravelModelProvider</code>
-  (370-860, whose <code>provide</code> is 363 lines) into <code>model_provider.rs</code> and
-  split <code>provide</code> by the kind of member it adds.</li>
-<li><code>src/virtual_members/phpdoc.rs</code> (1,449): move <code>@mixin</code> collection (the
-  mixin cache 38-88, <code>MixinCollector</code>/<code>MixinDedup</code>/<code>MixinSubs</code>,
-  <code>collect_trait_mixin_members</code>, the 311-line <code>collect_mixin_members</code>,
-  forwards-calls, template-parameter mixins and the substitution maps;
-  658-1443) into <code>phpdoc/mixins.rs</code>.</li>
 <li><code>src/blade/call_site_inference.rs</code> (1,294): move the refresh and
   invalidation orchestration (<code>refresh_blade_injected_vars</code> through
   <code>view_names_for_blade_uri</code>, 516-1054) into <code>call_site_refresh.rs</code>.</li>

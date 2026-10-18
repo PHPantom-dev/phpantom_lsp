@@ -1642,7 +1642,7 @@ untyped.</p>
 <p><strong>Where to change:</strong> <code>class_expression_name</code> (<code>src/class_lookup.rs</code>) maps
 <code>Expression::Static</code> to the current class exactly like <code>Expression::Self_</code>,
 and <code>$this::</code> lands in the same place through the expression branch.
-<code>class_constant_type</code> (<code>type_engine/call_resolution/return_types.rs</code>) then
+<code>class_constant_type</code> (<code>type_engine/call_resolution/return_types/class_constants.rs</code>) then
 always prefers the initializer's value and never asks whether the class or
 the constant is final.</p>
 <p><strong>Tests to update once fixed:</strong> the <code>static::</code>/<code>$this::</code> assertions in
@@ -1828,7 +1828,7 @@ once, for whichever of the two lands first.</p>
 <code>rhs_resolution/instantiation.rs</code>, <code>call_resolution/template_binding.rs</code>,
 <code>forward_walk/mod.rs</code> (<code>resolve_in_method_body</code>, next to the existing
 whole-body pre-passes <code>seed_static_locals</code> and
-<code>try_generator_yield_inference</code>), <code>forward_walk/assignment.rs</code>
+<code>try_generator_yield_inference</code>), <code>forward_walk/statements.rs</code>
 (<code>process_expression_statement</code>, where receiver calls are already visited).</p>
 <hr />
 <h2 id="t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used">T47. A closure assigned to a variable gets no parameter types from where it is used<a class="headerlink" href="#t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used" title="Permanent link">&para;</a></h2>
