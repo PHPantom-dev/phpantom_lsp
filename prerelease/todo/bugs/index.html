@@ -956,23 +956,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b631-top-level-code-in-two-namespace-blocks-shares-one-cached-subject-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B631. Top-level code in two <code>namespace</code> blocks shares one cached subject type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1014,6 +997,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B630. An unclosed call inside a braced <code>namespace</code> block drops the block
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b633-diagnostics-forget-top-level-variables-at-a-braced-namespace-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B633. Diagnostics forget top-level variables at a braced <code>namespace</code> block
       </span>
     </span>
   </a>
@@ -1619,23 +1613,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b631-top-level-code-in-two-namespace-blocks-shares-one-cached-subject-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B631. Top-level code in two <code>namespace</code> blocks shares one cached subject type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1677,6 +1654,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B630. An unclosed call inside a braced <code>namespace</code> block drops the block
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b633-diagnostics-forget-top-level-variables-at-a-braced-namespace-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B633. Diagnostics forget top-level variables at a braced <code>namespace</code> block
       </span>
     </span>
   </a>
@@ -1765,26 +1753,7 @@ whether <code>__()</code> with a key the catalog knows is narrowed at all there.
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b631-top-level-code-in-two-namespace-blocks-shares-one-cached-subject-type">B631. Top-level code in two <code>namespace</code> blocks shares one cached subject type<a class="headerlink" href="#b631-top-level-code-in-two-namespace-blocks-shares-one-cached-subject-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">namespace</span> <span class="nx">A</span> <span class="p">{</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="k">use</span> <span class="k">function</span> <span class="nf">Lib\make</span><span class="p">;</span>   <span class="c1">// returns Lib\Widget, which has spin()</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="nx">make</span><span class="p">()</span><span class="o">-&gt;</span><span class="na">spin</span><span class="p">();</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="p">}</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="nx">make</span><span class="p">()</span><span class="o">-&gt;</span><span class="na">spin</span><span class="p">();</span>          <span class="c1">// the global make() returns Gadget: not reported</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">}</span>
-</code></pre></div>
-<p>The unknown-member pass caches each subject's type under a
-<code>SubjectCacheKey</code> (<code>diagnostics/subject_cache.rs</code>), and top-level code gets
-the same scope, <code>ScopeKey::TopLevel { fn_scope_start: 0 }</code>, in every
-<code>namespace</code> block of the file. The first block to resolve <code>make()</code> answers
-for the same text in every later block, though the name means something
-else there, and a class subject such as <code>Foo::</code> is shared the same way
-between blocks that import different <code>Foo</code>s. Key top-level code by its
-namespace block as well (the start of the <code>NamespaceSpan</code> containing the
-access).</p>
+<p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b616-phpstan-quick-fixes-write-n-line-endings-into-rn-files">B616. PHPStan quick fixes write <code>\n</code> line endings into <code>\r\n</code> files<a class="headerlink" href="#b616-phpstan-quick-fixes-write-n-line-endings-into-rn-files" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
@@ -1800,12 +1769,12 @@ in <code>code_actions/docblock_edit.rs</code> write a literal <code>\n</code>. O
 them.</p>
 <h3 id="b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type">B618. "Update return type" on a closure writes the enclosing method's type<a class="headerlink" href="#b618-update-return-type-on-a-closure-writes-the-enclosing-methods-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">public function run(): array {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    $f = function (): string {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">        return 42;   // PHPStan: Anonymous function should return string but returns int.</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    };</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    return [];</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">public function run(): array {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    $f = function (): string {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">        return 42;   // PHPStan: Anonymous function should return string but returns int.</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    };</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    return [];</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>The quick fix rewrites the closure to <code>function (): array</code> and adds a
 <code>@return array{}</code> docblock above the statement: the type it writes is the
@@ -1824,14 +1793,14 @@ from and the docblock (already <code>paren_function_docblock</code>) from that o
 node.</p>
 <h3 id="b630-an-unclosed-call-inside-a-braced-namespace-block-drops-the-block">B630. An unclosed call inside a braced <code>namespace</code> block drops the block<a class="headerlink" href="#b630-an-unclosed-call-inside-a-braced-namespace-block-drops-the-block" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">namespace</span> <span class="nx">Lib</span> <span class="p">{</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="k">function</span> <span class="nf">greet</span><span class="p">(</span><span class="nx">string</span> <span class="nv">$name</span><span class="p">)</span><span class="o">:</span> <span class="nx">void</span> <span class="p">{}</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="p">}</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">namespace</span> <span class="nx">App</span> <span class="p">{</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="k">use</span> <span class="k">function</span> <span class="nf">Lib\greet</span><span class="p">;</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="nx">greet</span><span class="p">(</span>   <span class="c1">// until the `)` is typed, this line reads as `namespace Lib`</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">namespace</span> <span class="nx">Lib</span> <span class="p">{</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="k">function</span> <span class="nf">greet</span><span class="p">(</span><span class="nx">string</span> <span class="nv">$name</span><span class="p">)</span><span class="o">:</span> <span class="nx">void</span> <span class="p">{}</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="p">}</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">namespace</span> <span class="nx">App</span> <span class="p">{</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="k">use</span> <span class="k">function</span> <span class="nf">Lib\greet</span><span class="p">;</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="nx">greet</span><span class="p">(</span>   <span class="c1">// until the `)` is typed, this line reads as `namespace Lib`</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">}</span>
 </code></pre></div>
 <p>While a call inside a braced <code>namespace App { … }</code> block is missing its
 <code>)</code>, mago's parser leaves the whole block out of <code>program.statements</code>, so
@@ -1846,6 +1815,27 @@ parser's recovery ends the argument list at the block's <code>}</code> instead o
 dropping the statement: upstream in <code>mago-syntax</code>, or by re-parsing with
 the call closed, as signature help's text fallback already does for the
 classes (<code>patch_content_for_signature</code>).</p>
+<h3 id="b633-diagnostics-forget-top-level-variables-at-a-braced-namespace-block">B633. Diagnostics forget top-level variables at a braced <code>namespace</code> block<a class="headerlink" href="#b633-diagnostics-forget-top-level-variables-at-a-braced-namespace-block" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">namespace</span> <span class="nx">A</span> <span class="p">{</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="nv">$x</span> <span class="o">=</span> <span class="k">new</span> <span class="nx">\DateTime</span><span class="p">();</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="nv">$x</span><span class="o">-&gt;</span><span class="na">nope</span><span class="p">();</span>   <span class="c1">// reported: no `nope()` on DateTime</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="p">}</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="k">namespace</span> <span class="nx">B</span> <span class="p">{</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="nv">$x</span><span class="o">-&gt;</span><span class="na">nope</span><span class="p">();</span>   <span class="c1">// not reported, though `$x` is still the DateTime</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="p">}</span>
+</code></pre></div>
+<p>PHP keeps one global variable scope across a file's <code>namespace</code> blocks, and
+hover follows it: <code>walk_body_forward</code> (<code>forward_walk/statements.rs</code>) walks
+each block's statements on the same scope, so hovering <code>$x</code> in block B shows
+<code>DateTime</code>. The diagnostic walk does not: <code>walk_top_level_statements</code>
+(<code>forward_walk/diagnostic_walk.rs</code>) recurses into each <code>Statement::Namespace</code>
+and starts it on a fresh <code>ScopeState</code>, so a variable assigned in one block
+is untyped in the next and nothing checks the members, arguments or types
+it is used with there. Carry the top-level scope from block to block,
+switching only the loaders and imports, as the recursion's <code>block_ctx</code>
+already does.</p>
 
 
 
