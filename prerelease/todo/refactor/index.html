@@ -1816,7 +1816,203 @@ feature area.    </p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<p>No outstanding items.</p>
+<h3 id="keep-a-files-state-in-one-record">Keep a file's state in one record<a class="headerlink" href="#keep-a-files-state-in-one-record" title="Permanent link">&para;</a></h3>
+<p><code>Backend</code> holds about 20 maps keyed by URI, each behind its own lock:
+<code>symbol_maps</code>, <code>parse_errors</code>, <code>file_imports</code>, <code>file_symbol_imports</code>,
+<code>resolved_names</code>, <code>file_namespaces</code>, <code>file_pest_uses</code>, the five <code>blade_*</code>
+maps, <code>typed_receiver_view_spans_cache</code>, <code>morph_column_spans_cache</code>, and
+others. They are filled in <code>apply_ast_index_updates_batch</code> and emptied by a
+separate hand-kept list in <code>clear_file_maps</code>, <code>forget_closed_file</code> and
+<code>on_did_close</code>, so nothing makes a new map show up on the removal path.
+<code>blade_publish_lock</code> exists only because three of these maps can be
+published out of step. Move the per-file data into one <code>FileState</code> struct
+in a single <code>HashMap&lt;String, Arc&lt;FileState&gt;&gt;</code>, publish it as a whole, and
+remove it in one call. Drop <code>blade_publish_lock</code> once the Blade fields are
+part of it. The doc comment on <code>clear_file_maps</code> lists 6 of the roughly 18
+maps it clears; it goes away with the change.</p>
+<p>Files: <code>src/lib.rs</code>, <code>src/parser/ast_publish.rs</code>,
+<code>src/backend/file_access.rs</code>, <code>src/backend/documents.rs</code>,
+<code>src/backend/construction.rs</code>, and the readers of each map.</p>
+<h3 id="split-backend-into-sub-structs">Split <code>Backend</code> into sub-structs<a class="headerlink" href="#split-backend-into-sub-structs" title="Permanent link">&para;</a></h3>
+<p><code>Backend</code> (<code>src/lib.rs</code>) has 87 fields. 34 are framework state (24 Laravel,
+7 Blade, 2 Pest) and 14 are <code>Arc&lt;AtomicBool&gt;</code> client capabilities that are
+written once during <code>initialize</code>. <code>clone_for_diagnostic_worker</code>
+(<code>src/backend/construction.rs</code>) copies every field by hand, and every
+blocking request goes through it. Group the fields the way <code>SymbolIndex</code>,
+<code>WorkspaceEnv</code> and <code>DiagnosticState</code> already are:</p>
+<ul>
+<li><code>ClientCaps</code>: a plain <code>Copy</code> struct set once during <code>initialize</code>.</li>
+<li><code>LaravelState</code> and <code>BladeState</code>.</li>
+<li><code>WorkspaceIndexState</code>: <code>workspace_indexed</code>, <code>workspace_index_lock</code>,
+  <code>full_index_in_progress</code>, <code>workspace_index_status</code>.</li>
+<li>A <code>GatedIndex&lt;T&gt;</code> for the index plus has-any flag (plus dirty flag) trio
+  that <code>laravel_macros</code>, <code>laravel_pivots</code> and <code>laravel_commands</code> each
+  spell out by hand.</li>
+</ul>
+<p>Then hold the shared state behind one <code>Arc</code> so a request clone is a single
+refcount bump instead of about 80, and the hand-written clone goes away.
+The fields that are snapshotted today rather than shared (<code>client_name</code>,
+parts of <code>WorkspaceEnv</code>) must stay correct; check each one's writers. Do
+this after "Keep a file's state in one record", which removes many of the
+fields.</p>
+<p>Files: <code>src/lib.rs</code>, <code>src/backend/construction.rs</code>,
+<code>src/backend/startup.rs</code>, <code>src/workspace_env.rs</code>, <code>src/backend/laravel/</code>,
+and the field accesses across <code>src/</code>.</p>
+<h3 id="set-up-every-request-the-same-way">Set up every request the same way<a class="headerlink" href="#set-up-every-request-the-same-way" title="Permanent link">&para;</a></h3>
+<p><code>with_file_content</code> (<code>src/backend/requests.rs</code>) activates the chain cache,
+the type-engine caches, the resolved-class cache and the parse cache, and
+its comment calls it the one place no handler can bypass. Three places do
+it differently:</p>
+<ul>
+<li><code>completion/handler/mod.rs</code> repeats the four guards by hand.</li>
+<li><code>code_actions/dispatch.rs</code> activates a different subset (no chain cache,
+  no resolved-class cache).</li>
+<li><code>lsp_dispatch.rs</code> (the wasm build) calls <code>resolve_definition</code> and
+  <code>handle_rename</code> directly, so those requests get none of the caches and
+  no panic guard.</li>
+</ul>
+<p><code>hover/mod.rs</code> also activates the type-engine caches a second time inside
+an already-guarded request. Extract the guards into one <code>RequestScope</code>
+value that <code>with_file_content</code> and these callers all enter.</p>
+<p>Files: <code>src/backend/requests.rs</code>, <code>src/completion/handler/mod.rs</code>,
+<code>src/code_actions/dispatch.rs</code>, <code>src/hover/mod.rs</code>, <code>src/lsp_dispatch.rs</code>.</p>
+<h3 id="one-file-context-for-the-type-engine">One file context for the type engine<a class="headerlink" href="#one-file-context-for-the-type-engine" title="Permanent link">&para;</a></h3>
+<p><code>ResolutionCtx</code>, <code>CtxLoaders</code>, <code>VarResolutionCtx</code>
+(<code>type_engine/resolver/context.rs</code>), <code>VarQuery</code>
+(<code>type_engine/variable/resolution.rs</code>) and <code>ForwardWalkCtx</code>
+(<code>forward_walk/walk_ctx.rs</code>) repeat the same fields: the content, the
+cursor offset, the current class, <code>all_classes</code>, the two class loaders, the
+source imports and the backend. They are built by hand in more than 90
+places, and the conversions between them drop state without saying so:
+<code>as_resolution_ctx</code> hard-codes <code>is_in_static_method: false</code>,
+<code>preserve_static: false</code> and <code>laravel_macro_this_resolver: None</code>. Pull the
+shared fields into one borrowed <code>FileCtx&lt;'a&gt;</code> that each context holds by
+reference, give each its own extras on top, and add constructors so call
+sites stop listing fields.</p>
+<p>Files: <code>src/type_engine/resolver/context.rs</code>,
+<code>src/type_engine/variable/resolution.rs</code>,
+<code>src/type_engine/variable/forward_walk/walk_ctx.rs</code>, and their
+construction sites (including <code>resolution_tests.rs</code>).</p>
+<h3 id="keep-the-forward-walks-control-flow-state-in-forwardwalkctx">Keep the forward walk's control-flow state in <code>ForwardWalkCtx</code><a class="headerlink" href="#keep-the-forward-walks-control-flow-state-in-forwardwalkctx" title="Permanent link">&para;</a></h3>
+<p><code>LOOP_DEPTH</code> and <code>EXIT_EDGES</code> (<code>forward_walk/loop_control.rs</code>),
+<code>RETURN_EDGES</code> (<code>forward_walk/closures.rs</code>) and <code>UNREACHABLE_RANGES</code>
+(<code>forward_walk/reachability.rs</code>) are thread-locals, although they describe
+the walk in progress. A walk's behaviour therefore depends on whatever is
+running further up the call stack, and nested walks have to save and
+restore them by hand. Move them into <code>ForwardWalkCtx</code> (stacked for the
+closure and loop frames that need it) and return the unreachable ranges
+from the walk instead of reading them from a thread-local afterwards.</p>
+<p>Files: <code>src/type_engine/variable/forward_walk/loop_control.rs</code>,
+<code>closures.rs</code>, <code>reachability.rs</code>, <code>walk_ctx.rs</code>, <code>diagnostic_walk.rs</code>,
+<code>src/diagnostics/collect.rs</code>.</p>
+<h3 id="move-is_type_compatible-into-the-type-layer-and-split-it">Move <code>is_type_compatible</code> into the type layer and split it<a class="headerlink" href="#move-is_type_compatible-into-the-type-layer-and-split-it" title="Permanent link">&para;</a></h3>
+<p><code>is_type_compatible</code> (<code>src/diagnostics/type_errors/compatibility.rs</code>) is a
+single function of about 940 lines. It is the assignability check used by
+the argument, return and property diagnostics and by Blade call-site
+inference, and it sits apart from <code>php_type::is_subtype_of</code> (about 395
+lines) and <code>class_lookup::is_subtype_of_typed</code>. It opens with a Laravel
+model-type expansion. Move it to <code>src/php_type/</code> next to <code>is_subtype_of</code>,
+split it into one function per argument type kind, and take the Laravel
+expansion as a step the caller runs before the check. Split
+<code>is_subtype_of</code> the same way while there.</p>
+<p>Files: <code>src/diagnostics/type_errors/compatibility.rs</code>,
+<code>src/php_type/subtype.rs</code>, <code>src/class_lookup/subtyping.rs</code>, and the
+callers.</p>
+<h3 id="type-call-arguments-from-the-ast-not-their-text">Type call arguments from the AST, not their text<a class="headerlink" href="#type-call-arguments-from-the-ast-not-their-text" title="Permanent link">&para;</a></h3>
+<p><code>resolve_arg_text_to_type</code> (<code>type_engine/call_resolution/arg_text_types.rs</code>),
+<code>types/conditional/text_args.rs</code> and <code>const_fold.rs</code> work out an argument's
+type from its source text, re-detecting closures, first-class callables,
+array literals and casts by scanning strings. <code>text_args: &amp;str</code> is threaded
+through <code>owner_method_call.rs</code>, <code>template_binding.rs</code> and <code>out_param.rs</code>.
+This is a second resolution path next to <code>resolve_rhs_expression</code>, and it
+pulls <code>type_engine</code> up into <code>completion::source::helpers</code> (18 calls, e.g.
+<code>extract_closure_params_from_text</code>). Pass the argument expressions instead
+and resolve them through <code>resolve_rhs_expression</code>, then delete the text
+path and the <code>completion</code> imports it needed.</p>
+<p>Files: <code>src/type_engine/call_resolution/arg_text_types.rs</code>,
+<code>src/type_engine/types/conditional/text_args.rs</code>,
+<code>src/type_engine/types/conditional/const_fold.rs</code>, and the callers that
+pass <code>text_args</code>.</p>
+<h3 id="take-laravel-out-of-the-core-class-loader">Take Laravel out of the core class loader<a class="headerlink" href="#take-laravel-out-of-the-core-class-loader" title="Permanent link">&para;</a></h3>
+<p><code>find_or_load_class</code> (<code>src/resolution/classes.rs</code>) special-cases the
+configured date class and Laravel aliases, and <code>find_or_load_class_typed</code>
+applies the auth, storage, facade-alias, macro and pivot patches on every
+call. Some of these are gated on bare short names (<code>"Guard" | "Request" |
+"Auth"</code>, <code>"FilesystemManager" | "Storage"</code>). The generic resolved-class
+cache (<code>virtual_members/cache.rs</code>) also carries <code>is_laravel</code>,
+<code>laravel_aliases</code> and <code>schema_index</code>. Add a class-refinement hook that the
+loader runs after loading, register the Laravel patches through it, and
+match on FQNs rather than short names.</p>
+<p>Files: <code>src/resolution/classes.rs</code>, <code>src/virtual_members/cache.rs</code>,
+<code>src/virtual_members/laravel/</code>, <code>src/backend/laravel/</code>.</p>
+<h3 id="make-diagnostic-collectors-share-the-pass-context">Make diagnostic collectors share the pass context<a class="headerlink" href="#make-diagnostic-collectors-share-the-pass-context" title="Permanent link">&para;</a></h3>
+<p><code>collect_slow_diagnostics_scoped</code> builds a <code>FileDiagnosticContext</code> so the
+pass reads <code>symbol_maps</code> and <code>file_context</code> once, but only about 10
+collectors take it. The rest (<code>class_case_mismatch.rs</code>, <code>argument_count.rs</code>,
+<code>laravel_string_keys.rs</code>, …) read the locks again themselves.
+<code>run_slow_collectors</code> (<code>src/diagnostics/collect.rs</code>) is about 200 lines of
+<code>step!</code> calls, unlike the declarative <code>COLLECTORS</code> table code actions use.
+Give every collector the context, list the collectors in a table, and
+replace the <code>Vec::remove</code> loop in the reachability filter with <code>retain</code>
+(it is quadratic in the number of diagnostics).</p>
+<p>Files: <code>src/diagnostics/collect.rs</code> and the collector modules under
+<code>src/diagnostics/</code>.</p>
+<h3 id="use-the-existing-helpers">Use the existing helpers<a class="headerlink" href="#use-the-existing-helpers" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>find_line_start</code> is defined three times (<code>generate_constructor.rs</code>,
+  <code>promote_constructor_param.rs</code>, <code>extract_function/naming.rs</code>). Keep one,
+  in <code>text_position.rs</code> next to <code>line_start_byte_offset</code> (which takes a
+  line index, not an offset), and use it from all three.</li>
+<li>A line's indentation is read by <code>code_actions::helpers::indent_of_line_at</code>
+  and again by <code>line_indent</code> (<code>phpstan/fix_return_type/edits.rs</code>) and
+  <code>indentation</code> (<code>insert_translation_key.rs</code>). The local copies return a
+  <code>&amp;str</code> slice where the shared one allocates a <code>String</code>; make the shared
+  one return <code>&amp;str</code> and delete the copies.</li>
+<li><code>PhpType::is_int</code> and the other keyword predicates call
+  <code>keyword_lowercase</code> (<code>php_type/keywords.rs</code>), which allocates a <code>String</code>
+  per call; use the non-allocating <code>with_ascii_lowercase</code> that the same
+  file already has.</li>
+<li><code>self.symbol_maps.read()</code> is called directly in 55 places against 16
+  uses of <code>Backend::symbol_map_for</code>, which exists to replace them. Some
+  hold the guard across real work (<code>completion/handler/mod.rs</code>,
+  <code>references/mod.rs</code>).</li>
+<li><code>Backend::resolve_to_fqn</code> (<code>definition/resolve.rs</code>) is a pass-through
+  to <code>names::resolve_to_fqn</code> "kept for API compatibility". Point its 8
+  callers at the real function and delete it.</li>
+</ul>
+<p>Files: as listed.</p>
+<h3 id="distinct-types-for-source-names-fqns-and-uris">Distinct types for source names, FQNs and URIs<a class="headerlink" href="#distinct-types-for-source-names-fqns-and-uris" title="Permanent link">&para;</a></h3>
+<p>Class loaders are all <code>dyn Fn(&amp;str) -&gt; Option&lt;Arc&lt;ClassInfo&gt;&gt;</code>, and the
+only thing that tells a name as written from a resolved FQN is a leading
+<code>\</code>, added with a <code>format!</code> in <code>load_resolved_name</code>. <code>find_or_load_class</code>
+accepts short, qualified and <code>\</code>-prefixed names alike. There are about 220
+hand-stripped leading backslashes (<code>trim_start_matches('\\')</code>,
+<code>strip_prefix('\\')</code>), <code>find_class_by_name</code> and <code>find_class_by_fqn</code>
+disagree on case sensitivity, and URIs are plain <code>&amp;str</code> in more than 500
+signatures. Introduce <code>SourceName</code>, <code>Fqn</code> and <code>Uri</code> newtypes and convert
+one subsystem at a time, starting with the class-loader closures in
+<code>src/class_lookup.rs</code> and <code>src/resolution/loaders.rs</code>. Write a short
+module doc there that says which of the roughly 20 loader entry points to
+use when. This is large; plan it as several PRs.</p>
+<p>Files: <code>src/class_lookup.rs</code>, <code>src/resolution/</code>, <code>src/util.rs</code>, then
+callers subsystem by subsystem.</p>
+<h3 id="rename-the-type-engine-modules-that-collide">Rename the type-engine modules that collide<a class="headerlink" href="#rename-the-type-engine-modules-that-collide" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>type_engine/types/</code> shares its name with <code>crate::types</code>.</li>
+<li><code>type_engine/types/narrowing/{instanceof,assertions,guards}.rs</code> (reading
+  facts out of a condition) and
+  <code>forward_walk/cond_narrowing/{instanceof,assertions,type_guards}.rs</code>
+  (applying them to the scope) have near-identical file names, and
+  <code>variable/resolution/guards.rs</code> uses "guards" for re-entry guards.</li>
+<li><code>foreach_resolution.rs</code> holds iterable element types, not the foreach
+  logic, which is in <code>forward_walk/foreach.rs</code>.</li>
+<li><code>resolver/array_access.rs</code> and <code>rhs_resolution/array_access.rs</code> both
+  resolve <code>$x[...]</code>; merge them or name them after what differs.</li>
+<li><code>subject_expr</code>, <code>subject_extraction</code> and <code>subject_resolution</code> each
+  describe themselves as the single shared entry point. Fix their module
+  docs to say how they relate.</li>
+</ul>
+<p>Files: <code>src/type_engine/</code>.</p>
 
 
 
