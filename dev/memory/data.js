@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792449483827,
+  "lastUpdate": 1792450433621,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4181,6 +4181,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 87.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "86608707c22974c0c5c74628d0003e27688859af",
+          "message": "Dead branches in Blade templates",
+          "timestamp": "2026-10-20T00:38:25+02:00",
+          "tree_id": "cb7f2a377e975116fafc9c0b25c463be03e6d0c1",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/86608707c22974c0c5c74628d0003e27688859af"
+        },
+        "date": 1792450422053,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 84.2,
             "unit": "MiB"
           }
         ]
