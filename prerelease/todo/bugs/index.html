@@ -954,17 +954,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B641. "Generate promoted constructor" orphans each property's <code>@var</code> docblock
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1605,17 +1594,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B641. "Generate promoted constructor" orphans each property's <code>@var</code> docblock
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1727,25 +1705,9 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b641-generate-promoted-constructor-orphans-each-propertys-var-docblock">B641. "Generate promoted constructor" orphans each property's <code>@var</code> docblock<a class="headerlink" href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Order {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    /** @var list&lt;Item&gt; */</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    private array $items;</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    public static int $count = 0;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">}</span>
-</code></pre></div>
-<p>The action deletes each property's declaration and re-declares it as a
-promoted parameter, but the deleted span (<code>declaration_span</code> in
-<code>generate_constructor.rs</code>, from <code>find_line_start</code> of the member) stops at
-the declaration, so the <code>/** @var list&lt;Item&gt; */</code> above it stays. It then
-documents whatever follows, here the static <code>$count</code>, whose type it now
-claims is <code>list&lt;Item&gt;</code>. "Promote constructor parameter" deletes the docblock
-with the property (<code>docblock_start_above_offset</code>,
-<code>promote_constructor_param.rs</code>); this action should too.</p>
 <h3 id="b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji">B642. Completion reads the cursor column as a character count, so it misfires after an emoji<a class="headerlink" href="#b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$label = '🎉'; $order-&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$label = '🎉'; $order-&gt;</span>
 </code></pre></div>
 <p>An LSP column counts UTF-16 code units, and a character outside the Basic
 Multilingual Plane (most emoji) is two of them. Several completion paths
@@ -1782,10 +1744,10 @@ sites) and <code>resolution/constants.rs</code> (two sites). Read bytes and deco
 them the way the scan does, and log a read failure once per file.</p>
 <h3 id="b646-an-import-used-only-by-a-access-at-the-end-of-the-file-is-reported-unused">B646. An import used only by a <code>::</code> access at the end of the file is reported unused<a class="headerlink" href="#b646-an-import-used-only-by-a-access-at-the-end-of-the-file-is-reported-unused" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">namespace</span> <span class="nx">App</span><span class="p">;</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">use</span> <span class="nx">App\Services\Mailer</span><span class="p">;</span>   <span class="c1">// reported unused until the member is typed</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nv">$mailer</span> <span class="o">=</span> <span class="nx">Mailer</span><span class="o">::</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">namespace</span> <span class="nx">App</span><span class="p">;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">use</span> <span class="nx">App\Services\Mailer</span><span class="p">;</span>   <span class="c1">// reported unused until the member is typed</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="nv">$mailer</span> <span class="o">=</span> <span class="nx">Mailer</span><span class="o">::</span>
 </code></pre></div>
 <p>The recovery reparse in <code>parser/recovery.rs</code> keeps a statement the end of
 the file cuts off when it is only missing its closers or <code>;</code>. A <code>::</code> with
