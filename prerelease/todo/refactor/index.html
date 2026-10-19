@@ -1821,13 +1821,6 @@ read against the Sprint 8 tasks. The first group blocks a Sprint 8
 task; the second is accumulated friction found on the way. Bugs the
 sweep found are filed in <code>bugs.md</code> (B642 to B645), not here.</p>
 <h2 id="blocks-a-sprint-8-task">Blocks a Sprint 8 task<a class="headerlink" href="#blocks-a-sprint-8-task" title="Permanent link">&para;</a></h2>
-<h3 id="share-the-phpstorm-stubs-map-parser-between-buildrs-and-the-server">Share the phpstorm-stubs map parser between <code>build.rs</code> and the server<a class="headerlink" href="#share-the-phpstorm-stubs-map-parser-between-buildrs-and-the-server" title="Permanent link">&para;</a></h3>
-<p>E1 has to parse <code>PhpStormStubsMap.php</code> at runtime, and the parser
-(<code>parse_section</code>, <code>parse_map_entry</code>, <code>php_unescape_single_quoted</code>) only
-exists inside <code>build.rs</code>. Move those three functions into a new
-<code>src/stub_map.rs</code> that <code>build.rs</code> pulls in with <code>#[path = "src/stub_map.rs"] mod stub_map;</code>
-and the crate declares in <code>src/lib.rs</code>, so both sides use one copy.</p>
-<p>Files: <code>build.rs</code>, <code>src/stub_map.rs</code> (new), <code>src/lib.rs</code>.</p>
 <h3 id="split-srcconfigrs">Split <code>src/config.rs</code><a class="headerlink" href="#split-srcconfigrs" title="Permanent link">&para;</a></h3>
 <p>2048 lines: about 1000 of config types and loading, plus a 1042-line
 inline test module. X17 adds <code>extra_roots</code> to <code>ClientIndexingOptions</code>,
@@ -1870,15 +1863,6 @@ calls <code>Url::parse</code>, <code>Url::from_file_path</code>, <code>Url::from
 are missing to <code>src/util.rs</code> and send every site through them, so F20
 changes one module instead of ninety.</p>
 <p>Files: <code>src/util.rs</code> plus the call sites (<code>grep -rnE 'Url::(parse|from_file_path|from_directory_path)|\.to_file_path\(\)' src</code>).</p>
-<h3 id="extract-the-progress-reporting-request-wrapper-in-srcserverrs">Extract the progress-reporting request wrapper in <code>src/server.rs</code><a class="headerlink" href="#extract-the-progress-reporting-request-wrapper-in-srcserverrs" title="Permanent link">&para;</a></h3>
-<p><code>goto_implementation</code>, <code>references</code> and <code>subtypes</code> each repeat the same
-~30 lines: take or create a work-done token, <code>progress_begin</code>, attach a
-<code>ScanProgress</code> poller to a blocking clone, run the request in
-<code>run_blocking_cancel_safe</code>, finish the poller, <code>progress_end</code>. F20
-rewrites every handler signature in this file. Add one
-<code>run_with_progress(name, title, message, token, f)</code> helper next to
-<code>run_position_request</code> and use it in all three.</p>
-<p>Files: <code>src/server.rs</code>, <code>src/progress.rs</code>.</p>
 <h3 id="make-the-code-action-collector-list-declarative">Make the code-action collector list declarative<a class="headerlink" href="#make-the-code-action-collector-list-declarative" title="Permanent link">&para;</a></h3>
 <p><code>handle_code_action</code> (<code>src/code_actions/mod.rs</code>) calls 30 collectors
 one after another by hand. BL1 needs a per-collector policy for
@@ -1939,18 +1923,6 @@ edit, about 20 lines each: <code>fix_phpdoc_type.rs</code>, <code>fix_prefixed_c
 <code>src/code_actions/docblock_edit.rs</code> and route all of them through it.
 Taking <code>eol</code> there is most of B634 for these actions.</p>
 <p>Files: those under <code>src/code_actions/</code>.</p>
-<h3 id="use-the-existing-text-utilities">Use the existing text utilities<a class="headerlink" href="#use-the-existing-text-utilities" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>src/code_actions/phpstan/remove_assert.rs</code> re-implements paren
-  matching in about 45 lines, without skipping comments; use
-  <code>text_scan::find_matching_forward</code>.</li>
-<li><code>rsplit('\\').next()</code> in place of <code>util::short_name</code>:
-  <code>code_actions/extract_function/naming.rs</code> (four),
-  <code>code_actions/extract_variable.rs</code>, <code>diagnostics/use_statements.rs</code>,
-  <code>diagnostics/existence_guards.rs</code>, <code>diagnostics/type_errors/arguments.rs</code>.</li>
-<li>A hand-stripped leading <code>\</code> in place of <code>util::strip_fqn_prefix</code>:
-  <code>code_actions/phpstan/remove_throws.rs</code>, <code>add_throws.rs</code>.</li>
-</ul>
 <h3 id="replace-hand-built-lsp-params-in-the-integration-tests">Replace hand-built LSP params in the integration tests<a class="headerlink" href="#replace-hand-built-lsp-params-in-the-integration-tests" title="Permanent link">&para;</a></h3>
 <p><code>tests/integration/</code> builds <code>DidOpenTextDocumentParams { … }</code> by hand
 1445 times across 77 files and <code>TextDocumentPositionParams { … }</code> 1459
@@ -1993,12 +1965,6 @@ rewrite.</p>
   then swap the index in.</li>
 </ul>
 <p>Files: as listed.</p>
-<h3 id="evict-one-file-from-morph_column_spans_cache-not-all-of-it">Evict one file from <code>morph_column_spans_cache</code>, not all of it<a class="headerlink" href="#evict-one-file-from-morph_column_spans_cache-not-all-of-it" title="Permanent link">&para;</a></h3>
-<p><code>clear_file_maps</code> (<code>src/backend/file_access.rs</code>) clears the whole
-<code>morph_column_spans_cache</code> whenever any file is closed or removed.
-Remove only that URI's entry, unless an entry depends on other files, in
-which case document why the whole cache goes.</p>
-<p>Files: <code>src/backend/file_access.rs</code>.</p>
 <h3 id="measure-the-parse-and-copy-costs-the-sweep-found">Measure the parse and copy costs the sweep found<a class="headerlink" href="#measure-the-parse-and-copy-costs-the-sweep-found" title="Permanent link">&para;</a></h3>
 <p>None of these has been measured, so check each against the performance
 bar before doing it, and file the ones that clear it in
@@ -2023,10 +1989,6 @@ bar before doing it, and file the ones that clear it in
   frees, so every partial identifier interned mid-edit stays for the
   session.</li>
 </ul>
-<p>Two are trivial and need no measurement: <code>diagnostics/collect.rs</code> should
-use <code>with_parse_cache_arc</code> instead of copying the content, and the
-cross-file parse cache (<code>parser/parse_cache.rs</code>) should move an entry to
-the back on a hit so it behaves as an LRU.</p>
 <h3 id="split-the-largest-laravel-modules">Split the largest Laravel modules<a class="headerlink" href="#split-the-largest-laravel-modules" title="Permanent link">&para;</a></h3>
 <p>Not touched by Sprint 8, but each does several jobs:
 <code>virtual_members/laravel/database_schema.rs</code> (1826 lines of code: file
