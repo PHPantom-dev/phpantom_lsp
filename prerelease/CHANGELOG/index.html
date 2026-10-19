@@ -5136,6 +5136,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Monorepo subprojects are indexed like standalone projects.</strong> In a workspace without a root <code>composer.json</code>, each subproject's local path-repository modules now resolve, its vendor classes rank below project code in completion, and a <code>composer update</code> in it is picked up without a restart.</li>
 <li><strong>Warnings for files PHPantom could not read.</strong> A <code>composer.json</code> with a syntax error, a <code>.phpantom.toml</code> edit that no longer parses, a broken phar, and a Laravel schema dump or migration that fails to load are now reported in the PHPantom output log instead of being silently skipped.</li>
 <li><strong><code>@phpstan-ignore</code> reasons with commas.</strong> Adding an identifier to an ignore comment, or removing one from it, keeps each reason with its own identifier, even when the reason contains commas or parentheses.</li>
 <li><strong>Edits and jumps after non-ASCII text.</strong> "Remove assert" and go-to-definition on an object shape key no longer land too far right on a line with non-ASCII characters before them, and go-to-definition on a shape whose keys contain them no longer fails.</li>
