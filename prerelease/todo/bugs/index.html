@@ -917,23 +917,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Blade">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b649-a-templates-diagnostics-are-filtered-against-the-wrong-ranges" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B649. A template's diagnostics are filtered against the wrong ranges
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1552,23 +1535,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Blade">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b649-a-templates-diagnostics-are-filtered-against-the-wrong-ranges" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B649. A template's diagnostics are filtered against the wrong ranges
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1689,26 +1655,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
-<h3 id="b649-a-templates-diagnostics-are-filtered-against-the-wrong-ranges">B649. A template's diagnostics are filtered against the wrong ranges<a class="headerlink" href="#b649-a-templates-diagnostics-are-filtered-against-the-wrong-ranges" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>@php($user = null)
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>@if (false)
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    {{ $user-&gt;name }}   {{-- still reported, though this branch never runs --}}
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>@endif
-</code></pre></div>
-<p>After the slow collectors run, <code>collect_slow_diagnostics_scoped</code>
-(<code>diagnostics/collect.rs</code>) drops every diagnostic that starts inside a
-branch the forward walk found unreachable. The unreachable ranges are
-converted with the free <code>offset_range_to_lsp_range</code>, which stays in the
-coordinates of the PHP the template lowers to, while the collectors built
-their diagnostics with <code>Backend::offset_range_to_lsp_range</code>, which maps them
-back into the template. The two sets of positions are compared directly, so
-in a template the filter keeps diagnostics from dead branches and can drop
-live ones that happen to line up. Convert the dead ranges with the Backend
-method, or compare in virtual-PHP coordinates before translating. The two
-functions sharing one name in <code>diagnostics/mod.rs</code> is what makes this easy
-to get wrong. Rename the free one (e.g. <code>checked_byte_range_to_lsp_range</code>)
-so a call site has to choose deliberately.</p>
+<p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
@@ -1716,9 +1663,9 @@ so a call site has to choose deliberately.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <h3 id="b648-generated-property-hooks-are-indented-with-four-spaces-in-a-two-space-file">B648. Generated property hooks are indented with four spaces in a two-space file<a class="headerlink" href="#b648-generated-property-hooks-are-indented-with-four-spaces-in-a-two-space-file" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class User {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">  public string $name;   // "Generate get hook" indents the hook body by 4</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class User {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">  public string $name;   // "Generate get hook" indents the hook body by 4</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>detect_indent_unit</code> (<code>code_actions/generate_property_hooks.rs</code>) returns a
 tab when the property's indentation contains one and four spaces otherwise.

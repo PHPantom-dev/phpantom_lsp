@@ -5136,6 +5136,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Dead branches in Blade templates.</strong> A mistake inside a branch the template can never take, such as <code>@if (false)</code>, is no longer reported, and diagnostics in live code are no longer dropped by mistake.</li>
 <li><strong>Imports used by an unfinished <code>::</code> access.</strong> An import named only by a <code>Mailer::</code> still waiting for its member at the end of the file is no longer reported unused.</li>
 <li><strong>Classes in files that are not UTF-8.</strong> A class, function or constant declared in a Latin-1 or Windows-1252 file now resolves, instead of showing up in workspace symbols but being reported as unknown wherever it is used.</li>
 <li><strong>Inherited constants that read <code>parent::</code> after an edit.</strong> A constant whose initializer reads <code>parent::X</code>, used through a subclass, no longer takes the subclass's parent's value once the file has been edited.</li>
