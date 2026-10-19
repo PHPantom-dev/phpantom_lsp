@@ -1942,7 +1942,7 @@ parameter via <code>self::</code>:</p>
 reads as the unresolved <code>RedCar::DataArray</code>, so <code>TData</code> never gets the
 shape and completion sees only the untyped <code>array</code> declared return.</p>
 <p>Bare alias names in <code>extends_generics</code>/<code>implements_generics</code> are already
-substituted (<code>type_engine/types/aliases.rs</code>), but the match is an exact
+substituted (<code>type_engine/type_ops/aliases.rs</code>), but the match is an exact
 comparison against a <code>Named</code> type, so <code>self::DataArray</code> never matches it,
 and <code>qualify_self_constant</code> (<code>php_type/transform.rs</code>) reads it as a class
 constant instead.</p>

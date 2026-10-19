@@ -5137,6 +5137,8 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Classes in files that are not UTF-8.</strong> A class, function or constant declared in a Latin-1 or Windows-1252 file now resolves, instead of showing up in workspace symbols but being reported as unknown wherever it is used.</li>
+<li><strong>Inherited constants that read <code>parent::</code> after an edit.</strong> A constant whose initializer reads <code>parent::X</code>, used through a subclass, no longer takes the subclass's parent's value once the file has been edited.</li>
+<li><strong>Same answers in the browser build.</strong> Go-to-definition, rename, hover, signature help, and highlights in the WebAssembly build now resolve types as thoroughly as the language server does.</li>
 <li><strong><code>@see</code> links in hover.</strong> A <code>@see</code> reference now links to the class it names, through the declaring file's <code>use</code> imports, rather than to another class with the same short name. Go-to-definition and type hierarchy no longer land in the wrong file in the same situation.</li>
 <li><strong>Stale diagnostics after a quick edit.</strong> An editor that pulls diagnostics no longer occasionally keeps showing the previous set when it asks for them just as a new set finishes.</li>
 <li><strong>Completion after an emoji.</strong> Member, variable, array-key, class-name and PHPDoc tag completion now work on a line that has an emoji or other character outside the Basic Multilingual Plane before the cursor.</li>

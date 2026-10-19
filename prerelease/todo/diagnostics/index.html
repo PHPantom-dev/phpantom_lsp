@@ -1845,7 +1845,7 @@ against its native hint on one axis only: whether the annotation admits a
 the native hint on any <em>other</em> axis (<code>@param int</code> on a <code>string</code>, <code>@return
 array</code> on a <code>: string</code>) stays silent. That is the check PHPStan's
 <code>IncompatiblePhpDocTypeRule</code> performs, and the one the existing
-<code>is_type_compatible</code> in <code>src/diagnostics/type_errors/compatibility.rs</code>
+<code>is_type_compatible</code> in <code>src/class_lookup/compatibility.rs</code>
 already has the machinery for.</p>
 <p>Covering it means resolving the documented type's bare names first, since a
 <code>Foo</code> that a <code>@template</code> list or an imported <code>@psalm-type</code> alias stands
@@ -1867,7 +1867,7 @@ spells <code>null</code> itself, so the check simply does not fire on it.</p>
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    return array_filter($values, fn ($v) =&gt; $v &gt; 3);  // array&lt;int, int&gt;, not flagged</span>
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">}</span>
 </code></pre></div>
-<p><code>is_type_compatible</code> in <code>src/diagnostics/type_errors/compatibility.rs</code>
+<p><code>is_type_compatible</code> in <code>src/class_lookup/compatibility.rs</code>
 carries an explicit MAYBE hatch for <code>array&lt;int, X&gt;</code> reaching a <code>list&lt;X&gt;</code>
 parameter or return type, on the grounds that PHP codebases spell the two
 interchangeably. The core <code>is_subtype_of</code> already rejects the direction

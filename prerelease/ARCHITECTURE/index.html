@@ -3292,7 +3292,7 @@
 <ol>
 <li><strong>Parsing</strong> PHP files into lightweight <code>ClassInfo</code> / <code>FunctionInfo</code> structures (not a full AST — just the information needed for IDE features).</li>
 <li><strong>Caching</strong> parsed results in an in-memory <code>uri_classes_index</code> keyed by file URI.</li>
-<li><strong>Building</strong> a precomputed symbol map (<code>symbol_maps</code>) during parsing for O(log n) go-to-definition lookups and call-site detection for signature help.</li>
+<li><strong>Building</strong> a precomputed symbol map (part of each file's <code>FileState</code>) during parsing for O(log n) go-to-definition lookups and call-site detection for signature help.</li>
 <li><strong>Resolving</strong> symbols on demand through a multi-phase lookup chain.</li>
 <li><strong>Merging</strong> inherited members (from parent classes, traits, interfaces, and mixins) at resolution time.</li>
 </ol>
@@ -3412,7 +3412,7 @@ sit next to.</p>
 </code></pre></div>
 <p><strong>The shared type engine lives under <code>type_engine/</code>.</strong> <code>type_engine/resolver/</code>,
 <code>type_engine/variable/</code> (including the <code>forward_walk/</code> forward walker),
-<code>type_engine/call_resolution/</code>, <code>type_engine/types/</code>, and the subject
+<code>type_engine/call_resolution/</code>, <code>type_engine/type_ops/</code>, and the subject
 extraction/resolution files are the project's single type-resolution engine —
 they answer "what is the type of this expression here?" and are consumed by
 diagnostics, hover, go-to-definition, and signature help, not just completion
@@ -3513,7 +3513,7 @@ equivalent:</p>
 <h2 id="go-to-definition-architecture">Go-to-Definition Architecture<a class="headerlink" href="#go-to-definition-architecture" title="Permanent link">&para;</a></h2>
 <p>The definition subsystem uses a <strong>three-tier</strong> approach, from fastest to slowest:</p>
 <h3 id="tier-1-precomputed-symbol-map-primary">Tier 1: Precomputed Symbol Map (primary)<a class="headerlink" href="#tier-1-precomputed-symbol-map-primary" title="Permanent link">&para;</a></h3>
-<p>During <code>update_ast</code>, every navigable symbol occurrence in a file is recorded as a <code>SymbolSpan</code> in a sorted vec stored in <code>symbol_maps</code> (keyed by file URI). Each span records the byte range and a <code>SymbolKind</code> variant:</p>
+<p>During <code>update_ast</code>, every navigable symbol occurrence in a file is recorded as a <code>SymbolSpan</code> in a sorted vec stored in the file's <code>FileState</code> (<code>Backend::files</code>, keyed by file URI). Each span records the byte range and a <code>SymbolKind</code> variant:</p>
 <table>
 <thead>
 <tr>
@@ -3768,7 +3768,7 @@ not: whether that class narrows the hint takes the class hierarchy. There it
 lets the docblock win and records the type with the hint qualified
 (<code>ClassInfo::unverified_doc_types</code>, <code>FunctionInfo::unverified_doc_types</code>).
 Loading the declaration puts the hint back unless the docblock class narrows
-it (<code>type_engine/types/docblock_narrowing.rs</code>): <code>Backend::link_loaded_class</code>
+it (<code>type_engine/type_ops/docblock_narrowing.rs</code>): <code>Backend::link_loaded_class</code>
 for every class the loader returns and the open file's own classes, and
 <code>Backend::verify_function_doc_types</code> for a function. The forward walker reads
 a parameter's docblock again inside the body, and checks it the same way.</p>
@@ -3859,14 +3859,13 @@ file that declares it.</p>
 </ul>
 <h3 id="index-write-sites">Index Write Sites<a class="headerlink" href="#index-write-sites" title="Permanent link">&para;</a></h3>
 <p><strong><code>update_ast_inner</code></strong> (<code>didOpen</code>/<code>didChange</code>): writes all three class
-maps plus <code>file_imports</code>, <code>file_namespaces</code>, <code>resolved_names</code>,
-<code>symbol_maps</code>, <code>parse_errors</code>.</p>
+maps plus the file's <code>FileState</code> (symbol map, imports, namespaces,
+resolved names, parse errors, a template's lowering), replaced as a whole.</p>
 <p><strong><code>parse_and_cache_content_versioned</code></strong> (lazy loading): writes only
-<code>uri_classes_index</code>, <code>fqn_class_index</code>, <code>fqn_uri_index</code>. Editor-only
-maps (<code>file_imports</code>, <code>file_namespaces</code>, etc.) are skipped for lazily
-loaded files to reduce memory usage.</p>
-<p><strong><code>clear_file_maps</code></strong> (<code>didClose</code>): removes <code>uri_classes_index</code>,
-<code>symbol_maps</code>, <code>file_imports</code>, <code>resolved_names</code>, <code>file_namespaces</code>.
+<code>uri_classes_index</code>, <code>fqn_class_index</code>, <code>fqn_uri_index</code>. The editor-only
+<code>FileState</code> is skipped for lazily loaded files to reduce memory usage.</p>
+<p><strong><code>clear_file_maps</code></strong> (<code>didClose</code>): removes <code>uri_classes_index</code> and the
+file's <code>FileState</code>.
 Keeps <code>fqn_class_index</code> and <code>fqn_uri_index</code> so cross-file resolution
 survives file close.</p>
 <p><strong>Init functions</strong>: populate <code>fqn_uri_index</code> from Composer classmap,
@@ -4601,7 +4600,7 @@ streams for one source of truth, which clients may merge, replace, or
 deduplicate differently. The server therefore treats push as a compatibility
 fallback for older clients rather than mixing both transports for the same
 native diagnostic set.</p>
-<p>Each worker is created during <code>initialized</code> via <code>clone_for_diagnostic_worker</code>, which builds a shallow clone of the <code>Backend</code>. All <code>Arc</code>-wrapped fields (maps, caches, the notify/pending slots) are shared by <code>Arc::clone</code>, so every worker sees all mutations the main <code>Backend</code> makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.</p>
+<p>Each worker is created during <code>initialized</code> via <code>clone_for_blocking</code>, which hands it a <code>Backend</code> sharing the main one's <code>BackendState</code>, so every worker sees all mutations the main <code>Backend</code> makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.</p>
 <p>Non-<code>Arc</code> fields are snapshotted at spawn time: <code>php_version</code>, <code>vendor_uri_prefixes</code>, and <code>vendor_dir_paths</code>. These fields are only written during <code>initialized</code> (before the workers are spawned) and never change afterwards. If a future feature adds runtime PHP version changes, the workers would need to be notified or re-cloned. This invariant ("init-time fields are write-once") should be verified before adding any post-init mutation to these fields.</p>
 <p><code>config</code> is the one exception: it is wrapped in <code>Arc&lt;Mutex&lt;Config&gt;&gt;</code> rather than snapshotted, because it <em>is</em> hot-reloaded. <code>src/indexing/watch.rs</code> reloads it on a project's own <code>.phpantom.toml</code> change (via <code>apply_watched_file_changes</code>) and on a global config change (via <code>global_config_watcher</code>, a background task polling the global config file's mtime since it lives outside the workspace and no client file watcher glob can reach it). Both reloads run on a cloned <code>Backend</code>, so <code>config</code> has to be <code>Arc</code>-shared for the write to reach every other clone, including the long-lived one that answers LSP requests.</p>
 <h3 id="re-diagnosing-only-the-functions-an-edit-touched">Re-diagnosing only the functions an edit touched<a class="headerlink" href="#re-diagnosing-only-the-functions-an-edit-touched" title="Permanent link">&para;</a></h3>
