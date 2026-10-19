@@ -954,17 +954,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b635-remove-return-statement-moves-the-return-out-of-a-braceless-if" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B635. "Remove return statement" moves the <code>return</code> out of a braceless <code>if</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b636-a-docblock-that-mentions-function-loses-its-inferred-return" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1671,17 +1660,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b635-remove-return-statement-moves-the-return-out-of-a-braceless-if" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B635. "Remove return statement" moves the <code>return</code> out of a braceless <code>if</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b636-a-docblock-that-mentions-function-loses-its-inferred-return" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1859,36 +1837,16 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b635-remove-return-statement-moves-the-return-out-of-a-braceless-if">B635. "Remove return statement" moves the <code>return</code> out of a braceless <code>if</code><a class="headerlink" href="#b635-remove-return-statement-moves-the-return-out-of-a-braceless-if" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">public function run(): void {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    if ($this-&gt;ready())</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">        return $this-&gt;save();   // PHPStan: ... returns bool but should not return anything.</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    $this-&gt;log();</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">}</span>
-</code></pre></div>
-<p>The quick fix keeps the value as a statement and adds a <code>return;</code> on the
-line after it, so the method still stops there. When the <code>return</code> is the
-only statement of an <code>if</code>, <code>else</code>, <code>elseif</code> or a loop written without
-braces, that <code>return;</code> lands after the construct instead of inside it: the
-method above now returns before <code>$this-&gt;log()</code> every time. On one line,
-<code>if ($x) return $v;</code> becomes <code>if ($x) $v;</code> and <code>if ($x) return;</code>, which
-evaluates the condition twice. <code>build_strip_return_expr_edit</code>
-(<code>code_actions/phpstan/fix_return_type/edits.rs</code>) writes the two
-statements without looking at what holds the <code>return</code>; when that is a
-braceless body, they need braces around them. <code>find_target</code>
-(<code>fix_return_type/target.rs</code>) already walks down to the statement and can
-report what holds it.</p>
 <h3 id="b636-a-docblock-that-mentions-function-loses-its-inferred-return">B636. A docblock that mentions "function" loses its inferred <code>@return</code><a class="headerlink" href="#b636-a-docblock-that-mentions-function-loses-its-inferred-return" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    /**</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">     * Builds the function map. {@see Bar}</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">     */</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    public function ids(): array {</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">        return [1, 2];</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    }</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    /**</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">     * Builds the function map. {@see Bar}</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">     */</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    public function ids(): array {</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">        return [1, 2];</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    }</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">}</span>
 </code></pre></div>
 <p>"Update docblock" adds no <code>@return array{1, 2}</code> here, as it would under
 another summary. <code>enrichment_return_type</code>
@@ -1904,14 +1862,14 @@ after the trigger. Pass the declaration's offset in and let
 <code>infer_return_type_at</code> find the function there.</p>
 <h3 id="b637-an-import-used-only-by-a-call-still-missing-its-is-reported-unused">B637. An import used only by a call still missing its <code>)</code> is reported unused<a class="headerlink" href="#b637-an-import-used-only-by-a-call-still-missing-its-is-reported-unused" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">namespace</span> <span class="nx">App</span><span class="p">;</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">use</span> <span class="nx">Lib\Widget</span><span class="p">;</span>   <span class="c1">// reported unused until the `)` is typed</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">class</span> <span class="nc">Shop</span> <span class="p">{</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="k">public</span> <span class="k">function</span> <span class="nf">make</span><span class="p">()</span> <span class="p">{</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>        <span class="nv">$w</span> <span class="o">=</span> <span class="k">new</span> <span class="nx">Widget</span><span class="p">(</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="p">}</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">namespace</span> <span class="nx">App</span><span class="p">;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">use</span> <span class="nx">Lib\Widget</span><span class="p">;</span>   <span class="c1">// reported unused until the `)` is typed</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">class</span> <span class="nc">Shop</span> <span class="p">{</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="k">public</span> <span class="k">function</span> <span class="nf">make</span><span class="p">()</span> <span class="p">{</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="nv">$w</span> <span class="o">=</span> <span class="k">new</span> <span class="nx">Widget</span><span class="p">(</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="p">}</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">}</span>
 </code></pre></div>
 <p>mago's argument-list recovery takes the method's <code>}</code> for an argument, so the
 braces stop balancing: the method body closes on the class's <code>}</code>, the class
@@ -1959,8 +1917,8 @@ closures keep the old binding, or none, until a restart. Invalidate it there
 as well.</p>
 <h3 id="b640-two-edits-count-columns-in-bytes-so-they-land-too-far-right-after-non-ascii-text">B640. Two edits count columns in bytes, so they land too far right after non-ASCII text<a class="headerlink" href="#b640-two-edits-count-columns-in-bytes-so-they-land-too-far-right-after-non-ascii-text" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @var object{größe: int, name: string} $item */</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">echo $item-&gt;name;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @var object{größe: int, name: string} $item */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">echo $item-&gt;name;</span>
 </code></pre></div>
 <p>An LSP column counts UTF-16 code units, but two places still turn a byte
 offset into a column by hand and report the byte count. Any non-ASCII
@@ -1974,11 +1932,11 @@ an absolute byte offset through <code>offset_to_position</code> (<code>text_posi
 instead.</p>
 <h3 id="b641-generate-promoted-constructor-orphans-each-propertys-var-docblock">B641. "Generate promoted constructor" orphans each property's <code>@var</code> docblock<a class="headerlink" href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Order {</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    /** @var list&lt;Item&gt; */</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    private array $items;</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    public static int $count = 0;</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Order {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    /** @var list&lt;Item&gt; */</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    private array $items;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    public static int $count = 0;</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>The action deletes each property's declaration and re-declares it as a
 promoted parameter, but the deleted span (<code>declaration_span</code> in
@@ -1990,7 +1948,7 @@ with the property (<code>docblock_start_above_offset</code>,
 <code>promote_constructor_param.rs</code>); this action should too.</p>
 <h3 id="b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji">B642. Completion reads the cursor column as a character count, so it misfires after an emoji<a class="headerlink" href="#b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$label = '🎉'; $order-&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$label = '🎉'; $order-&gt;</span>
 </code></pre></div>
 <p>An LSP column counts UTF-16 code units, and a character outside the Basic
 Multilingual Plane (most emoji) is two of them. Several completion paths
@@ -2016,7 +1974,7 @@ something else triggers a refresh. Store the set and bump the id as one
 step: under one guard, or bump the id before publishing the set.</p>
 <h3 id="b644-ignore-with-phpstan-ignore-corrupts-a-comment-whose-reason-contains-a-comma">B644. "Ignore with <code>@phpstan-ignore</code>" corrupts a comment whose reason contains a comma<a class="headerlink" href="#b644-ignore-with-phpstan-ignore-corrupts-a-comment-whose-reason-contains-a-comma" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">// @phpstan-ignore argument.type (legacy, see #12)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// @phpstan-ignore argument.type (legacy, see #12)</span>
 </code></pre></div>
 <p>Adding a second identifier to this line, or removing one from it, splits the
 list on <code>,</code> and stops it at the first <code>(</code>, so a reason with a comma or with
