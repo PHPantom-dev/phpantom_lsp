@@ -1816,7 +1816,228 @@ feature area.    </p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<p>No outstanding items.</p>
+<p>From a broad sweep on 2026-10-19 of everything changed since 0.11.1,
+read against the Sprint 8 tasks. The first group blocks a Sprint 8
+task; the second is accumulated friction found on the way. Bugs the
+sweep found are filed in <code>bugs.md</code> (B642 to B645), not here.</p>
+<h2 id="blocks-a-sprint-8-task">Blocks a Sprint 8 task<a class="headerlink" href="#blocks-a-sprint-8-task" title="Permanent link">&para;</a></h2>
+<h3 id="share-the-phpstorm-stubs-map-parser-between-buildrs-and-the-server">Share the phpstorm-stubs map parser between <code>build.rs</code> and the server<a class="headerlink" href="#share-the-phpstorm-stubs-map-parser-between-buildrs-and-the-server" title="Permanent link">&para;</a></h3>
+<p>E1 has to parse <code>PhpStormStubsMap.php</code> at runtime, and the parser
+(<code>parse_section</code>, <code>parse_map_entry</code>, <code>php_unescape_single_quoted</code>) only
+exists inside <code>build.rs</code>. Move those three functions into a new
+<code>src/stub_map.rs</code> that <code>build.rs</code> pulls in with <code>#[path = "src/stub_map.rs"] mod stub_map;</code>
+and the crate declares in <code>src/lib.rs</code>, so both sides use one copy.</p>
+<p>Files: <code>build.rs</code>, <code>src/stub_map.rs</code> (new), <code>src/lib.rs</code>.</p>
+<h3 id="split-srcconfigrs">Split <code>src/config.rs</code><a class="headerlink" href="#split-srcconfigrs" title="Permanent link">&para;</a></h3>
+<p>2048 lines: about 1000 of config types and loading, plus a 1042-line
+inline test module. X17 adds <code>extra_roots</code> to <code>ClientIndexingOptions</code>,
+and E3 adds a <code>[stubs]</code> section, both to this file. Make it a
+<code>src/config/</code> directory: <code>mod.rs</code> (<code>Config</code>, <code>merge_toml</code>,
+<code>load_config_from</code>, the create/write helpers, <code>ConfigError</code>),
+<code>diagnostics.rs</code> (<code>DiagnosticsConfig</code>, <code>IgnoreRule</code>), <code>tools.rs</code>
+(<code>FormattingConfig</code>, <code>PhpStanConfig</code>, <code>MagoConfig</code>, <code>PhpcsConfig</code>,
+<code>PhpmdConfig</code>), <code>indexing.rs</code> (<code>IndexingConfig</code>, <code>ClientIndexingOptions</code>,
+<code>IndexingStrategy</code>), <code>laravel.rs</code> (the <code>Laravel*Config</code> types) and
+<code>tests.rs</code> for the test module. Re-export from <code>mod.rs</code> so callers keep
+<code>crate::config::X</code>.</p>
+<p>Files: <code>src/config.rs</code> → <code>src/config/*.rs</code>.</p>
+<h3 id="split-apply_watched_file_changes-and-move-its-tests-out-of-srcindexingwatchrs">Split <code>apply_watched_file_changes</code> and move its tests out of <code>src/indexing/watch.rs</code><a class="headerlink" href="#split-apply_watched_file_changes-and-move-its-tests-out-of-srcindexingwatchrs" title="Permanent link">&para;</a></h3>
+<p><code>apply_watched_file_changes</code> (<code>src/indexing/watch.rs</code>) is a single
+267-line function, and the file carries 777 lines of inline tests that
+build a <code>Backend</code> 23 times. X17 has to add re-registration when the
+extra roots change, which lands in this file. Break the function into
+steps (classify the events, config and composer reloads, the re-index,
+cache invalidation) and move the test module to
+<code>src/indexing/watch_tests.rs</code>.</p>
+<p>Files: <code>src/indexing/watch.rs</code>, <code>src/indexing/watch_tests.rs</code> (new).</p>
+<h3 id="split-find_implementors-into-its-phases">Split <code>find_implementors</code> into its phases<a class="headerlink" href="#split-find_implementors-into-its-phases" title="Permanent link">&para;</a></h3>
+<p><code>Backend::find_implementors</code> (<code>src/definition/implementation.rs</code>) is a
+316-line function with three commented phases (index lookup, collecting
+unparsed sources, parsing sources that name a subtype). X17's "switch
+every walker together" goes through go-to-implementation's walk. Give
+each phase its own method, and move the 738-line inline test module to
+<code>src/definition/implementation_tests.rs</code>.</p>
+<p>Files: <code>src/definition/implementation.rs</code>,
+<code>src/definition/implementation_tests.rs</code> (new).</p>
+<h3 id="route-uri-and-path-conversion-through-util">Route URI and path conversion through <code>util</code><a class="headerlink" href="#route-uri-and-path-conversion-through-util" title="Permanent link">&para;</a></h3>
+<p>F20 replaces <code>url::Url</code> with a <code>fluent_uri</code>-based <code>Uri</code>. Non-test code
+calls <code>Url::parse</code>, <code>Url::from_file_path</code>, <code>Url::from_directory_path</code> or
+<code>.to_file_path()</code> directly at 95 sites, while <code>util::path_to_uri</code> and
+<code>util::uri_to_path</code> already exist. The biggest offenders are
+<code>definition/implementation.rs</code> (15), <code>virtual_members/laravel/config_keys.rs</code>
+(9), <code>definition/resolve.rs</code> (8), <code>virtual_members/laravel/string_keys.rs</code>
+(6) and <code>indexing/watch.rs</code> (6). Add the <code>Url</code>-returning variants that
+are missing to <code>src/util.rs</code> and send every site through them, so F20
+changes one module instead of ninety.</p>
+<p>Files: <code>src/util.rs</code> plus the call sites (<code>grep -rnE 'Url::(parse|from_file_path|from_directory_path)|\.to_file_path\(\)' src</code>).</p>
+<h3 id="extract-the-progress-reporting-request-wrapper-in-srcserverrs">Extract the progress-reporting request wrapper in <code>src/server.rs</code><a class="headerlink" href="#extract-the-progress-reporting-request-wrapper-in-srcserverrs" title="Permanent link">&para;</a></h3>
+<p><code>goto_implementation</code>, <code>references</code> and <code>subtypes</code> each repeat the same
+~30 lines: take or create a work-done token, <code>progress_begin</code>, attach a
+<code>ScanProgress</code> poller to a blocking clone, run the request in
+<code>run_blocking_cancel_safe</code>, finish the poller, <code>progress_end</code>. F20
+rewrites every handler signature in this file. Add one
+<code>run_with_progress(name, title, message, token, f)</code> helper next to
+<code>run_position_request</code> and use it in all three.</p>
+<p>Files: <code>src/server.rs</code>, <code>src/progress.rs</code>.</p>
+<h3 id="make-the-code-action-collector-list-declarative">Make the code-action collector list declarative<a class="headerlink" href="#make-the-code-action-collector-list-declarative" title="Permanent link">&para;</a></h3>
+<p><code>handle_code_action</code> (<code>src/code_actions/mod.rs</code>) calls 30 collectors
+one after another by hand. BL1 needs a per-collector policy for
+templates (drop PHPStan and Mago fixes, resolve deferred actions before
+offering, reject partially translated edits). Turn the sequence into a
+static table of collectors, each with its template policy, so BL1 adds
+a field instead of an <code>if is_blade_file</code> beside each call.</p>
+<p>Files: <code>src/code_actions/mod.rs</code>.</p>
+<h2 id="accumulated-friction">Accumulated friction<a class="headerlink" href="#accumulated-friction" title="Permanent link">&para;</a></h2>
+<h3 id="convert-byte-ranges-through-byte_range_to_lsp_range">Convert byte ranges through <code>byte_range_to_lsp_range</code><a class="headerlink" href="#convert-byte-ranges-through-byte_range_to_lsp_range" title="Permanent link">&para;</a></h3>
+<p>About 25 places call <code>offset_to_position</code> twice to build a <code>Range</code> by
+hand, where <code>byte_range_to_lsp_range</code> (<code>src/text_position.rs</code>) does it in
+one cached step: <code>code_actions/helpers.rs</code> (two), <code>docblock_edit.rs</code>,
+<code>convert_to_instance_variable.rs</code>, <code>use_line_deletion.rs</code> (two),
+<code>phpstan/remove_unreachable.rs</code>, <code>phpstan/attributes.rs</code>,
+<code>insert_translation_key.rs</code> (three), <code>change_visibility.rs</code> (two),
+<code>generate_property_hooks.rs</code>, <code>generate_constructor.rs</code>, <code>mago.rs</code>,
+<code>update_docblock/mod.rs</code>, <code>diagnostics/class_name_mismatch.rs</code> and
+<code>definition/resolve.rs</code> (two). Delete the private copies too:
+<code>byte_deletion_edit</code> and <code>line_start_offset</code> in <code>use_line_deletion.rs</code>
+(use the helper and <code>text_position::line_start_byte_offset</code>). B640's
+<code>remove_assert.rs</code> fix is the hand-rolled case that is also wrong.</p>
+<p>Files: the ones listed, all under <code>src/</code>.</p>
+<h3 id="one-phpstan-ignore-identifier-parser">One <code>@phpstan-ignore</code> identifier parser<a class="headerlink" href="#one-phpstan-ignore-identifier-parser" title="Permanent link">&para;</a></h3>
+<p>The identifier list of an ignore comment is parsed in five places:
+<code>src/phpstan_ignore.rs</code> and <code>src/diagnostics/stale.rs</code> (each with its own
+depth-aware scan) and three naive copies in
+<code>src/code_actions/phpstan/ignore.rs</code> (B644). Add one
+<code>parse_ignore_ids(line)</code> to <code>phpstan_ignore.rs</code> that returns each id with
+its span and the span of the whole list, and use it at all five sites.</p>
+<p>Files: <code>src/phpstan_ignore.rs</code>, <code>src/diagnostics/stale.rs</code>,
+<code>src/code_actions/phpstan/ignore.rs</code>.</p>
+<h3 id="merge-add-override-and-add-returntypewillchange">Merge "Add <code>#[Override]</code>" and "Add <code>#[ReturnTypeWillChange]</code>"<a class="headerlink" href="#merge-add-override-and-add-returntypewillchange" title="Permanent link">&para;</a></h3>
+<p><code>src/code_actions/phpstan/add_override.rs</code> and
+<code>add_return_type_will_change.rs</code> are about 90 lines of the same
+collect/resolve code, differing in the identifier, the attribute name
+and the import policy, and they have already drifted (only one has a
+staleness check). <code>extract_method_name</code> is in both, and the same parsing
+is inlined in <code>remove_override.rs</code>. Write one "add attribute for
+identifier" collector and resolver parameterised by those three things,
+and one shared <code>phpstan_member_name(message)</code>.</p>
+<p>Files: <code>src/code_actions/phpstan/add_override.rs</code>,
+<code>add_return_type_will_change.rs</code>, <code>remove_override.rs</code>.</p>
+<h3 id="a-deferred_quickfix-helper-for-phpstan-actions">A <code>deferred_quickfix</code> helper for PHPStan actions<a class="headerlink" href="#a-deferred_quickfix-helper-for-phpstan-actions" title="Permanent link">&para;</a></h3>
+<p>Ten deferred PHPStan quick fixes each build the
+<code>diagnostic_message</code>/<code>diagnostic_line</code>/<code>diagnostic_code</code> JSON, call
+<code>make_code_action_data</code> and assemble a <code>QUICKFIX</code> <code>CodeAction</code> with no
+edit, about 20 lines each: <code>fix_phpdoc_type.rs</code>, <code>fix_prefixed_class.rs</code>,
+<code>ignore.rs</code>, <code>add_override.rs</code>, <code>remove_throws.rs</code>, <code>add_throws.rs</code>,
+<code>new_static.rs</code> (three) and <code>add_return_type_will_change.rs</code>. Add
+<code>deferred_quickfix(title, kind, uri, diag, extra)</code> to
+<code>src/code_actions/helpers.rs</code> beside <code>rewrite_action</code>.</p>
+<p>Files: <code>src/code_actions/helpers.rs</code>, <code>src/code_actions/phpstan/*.rs</code>.</p>
+<h3 id="one-docblock-renderer-for-generated-code">One docblock renderer for generated code<a class="headerlink" href="#one-docblock-renderer-for-generated-code" title="Permanent link">&para;</a></h3>
+<p>New docblocks are assembled by hand in <code>generate_getter_setter.rs</code> (two),
+<code>extract_interface.rs</code> (two), <code>extract_function/codegen.rs</code> and
+<code>docblock_edit.rs</code> (two). Add <code>render_docblock(indent, lines, eol)</code> to
+<code>src/code_actions/docblock_edit.rs</code> and route all of them through it.
+Taking <code>eol</code> there is most of B634 for these actions.</p>
+<p>Files: those under <code>src/code_actions/</code>.</p>
+<h3 id="use-the-existing-text-utilities">Use the existing text utilities<a class="headerlink" href="#use-the-existing-text-utilities" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>src/code_actions/phpstan/remove_assert.rs</code> re-implements paren
+  matching in about 45 lines, without skipping comments; use
+  <code>text_scan::find_matching_forward</code>.</li>
+<li><code>rsplit('\\').next()</code> in place of <code>util::short_name</code>:
+  <code>code_actions/extract_function/naming.rs</code> (four),
+  <code>code_actions/extract_variable.rs</code>, <code>diagnostics/use_statements.rs</code>,
+  <code>diagnostics/existence_guards.rs</code>, <code>diagnostics/type_errors/arguments.rs</code>.</li>
+<li>A hand-stripped leading <code>\</code> in place of <code>util::strip_fqn_prefix</code>:
+  <code>code_actions/phpstan/remove_throws.rs</code>, <code>add_throws.rs</code>.</li>
+</ul>
+<h3 id="replace-hand-built-lsp-params-in-the-integration-tests">Replace hand-built LSP params in the integration tests<a class="headerlink" href="#replace-hand-built-lsp-params-in-the-integration-tests" title="Permanent link">&para;</a></h3>
+<p><code>tests/integration/</code> builds <code>DidOpenTextDocumentParams { … }</code> by hand
+1445 times across 77 files and <code>TextDocumentPositionParams { … }</code> 1459
+times across 102, although <code>common/mod.rs</code> has <code>open_php</code>,
+<code>complete_at</code>, <code>hover_at</code>, <code>goto_definition_at</code> and friends. The worst
+are <code>completion_variables.rs</code> (291), <code>completion_generics.rs</code> (111),
+<code>completion_array_shapes.rs</code> (89), <code>definition_members.rs</code> (85) and
+<code>definition_variables.rs</code> (63). Convert file by file; it is mechanical
+but large, so do it in the main session in batches of files, not as one
+rewrite.</p>
+<p>Files: <code>tests/integration/*.rs</code>.</p>
+<h3 id="report-failures-the-user-can-act-on">Report failures the user can act on<a class="headerlink" href="#report-failures-the-user-can-act-on" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>composer/mod.rs</code>'s <code>read_composer_package</code> turns a missing, unreadable
+  and malformed <code>composer.json</code> into the same <code>None</code> (16 callers), so a
+  syntax error silently drops PSR-4 mappings and the PHP version. Return
+  a <code>Result</code> and have startup (<code>backend/startup.rs</code>) send a warning
+  through <code>self.log</code> for a parse error.</li>
+<li>A <code>.phpantom.toml</code> that fails to reload (<code>indexing/watch.rs</code>
+  <code>reload_config</code>), a phar that fails to read or parse
+  (<code>indexing/phar.rs</code>) and a schema or migration reload failure
+  (<code>backend/laravel/schema.rs</code>) only reach <code>tracing::warn!</code>, which the
+  default filter hides. Send them through <code>self.log</code> the way the initial
+  config load does.</li>
+<li><code>composer/installed.rs</code> and <code>composer/autoload_files.rs</code> treat a
+  corrupt file like a missing one; log the parse error.</li>
+</ul>
+<p>Files: as listed.</p>
+<h3 id="shorten-lock-scopes-that-span-file-io-or-long-walks">Shorten lock scopes that span file IO or long walks<a class="headerlink" href="#shorten-lock-scopes-that-span-file-io-or-long-walks" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>references/variables.rs</code> holds the <code>symbol_maps</code> read guard for the
+  whole reference walk (which also takes <code>uri_classes_index</code>); clone the
+  map's <code>Arc</code> and drop the guard.</li>
+<li><code>virtual_members/laravel/config_keys.rs</code>, <code>route_names.rs</code>
+  (<code>enumerate_all_routes</code>) and <code>backend/laravel/mod.rs</code> read files while
+  holding <code>laravel_provider_resources</code> or <code>vendor_dir_paths</code>; copy the
+  path list first.</li>
+<li><code>backend/laravel/schema.rs</code> holds the <code>schema_index</code> write guard
+  across migration reads and <code>clear_resolved_class_cache()</code>; read first,
+  then swap the index in.</li>
+</ul>
+<p>Files: as listed.</p>
+<h3 id="evict-one-file-from-morph_column_spans_cache-not-all-of-it">Evict one file from <code>morph_column_spans_cache</code>, not all of it<a class="headerlink" href="#evict-one-file-from-morph_column_spans_cache-not-all-of-it" title="Permanent link">&para;</a></h3>
+<p><code>clear_file_maps</code> (<code>src/backend/file_access.rs</code>) clears the whole
+<code>morph_column_spans_cache</code> whenever any file is closed or removed.
+Remove only that URI's entry, unless an entry depends on other files, in
+which case document why the whole cache goes.</p>
+<p>Files: <code>src/backend/file_access.rs</code>.</p>
+<h3 id="measure-the-parse-and-copy-costs-the-sweep-found">Measure the parse and copy costs the sweep found<a class="headerlink" href="#measure-the-parse-and-copy-costs-the-sweep-found" title="Permanent link">&para;</a></h3>
+<p>None of these has been measured, so check each against the performance
+bar before doing it, and file the ones that clear it in
+<code>performance.md</code>:</p>
+<ul>
+<li>One keystroke parses an open file three or more times: <code>update_ast</code>
+  (<code>parser/ast_update.rs</code>) discards its tree, then fast diagnostics
+  (<code>diagnostics/collect.rs</code>) and slow diagnostics
+  (<code>diagnostics/incremental/mod.rs</code>) each parse under their own cache,
+  and every request parses once more.</li>
+<li>The Laravel refreshers <code>update_ast</code> calls (macros, morph map, gates,
+  provider resources, commands) each parse the same content again, up to
+  six times for a service provider.</li>
+<li><code>find_or_load_class_typed</code> (<code>resolution/classes.rs</code>) re-applies the
+  auth, storage, macro and pivot patches on every lookup, copying the
+  whole <code>ClassInfo</code> and handing out a new <code>Arc</code> each time, which also
+  defeats the pointer-identity shortcut in
+  <code>forward_walk/scope_state/merge.rs</code>. A memo keyed on the class and an
+  index generation would fix it.</li>
+<li>The per-thread parse arena (<code>parser/ast_update.rs</code>) keeps the peak size
+  of the largest file each worker ever parsed, and <code>Atom</code> (<code>ustr</code>) never
+  frees, so every partial identifier interned mid-edit stays for the
+  session.</li>
+</ul>
+<p>Two are trivial and need no measurement: <code>diagnostics/collect.rs</code> should
+use <code>with_parse_cache_arc</code> instead of copying the content, and the
+cross-file parse cache (<code>parser/parse_cache.rs</code>) should move an entry to
+the back on a hit so it behaves as an LRU.</p>
+<h3 id="split-the-largest-laravel-modules">Split the largest Laravel modules<a class="headerlink" href="#split-the-largest-laravel-modules" title="Permanent link">&para;</a></h3>
+<p>Not touched by Sprint 8, but each does several jobs:
+<code>virtual_members/laravel/database_schema.rs</code> (1826 lines of code: file
+discovery, SQL dump parsing, and migration interpretation, which should
+be three files), <code>virtual_members/laravel/route_names.rs</code> (1958:
+resource registration, macro and include traversal, and route discovery)
+and <code>virtual_members/laravel/model_extraction.rs</code> (1425).
+<code>symbol_map/mod.rs</code> (1202) holds the <code>SymbolMap</code> type and its whole
+<code>impl</code>; move those to <code>symbol_map/map.rs</code> and keep <code>mod.rs</code> a re-export
+layer.</p>
+<p>Files: as listed.</p>
 
 
 

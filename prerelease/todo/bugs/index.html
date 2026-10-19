@@ -1041,6 +1041,50 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B642. Completion reads the cursor column as a character count, so it misfires after an emoji
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b643-a-pull-racing-a-diagnostics-run-can-answer-unchanged-and-keep-stale-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B643. A pull racing a diagnostics run can answer <code>Unchanged</code> and keep stale diagnostics
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b644-ignore-with-phpstan-ignore-corrupts-a-comment-whose-reason-contains-a-comma" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B644. "Ignore with <code>@phpstan-ignore</code>" corrupts a comment whose reason contains a comma
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B645. A class in a non-UTF-8 file is indexed but never loads
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1725,6 +1769,50 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B642. Completion reads the cursor column as a character count, so it misfires after an emoji
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b643-a-pull-racing-a-diagnostics-run-can-answer-unchanged-and-keep-stale-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B643. A pull racing a diagnostics run can answer <code>Unchanged</code> and keep stale diagnostics
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b644-ignore-with-phpstan-ignore-corrupts-a-comment-whose-reason-contains-a-comma" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B644. "Ignore with <code>@phpstan-ignore</code>" corrupts a comment whose reason contains a comma
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B645. A class in a non-UTF-8 file is indexed but never loads
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1940,6 +2028,55 @@ documents whatever follows, here the static <code>$count</code>, whose type it n
 claims is <code>list&lt;Item&gt;</code>. "Promote constructor parameter" deletes the docblock
 with the property (<code>docblock_start_above_offset</code>,
 <code>promote_constructor_param.rs</code>); this action should too.</p>
+<h3 id="b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji">B642. Completion reads the cursor column as a character count, so it misfires after an emoji<a class="headerlink" href="#b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$label = '🎉'; $order-&gt;</span>
+</code></pre></div>
+<p>An LSP column counts UTF-16 code units, and a character outside the Basic
+Multilingual Plane (most emoji) is two of them. Several completion paths
+look the column up with <code>char_indices().nth(position.character)</code>, which
+counts characters, so after such a character the cursor lands one character
+too far right. The <code>_x;</code> that <code>patch_incomplete_member_access</code> splices in to
+let the parser recover goes in the wrong place, and member completion after
+<code>-&gt;</code> on that line comes back empty. The same lookup is in
+<code>completion/handler/patching.rs</code> (both patchers), <code>completion/target.rs</code>,
+<code>completion/array_shape.rs</code> (two sites) and
+<code>completion/variable/completion.rs</code>. Convert through
+<code>position_to_byte_offset</code> or <code>utf16_col_to_byte_offset</code>
+(<code>text_position.rs</code>) instead.</p>
+<h3 id="b643-a-pull-racing-a-diagnostics-run-can-answer-unchanged-and-keep-stale-diagnostics">B643. A pull racing a diagnostics run can answer <code>Unchanged</code> and keep stale diagnostics<a class="headerlink" href="#b643-a-pull-racing-a-diagnostics-run-can-answer-unchanged-and-keep-stale-diagnostics" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>In pull mode, a diagnostics run stores the new set in <code>last_full</code>, releases
+that lock, and only then bumps the URI's <code>resultId</code>
+(<code>diagnostics/delivery.rs</code>). A <code>textDocument/diagnostic</code> request landing in
+that gap (<code>diagnostics/pull.rs</code>) finds the cache present and the client's
+<code>previousResultId</code> still equal to the current one, and answers <code>Unchanged</code>
+for a set that just changed. The editor keeps the old diagnostics until
+something else triggers a refresh. Store the set and bump the id as one
+step: under one guard, or bump the id before publishing the set.</p>
+<h3 id="b644-ignore-with-phpstan-ignore-corrupts-a-comment-whose-reason-contains-a-comma">B644. "Ignore with <code>@phpstan-ignore</code>" corrupts a comment whose reason contains a comma<a class="headerlink" href="#b644-ignore-with-phpstan-ignore-corrupts-a-comment-whose-reason-contains-a-comma" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">// @phpstan-ignore argument.type (legacy, see #12)</span>
+</code></pre></div>
+<p>Adding a second identifier to this line, or removing one from it, splits the
+list on <code>,</code> and stops it at the first <code>(</code>, so a reason with a comma or with
+nested parentheses is cut into pieces and treated as identifiers. The three
+hand-rolled scans are in <code>code_actions/phpstan/ignore.rs</code>. The ignore-comment
+parser in <code>phpstan_ignore.rs</code> and the stale-ignore check in
+<code>diagnostics/stale.rs</code> already track parenthesis depth; the code actions
+should parse through the same function (see the shared-parser item in
+<code>docs/todo/refactor.md</code>).</p>
+<h3 id="b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads">B645. A class in a non-UTF-8 file is indexed but never loads<a class="headerlink" href="#b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>The workspace scan reads every file as bytes and decodes it with
+<code>from_utf8_lossy</code> (<code>indexing/scan.rs</code>), so a class in a Latin-1 or
+Windows-1252 file shows up in workspace symbols. Loading it on demand reads
+the file with <code>read_to_string(...).ok()</code> (<code>resolution/lazy_parse.rs</code>), which
+fails on invalid UTF-8 and is dropped without a log, so every use of the
+class is reported as unknown and go-to-definition finds nothing. The same
+read appears in <code>backend/file_access.rs</code>, <code>resolution/functions.rs</code> (two
+sites) and <code>resolution/constants.rs</code> (two sites). Read bytes and decode
+them the way the scan does, and log a read failure once per file.</p>
 
 
 
