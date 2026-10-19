@@ -954,17 +954,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b639-a-pestphp-changed-outside-the-editor-is-never-re-read" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B639. A <code>Pest.php</code> changed outside the editor is never re-read
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1616,17 +1605,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b639-a-pestphp-changed-outside-the-editor-is-never-re-read" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B639. A <code>Pest.php</code> changed outside the editor is never re-read
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1749,18 +1727,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b639-a-pestphp-changed-outside-the-editor-is-never-re-read">B639. A <code>Pest.php</code> changed outside the editor is never re-read<a class="headerlink" href="#b639-a-pestphp-changed-outside-the-editor-is-never-re-read" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>The <code>-&gt;in(…)</code> bindings a test file's closures are typed from come from the
-<code>Pest.php</code> files above it, cached per directory in
-<code>Backend::pest_configs</code> (<code>pest.rs</code>), including the directories found to
-have none. The cache is only dropped when a file ending in <code>/Pest.php</code> is
-saved in the editor (<code>on_did_save</code>, <code>backend/documents.rs</code>). One created by
-<code>pest --init</code>, edited by another tool, or changed by a branch switch reaches
-the server as a watched-file event, which <code>apply_watched_file_changes</code>
-(<code>indexing/watch.rs</code>) re-indexes without touching that cache, so test
-closures keep the old binding, or none, until a restart. Invalidate it there
-as well.</p>
 <h3 id="b641-generate-promoted-constructor-orphans-each-propertys-var-docblock">B641. "Generate promoted constructor" orphans each property's <code>@var</code> docblock<a class="headerlink" href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Order {</span>
