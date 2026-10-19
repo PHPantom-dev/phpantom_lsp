@@ -999,17 +999,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B645. A class in a non-UTF-8 file is indexed but never loads
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b646-an-import-used-only-by-a-access-at-the-end-of-the-file-is-reported-unused" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1662,17 +1651,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B645. A class in a non-UTF-8 file is indexed but never loads
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b646-an-import-used-only-by-a-access-at-the-end-of-the-file-is-reported-unused" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1781,17 +1759,6 @@ tab when the property's indentation contains one and four spaces otherwise.
 <code>code_actions::helpers::indent_unit</code> already detects a file's unit,
 including two spaces. Use it and delete the local copy.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads">B645. A class in a non-UTF-8 file is indexed but never loads<a class="headerlink" href="#b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>The workspace scan reads every file as bytes and decodes it with
-<code>from_utf8_lossy</code> (<code>indexing/scan.rs</code>), so a class in a Latin-1 or
-Windows-1252 file shows up in workspace symbols. Loading it on demand reads
-the file with <code>read_to_string(...).ok()</code> (<code>resolution/lazy_parse.rs</code>), which
-fails on invalid UTF-8 and is dropped without a log, so every use of the
-class is reported as unknown and go-to-definition finds nothing. The same
-read appears in <code>backend/file_access.rs</code>, <code>resolution/functions.rs</code> (two
-sites) and <code>resolution/constants.rs</code> (two sites). Read bytes and decode
-them the way the scan does, and log a read failure once per file.</p>
 <h3 id="b646-an-import-used-only-by-a-access-at-the-end-of-the-file-is-reported-unused">B646. An import used only by a <code>::</code> access at the end of the file is reported unused<a class="headerlink" href="#b646-an-import-used-only-by-a-access-at-the-end-of-the-file-is-reported-unused" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="cp">&lt;?php</span>
