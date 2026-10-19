@@ -971,17 +971,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b643-a-pull-racing-a-diagnostics-run-can-answer-unchanged-and-keep-stale-diagnostics" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B643. A pull racing a diagnostics run can answer <code>Unchanged</code> and keep stale diagnostics
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1617,17 +1606,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b643-a-pull-racing-a-diagnostics-run-can-answer-unchanged-and-keep-stale-diagnostics" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B643. A pull racing a diagnostics run can answer <code>Unchanged</code> and keep stale diagnostics
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1742,16 +1720,6 @@ so a <code>@see Foo</code> that relies on a <code>use</code> import is not resol
 Resolve it with the declaring file's imports, the way other docblock names
 are.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b643-a-pull-racing-a-diagnostics-run-can-answer-unchanged-and-keep-stale-diagnostics">B643. A pull racing a diagnostics run can answer <code>Unchanged</code> and keep stale diagnostics<a class="headerlink" href="#b643-a-pull-racing-a-diagnostics-run-can-answer-unchanged-and-keep-stale-diagnostics" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>In pull mode, a diagnostics run stores the new set in <code>last_full</code>, releases
-that lock, and only then bumps the URI's <code>resultId</code>
-(<code>diagnostics/delivery.rs</code>). A <code>textDocument/diagnostic</code> request landing in
-that gap (<code>diagnostics/pull.rs</code>) finds the cache present and the client's
-<code>previousResultId</code> still equal to the current one, and answers <code>Unchanged</code>
-for a set that just changed. The editor keeps the old diagnostics until
-something else triggers a refresh. Store the set and bump the id as one
-step: under one guard, or bump the id before publishing the set.</p>
 <h3 id="b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads">B645. A class in a non-UTF-8 file is indexed but never loads<a class="headerlink" href="#b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
 <p>The workspace scan reads every file as bytes and decodes it with
