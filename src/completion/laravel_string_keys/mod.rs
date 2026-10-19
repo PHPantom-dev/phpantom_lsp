@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::completion::source::code_context::CodeContext;
 use crate::symbol_map::{LaravelConfigResource, LaravelStringKind};
 use crate::types::FileContext;
 
@@ -175,7 +176,11 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<CompletionResponse> {
-        self.try_laravel_string_key_completion_inner(content, position, None, None, None)
+        let code = crate::completion::source::code_context::code_context_at(
+            content,
+            crate::text_position::position_to_offset(content, position) as usize,
+        )?;
+        self.try_laravel_string_key_completion_inner(content, position, &code, None, None, None)
     }
 
     /// Live-request form of Laravel string-key completion. Resolved names
@@ -185,12 +190,14 @@ impl Backend {
         content: &str,
         position: Position,
         file_ctx: &FileContext,
+        code: &CodeContext<'_>,
     ) -> Option<CompletionResponse> {
         let indexed_function_exists = |name: &str| self.has_indexed_function(name);
         let indexed_class_exists = |name: &str| self.has_indexed_class(name);
         self.try_laravel_string_key_completion_inner(
             content,
             position,
+            code,
             file_ctx.resolved_names.as_deref(),
             Some(&indexed_function_exists),
             Some(&indexed_class_exists),
@@ -201,6 +208,7 @@ impl Backend {
         &self,
         content: &str,
         position: Position,
+        code: &CodeContext<'_>,
         resolved_names: Option<&crate::names::OwnedResolvedNames>,
         indexed_function_exists: Option<&dyn Fn(&str) -> bool>,
         indexed_class_exists: Option<&dyn Fn(&str) -> bool>,
@@ -208,6 +216,7 @@ impl Backend {
         let ctx = detect_laravel_string_key_context_inner(
             content,
             position,
+            code,
             resolved_names,
             indexed_function_exists,
             indexed_class_exists,

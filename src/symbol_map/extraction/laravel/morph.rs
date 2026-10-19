@@ -6,9 +6,7 @@ use crate::virtual_members::laravel::helpers::string_literal_at_range;
 
 /// The morph-map API on `Illuminate\Database\Eloquent\Relations\Relation`
 /// whose first argument holds the alias → model map.
-pub(in crate::symbol_map::extraction) fn is_morph_map_registration_method(
-    member_name: &str,
-) -> bool {
+pub(crate) fn is_morph_map_registration_method(member_name: &str) -> bool {
     member_name.eq_ignore_ascii_case("morphMap")
         || member_name.eq_ignore_ascii_case("enforceMorphMap")
 }
@@ -22,21 +20,22 @@ pub(crate) const MORPH_TYPES_ARG: usize = 1;
 /// Laravel maps each entry through `Relation::getMorphedModel()`, so a plain
 /// string there is a morph alias.
 pub(crate) fn is_morph_types_query_method(member_name: &str) -> bool {
-    matches!(
-        member_name.to_ascii_lowercase().as_str(),
-        "hasmorph"
-            | "orhasmorph"
-            | "doesnthavemorph"
-            | "ordoesnthavemorph"
-            | "wherehasmorph"
-            | "orwherehasmorph"
-            | "wheredoesnthavemorph"
-            | "orwheredoesnthavemorph"
-            | "wheremorphrelation"
-            | "orwheremorphrelation"
-            | "wheremorphdoesnthaverelation"
-            | "orwheremorphdoesnthaverelation"
-    )
+    [
+        "hasMorph",
+        "orHasMorph",
+        "doesntHaveMorph",
+        "orDoesntHaveMorph",
+        "whereHasMorph",
+        "orWhereHasMorph",
+        "whereDoesntHaveMorph",
+        "orWhereDoesntHaveMorph",
+        "whereMorphRelation",
+        "orWhereMorphRelation",
+        "whereMorphDoesntHaveRelation",
+        "orWhereMorphDoesntHaveRelation",
+    ]
+    .iter()
+    .any(|method| member_name.eq_ignore_ascii_case(method))
 }
 
 /// Push a [`crate::symbol_map::LaravelStringKind::MorphAlias`] span for every

@@ -144,7 +144,6 @@ unlikely to move the needle for most users.
 | L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (middleware, assets, validation, Inertia)                     | Medium      | Medium-High |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Medium      |
-| L42 | [Morph alias completion in array positions](todo/laravel.md#l42-morph-alias-completion-in-array-positions)                                                                  | Low-Medium  | Medium      |
 | L44 | [Sibling resource registrations and degenerate resource names](todo/laravel.md#l44-sibling-resource-registrations-and-degenerate-resource-names)                             | Low-Medium  | Medium      |
 | L50 | ["Create route" quick-fix for an unresolved route name](todo/laravel.md#l50-create-route-quick-fix-for-an-unresolved-route-name)                                            | Low-Medium  | Medium      |
 | L8  | [`withSum`/`withAvg`/`withMin`/`withMax` aggregate properties](todo/laravel.md#l8-withsum-withavg-withmin-withmax-aggregate-properties)                                  | Low-Medium  | High        |

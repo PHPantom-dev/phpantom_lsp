@@ -10,16 +10,15 @@ use tower_lsp::lsp_types::Position;
 
 use std::cell::OnceCell;
 
+use crate::completion::source::code_context::{CodeContext, Operator};
 use crate::symbol_map::LaravelStringKind;
 use crate::symbol_map::extraction::laravel::{
-    MethodReceiver, argument_takes_name_list, facade_static_call_arg_kind,
+    MORPH_TYPES_ARG, MethodReceiver, argument_takes_name_list, facade_static_call_arg_kind,
     helper_function_accepts_name_list, helper_function_first_arg_kind, instance_method_arg_kind,
+    is_morph_map_registration_method, is_morph_types_query_method,
 };
 use crate::text_position::position_to_offset;
-use crate::text_scan::{
-    CodeOffsets, ScanStep, is_escaped, open_quote_before, scan_ident_backward,
-    scan_top_level_backward, skip_php_trivia, top_level_commas,
-};
+use crate::text_scan::{CodeOffsets, is_escaped, scan_ident_backward, skip_php_trivia};
 
 pub(super) struct LaravelStringKeyContext<'a> {
     pub(super) kind: LaravelStringKind,
@@ -31,6 +30,9 @@ pub(super) struct LaravelStringKeyContext<'a> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum StringArgumentShape {
     Scalar,
+    /// An unkeyed entry can still become a key while the user types.
+    ArrayElement,
+    ArrayKey,
     ArrayValue,
 }
 
@@ -48,8 +50,13 @@ impl ArgumentSlot<'_> {
     /// Whether this is the first positional argument, or the one named
     /// `name`.
     pub(super) fn is_first_or_named(self, name: &str) -> bool {
+        self.matches_parameter(0, name)
+    }
+
+    /// Match PHP's positional or named spelling of a parameter.
+    fn matches_parameter(self, index: usize, name: &str) -> bool {
         match self {
-            Self::Positional(index) => index == 0,
+            Self::Positional(position) => position == index,
             Self::Named(named) => named == name,
         }
     }
@@ -57,6 +64,8 @@ impl ArgumentSlot<'_> {
 
 pub(super) struct StringArgumentContext<'a> {
     pub(super) callable: &'a str,
+    /// Method-call operator and the end of its receiver, ignoring comments.
+    pub(super) operator: Option<Operator>,
     pub(super) slot: ArgumentSlot<'a>,
     pub(super) shape: StringArgumentShape,
 }
@@ -70,79 +79,7 @@ pub(super) enum PhpLexState {
     BlockComment,
 }
 
-/// Find the unmatched call parenthesis the end of `content` sits in.
-pub(super) fn enclosing_call_open_paren(content: &str) -> Option<usize> {
-    scan_top_level_backward(content.as_bytes(), |bytes, i| match bytes[i] {
-        b'(' => ScanStep::Stop,
-        b';' => ScanStep::Abort,
-        _ => ScanStep::Skip(1),
-    })
-}
-
-/// Return the callable a scalar argument is passed to, and where among its
-/// arguments the scalar sits.
-pub(super) fn callable_before_scalar_argument(
-    before_value: &str,
-) -> Option<(&str, ArgumentSlot<'_>)> {
-    let before_value = before_value.trim_end();
-    if let Some(callable) = before_value.strip_suffix('(') {
-        return Some((callable.trim_end(), ArgumentSlot::Positional(0)));
-    }
-    if let Some(before_comma) = before_value.strip_suffix(',') {
-        let open_paren = enclosing_call_open_paren(before_comma)?;
-        let index = top_level_commas(&before_comma[open_paren + 1..]).count() + 1;
-        return Some((
-            before_comma[..open_paren].trim_end(),
-            ArgumentSlot::Positional(index),
-        ));
-    }
-
-    let colon = before_value.rfind(':')?;
-    if !before_value[colon + 1..].trim().is_empty() {
-        return None;
-    }
-    let before_label = before_value[..colon].trim_end();
-    // Scanned by byte, the way PHP's lexer reads a label: every byte from
-    // 0x80 up is a label byte, so a non-ASCII name (`prénom:`) is read
-    // whole and the start always lands on a character boundary.
-    let label_start = before_label
-        .bytes()
-        .rposition(|b| !(b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80))
-        .map_or(0, |index| index + 1);
-    if label_start == before_label.len() {
-        return None;
-    }
-    let argument = &before_label[label_start..];
-    let before_argument = before_label[..label_start].trim_end();
-    let open_paren = enclosing_call_open_paren(before_argument)?;
-    Some((
-        before_argument[..open_paren].trim_end(),
-        ArgumentSlot::Named(argument),
-    ))
-}
-
-/// Return the callable owning an array that directly contains this literal.
-pub(super) fn callable_before_array_argument(
-    before_quote: &str,
-) -> Option<(&str, ArgumentSlot<'_>)> {
-    let open = scan_top_level_backward(before_quote.as_bytes(), |bytes, i| match bytes[i] {
-        b'[' | b'(' => ScanStep::Stop,
-        b'{' | b';' => ScanStep::Abort,
-        _ => ScanStep::Skip(1),
-    })?;
-    let before_open = before_quote[..open].trim_end();
-    if before_quote.as_bytes()[open] == b'[' {
-        return callable_before_scalar_argument(before_open);
-    }
-    // A parenthesis only opens an array in the legacy `array(...)` spelling.
-    let token_start = scan_ident_backward(before_open.as_bytes(), before_open.len());
-    if before_open[token_start..].eq_ignore_ascii_case("array") {
-        return callable_before_scalar_argument(before_open[..token_start].trim_end());
-    }
-    None
-}
-
-/// Resource arrays name values; an associative key is bookkeeping, not a disk.
+/// Whether the literal is followed by an associative-array arrow.
 pub(super) fn string_literal_is_array_key(content: &str, cursor: usize, quote: u8) -> bool {
     let bytes = content.as_bytes();
     let mut index = cursor;
@@ -156,28 +93,85 @@ pub(super) fn string_literal_is_array_key(content: &str, cursor: usize, quote: u
     false
 }
 
-pub(super) fn string_argument_context<'a>(
-    content: &'a str,
-    before_quote: &'a str,
-    cursor: usize,
-    quote: u8,
-) -> Option<StringArgumentContext<'a>> {
-    if let Some((callable, slot)) = callable_before_array_argument(before_quote) {
-        if string_literal_is_array_key(content, cursor, quote) {
-            return None;
-        }
-        return Some(StringArgumentContext {
-            callable,
-            slot,
-            shape: StringArgumentShape::ArrayValue,
-        });
+impl StringArgumentShape {
+    fn is_array_value(self) -> bool {
+        matches!(self, Self::ArrayElement | Self::ArrayValue)
     }
 
-    let (callable, slot) = callable_before_scalar_argument(before_quote)?;
+    fn is_array_key(self) -> bool {
+        matches!(self, Self::ArrayElement | Self::ArrayKey)
+    }
+}
+
+/// Read a literal's immediate call argument from the shared lexical scan.
+/// Nested arrays and expressions are deliberately not treated as direct keys.
+pub(super) fn string_argument_context<'a>(
+    content: &'a str,
+    code: &CodeContext<'_>,
+    cursor: usize,
+) -> Option<StringArgumentContext<'a>> {
+    let (quote_pos, quote) = code.open_string?;
+    let inner = code.open_brackets.last()?;
+    let before_inner = &content[..inner.code_before];
+    let token_start = crate::text_scan::scan_ident_backward(content.as_bytes(), inner.code_before);
+    let is_array = inner.byte == b'['
+        || (inner.byte == b'('
+            && inner.callee_operator.is_none()
+            && before_inner[token_start..].eq_ignore_ascii_case("array"));
+    let (call, value_start, shape) = if is_array {
+        let call = code.open_brackets.iter().rev().nth(1)?;
+        let element_start = skip_php_trivia(content.as_bytes(), inner.item_start);
+        let shape = if element_start == quote_pos {
+            if string_literal_is_array_key(content, cursor, quote as u8) {
+                StringArgumentShape::ArrayKey
+            } else {
+                StringArgumentShape::ArrayElement
+            }
+        } else if code.code_before.ends_with("=>") && !inner.item_has_arrow_function {
+            StringArgumentShape::ArrayValue
+        } else {
+            return None;
+        };
+        let value_start = if inner.byte == b'[' {
+            inner.offset
+        } else {
+            token_start
+        };
+        (call, value_start, shape)
+    } else {
+        (inner, quote_pos, StringArgumentShape::Scalar)
+    };
+    if call.byte != b'(' {
+        return None;
+    }
+
+    let argument_start = skip_php_trivia(content.as_bytes(), call.item_start);
+    let named_argument = if argument_start == value_start {
+        None
+    } else {
+        let bytes = content.as_bytes();
+        let mut name_end = argument_start;
+        while name_end < value_start
+            && (bytes[name_end].is_ascii_alphanumeric()
+                || bytes[name_end] == b'_'
+                || bytes[name_end] >= 0x80)
+        {
+            name_end += 1;
+        }
+        let colon = skip_php_trivia(content.as_bytes(), name_end);
+        if name_end == argument_start
+            || bytes.get(colon) != Some(&b':')
+            || skip_php_trivia(content.as_bytes(), colon + 1) != value_start
+        {
+            return None;
+        }
+        Some(&content[argument_start..name_end])
+    };
     Some(StringArgumentContext {
-        callable,
-        slot,
-        shape: StringArgumentShape::Scalar,
+        callable: &content[..call.code_before],
+        operator: call.callee_operator,
+        slot: named_argument.map_or(ArgumentSlot::Positional(call.commas), ArgumentSlot::Named),
+        shape,
     })
 }
 
@@ -705,12 +699,17 @@ pub(super) fn detect_laravel_string_key_context(
     content: &str,
     position: Position,
 ) -> Option<LaravelStringKeyContext<'_>> {
-    detect_laravel_string_key_context_inner(content, position, None, None, None)
+    let code = crate::completion::source::code_context::code_context_at(
+        content,
+        position_to_offset(content, position) as usize,
+    )?;
+    detect_laravel_string_key_context_inner(content, position, &code, None, None, None)
 }
 
 pub(super) fn detect_laravel_string_key_context_inner<'a>(
     content: &'a str,
     position: Position,
+    code: &CodeContext<'_>,
     resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
     indexed_function_exists: Option<&dyn Fn(&str) -> bool>,
     indexed_class_exists: Option<&dyn Fn(&str) -> bool>,
@@ -720,18 +719,10 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
         return None;
     }
 
-    let quote_pos = open_quote_before(content, cursor_offset)?;
+    let (quote_pos, _) = code.open_string?;
     let literal = &content[quote_pos + 1..cursor_offset];
     let literal_start = quote_pos + 1;
-
-    // ── Locate the call argument that owns this string ─────────────
-    let before_quote = content[..quote_pos].trim_end();
-    let argument = string_argument_context(
-        content,
-        before_quote,
-        cursor_offset,
-        content.as_bytes()[quote_pos],
-    )?;
+    let argument = string_argument_context(content, code, cursor_offset)?;
     let before_paren = argument.callable;
 
     // ── Extract the function/method name ────────────────────────────
@@ -748,7 +739,6 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
 
     let call = StringCall {
         content,
-        before_quote,
         before_paren,
         name_start,
         name: &before_paren[name_start..],
@@ -759,13 +749,21 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
         indexed_class_exists,
     };
     let before_name = before_paren[..name_start].trim_end();
-    let key = if let Some(before_colons) = before_name.strip_suffix("::") {
-        static_call_key(&call, before_colons.trim_end())?
-    } else if let Some(receiver) = before_name
-        .strip_suffix("?->")
-        .or_else(|| before_name.strip_suffix("->"))
-    {
-        instance_call_key(&call, receiver.trim_end(), before_name)?
+    let key = if call.argument.operator.is_some() && is_morph_types_query_method(call.name) {
+        (call
+            .argument
+            .slot
+            .matches_parameter(MORPH_TYPES_ARG, "types")
+            && (call.argument.shape == StringArgumentShape::Scalar
+                || call.argument.shape.is_array_value()))
+        .then_some(StringKey::Whole(LaravelStringKind::MorphAlias))?
+    } else if let Some(operator) = call.argument.operator {
+        let receiver = &content[..operator.code_before];
+        if operator.is_static {
+            static_call_key(&call, receiver)?
+        } else {
+            instance_call_key(&call, receiver, before_name)?
+        }
     } else if let Some(attr_start) = attribute_class_start(before_paren, name_start) {
         StringKey::Whole(attribute_key(&call, attr_start)?)
     } else {
@@ -791,8 +789,6 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
 /// spells it.
 struct StringCall<'a, 'f> {
     content: &'a str,
-    /// The text before the string's opening quote, trimmed.
-    before_quote: &'a str,
     /// The text before the call's `(`.
     before_paren: &'a str,
     /// Where the function or method name starts in `before_paren`.
@@ -814,9 +810,8 @@ impl StringCall<'_, '_> {
     fn shape_fits(&self, kind: &LaravelStringKind) -> bool {
         match self.argument.shape {
             StringArgumentShape::Scalar => true,
-            StringArgumentShape::ArrayValue => {
-                argument_takes_name_list(kind, self.name) && !self.before_quote.ends_with("=>")
-            }
+            StringArgumentShape::ArrayElement => argument_takes_name_list(kind, self.name),
+            StringArgumentShape::ArrayKey | StringArgumentShape::ArrayValue => false,
         }
     }
 }
@@ -902,6 +897,27 @@ fn static_call_key<'a>(call: &StringCall<'a, '_>, before_colons: &'a str) -> Opt
     let reference = semantic_class_reference(written_class, cls_start, call.resolved_names);
     let slot = call.argument.slot;
 
+    if is_morph_map_registration_method(call.name)
+        && resolve_known_class_reference(
+            call.content,
+            reference,
+            "Illuminate\\Database\\Eloquent\\Relations",
+            &["Relation"],
+            true,
+            call.indexed_class_exists,
+        )
+        .is_some()
+    {
+        return (slot.is_first_or_named("map") && call.argument.shape.is_array_key())
+            .then_some(StringKey::Whole(LaravelStringKind::MorphAlias));
+    }
+    if call.name.eq_ignore_ascii_case("set")
+        && slot.is_first_or_named("key")
+        && call.argument.shape.is_array_key()
+        && is_laravel_facade_reference(call.content, reference, "Config", call.indexed_class_exists)
+    {
+        return Some(StringKey::Whole(LaravelStringKind::Config));
+    }
     if let Some(trigger) = config_resource_static_trigger(
         call.content,
         reference,
@@ -910,7 +926,10 @@ fn static_call_key<'a>(call: &StringCall<'a, '_>, before_colons: &'a str) -> Opt
     ) {
         let shape_fits = match call.argument.shape {
             StringArgumentShape::Scalar => trigger.shape.accepts_scalar(),
-            StringArgumentShape::ArrayValue => trigger.shape.accepts_array(),
+            StringArgumentShape::ArrayElement | StringArgumentShape::ArrayValue => {
+                trigger.shape.accepts_array()
+            }
+            StringArgumentShape::ArrayKey => false,
         };
         return (slot.is_first_or_named(trigger.argument) && shape_fits).then_some(
             StringKey::Whole(LaravelStringKind::ConfigResource(trigger.kind)),
@@ -918,6 +937,7 @@ fn static_call_key<'a>(call: &StringCall<'a, '_>, before_colons: &'a str) -> Opt
     }
     if call.name.eq_ignore_ascii_case("middleware")
         && slot.is_first_or_named("middleware")
+        && call.argument.shape != StringArgumentShape::ArrayKey
         && is_laravel_facade_reference(call.content, reference, "Route", call.indexed_class_exists)
     {
         return middleware_key(call.literal);
@@ -954,6 +974,7 @@ fn instance_call_key<'a>(
     let slot = call.argument.slot;
     if call.name.eq_ignore_ascii_case("middleware")
         && slot.is_first_or_named("middleware")
+        && call.argument.shape != StringArgumentShape::ArrayKey
         && receiver.roots_at_route()
     {
         return middleware_key(call.literal);
@@ -969,8 +990,13 @@ fn instance_call_key<'a>(
 /// markers Blade directives lower to.
 fn function_call_key(call: &StringCall<'_, '_>) -> Option<LaravelStringKind> {
     let slot = call.argument.slot;
-    if call.argument.shape != StringArgumentShape::Scalar
-        && (!helper_function_accepts_name_list(call.name) || call.before_quote.ends_with("=>"))
+    let config_array_key = call.name.eq_ignore_ascii_case("config")
+        && slot.is_first_or_named("key")
+        && call.argument.shape.is_array_key();
+    if !config_array_key
+        && call.argument.shape != StringArgumentShape::Scalar
+        && (call.argument.shape != StringArgumentShape::ArrayElement
+            || !helper_function_accepts_name_list(call.name))
     {
         return None;
     }
@@ -992,6 +1018,8 @@ fn function_call_key(call: &StringCall<'_, '_>) -> Option<LaravelStringKind> {
     ) {
         slot.is_first_or_named(trigger.argument)
             .then_some(LaravelStringKind::ConfigResource(trigger.kind))
+    } else if config_array_key {
+        Some(LaravelStringKind::Config)
     } else if slot == ArgumentSlot::Positional(0) {
         helper_function_first_arg_kind(call.name)
     } else {

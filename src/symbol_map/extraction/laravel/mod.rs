@@ -43,7 +43,9 @@ pub(crate) use facade_calls::{
 };
 pub(crate) use gates::is_gate_check_method;
 pub(crate) use method_calls::{MethodReceiver, instance_method_arg_kind};
-pub(crate) use morph::{MORPH_TYPES_ARG, is_morph_types_query_method};
+pub(crate) use morph::{
+    MORPH_TYPES_ARG, is_morph_map_registration_method, is_morph_types_query_method,
+};
 pub(crate) use receivers::chain_roots_at_facade;
 pub(crate) use routes::{
     ROUTE_HTTP_METHODS, is_request_route_pattern_method, is_route_facade_pattern_method,
