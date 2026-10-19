@@ -1816,36 +1816,7 @@ feature area.    </p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<h3 id="type-call-arguments-from-the-ast-not-their-text">Type call arguments from the AST, not their text<a class="headerlink" href="#type-call-arguments-from-the-ast-not-their-text" title="Permanent link">&para;</a></h3>
-<p><code>resolve_arg_text_to_type</code> (<code>type_engine/call_resolution/arg_text_types.rs</code>),
-<code>type_ops/conditional/text_args.rs</code> and <code>const_fold.rs</code> work out an argument's
-type from its source text, re-detecting closures, first-class callables,
-array literals and casts by scanning strings. <code>text_args: &amp;str</code> is threaded
-through <code>owner_method_call.rs</code>, <code>template_binding.rs</code> and <code>out_param.rs</code>.
-This is a second resolution path next to <code>resolve_rhs_expression</code>, and it
-pulls <code>type_engine</code> up into <code>completion::source::helpers</code> (18 calls, e.g.
-<code>extract_closure_params_from_text</code>). Pass the argument expressions instead
-and resolve them through <code>resolve_rhs_expression</code>, then delete the text
-path and the <code>completion</code> imports it needed.</p>
-<p>Files: <code>src/type_engine/call_resolution/arg_text_types.rs</code>,
-<code>src/type_engine/type_ops/conditional/text_args.rs</code>,
-<code>src/type_engine/type_ops/const_fold.rs</code>, and the callers that
-pass <code>text_args</code>.</p>
-<h3 id="distinct-types-for-source-names-fqns-and-uris">Distinct types for source names, FQNs and URIs<a class="headerlink" href="#distinct-types-for-source-names-fqns-and-uris" title="Permanent link">&para;</a></h3>
-<p>Class loaders are all <code>dyn Fn(&amp;str) -&gt; Option&lt;Arc&lt;ClassInfo&gt;&gt;</code>, and the
-only thing that tells a name as written from a resolved FQN is a leading
-<code>\</code>, added with a <code>format!</code> in <code>load_resolved_name</code>. <code>find_or_load_class</code>
-accepts short, qualified and <code>\</code>-prefixed names alike. There are about 220
-hand-stripped leading backslashes (<code>trim_start_matches('\\')</code>,
-<code>strip_prefix('\\')</code>), <code>find_class_by_name</code> and <code>find_class_by_fqn</code>
-disagree on case sensitivity, and URIs are plain <code>&amp;str</code> in more than 500
-signatures. Introduce <code>SourceName</code>, <code>Fqn</code> and <code>Uri</code> newtypes and convert
-one subsystem at a time, starting with the class-loader closures in
-<code>src/class_lookup.rs</code> and <code>src/resolution/loaders.rs</code>. Write a short
-module doc there that says which of the roughly 20 loader entry points to
-use when. This is large; plan it as several PRs.</p>
-<p>Files: <code>src/class_lookup.rs</code>, <code>src/resolution/</code>, <code>src/util.rs</code>, then
-callers subsystem by subsystem.</p>
+<p>No outstanding items.</p>
 
 
 

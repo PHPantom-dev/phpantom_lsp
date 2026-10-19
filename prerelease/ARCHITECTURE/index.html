@@ -3739,8 +3739,8 @@ two kinds, and each kind has one rule:</p>
   <code>resolve_written_type</code>.</li>
 <li><strong>Resolved names</strong> (<code>ClassInfo::fqn()</code>, <code>parent_class</code>, stored member
   types, any type the engine produced) are exactly the FQN they spell, so a
-  bare <code>Redis</code> is the global class. Look them up with the resolved loader
-  or <code>class_lookup::load_resolved_name</code>.</li>
+  bare <code>Redis</code> is the global class. Look them up with the resolved loader,
+  which only accepts a <code>class_lookup::Fqn</code>.</li>
 </ul>
 <p>A written name that no class answers to still has to come out as the FQN PHP
 reads it, or the resolved loader would later read the bare spelling as a
@@ -3780,18 +3780,21 @@ a parameter's docblock again inside the body, and checks it the same way.</p>
   goes through the imports, else the name is qualified with the current
   namespace. Hand it only written names: a resolved global <code>Exception</code> read
   through it inside <code>namespace App</code> is <code>App\Exception</code>.</li>
-<li><strong><code>class_loader</code></strong> (<code>Backend::resolved_class_loader_with</code>) looks the
-  name up as an FQN, in the index and then among the caller's own classes
+<li><strong><code>class_loader</code></strong> (<code>Backend::resolved_class_loader_with</code>) takes an
+  <code>Fqn</code> and looks the name up as exactly that FQN, in the index and then among the caller's own classes
   (a re-parse of patched content holds classes the index does not). A miss
   is final: it is never retried against a file's imports or namespace.</li>
 <li><strong><code>source_imports</code></strong> is the block's <code>use</code> table, which
   <code>resolve_code_class_name</code> qualifies a name no class answers to with. It is
   <code>None</code> only where no file context exists; a miss then keeps its spelling.</li>
 </ul>
-<p><code>class_lookup::load_resolved_name</code> looks a resolved name up as the explicit
-<code>\Name</code> with whichever loader it is given, so a source loader cannot read it
-through the imports. Every loader, a test's plain map included, has to accept
-that leading <code>\</code>. <code>resolve_class_fully</code> wraps its loader this way.</p>
+<p>The two loaders have distinct types (<code>class_lookup::ResolvedClassLoader</code>
+and <code>class_lookup::SourceClassLoader</code>), so handing one where the other is
+expected does not compile. <code>Fqn::new</code> strips a leading <code>\</code> once, so a
+resolved loader never sees one and no caller strips it by hand. Wrapping a
+written name in <code>Fqn::new</code> is the one remaining way to mix the two up; the
+module doc of <code>src/class_lookup.rs</code> says which loader entry point to use
+when.</p>
 <p>Rules for code that touches names:</p>
 <ol>
 <li><strong>Resolve a name once, where it is read, by the rule for its kind,</strong> then
