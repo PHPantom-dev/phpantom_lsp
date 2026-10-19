@@ -954,10 +954,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b637-an-import-used-only-by-a-call-at-the-end-of-the-file-still-missing-its-is-reported-unused" class="md-nav__link">
+  <a href="#b637-an-import-used-only-by-an-empty-call-at-the-end-of-the-file-is-reported-unused" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B637. An import used only by a call at the end of the file still missing its <code>)</code> is reported unused
+        B637. An import used only by an empty call at the end of the file is reported unused
       </span>
     </span>
   </a>
@@ -1627,10 +1627,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b637-an-import-used-only-by-a-call-at-the-end-of-the-file-still-missing-its-is-reported-unused" class="md-nav__link">
+  <a href="#b637-an-import-used-only-by-an-empty-call-at-the-end-of-the-file-is-reported-unused" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B637. An import used only by a call at the end of the file still missing its <code>)</code> is reported unused
+        B637. An import used only by an empty call at the end of the file is reported unused
       </span>
     </span>
   </a>
@@ -1771,25 +1771,24 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b637-an-import-used-only-by-a-call-at-the-end-of-the-file-still-missing-its-is-reported-unused">B637. An import used only by a call at the end of the file still missing its <code>)</code> is reported unused<a class="headerlink" href="#b637-an-import-used-only-by-a-call-at-the-end-of-the-file-still-missing-its-is-reported-unused" title="Permanent link">&para;</a></h3>
+<h3 id="b637-an-import-used-only-by-an-empty-call-at-the-end-of-the-file-is-reported-unused">B637. An import used only by an empty call at the end of the file is reported unused<a class="headerlink" href="#b637-an-import-used-only-by-an-empty-call-at-the-end-of-the-file-is-reported-unused" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="cp">&lt;?php</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">namespace</span> <span class="nx">App</span><span class="p">;</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">use</span> <span class="nx">App\Http\Controllers\HomeController</span><span class="p">;</span>   <span class="c1">// reported unused until the `)` is typed</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nx">Route</span><span class="o">::</span><span class="na">get</span><span class="p">(</span><span class="s1">'/'</span><span class="p">,</span> <span class="p">[</span><span class="nx">HomeController</span><span class="o">::</span><span class="na">class</span><span class="p">,</span> <span class="s1">'index'</span><span class="p">]</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">use</span> <span class="nx">App\Services\Mailer</span><span class="p">;</span>   <span class="c1">// reported unused until the `)` is typed</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nv">$mailer</span> <span class="o">=</span> <span class="k">new</span> <span class="nx">Mailer</span><span class="p">(</span>
 </code></pre></div>
-<p>mago drops a top-level statement that the end of the file cuts off, and it
-does so even once its brackets are closed if the <code>;</code> is missing too. Nothing
-in the statement reaches the symbol map, so <code>collect_unused_import_diagnostics</code>
-(<code>diagnostics/unused_imports.rs</code>) reports every import it names. This is
-typical of a routes file, where the newest statement is the last one.
-<code>parser/bracket_recovery.rs</code> closes the brackets a call leaves open before a
-<code>}</code> by writing them over the whitespace in front of it. At the end of the
-file that needs room for the closers and a <code>;</code>, but a file usually ends in
-a single newline after the text being typed. Fixing it needs either
-recovery upstream in <code>mago-syntax</code> or a reparse that may append text past the
-end, with every consumer kept from reading a span beyond the caller's
-content.</p>
+<p>mago drops a top-level statement that the end of the file cuts off. Nothing
+in it reaches the symbol map, so <code>collect_unused_import_diagnostics</code>
+(<code>diagnostics/unused_imports.rs</code>) reports every import it names.
+<code>parser/bracket_recovery.rs</code> keeps the statement by writing the closers and
+a <code>;</code> over the whitespace the file ends in. A file usually ends in a single
+newline, which has room for the <code>;</code> alone, and the parser takes a <code>;</code> for
+the closers only when the call or array already holds an argument. So a call
+whose <code>(</code> is the last thing typed, or a file with no whitespace after the
+statement at all, still loses it. Fixing it needs either recovery upstream
+in <code>mago-syntax</code> or a reparse that may append text past the end, with every
+consumer kept from reading a span beyond the caller's content.</p>
 <h3 id="b638-a-monorepos-subprojects-miss-path-repositories-and-are-never-rescanned-after-composer-update">B638. A monorepo's subprojects miss path repositories and are never rescanned after <code>composer update</code><a class="headerlink" href="#b638-a-monorepos-subprojects-miss-path-repositories-and-are-never-rescanned-after-composer-update" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>A workspace with no root <code>composer.json</code> goes through <code>init_monorepo</code>
