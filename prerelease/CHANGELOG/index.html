@@ -5136,6 +5136,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Line endings of generated code.</strong> Imports, generated methods and docblocks, extracted code and other edits now end their lines with <code>\r\n</code> in a file saved that way, instead of leaving it with mixed line endings.</li>
 <li><strong>Constants in <code>switch</code> cases.</strong> Hover, go-to-definition, find references and rename now work on a constant or class constant written in a <code>case</code> label, and an import used only there is no longer reported as unused.</li>
 <li><strong>Unused imports named only in text.</strong> An import whose name appears only in a string, a comment or as a property name is now reported as unused.</li>
 <li><strong>Variables imported with <code>global</code>.</strong> A function that reads a top-level variable through <code>global</code> now sees the type the top-level code gave it in diagnostics too, as hover already did.</li>
