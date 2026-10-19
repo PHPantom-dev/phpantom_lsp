@@ -1041,6 +1041,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#keeping-the-map-current" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Keeping the map current
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#what-this-does-not-change" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1938,6 +1949,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#keeping-the-map-current" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Keeping the map current
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#what-this-does-not-change" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2617,6 +2639,15 @@ stub file and return a <code>Location</code> pointing at the declaration.</p>
 <p>Finding the exact line within the stub file can reuse the existing
 member-lookup logic in <code>definition/member/file_lookup.rs</code> (read the
 file, parse it, find the symbol by name/offset).</p>
+<h3 id="keeping-the-map-current">Keeping the map current<a class="headerlink" href="#keeping-the-map-current" title="Permanent link">&para;</a></h3>
+<p><code>composer update</code> can upgrade <code>jetbrains/phpstorm-stubs</code> or <code>composer
+remove</code> can drop it mid-session, and a map read once at startup would
+keep go-to-definition pointing at the old files, or at files that no
+longer exist. <code>rescan_composer_indexes</code> (<code>src/indexing/scan.rs</code>) runs on
+a <code>composer.lock</code> change; detect the package again there, from the same
+<code>installed.json</code> read, and rebuild the map from its current
+<code>PhpStormStubsMap.php</code>, or drop it when the package is gone, the way E2's
+"Keeping the indices current" does for its indices.</p>
 <h3 id="what-this-does-not-change">What this does NOT change<a class="headerlink" href="#what-this-does-not-change" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Type resolution still uses the embedded stubs. The on-disk stubs

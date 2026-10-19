@@ -1008,6 +1008,50 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b638-a-monorepos-subprojects-miss-path-repositories-and-are-never-rescanned-after-composer-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B638. A monorepo's subprojects miss path repositories and are never rescanned after <code>composer update</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b639-a-pestphp-changed-outside-the-editor-is-never-re-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B639. A <code>Pest.php</code> changed outside the editor is never re-read
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b640-two-edits-count-columns-in-bytes-so-they-land-too-far-right-after-non-ascii-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B640. Two edits count columns in bytes, so they land too far right after non-ASCII text
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B641. "Generate promoted constructor" orphans each property's <code>@var</code> docblock
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1659,6 +1703,50 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b638-a-monorepos-subprojects-miss-path-repositories-and-are-never-rescanned-after-composer-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B638. A monorepo's subprojects miss path repositories and are never rescanned after <code>composer update</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b639-a-pestphp-changed-outside-the-editor-is-never-re-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B639. A <code>Pest.php</code> changed outside the editor is never re-read
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b640-two-edits-count-columns-in-bytes-so-they-land-too-far-right-after-non-ascii-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B640. Two edits count columns in bytes, so they land too far right after non-ASCII text
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B641. "Generate promoted constructor" orphans each property's <code>@var</code> docblock
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1834,6 +1922,67 @@ no cursor for. The parser's recovery has to end the argument list at the
 <code>}</code> instead, upstream in <code>mago-syntax</code> or by a same-length reparse such as
 the one <code>parser/namespace_recovery.rs</code> makes for a dropped <code>namespace</code>
 block.</p>
+<h3 id="b638-a-monorepos-subprojects-miss-path-repositories-and-are-never-rescanned-after-composer-update">B638. A monorepo's subprojects miss path repositories and are never rescanned after <code>composer update</code><a class="headerlink" href="#b638-a-monorepos-subprojects-miss-path-repositories-and-are-never-rescanned-after-composer-update" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>A workspace with no root <code>composer.json</code> goes through <code>init_monorepo</code>
+(<code>indexing/init.rs</code>), which sets up each subproject with its own copy of the
+Composer steps. That copy leaves out the PSR-4 mappings of path-repository
+packages (<code>composer::extract_path_repo_psr4_mappings</code>), which
+<code>init_autoload_paths</code> adds for a single project, so a class in a local
+module that the classmap does not list yet never resolves. After startup a
+<code>composer.json</code> or <code>composer.lock</code> change runs <code>rescan_composer_indexes</code>
+(<code>indexing/scan.rs</code>) on the workspace root only. It reads the root's
+<code>composer.json</code>, finds none, and just clears the caches, so a subproject's
+vendor classes, autoload functions and constants stay as they were at
+startup until a restart. The copy also never classifies the classes the
+subproject's Composer classmap lists, which a single project does with
+<code>classify_class_origin</code>, so where an optimized autoloader lists every
+vendor class, completion ranks all of them as project code. Run the
+single-project Composer setup per subproject root, and rescan the
+subproject whose Composer files changed.</p>
+<h3 id="b639-a-pestphp-changed-outside-the-editor-is-never-re-read">B639. A <code>Pest.php</code> changed outside the editor is never re-read<a class="headerlink" href="#b639-a-pestphp-changed-outside-the-editor-is-never-re-read" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>The <code>-&gt;in(…)</code> bindings a test file's closures are typed from come from the
+<code>Pest.php</code> files above it, cached per directory in
+<code>Backend::pest_configs</code> (<code>pest.rs</code>), including the directories found to
+have none. The cache is only dropped when a file ending in <code>/Pest.php</code> is
+saved in the editor (<code>on_did_save</code>, <code>backend/documents.rs</code>). One created by
+<code>pest --init</code>, edited by another tool, or changed by a branch switch reaches
+the server as a watched-file event, which <code>apply_watched_file_changes</code>
+(<code>indexing/watch.rs</code>) re-indexes without touching that cache, so test
+closures keep the old binding, or none, until a restart. Invalidate it there
+as well.</p>
+<h3 id="b640-two-edits-count-columns-in-bytes-so-they-land-too-far-right-after-non-ascii-text">B640. Two edits count columns in bytes, so they land too far right after non-ASCII text<a class="headerlink" href="#b640-two-edits-count-columns-in-bytes-so-they-land-too-far-right-after-non-ascii-text" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @var object{größe: int, name: string} $item */</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">echo $item-&gt;name;</span>
+</code></pre></div>
+<p>An LSP column counts UTF-16 code units, but two places still turn a byte
+offset into a column by hand and report the byte count. Any non-ASCII
+character earlier on the line pushes the result right by its extra bytes:
+go-to-definition on <code>name</code> above lands two columns into the key instead of
+on its first letter. The hand-rolled conversions are object-shape key
+go-to-definition (<code>definition/member/shape_keys.rs</code>, which returns the
+key's byte index within its line as the <code>character</code>) and the ranges
+"Remove assert" deletes (<code>code_actions/phpstan/remove_assert.rs</code>). Convert
+an absolute byte offset through <code>offset_to_position</code> (<code>text_position.rs</code>)
+instead.</p>
+<h3 id="b641-generate-promoted-constructor-orphans-each-propertys-var-docblock">B641. "Generate promoted constructor" orphans each property's <code>@var</code> docblock<a class="headerlink" href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Order {</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    /** @var list&lt;Item&gt; */</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    private array $items;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    public static int $count = 0;</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>The action deletes each property's declaration and re-declares it as a
+promoted parameter, but the deleted span (<code>declaration_span</code> in
+<code>generate_constructor.rs</code>, from <code>find_line_start</code> of the member) stops at
+the declaration, so the <code>/** @var list&lt;Item&gt; */</code> above it stays. It then
+documents whatever follows, here the static <code>$count</code>, whose type it now
+claims is <code>list&lt;Item&gt;</code>. "Promote constructor parameter" deletes the docblock
+with the property (<code>docblock_start_above_offset</code>,
+<code>promote_constructor_param.rs</code>); this action should too.</p>
 
 
 
