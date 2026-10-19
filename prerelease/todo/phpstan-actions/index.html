@@ -2005,9 +2005,11 @@ eagerly by <code>codeAction/resolve</code> instead.</p>
 - Stale detection tests that construct <code>Diagnostic</code> objects and call
   <code>is_stale_phpstan_diagnostic</code></p>
 <h3 id="attribute-insertion-pattern">Attribute insertion pattern<a class="headerlink" href="#attribute-insertion-pattern" title="Permanent link">&para;</a></h3>
-<p><code>find_method_insertion_point</code> is shared from <code>code_actions/phpstan/mod.rs</code>
-and used by <code>add_override.rs</code> and <code>add_return_type_will_change.rs</code>. Future attribute-related actions should
-reuse it.</p>
+<p><code>attributed_member_at</code> (<code>code_actions/phpstan/attributes.rs</code>) reads the
+attributes written on the member a diagnostic points at, and
+<code>add_attribute.rs</code> adds the one a PHPStan identifier asks for. A future
+action that adds an attribute is a new row in its <code>MISSING_ATTRIBUTES</code>
+table.</p>
 <h3 id="phpdoc-type-mismatch-pattern">PHPDoc type mismatch pattern<a class="headerlink" href="#phpdoc-type-mismatch-pattern" title="Permanent link">&para;</a></h3>
 <p><code>fix_phpdoc_type.rs</code> provides a shared helper parameterised by tag name
 (<code>@return</code>, <code>@param</code>, <code>@var</code>). Each diagnostic offers two quickfixes:

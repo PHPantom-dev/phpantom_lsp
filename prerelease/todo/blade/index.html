@@ -1549,7 +1549,10 @@ a way a translated edit corrupts or misplaces template text):</p>
   on disk), and several insert comment lines that would land in HTML.
   Fix namespace and fix class name are about class files. Extract function
   places the new function after the enclosing one, which for template code
-  is the wrapper the preprocessor closes after the last line.</li>
+  is the wrapper the preprocessor closes after the last line. These are
+  marked <code>TemplatePolicy::Skip</code> in the <code>COLLECTORS</code> table
+  (<code>src/code_actions/mod.rs</code>), which is where the per-collector rules
+  above belong too.</li>
 <li><strong>A stale lowering.</strong> <code>did_change</code> parses in the background, so the
   virtual PHP can lag the buffer by a keystroke. Record the template length
   a source map was built from (as <code>SymbolMap::matches_source</code> does) and

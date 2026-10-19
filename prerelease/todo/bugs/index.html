@@ -987,17 +987,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b640-two-edits-count-columns-in-bytes-so-they-land-too-far-right-after-non-ascii-text" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B640. Two edits count columns in bytes, so they land too far right after non-ASCII text
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1024,17 +1013,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B643. A pull racing a diagnostics run can answer <code>Unchanged</code> and keep stale diagnostics
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b644-ignore-with-phpstan-ignore-corrupts-a-comment-whose-reason-contains-a-comma" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B644. "Ignore with <code>@phpstan-ignore</code>" corrupts a comment whose reason contains a comma
       </span>
     </span>
   </a>
@@ -1682,17 +1660,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b640-two-edits-count-columns-in-bytes-so-they-land-too-far-right-after-non-ascii-text" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B640. Two edits count columns in bytes, so they land too far right after non-ASCII text
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1719,17 +1686,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B643. A pull racing a diagnostics run can answer <code>Unchanged</code> and keep stale diagnostics
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b644-ignore-with-phpstan-ignore-corrupts-a-comment-whose-reason-contains-a-comma" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B644. "Ignore with <code>@phpstan-ignore</code>" corrupts a comment whose reason contains a comma
       </span>
     </span>
   </a>
@@ -1864,28 +1820,13 @@ the server as a watched-file event, which <code>apply_watched_file_changes</code
 (<code>indexing/watch.rs</code>) re-indexes without touching that cache, so test
 closures keep the old binding, or none, until a restart. Invalidate it there
 as well.</p>
-<h3 id="b640-two-edits-count-columns-in-bytes-so-they-land-too-far-right-after-non-ascii-text">B640. Two edits count columns in bytes, so they land too far right after non-ASCII text<a class="headerlink" href="#b640-two-edits-count-columns-in-bytes-so-they-land-too-far-right-after-non-ascii-text" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @var object{größe: int, name: string} $item */</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">echo $item-&gt;name;</span>
-</code></pre></div>
-<p>An LSP column counts UTF-16 code units, but two places still turn a byte
-offset into a column by hand and report the byte count. Any non-ASCII
-character earlier on the line pushes the result right by its extra bytes:
-go-to-definition on <code>name</code> above lands two columns into the key instead of
-on its first letter. The hand-rolled conversions are object-shape key
-go-to-definition (<code>definition/member/shape_keys.rs</code>, which returns the
-key's byte index within its line as the <code>character</code>) and the ranges
-"Remove assert" deletes (<code>code_actions/phpstan/remove_assert.rs</code>). Convert
-an absolute byte offset through <code>offset_to_position</code> (<code>text_position.rs</code>)
-instead.</p>
 <h3 id="b641-generate-promoted-constructor-orphans-each-propertys-var-docblock">B641. "Generate promoted constructor" orphans each property's <code>@var</code> docblock<a class="headerlink" href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Order {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    /** @var list&lt;Item&gt; */</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    private array $items;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    public static int $count = 0;</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Order {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    /** @var list&lt;Item&gt; */</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    private array $items;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    public static int $count = 0;</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>The action deletes each property's declaration and re-declares it as a
 promoted parameter, but the deleted span (<code>declaration_span</code> in
@@ -1897,7 +1838,7 @@ with the property (<code>docblock_start_above_offset</code>,
 <code>promote_constructor_param.rs</code>); this action should too.</p>
 <h3 id="b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji">B642. Completion reads the cursor column as a character count, so it misfires after an emoji<a class="headerlink" href="#b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$label = '🎉'; $order-&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$label = '🎉'; $order-&gt;</span>
 </code></pre></div>
 <p>An LSP column counts UTF-16 code units, and a character outside the Basic
 Multilingual Plane (most emoji) is two of them. Several completion paths
@@ -1921,18 +1862,6 @@ that gap (<code>diagnostics/pull.rs</code>) finds the cache present and the clie
 for a set that just changed. The editor keeps the old diagnostics until
 something else triggers a refresh. Store the set and bump the id as one
 step: under one guard, or bump the id before publishing the set.</p>
-<h3 id="b644-ignore-with-phpstan-ignore-corrupts-a-comment-whose-reason-contains-a-comma">B644. "Ignore with <code>@phpstan-ignore</code>" corrupts a comment whose reason contains a comma<a class="headerlink" href="#b644-ignore-with-phpstan-ignore-corrupts-a-comment-whose-reason-contains-a-comma" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// @phpstan-ignore argument.type (legacy, see #12)</span>
-</code></pre></div>
-<p>Adding a second identifier to this line, or removing one from it, splits the
-list on <code>,</code> and stops it at the first <code>(</code>, so a reason with a comma or with
-nested parentheses is cut into pieces and treated as identifiers. The three
-hand-rolled scans are in <code>code_actions/phpstan/ignore.rs</code>. The ignore-comment
-parser in <code>phpstan_ignore.rs</code> and the stale-ignore check in
-<code>diagnostics/stale.rs</code> already track parenthesis depth; the code actions
-should parse through the same function (see the shared-parser item in
-<code>docs/todo/refactor.md</code>).</p>
 <h3 id="b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads">B645. A class in a non-UTF-8 file is indexed but never loads<a class="headerlink" href="#b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
 <p>The workspace scan reads every file as bytes and decodes it with

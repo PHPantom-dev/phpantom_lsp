@@ -2780,8 +2780,8 @@ These are absurd inputs that Laravel handles badly too, so the current
 tidying is arguably more useful; the divergence is recorded here rather
 than fixed because it makes the unknown-route diagnostic disagree with the
 framework in both directions.</p>
-<p><strong>Where to look:</strong> <code>virtual_members/laravel/route_names.rs</code>, alongside the
-existing <code>resource_registration</code> handling.</p>
+<p><strong>Where to look:</strong> <code>virtual_members/laravel/route_names/resources.rs</code>,
+alongside the existing <code>resource_registration</code> handling.</p>
 <h4 id="l46-can-on-a-user-model-the-receiver-does-not-name">L46. <code>-&gt;can()</code> on a user model the receiver does not name<a class="headerlink" href="#l46-can-on-a-user-model-the-receiver-does-not-name" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
 <p>Authorization abilities are recognized on <code>Gate::allows()</code>,
@@ -2809,7 +2809,7 @@ resolution at all.</p>
 <p><strong>Where to look:</strong> <code>receiver_is_user_like</code> in
 <code>symbol_map/extraction/laravel/gates.rs</code> and its completion-side twin (a
 local check in <code>completion/laravel_string_keys/context.rs</code>); <code>ViewReceiverSite</code> in
-<code>symbol_map/mod.rs</code> for the confirm-later shape.</p>
+<code>symbol_map/laravel_spans.rs</code> for the confirm-later shape.</p>
 <h4 id="l49-unguarded-eloquent-mass-assignment-diagnostic">L49. Unguarded Eloquent mass assignment diagnostic<a class="headerlink" href="#l49-unguarded-eloquent-mass-assignment-diagnostic" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>A model that declares neither <code>$fillable</code> nor <code>$guarded</code> is totally
@@ -2825,12 +2825,12 @@ attributes, and the project never calls <code>Model::unguard()</code>, on <code>
 resolution and column-source machinery L30 already needs (and the
 diagnostic's model-argument matching) share the same receiver-typing
 path, so build them together.</p>
-<p><strong>Where to look:</strong> <code>virtual_members/laravel/model_extraction.rs</code> for
+<p><strong>Where to look:</strong> <code>virtual_members/laravel/model_extraction/</code> for
 existing <code>$fillable</code>/<code>$guarded</code> reads; <code>diagnostics/</code> for the
 call-site diagnostic pattern used by similarly-shaped checks.</p>
 <h4 id="l50-create-route-quick-fix-for-an-unresolved-route-name">L50. "Create route" quick-fix for an unresolved route name<a class="headerlink" href="#l50-create-route-quick-fix-for-an-unresolved-route-name" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>The unknown-route-name diagnostic (fed by <code>route_names.rs</code>) has no
+<p>The unknown-route-name diagnostic (fed by <code>route_names/</code>) has no
 accompanying fix today. Once the diagnostic fires, generate a
 <code>Route::get('{path}', [{Controller}::class, '{method}'])
 -&gt;name('{name}');</code> stub appended to <code>routes/web.php</code> (or <code>api.php</code> if
@@ -2839,7 +2839,7 @@ and controller from the route name's own conventional dashes/dots
 where possible and otherwise leaving placeholders.</p>
 <p><strong>Where to look:</strong> <code>code_actions/</code> for the code-action registration
 pattern used by other "declare the missing thing" fixes;
-<code>virtual_members/laravel/route_names.rs</code> for the existing scanner
+<code>virtual_members/laravel/route_names/</code> for the existing scanner
 this reuses for the diagnostic and the insertion point.</p>
 
 

@@ -1075,6 +1075,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#p84-class-lookups-re-apply-the-laravel-patches-on-every-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P84. Class lookups re-apply the Laravel patches on every call
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p85-one-keystroke-parses-the-open-file-three-times" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P85. One keystroke parses the open file three times
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1351,6 +1373,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#p84-class-lookups-re-apply-the-laravel-patches-on-every-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P84. Class lookups re-apply the Laravel patches on every call
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p85-one-keystroke-parses-the-open-file-three-times" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P85. One keystroke parses the open file three times
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1455,7 +1499,35 @@ against that bar.</p>
 </tbody>
 </table>
 <hr />
-<p>No outstanding items.</p>
+<h2 id="p84-class-lookups-re-apply-the-laravel-patches-on-every-call">P84. Class lookups re-apply the Laravel patches on every call<a class="headerlink" href="#p84-class-lookups-re-apply-the-laravel-patches-on-every-call" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
+<p><code>find_or_load_class_typed</code> (<code>resolution/classes.rs</code>) memoises the indexed
+class but runs the auth, storage, macro and pivot refinements after the
+memo, on every lookup. When one applies, it copies the whole <code>ClassInfo</code>
+into a new <code>Arc</code>, which also defeats the pointer-identity shortcut in
+<code>forward_walk/scope_state/merge.rs</code>.</p>
+<p>Measured on the large Laravel app (debug <code>analyze</code>, 2026-10-19): 8.4M
+lookups, 400k of them copying, spend 47.7 s of the run's 371 CPU-seconds
+in the refinements (12.9%), 32.7 s of it in the copies alone. Memoise the
+refined class keyed on the indexed class and a generation that moves with
+the auth model, storage driver, macro and pivot registries, so a repeat
+lookup hands back the same <code>Arc</code>.</p>
+<h2 id="p85-one-keystroke-parses-the-open-file-three-times">P85. One keystroke parses the open file three times<a class="headerlink" href="#p85-one-keystroke-parses-the-open-file-three-times" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p><code>update_ast</code> (<code>parser/ast_update.rs</code>) parses the buffer and discards the
+tree, then the fast diagnostics (<code>diagnostics/collect.rs</code>) and the slow
+pass (<code>diagnostics/incremental/mod.rs</code>) each parse it again under their
+own parse cache. A probe counted three parses per edit in every file it
+tried.</p>
+<p>Measured on the large Laravel app (debug, an edit inside one method, the
+slow pass running partial): a parse costs 3.5 to 5 ms on 1,300 to
+1,900-line services, where the whole edit cycle takes 95 to 185 ms, and
+0.2 to 0.6 ms on service providers whose cycle takes 7 to 22 ms. Parsing
+once would save 4 to 11% of the cycle. The Laravel refreshers <code>update_ast</code>
+calls add at most one more parse on the providers tried (about 2.5% of the
+cycle), not worth a change of their own. Keeping the parsed tree alive
+between <code>didChange</code> and the diagnostic pass costs its parse memory, about
+22 MB for a 73 KB file, for as long as the file is open.</p>
 <hr />
 <h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
 <h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>
