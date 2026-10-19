@@ -939,23 +939,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b647-some-lookups-find-a-classs-file-by-its-short-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B647. Some lookups find a class's file by its short name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1574,23 +1557,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b647-some-lookups-find-a-classs-file-by-its-short-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B647. Some lookups find a class's file by its short name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1693,32 +1659,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b647-some-lookups-find-a-classs-file-by-its-short-name">B647. Some lookups find a class's file by its short name<a class="headerlink" href="#b647-some-lookups-find-a-classs-file-by-its-short-name" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace App\Billing;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class Invoice { public function total(): int {} }</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">namespace App\Legacy;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">class Invoice {}</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">namespace App;</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">/** @see \App\Billing\Invoice::total() */</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">function report() {}   // hover link can point into App\Legacy\Invoice's file</span>
-</code></pre></div>
-<p><code>find_class_file_uri</code> (<code>definition/member/file_lookup.rs</code>) only checks the
-namespace when the name it is given has one. Several callers hand it
-<code>ClassInfo::name</code>, the short name, so any class with that short name in any
-file matches, and the first one found wins. The result is a link or jump to
-the wrong file, at the right class's offset. The callers are both
-<code>resolve_see_target</code> branches (<code>hover/see_refs.rs</code>), the fallback in
-<code>build_hierarchy_item_for_class</code> (<code>type_hierarchy.rs</code>, tried before the
-<code>fqn_uri_index</code> lookup that would get it right), and the
-<code>resolve_search_name</code> fallback in <code>definition/member/mod.rs</code>, which uses
-<code>target_class.name</code> as <code>declaring_fqn</code>. Pass <code>ClassInfo::fqn()</code> at each site.
-<code>resolve_see_target</code> also passes the raw <code>@see</code> text to <code>find_or_load_class</code>,
-so a <code>@see Foo</code> that relies on a <code>use</code> import is not resolved through it.
-Resolve it with the declaring file's imports, the way other docblock names
-are.</p>
+<p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads">B645. A class in a non-UTF-8 file is indexed but never loads<a class="headerlink" href="#b645-a-class-in-a-non-utf-8-file-is-indexed-but-never-loads" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
@@ -1733,10 +1674,10 @@ sites) and <code>resolution/constants.rs</code> (two sites). Read bytes and deco
 them the way the scan does, and log a read failure once per file.</p>
 <h3 id="b646-an-import-used-only-by-a-access-at-the-end-of-the-file-is-reported-unused">B646. An import used only by a <code>::</code> access at the end of the file is reported unused<a class="headerlink" href="#b646-an-import-used-only-by-a-access-at-the-end-of-the-file-is-reported-unused" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">namespace</span> <span class="nx">App</span><span class="p">;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">use</span> <span class="nx">App\Services\Mailer</span><span class="p">;</span>   <span class="c1">// reported unused until the member is typed</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="nv">$mailer</span> <span class="o">=</span> <span class="nx">Mailer</span><span class="o">::</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">namespace</span> <span class="nx">App</span><span class="p">;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">use</span> <span class="nx">App\Services\Mailer</span><span class="p">;</span>   <span class="c1">// reported unused until the member is typed</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nv">$mailer</span> <span class="o">=</span> <span class="nx">Mailer</span><span class="o">::</span>
 </code></pre></div>
 <p>The recovery reparse in <code>parser/recovery.rs</code> keeps a statement the end of
 the file cuts off when it is only missing its closers or <code>;</code>. A <code>::</code> with
