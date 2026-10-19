@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792422845694,
+  "lastUpdate": 1792423827039,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3671,6 +3671,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 82.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "139620cf1d8ecb08eb563fb5c4468c926fe8de27",
+          "message": "Monorepo subprojects are indexed like standalone projects",
+          "timestamp": "2026-10-19T17:15:29+02:00",
+          "tree_id": "9cb2c1a252dd18790d9e28e083c448a31d0da6af",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/139620cf1d8ecb08eb563fb5c4468c926fe8de27"
+        },
+        "date": 1792423815474,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75.1,
             "unit": "MiB"
           }
         ]
