@@ -1816,31 +1816,6 @@ feature area.    </p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<h3 id="one-file-context-for-the-type-engine">One file context for the type engine<a class="headerlink" href="#one-file-context-for-the-type-engine" title="Permanent link">&para;</a></h3>
-<p><code>ResolutionCtx</code>, <code>CtxLoaders</code>, <code>VarResolutionCtx</code>
-(<code>type_engine/resolver/context.rs</code>), <code>VarQuery</code>
-(<code>type_engine/variable/resolution.rs</code>) and <code>ForwardWalkCtx</code>
-(<code>forward_walk/walk_ctx.rs</code>) repeat the same fields: the content, the
-cursor offset, the current class, <code>all_classes</code>, the two class loaders, the
-source imports and the backend. They are built by hand in more than 90
-places, and the conversions between them drop state without saying so:
-<code>as_resolution_ctx</code> hard-codes <code>is_in_static_method: false</code>,
-<code>preserve_static: false</code> and <code>laravel_macro_this_resolver: None</code>. Pull the
-shared fields into one borrowed <code>FileCtx&lt;'a&gt;</code> that each context holds by
-reference, give each its own extras on top, and add constructors so call
-sites stop listing fields.</p>
-<p>The cursor offset and the current class are better left on each context:
-they change between the copies one resolution makes, and the contexts do
-not agree on the class's type (<code>Option&lt;&amp;ClassInfo&gt;</code> in <code>ResolutionCtx</code> and
-<code>VarQuery</code>, <code>&amp;ClassInfo</code> in the other two). That leaves the content,
-<code>all_classes</code>, both class loaders, the source imports and the backend for
-<code>FileCtx</code>. Moving them touches about 610 field reads, which the compiler's
-<code>no field</code> errors locate exactly, and about 190 struct literals, which
-have to be regrouped by hand or script.</p>
-<p>Files: <code>src/type_engine/resolver/context.rs</code>,
-<code>src/type_engine/variable/resolution.rs</code>,
-<code>src/type_engine/variable/forward_walk/walk_ctx.rs</code>, and their
-construction sites (including <code>resolution_tests.rs</code>).</p>
 <h3 id="type-call-arguments-from-the-ast-not-their-text">Type call arguments from the AST, not their text<a class="headerlink" href="#type-call-arguments-from-the-ast-not-their-text" title="Permanent link">&para;</a></h3>
 <p><code>resolve_arg_text_to_type</code> (<code>type_engine/call_resolution/arg_text_types.rs</code>),
 <code>type_ops/conditional/text_args.rs</code> and <code>const_fold.rs</code> work out an argument's
