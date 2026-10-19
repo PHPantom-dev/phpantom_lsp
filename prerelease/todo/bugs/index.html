@@ -954,21 +954,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b646-typing-without-auto-close-infers-no-return-from-the-body" class="md-nav__link">
+  <a href="#b637-an-import-used-only-by-a-call-at-the-end-of-the-file-still-missing-its-is-reported-unused" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B646. Typing <code>/**</code> without auto-close infers no <code>@return</code> from the body
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b637-an-import-used-only-by-a-call-still-missing-its-is-reported-unused" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B637. An import used only by a call still missing its <code>)</code> is reported unused
+        B637. An import used only by a call at the end of the file still missing its <code>)</code> is reported unused
       </span>
     </span>
   </a>
@@ -1660,21 +1649,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b646-typing-without-auto-close-infers-no-return-from-the-body" class="md-nav__link">
+  <a href="#b637-an-import-used-only-by-a-call-at-the-end-of-the-file-still-missing-its-is-reported-unused" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B646. Typing <code>/**</code> without auto-close infers no <code>@return</code> from the body
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b637-an-import-used-only-by-a-call-still-missing-its-is-reported-unused" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B637. An import used only by a call still missing its <code>)</code> is reported unused
+        B637. An import used only by a call at the end of the file still missing its <code>)</code> is reported unused
       </span>
     </span>
   </a>
@@ -1837,46 +1815,25 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b646-typing-without-auto-close-infers-no-return-from-the-body">B646. Typing <code>/**</code> without auto-close infers no <code>@return</code> from the body<a class="headerlink" href="#b646-typing-without-auto-close-infers-no-return-from-the-body" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/**</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function ids(): array {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    return [1, 2];</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
-</code></pre></div>
-<p>Docblock completion here offers <code>@return array&lt;mixed&gt;</code> rather than
-<code>@return array{1, 2}</code>, which it does give once the editor has closed the
-block as <code>/** */</code>. The still-open <code>/**</code> swallows the rest of the file, so
-<code>enrichment_return_type</code> (<code>code_actions/phpstan/fix_return_type/inference.rs</code>)
-parses text in which the function does not exist. The throws analysis
-avoids this by blanking the open docblock first
-(<code>with_open_docblock_blanked</code> in <code>completion/source/throws_analysis/uncaught.rs</code>);
-return inference should parse the same blanked text.</p>
-<h3 id="b637-an-import-used-only-by-a-call-still-missing-its-is-reported-unused">B637. An import used only by a call still missing its <code>)</code> is reported unused<a class="headerlink" href="#b637-an-import-used-only-by-a-call-still-missing-its-is-reported-unused" title="Permanent link">&para;</a></h3>
+<h3 id="b637-an-import-used-only-by-a-call-at-the-end-of-the-file-still-missing-its-is-reported-unused">B637. An import used only by a call at the end of the file still missing its <code>)</code> is reported unused<a class="headerlink" href="#b637-an-import-used-only-by-a-call-at-the-end-of-the-file-still-missing-its-is-reported-unused" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">namespace</span> <span class="nx">App</span><span class="p">;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">use</span> <span class="nx">Lib\Widget</span><span class="p">;</span>   <span class="c1">// reported unused until the `)` is typed</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">class</span> <span class="nc">Shop</span> <span class="p">{</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="k">public</span> <span class="k">function</span> <span class="nf">make</span><span class="p">()</span> <span class="p">{</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="nv">$w</span> <span class="o">=</span> <span class="k">new</span> <span class="nx">Widget</span><span class="p">(</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="p">}</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">namespace</span> <span class="nx">App</span><span class="p">;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">use</span> <span class="nx">App\Http\Controllers\HomeController</span><span class="p">;</span>   <span class="c1">// reported unused until the `)` is typed</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nx">Route</span><span class="o">::</span><span class="na">get</span><span class="p">(</span><span class="s1">'/'</span><span class="p">,</span> <span class="p">[</span><span class="nx">HomeController</span><span class="o">::</span><span class="na">class</span><span class="p">,</span> <span class="s1">'index'</span><span class="p">]</span>
 </code></pre></div>
-<p>mago's argument-list recovery takes the method's <code>}</code> for an argument, so the
-braces stop balancing: the method body closes on the class's <code>}</code>, the class
-runs to the end of the file, and the parser drops it whole. Nothing in it
-reaches the symbol map, and <code>collect_unused_import_diagnostics</code>
-(<code>diagnostics/unused_imports.rs</code>) counts an import as used only when a span
-there names it, so every import the class uses is reported until the call is
-closed. A call at the top level of the file's last <code>namespace</code> block drops
-just its own statement, with the same result. Signature help and
-named-argument completion work around the dropped class by re-parsing with
-<code>);</code> at the cursor (<code>patch_content_for_signature</code>), which diagnostics have
-no cursor for. The parser's recovery has to end the argument list at the
-<code>}</code> instead, upstream in <code>mago-syntax</code> or by a same-length reparse such as
-the one <code>parser/namespace_recovery.rs</code> makes for a dropped <code>namespace</code>
-block.</p>
+<p>mago drops a top-level statement that the end of the file cuts off, and it
+does so even once its brackets are closed if the <code>;</code> is missing too. Nothing
+in the statement reaches the symbol map, so <code>collect_unused_import_diagnostics</code>
+(<code>diagnostics/unused_imports.rs</code>) reports every import it names. This is
+typical of a routes file, where the newest statement is the last one.
+<code>parser/bracket_recovery.rs</code> closes the brackets a call leaves open before a
+<code>}</code> by writing them over the whitespace in front of it. At the end of the
+file that needs room for the closers and a <code>;</code>, but a file usually ends in
+a single newline after the text being typed. Fixing it needs either
+recovery upstream in <code>mago-syntax</code> or a reparse that may append text past the
+end, with every consumer kept from reading a span beyond the caller's
+content.</p>
 <h3 id="b638-a-monorepos-subprojects-miss-path-repositories-and-are-never-rescanned-after-composer-update">B638. A monorepo's subprojects miss path repositories and are never rescanned after <code>composer update</code><a class="headerlink" href="#b638-a-monorepos-subprojects-miss-path-repositories-and-are-never-rescanned-after-composer-update" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>A workspace with no root <code>composer.json</code> goes through <code>init_monorepo</code>
@@ -1909,8 +1866,8 @@ closures keep the old binding, or none, until a restart. Invalidate it there
 as well.</p>
 <h3 id="b640-two-edits-count-columns-in-bytes-so-they-land-too-far-right-after-non-ascii-text">B640. Two edits count columns in bytes, so they land too far right after non-ASCII text<a class="headerlink" href="#b640-two-edits-count-columns-in-bytes-so-they-land-too-far-right-after-non-ascii-text" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @var object{größe: int, name: string} $item */</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">echo $item-&gt;name;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @var object{größe: int, name: string} $item */</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">echo $item-&gt;name;</span>
 </code></pre></div>
 <p>An LSP column counts UTF-16 code units, but two places still turn a byte
 offset into a column by hand and report the byte count. Any non-ASCII
@@ -1924,11 +1881,11 @@ an absolute byte offset through <code>offset_to_position</code> (<code>text_posi
 instead.</p>
 <h3 id="b641-generate-promoted-constructor-orphans-each-propertys-var-docblock">B641. "Generate promoted constructor" orphans each property's <code>@var</code> docblock<a class="headerlink" href="#b641-generate-promoted-constructor-orphans-each-propertys-var-docblock" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Order {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    /** @var list&lt;Item&gt; */</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    private array $items;</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    public static int $count = 0;</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Order {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    /** @var list&lt;Item&gt; */</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    private array $items;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    public static int $count = 0;</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>The action deletes each property's declaration and re-declares it as a
 promoted parameter, but the deleted span (<code>declaration_span</code> in
@@ -1940,7 +1897,7 @@ with the property (<code>docblock_start_above_offset</code>,
 <code>promote_constructor_param.rs</code>); this action should too.</p>
 <h3 id="b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji">B642. Completion reads the cursor column as a character count, so it misfires after an emoji<a class="headerlink" href="#b642-completion-reads-the-cursor-column-as-a-character-count-so-it-misfires-after-an-emoji" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$label = '🎉'; $order-&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$label = '🎉'; $order-&gt;</span>
 </code></pre></div>
 <p>An LSP column counts UTF-16 code units, and a character outside the Basic
 Multilingual Plane (most emoji) is two of them. Several completion paths
@@ -1966,7 +1923,7 @@ something else triggers a refresh. Store the set and bump the id as one
 step: under one guard, or bump the id before publishing the set.</p>
 <h3 id="b644-ignore-with-phpstan-ignore-corrupts-a-comment-whose-reason-contains-a-comma">B644. "Ignore with <code>@phpstan-ignore</code>" corrupts a comment whose reason contains a comma<a class="headerlink" href="#b644-ignore-with-phpstan-ignore-corrupts-a-comment-whose-reason-contains-a-comma" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// @phpstan-ignore argument.type (legacy, see #12)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// @phpstan-ignore argument.type (legacy, see #12)</span>
 </code></pre></div>
 <p>Adding a second identifier to this line, or removing one from it, splits the
 list on <code>,</code> and stops it at the first <code>(</code>, so a reason with a comma or with
