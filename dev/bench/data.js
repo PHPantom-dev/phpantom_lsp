@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792456462413,
+  "lastUpdate": 1792499535868,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -30256,6 +30256,252 @@ window.BENCHMARK_DATA = {
           {
             "name": "find_references/hierarchy_scan/150",
             "value": 0.442,
+            "range": "± 0.006",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "vishnu@aspireapp.com",
+            "name": "Vishnu B",
+            "username": "vishnub1626"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "521dd8ef73be9009412c80bfab22da1c09ab6659",
+          "message": "perf: Allocate parsed member lists at their final size\n\nThe parser wraps each parsed method, property, constant and class in an\n`Arc` with `records.into_iter().map(Arc::new).collect()`. Collecting a\nconsumed `Vec` reuses its allocation, so the pointer list keeps the\nwhole record buffer: three 376-byte properties leave 188 pointer slots\nallocated for three pointers. These lists live in the index for the\nwhole session. The standard library documents this case under\n`impl FromIterator for Vec` and suggests discarding the excess capacity.\n\nAdd `into_arcs`, which allocates the pointer list at its final size,\nand use it where long-lived lists are built: class-like members,\nanonymous classes, docblock `@method` tags, Laravel factory methods and\nthe per-file class lists. `SharedVec::from` now releases spare growth\ncapacity, which also covers parameter lists. Copy-on-write behaviour is\nunchanged.\n\nOn a 25,913-file Laravel project, the `mem-audit` live heap after\n`analyze` falls from 1,953.6 to 1,822.6 MiB. The per-file class lists\nfall from 247.0 to 114.9 MiB. In the language server, measured on the\nprevious base a37a783f6, the macOS physical footprint after startup\nfalls from a median of 2,563 to 2,444 MiB, and after 43 editor requests\nfrom 2,596 to 2,466 MiB (three alternating runs per build; the ranges\ndo not overlap). Warm-up time is unchanged.",
+          "timestamp": "2026-10-20T14:21:04+02:00",
+          "tree_id": "0b8a2a454dc7edc9ed89a1dc31b489f56fedfc80",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/521dd8ef73be9009412c80bfab22da1c09ab6659"
+        },
+        "date": 1792499521761,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 5.021,
+            "range": "± 0.26",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.036,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.107,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.163,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.276,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.35,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 1.568,
+            "range": "± 0.048",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 3.07,
+            "range": "± 0.054",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.114,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.047,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.043,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.054,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 5.574,
+            "range": "± 0.102",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.174,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.332,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.056,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.04,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.12,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.06,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.05,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.197,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.03,
+            "range": "± 0.014",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.358,
+            "range": "± 0.084",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.052,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 1.009,
+            "range": "± 0.039",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.31,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 7.895,
+            "range": "± 0.054",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 0.903,
+            "range": "± 0.02",
+            "unit": "ms"
+          },
+          {
+            "name": "custom_builder_completion/custom_builder_deep_inheritance",
+            "value": 0.078,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_completion/model_where_prefix",
+            "value": 0.068,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_completion/model_typing_sequence",
+            "value": 0.268,
+            "range": "± 0.017",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cold_confirmation/1",
+            "value": 0.063,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cached_request/1",
+            "value": 0.04,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cold_confirmation/128",
+            "value": 0.131,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cached_request/128",
+            "value": 0.068,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "find_references/hierarchy_scan/50",
+            "value": 0.23,
+            "range": "± 0.024",
+            "unit": "ms"
+          },
+          {
+            "name": "find_references/hierarchy_scan/150",
+            "value": 0.345,
             "range": "± 0.006",
             "unit": "ms"
           }
