@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792455155815,
+  "lastUpdate": 1792455198034,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4249,6 +4249,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 82.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "332c647b4c6fe6780159bc257e17115b23808d34",
+          "message": "Moire robust FQN handeling",
+          "timestamp": "2026-10-20T01:57:25+02:00",
+          "tree_id": "70a2352e9e81079101ab19b4d1217fdb36801146",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/332c647b4c6fe6780159bc257e17115b23808d34"
+        },
+        "date": 1792455185726,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80.7,
             "unit": "MiB"
           }
         ]
