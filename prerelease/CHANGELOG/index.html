@@ -5136,6 +5136,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Same-named variables in different functions.</strong> A call through a variable no longer takes its type from a variable of the same name in another function of the file. <code>$box-&gt;get(0)</code> on a <code>Box&lt;Post&gt;</code> was read as the <code>Box&lt;User&gt;</code> of an earlier function, and <code>$f()</code> lost its return type when another function's <code>$f</code> held a plain <code>Closure</code>.</li>
 <li><strong>Generated property hooks follow the file's indentation.</strong> "Generate get hook" and "Generate set hook" indent the new hooks by two spaces in a file indented with two spaces, instead of always using four.</li>
 <li><strong>Dead branches in Blade templates.</strong> A mistake inside a branch the template can never take, such as <code>@if (false)</code>, is no longer reported, and diagnostics in live code are no longer dropped by mistake.</li>
 <li><strong>Imports used by an unfinished <code>::</code> access.</strong> An import named only by a <code>Mailer::</code> still waiting for its member at the end of the file is no longer reported unused.</li>

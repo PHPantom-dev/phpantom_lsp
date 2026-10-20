@@ -1132,17 +1132,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b663-a-bare-closure-in-one-function-body-makes-f-unresolvable-in-the-others" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B663. A bare <code>Closure</code> in one function body makes <code>$f()</code> unresolvable in the others
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1918,17 +1907,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b663-a-bare-closure-in-one-function-body-makes-f-unresolvable-in-the-others" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B663. A bare <code>Closure</code> in one function body makes <code>$f()</code> unresolvable in the others
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2049,9 +2027,7 @@ method's return type through, so the information is available — the stub's
 return type just discards it. Give <code>fromCallable()</code> a return type derived
 from its argument, the same way the first-class callable syntax is handled.
 See also <a href="#b661-invoking-an-array-callable-has-no-return-type">B661</a>, which
-is the other half of the same hole, and
-<a href="#b663-a-bare-closure-in-one-function-body-makes-f-unresolvable-in-the-others">B663</a>,
-which is what makes this one spread.</p>
+is the other half of the same hole.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
@@ -2236,32 +2212,6 @@ way the member-access checks resolve theirs rather than pattern-matched.
 Conformance row <code>regressions_variable_class_static_property.php</code> (the
 private-read half of that test already passes, so only the write check is
 missing).</p>
-<h3 id="b663-a-bare-closure-in-one-function-body-makes-f-unresolvable-in-the-others">B663. A bare <code>Closure</code> in one function body makes <code>$f()</code> unresolvable in the others<a class="headerlink" href="#b663-a-bare-closure-in-one-function-body-makes-f-unresolvable-in-the-others" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">function poison(Repo $r): void {</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">    $f = \Closure::fromCallable([$r, 'find']);</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">    $f()-&gt;name();   // unresolved — expected, see B653</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">}</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">function clean(Repo $r): void {</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">    $f = $r-&gt;find(...);</span>
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="x">    $f()-&gt;name();   // ALSO unresolved; resolves to User if `poison` is deleted,</span>
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="x">                    // or if either function renames its variable</span>
-<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="x">}</span>
-</code></pre></div>
-<p>A variable that holds a signature-less <code>Closure</code> in one function body
-leaks that reading into every other body in the file that invokes a
-variable of the same name. Renaming either <code>$f</code> fixes it, deleting the
-first function fixes it, and no other unresolvable binding does it — an
-array callable or a <code>mixed</code> in the first body leaves the second alone, so
-it is specific to the bare <code>Closure</code>. A per-file map keyed by variable name
-is reaching across scopes it should not see; find it and key it by the
-function/closure body as well. This is the mechanism that turns one real
-gap (<a href="#b653-closurefromcallable-loses-the-callees-signature">B653</a>) into a
-false positive on every other call of a same-named callable in the file,
-and it will do the same to any file with a <code>$callback</code> or <code>$fn</code> in more
-than one function. Found while reducing the php-typing-conformance
-callable rows, not by a row of its own.</p>
 
 
 
