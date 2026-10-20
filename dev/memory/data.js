@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792456662558,
+  "lastUpdate": 1792499792822,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4317,6 +4317,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 84,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "vishnu@aspireapp.com",
+            "name": "Vishnu B",
+            "username": "vishnub1626"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "521dd8ef73be9009412c80bfab22da1c09ab6659",
+          "message": "perf: Allocate parsed member lists at their final size\n\nThe parser wraps each parsed method, property, constant and class in an\n`Arc` with `records.into_iter().map(Arc::new).collect()`. Collecting a\nconsumed `Vec` reuses its allocation, so the pointer list keeps the\nwhole record buffer: three 376-byte properties leave 188 pointer slots\nallocated for three pointers. These lists live in the index for the\nwhole session. The standard library documents this case under\n`impl FromIterator for Vec` and suggests discarding the excess capacity.\n\nAdd `into_arcs`, which allocates the pointer list at its final size,\nand use it where long-lived lists are built: class-like members,\nanonymous classes, docblock `@method` tags, Laravel factory methods and\nthe per-file class lists. `SharedVec::from` now releases spare growth\ncapacity, which also covers parameter lists. Copy-on-write behaviour is\nunchanged.\n\nOn a 25,913-file Laravel project, the `mem-audit` live heap after\n`analyze` falls from 1,953.6 to 1,822.6 MiB. The per-file class lists\nfall from 247.0 to 114.9 MiB. In the language server, measured on the\nprevious base a37a783f6, the macOS physical footprint after startup\nfalls from a median of 2,563 to 2,444 MiB, and after 43 editor requests\nfrom 2,596 to 2,466 MiB (three alternating runs per build; the ranges\ndo not overlap). Warm-up time is unchanged.",
+          "timestamp": "2026-10-20T14:21:04+02:00",
+          "tree_id": "0b8a2a454dc7edc9ed89a1dc31b489f56fedfc80",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/521dd8ef73be9009412c80bfab22da1c09ab6659"
+        },
+        "date": 1792499780699,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 44,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.8,
             "unit": "MiB"
           }
         ]
