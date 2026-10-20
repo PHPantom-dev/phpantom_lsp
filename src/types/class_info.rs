@@ -210,7 +210,7 @@ impl DocblockMembers {
             return None;
         }
         Some(Arc::new(Self {
-            methods: methods.into_iter().map(Arc::new).collect(),
+            methods: crate::types::into_arcs(methods),
             properties,
         }))
     }

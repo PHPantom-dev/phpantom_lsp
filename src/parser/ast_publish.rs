@@ -298,7 +298,7 @@ impl Backend {
                 .filter(|class| !class.name.starts_with("__anonymous@"))
                 .map(|class| class_info_fqn(class))
                 .collect();
-            let classes: Vec<Arc<ClassInfo>> = update.classes.into_iter().map(Arc::new).collect();
+            let classes: Vec<Arc<ClassInfo>> = crate::types::into_arcs(update.classes);
             let new_fqns: Vec<String> = classes
                 .iter()
                 .filter(|class| !class.name.starts_with("__anonymous@"))

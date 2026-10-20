@@ -23,7 +23,6 @@ use crate::inheritance::{ClassRef, build_substitution_map};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, MethodInfo, ParameterInfo};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use super::helpers::{snake_to_pascal, walks_parent_chain};
 use super::{classify_relationship_typed, is_soft_deletes_trait};
@@ -494,7 +493,7 @@ impl VirtualMemberProvider for LaravelFactoryProvider {
             cache,
         ));
         VirtualMembers {
-            methods: methods.into_iter().map(Arc::new).collect(),
+            methods: crate::types::into_arcs(methods),
             properties: Vec::new(),
             constants: Vec::new(),
         }

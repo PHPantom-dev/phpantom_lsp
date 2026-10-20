@@ -293,7 +293,7 @@ impl Backend {
             }
         }
 
-        let arc_classes: Vec<Arc<ClassInfo>> = classes.into_iter().map(Arc::new).collect();
+        let arc_classes: Vec<Arc<ClassInfo>> = crate::types::into_arcs(classes);
 
         // Used below to decide whether resolved-class cache eviction
         // is needed (only on re-parse, not first load).

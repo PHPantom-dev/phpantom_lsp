@@ -7,8 +7,6 @@
 //! trees looking for `Expression::AnonymousClass` nodes, recursing into
 //! method bodies (including nested anonymous classes) along the way.
 
-use std::sync::Arc;
-
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
@@ -82,17 +80,9 @@ impl Backend {
         ClassInfo {
             kind: ClassLikeKind::Class,
             name,
-            methods: methods.into_iter().map(Arc::new).collect::<Vec<_>>().into(),
-            properties: properties
-                .into_iter()
-                .map(Arc::new)
-                .collect::<Vec<_>>()
-                .into(),
-            constants: constants
-                .into_iter()
-                .map(Arc::new)
-                .collect::<Vec<_>>()
-                .into(),
+            methods: crate::types::into_arcs(methods).into(),
+            properties: crate::types::into_arcs(properties).into(),
+            constants: crate::types::into_arcs(constants).into(),
             start_offset,
             end_offset,
             keyword_offset,

@@ -244,7 +244,7 @@ impl Backend {
                 &empty_use_map,
                 &stub_namespace,
             );
-            let arc_classes: Vec<Arc<ClassInfo>> = classes.into_iter().map(Arc::new).collect();
+            let arc_classes: Vec<Arc<ClassInfo>> = crate::types::into_arcs(classes);
             self.symbols
                 .uri_classes_index
                 .write()
