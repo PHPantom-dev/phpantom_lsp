@@ -1154,17 +1154,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b662-property-assignment-type-checks-only-cover-this-prop-and-selfprop" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B662. Property assignment type checks only cover <code>$this-&gt;prop</code> and <code>self::$prop</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1962,17 +1951,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b662-property-assignment-type-checks-only-cover-this-prop-and-selfprop" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B662. Property assignment type checks only cover <code>$this-&gt;prop</code> and <code>self::$prop</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2307,28 +2285,6 @@ closures both resolve, so the gap is the array spelling alone —
 <code>call_user_func([$r, 'find'])</code> is <code>mixed</code> for the same reason. Conformance
 row <code>callables_array_callable_invocation.php</code>; the sibling stub gap is
 <a href="#b653-closurefromcallable-loses-the-callees-signature">B653</a>.</p>
-<h3 id="b662-property-assignment-type-checks-only-cover-this-prop-and-selfprop">B662. Property assignment type checks only cover <code>$this-&gt;prop</code> and <code>self::$prop</code><a class="headerlink" href="#b662-property-assignment-type-checks-only-cover-this-prop-and-selfprop" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">final class Holder { public static int $count = 1; public int $n = 1; }</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">function f(Holder $h): void { $h-&gt;n = 'no'; }        // not reported</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">function g(): void { Holder::$count = 'no'; }        // not reported</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">function h(Holder $h): void { $h-&gt;n = 1; }           // correct, and silent</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">/** @param class-string&lt;Holder&gt; $c */</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">function i(string $c): void { $c::$count = 'no'; }   // not reported</span>
-</code></pre></div>
-<p><code>check_expression_for_property_assignment</code> in
-<code>diagnostics/property_type_errors.rs</code> returns early unless the instance
-assignment's object is literally <code>$this</code>, or the static assignment's class
-is <code>self</code>/<code>static</code>. Every write through another object, through a named
-class, or through a class-string goes unchecked — which is most writes in
-real code. The property's declared type and the RHS type are both already
-resolved for the <code>$this</code> case; the subject just has to be resolved the same
-way the member-access checks resolve theirs rather than pattern-matched.
-Conformance row <code>regressions_variable_class_static_property.php</code> (the
-private-read half of that test already passes, so only the write check is
-missing).</p>
 
 
 
