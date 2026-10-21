@@ -1165,17 +1165,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b668-a-member-access-on-a-parenthesised-closure-literal-has-no-subject" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B668. A member access on a parenthesised closure literal has no subject
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1984,17 +1973,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b668-a-member-access-on-a-parenthesised-closure-literal-has-no-subject" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B668. A member access on a parenthesised closure literal has no subject
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2351,19 +2329,6 @@ way the member-access checks resolve theirs rather than pattern-matched.
 Conformance row <code>regressions_variable_class_static_property.php</code> (the
 private-read half of that test already passes, so only the write check is
 missing).</p>
-<h3 id="b668-a-member-access-on-a-parenthesised-closure-literal-has-no-subject">B668. A member access on a parenthesised closure literal has no subject<a class="headerlink" href="#b668-a-member-access-on-a-parenthesised-closure-literal-has-no-subject" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">function f(View\Factory $factory): void {</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">    $state = (fn(): array =&gt; [])-&gt;call($factory);             // Cannot verify method</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">    (function (): int { return 1; })-&gt;bindTo($factory);       // 'call'/'bindTo' — type</span>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">}                                                             // of '' could not be resolved</span>
-</code></pre></div>
-<p><code>$state</code> itself resolves to <code>array</code>, so the call is understood. Only the
-member-access diagnostic fails: the subject it extracts from
-<code>(fn() =&gt; …)</code> or <code>(function () {…})</code> is the empty string, which resolves
-to nothing. A closure literal is a <code>Closure</code>; the diagnostic should resolve
-its subject through the same path that typed the call. Found in the Laravel
-sample.</p>
 
 
 
