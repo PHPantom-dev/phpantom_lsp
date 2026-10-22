@@ -122,19 +122,22 @@ fn push_throws_items(site: &TagSite, def: &TagDef, items: &mut Vec<CompletionIte
         smart,
         ..
     } = *site;
-    let uncaught = match smart.class_loader {
-        Some(class_loader) => throws_analysis::find_uncaught_throw_types_with_context(
-            content,
-            position,
-            Some(&ThrowsContext {
-                class_loader,
-                function_loader: smart.function_loader,
-                use_map,
-                local_classes: smart.local_classes,
-                backend: smart.import_target.map(|(backend, _)| backend),
-            }),
-        ),
-        None => throws_analysis::find_uncaught_throw_types(content, position),
+    let uncaught = match (smart.class_loader, smart.resolved_class_loader) {
+        (Some(class_loader), Some(resolved_class_loader)) => {
+            throws_analysis::find_uncaught_throw_types_with_context(
+                content,
+                position,
+                Some(&ThrowsContext {
+                    class_loader,
+                    resolved_class_loader,
+                    function_loader: smart.function_loader,
+                    use_map,
+                    local_classes: smart.local_classes,
+                    backend: smart.import_target.map(|(backend, _)| backend),
+                }),
+            )
+        }
+        _ => throws_analysis::find_uncaught_throw_types(content, position),
     };
     let existing_throws = find_existing_throws_tags(content, position);
     let missing: Vec<String> = uncaught

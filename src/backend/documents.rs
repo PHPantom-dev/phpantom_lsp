@@ -19,7 +19,7 @@ impl Backend {
         // Track files opened with languageId "blade" so they get
         // Blade preprocessing even without a .blade.php extension.
         if doc.language_id == "blade" && !crate::blade::is_blade_file(&uri) {
-            self.blade_uris.write().insert(uri.clone());
+            self.blade.uris.write().insert(uri.clone());
         }
 
         self.open_files
@@ -242,12 +242,13 @@ impl Backend {
             // for a provider or config file) goes to a blocking task, as
             // `did_change` does, so closing a file does not stall the
             // service loop.
-            let reparse = move |backend: &Backend, uri: &str| match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    backend.update_ast(uri, &content);
-                }
-                Err(_) => backend.forget_closed_file(uri),
-            };
+            let reparse =
+                move |backend: &Backend, uri: &str| match crate::util::read_php_source(&path) {
+                    Some(content) => {
+                        backend.update_ast(uri, &content);
+                    }
+                    None => backend.forget_closed_file(uri),
+                };
             if self.sync_ast_updates {
                 reparse(self, &uri);
             } else {

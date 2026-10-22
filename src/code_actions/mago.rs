@@ -90,11 +90,8 @@ impl Backend {
                     worst_safety = safety;
                 }
 
-                let start_pos = crate::text_position::offset_to_position(content, start);
-                let end_pos = crate::text_position::offset_to_position(content, end);
-
                 text_edits.push(TextEdit {
-                    range: Range::new(start_pos, end_pos),
+                    range: crate::text_position::byte_range_to_lsp_range(content, start, end),
                     new_text,
                 });
             }

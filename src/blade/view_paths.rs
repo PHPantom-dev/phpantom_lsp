@@ -4,8 +4,6 @@
 
 use std::path::{Path, PathBuf};
 
-use tower_lsp::lsp_types::Url;
-
 use crate::text_scan::unquote_php_string;
 
 /// Discover Laravel Blade view directories from `config/view.php`.
@@ -58,7 +56,7 @@ pub(crate) struct ViewRoot {
 /// cannot be parsed to a file path is treated as covered, so it cannot
 /// force a spurious recompute.
 pub(crate) fn view_root_covers(roots: &[ViewRoot], uri: &str) -> bool {
-    let Some(path) = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok()) else {
+    let Some(path) = crate::util::uri_to_path(uri) else {
         return true;
     };
     roots.iter().any(|root| {
@@ -87,7 +85,7 @@ impl crate::Backend {
             return std::sync::Arc::new(Vec::new());
         };
         self.cached_laravel_enumeration(
-            &self.laravel_string_key_build_locks.view_roots,
+            &self.laravel.string_key_build_locks.view_roots,
             |cache| cache.view_roots.clone(),
             |cache, roots| cache.view_roots = Some(roots),
             || {
@@ -109,10 +107,10 @@ impl crate::Backend {
     /// configured view root that contains it, in dot notation, plus
     /// `namespace::name` forms for provider-registered directories.
     pub(crate) fn view_names_for_blade_uri(&self, uri: &str) -> Vec<String> {
-        let Ok(url) = tower_lsp::lsp_types::Url::parse(uri) else {
+        let Some(url) = crate::util::parse_url(uri) else {
             return Vec::new();
         };
-        let Ok(path) = url.to_file_path() else {
+        let Some(path) = crate::util::url_to_path(&url) else {
             return Vec::new();
         };
 
@@ -173,7 +171,7 @@ impl crate::Backend {
         for root in self.laravel_view_roots().iter() {
             match_root(&root.path, &|| root.canonical.clone(), "");
         }
-        for res in &self.laravel_provider_resources.read().view_dirs {
+        for res in &self.laravel.provider_resources.read().view_dirs {
             match_root(&res.path, &|| res.path.canonicalize().ok(), &res.namespace);
         }
         names

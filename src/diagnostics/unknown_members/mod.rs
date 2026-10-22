@@ -73,17 +73,16 @@ mod chains;
 mod member_check;
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::parser::with_parse_cache;
 use crate::resolution::FileLoaders;
 use crate::type_engine::resolver::{
     ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
 };
-use crate::types::ClassInfo;
 
 use super::existence_guards::{compute_existence_guards, compute_isset_empty_argument_ranges};
 use super::helpers::{FileDiagnosticContext, make_diagnostic};
@@ -148,9 +147,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
-            return;
-        };
+        let ctx = FileDiagnosticContext::gather(self, uri);
         self.collect_unknown_member_diagnostics_with_context(&ctx, uri, content, out);
     }
 
@@ -241,7 +238,7 @@ impl Backend {
 }
 
 impl UnknownMemberPass<'_> {
-    fn class_loader(&self) -> &dyn Fn(&str) -> Option<Arc<ClassInfo>> {
+    fn class_loader(&self) -> &ResolvedClassLoader<'_> {
         self.loaders.resolved_class_loader()
     }
 

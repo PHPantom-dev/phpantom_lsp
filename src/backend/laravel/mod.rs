@@ -9,6 +9,7 @@
 //! Each index has its own file; what they share is the discovery of the
 //! registered service providers, which lives here.
 
+mod class_loading;
 mod commands;
 mod date_class;
 mod gates;
@@ -17,9 +18,12 @@ mod morph_map;
 mod pivots;
 mod provider_resources;
 mod schema;
+mod state;
 mod storage;
 mod string_key_cache;
 
+pub(crate) use class_loading::CLASS_LOAD_HOOKS;
+pub(crate) use state::LaravelState;
 pub(crate) use string_key_cache::{LaravelStringKeyBuildLocks, LaravelStringKeyCache};
 
 use crate::Backend;
@@ -102,7 +106,9 @@ impl Backend {
                 }
             };
 
-        for vendor_dir in self.workspace.vendor_dir_paths.lock().iter() {
+        // Copied out so the lock is not held across the file reads.
+        let vendor_dirs = self.workspace.vendor_dir_paths.lock().clone();
+        for vendor_dir in &vendor_dirs {
             let installed = vendor_dir.join("composer").join("installed.json");
             if let Ok(content) = std::fs::read_to_string(&installed) {
                 for fqn in crate::virtual_members::laravel::parse_installed_providers(&content) {

@@ -97,7 +97,7 @@ pub(crate) fn parse_user_files(
             let display = file_path.strip_prefix(root).unwrap_or(file_path).display();
             eprintln!("[w{worker:02}] parse {display}");
         }
-        let content = std::fs::read_to_string(file_path).ok()?;
+        let content = crate::util::read_php_source(file_path)?;
         let uri = crate::util::path_to_uri(file_path);
         backend.update_ast(&uri, &content);
         Some((uri, content))
@@ -124,7 +124,7 @@ pub(crate) fn parse_user_files(
 /// would report (or fix against) false positives.  A project that is not
 /// Laravel has nothing to discover.
 pub(crate) fn discover_laravel_resources(backend: &Backend) {
-    if !backend.resolved_class_cache.read().is_laravel() {
+    if !backend.resolved_class_cache.read().laravel().is_enabled() {
         return;
     }
     let providers = backend.laravel_providers();

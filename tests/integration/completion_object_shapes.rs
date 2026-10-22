@@ -1,5 +1,4 @@
-use crate::common::create_test_backend;
-use tower_lsp::LanguageServer;
+use crate::common::{completion_response, create_test_backend, open_php};
 use tower_lsp::lsp_types::*;
 
 // ─── Object Shape Parsing Unit Tests ────────────────────────────────────────
@@ -215,31 +214,10 @@ async fn test_object_shape_basic_property_completion() {
         "$result->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$result->` (line 11, char 9)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 9,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 9, None).await;
     assert!(
         result.is_some(),
         "Should return completions for object shape properties"
@@ -294,30 +272,9 @@ async fn test_object_shape_optional_property_completion() {
         "$obj->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 6,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 6, None).await;
     assert!(result.is_some(), "Should return completions");
 
     match result.unwrap() {
@@ -368,31 +325,10 @@ async fn test_object_shape_value_type_chain_resolution() {
         "$data->user->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$data->user->` (line 15, char 14)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 14, None).await;
     assert!(
         result.is_some(),
         "Should chain-resolve object shape property type to User"
@@ -438,30 +374,9 @@ async fn test_object_shape_var_annotation() {
         "$item->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 7,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 3, 7, None).await;
     assert!(
         result.is_some(),
         "Should return completions from @var object shape"
@@ -507,31 +422,10 @@ async fn test_object_shape_param_annotation() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$config->` (line 6, char 17)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 6,
-                character: 17,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 6, 17, None).await;
     assert!(
         result.is_some(),
         "Should return completions from @param object shape"
@@ -587,30 +481,9 @@ async fn test_object_shape_intersection_with_stdclass() {
         "$obj->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 6,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 6, None).await;
     assert!(
         result.is_some(),
         "Should return completions for object shape intersection"
@@ -661,30 +534,9 @@ async fn test_object_shape_in_union_type() {
         "$result->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 9,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 9, None).await;
     assert!(
         result.is_some(),
         "Should return completions for nullable object shape"
@@ -731,30 +583,9 @@ async fn test_bare_object_no_completions() {
         "$obj->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 8,
-                character: 6,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 8, 6, None).await;
     // Bare `object` has no properties — result should be None.
     if let Some(resp) = result {
         let items = match resp {
@@ -800,31 +631,10 @@ async fn test_object_shape_from_this_method() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$item->` (line 11, char 15)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 15, None).await;
     assert!(
         result.is_some(),
         "Should return completions from $this->getItem() object shape"
@@ -874,31 +684,10 @@ async fn test_object_shape_nested_chain() {
         "$result->meta->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$result->meta->` (line 11, char 16)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 16, None).await;
     assert!(result.is_some(), "Should chain-resolve nested object shape");
 
     match result.unwrap() {
@@ -941,31 +730,10 @@ async fn test_object_shape_from_function_return() {
         "$response->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$response->` (line 8, char 12)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 8,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 8, 12, None).await;
     assert!(
         result.is_some(),
         "Should return completions from function return object shape"
@@ -1007,30 +775,9 @@ async fn test_object_shape_does_not_break_array_shape() {
         "$data['\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 7,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 3, 7, None).await;
     assert!(
         result.is_some(),
         "Array shape key completion should still work"

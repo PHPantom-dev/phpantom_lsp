@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use parking_lot::{Mutex, RwLock};
-use tower_lsp::lsp_types::{Location, Range, Url};
+use tower_lsp::lsp_types::{Location, Range};
 
 use crate::atom::{Atom, AtomMap};
 
@@ -132,7 +132,7 @@ pub(super) struct CompactLocation {
 impl CompactLocation {
     pub(super) fn to_lsp(&self) -> Option<Location> {
         Some(Location {
-            uri: Url::parse(&self.uri).ok()?,
+            uri: crate::util::parse_url(&self.uri)?,
             range: self.range,
         })
     }

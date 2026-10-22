@@ -1,4 +1,6 @@
-use crate::common::{create_psr4_workspace, goto_definition_at, open_document};
+use crate::common::{
+    create_psr4_workspace, goto_definition_at, open_document, references_response,
+};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -143,22 +145,8 @@ async fn resource_classes_feed_find_references_and_code_lens() {
     let php_uri = Url::from_file_path(dir.path().join("src/Domain/Widget.php")).unwrap();
     open_document(&backend, &php_uri, "php", php).await;
 
-    let references = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: php_uri.clone(),
-                },
-                position: Position::new(2, 8),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
+    let references = references_response(&backend, &php_uri, Position::new(2, 8), false)
         .await
-        .expect("reference request should succeed")
         .expect("resource references should be found");
     assert_eq!(references.len(), 3);
     assert_eq!(
@@ -222,22 +210,8 @@ async fn resource_class_members_feed_find_references_and_code_lens() {
     let php_uri = Url::from_file_path(dir.path().join("src/Handler/Run.php")).unwrap();
     open_document(&backend, &php_uri, "php", php).await;
 
-    let references = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: php_uri.clone(),
-                },
-                position: Position::new(3, 22),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
+    let references = references_response(&backend, &php_uri, Position::new(3, 22), false)
         .await
-        .expect("reference request should succeed")
         .expect("resource member reference should be found");
     assert_eq!(references.len(), 1);
     assert!(references[0].uri.path().ends_with("/config/callbacks.yaml"));
@@ -341,22 +315,8 @@ async fn rename_ignores_resource_occurrences() {
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
     // Both spellings are found by Find References.
-    let references = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: php_uri.clone(),
-                },
-                position: Position::new(2, 8),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
+    let references = references_response(&backend, &php_uri, Position::new(2, 8), false)
         .await
-        .expect("reference request should succeed")
         .expect("resource references should be found");
     assert_eq!(
         references

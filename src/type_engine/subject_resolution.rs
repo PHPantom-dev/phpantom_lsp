@@ -1,21 +1,22 @@
-//! Shared subject type resolution utility.
+//! The type of a subject a feature already holds as text.
 //!
-//! Resolves a subject string (`$this`, `self`, `static`, `parent`,
-//! bare class names, or `$variable`) to a [`PhpType`].  This is the
-//! single point of truth for all features that need to answer "what
-//! type does this subject refer to?" without the full completion
-//! resolver pipeline.
+//! The last step after [`subject_extraction`](super::subject_extraction)
+//! finds a subject's text and [`subject_expr`](super::subject_expr) parses
+//! it.  The class keywords (`self`, `static`, `parent`, `$this`) and a bare
+//! class name on static access are answered here from the enclosing class
+//! and the imports; a variable goes to the forward walker and anything else
+//! to the shared chain resolver, so this adds no resolution of its own.
 //!
 //! Consumers: deprecated diagnostics, find-references, code actions.
 
 use crate::atom::atom;
+use crate::class_lookup::{ResolvedClassLoader, find_class_at_offset};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::class_lookup::find_class_at_offset;
 use crate::names::resolve_to_fqn;
 use crate::php_type::PhpType;
-use crate::type_engine::resolver::Loaders;
+use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{AccessKind, ClassInfo, ResolvedType};
@@ -31,14 +32,28 @@ pub(crate) struct SubjectResolutionCtx<'a> {
     /// File content.
     pub content: &'a str,
     /// Class loader for already-resolved names.
-    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    /// See [`ResolutionCtx::source_class_loader`](crate::type_engine::resolver::ResolutionCtx::source_class_loader).
+    pub class_loader: &'a ResolvedClassLoader<'a>,
+    /// See [`FileCtx::source_class_loader`](crate::type_engine::resolver::FileCtx::source_class_loader).
     pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// Server state for project-wide answers.  See
-    /// [`ResolutionCtx::backend`](crate::type_engine::resolver::ResolutionCtx::backend).
+    /// [`FileCtx::backend`](crate::type_engine::resolver::FileCtx::backend).
     pub backend: Option<&'a crate::Backend>,
     /// Function loader (for variable resolution via the forward walker).
     pub function_loader: &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
+}
+
+impl<'a> SubjectResolutionCtx<'a> {
+    /// The file the subject is read in, as the type engine takes it.
+    fn file(&self) -> FileCtx<'a> {
+        FileCtx::new(
+            self.content,
+            self.local_classes,
+            self.class_loader,
+            self.source_class_loader,
+        )
+        .with_imports(Some(self.use_map))
+        .with_backend(self.backend)
+    }
 }
 
 /// Resolve a subject string to a [`PhpType`].
@@ -83,16 +98,8 @@ pub(crate) fn resolve_subject_type(
                 let current_class = find_class_at_offset(ctx.local_classes, access_offset);
                 return crate::type_engine::variable::resolution::resolve_variable_php_type(
                     VarQuery {
-                        var_name: trimmed,
-                        cursor_offset: access_offset,
-                        content: ctx.content,
-                        current_class,
-                        all_classes: ctx.local_classes,
-                        class_loader: ctx.class_loader,
-                        source_class_loader: ctx.source_class_loader,
-                        source_imports: Some(ctx.use_map),
-                        backend: ctx.backend,
                         loaders: Loaders::with_function(Some(ctx.function_loader)),
+                        ..VarQuery::new(trimmed, ctx.file(), current_class, access_offset)
                     },
                 );
             }
@@ -103,20 +110,13 @@ pub(crate) fn resolve_subject_type(
             // and hover use.
             let current_class = find_class_at_offset(ctx.local_classes, access_offset);
             let rctx = crate::type_engine::resolver::ResolutionCtx {
-                current_class,
-                all_classes: ctx.local_classes,
-                content: ctx.content,
-                cursor_offset: access_offset,
-                class_loader: ctx.class_loader,
-                source_class_loader: ctx.source_class_loader,
-                source_imports: Some(ctx.use_map),
-                backend: ctx.backend,
-                laravel_macro_this_resolver: None,
                 resolved_class_cache: ctx.backend.map(|b| &b.resolved_class_cache),
                 function_loader: Some(ctx.function_loader),
-                scope_var_resolver: None,
-                is_in_static_method: false,
-                preserve_static: false,
+                ..crate::type_engine::resolver::ResolutionCtx::new(
+                    ctx.file(),
+                    current_class,
+                    access_offset,
+                )
             };
             let access_kind = AccessKind::of_member_access(is_static);
             let resolved = crate::type_engine::resolver::resolve_target_classes_expr(

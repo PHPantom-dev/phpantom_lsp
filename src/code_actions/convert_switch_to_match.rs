@@ -210,7 +210,7 @@ fn try_convert_switch(sw: &control_flow::switch::Switch<'_>, content: &str) -> O
     }
 
     for arm in &arms {
-        result.push_str(&indent);
+        result.push_str(indent);
         result.push_str("    ");
         match &arm.conditions {
             Some(conds) => result.push_str(&conds.join(", ")),
@@ -221,7 +221,7 @@ fn try_convert_switch(sw: &control_flow::switch::Switch<'_>, content: &str) -> O
         result.push_str(",\n");
     }
 
-    result.push_str(&indent);
+    result.push_str(indent);
     result.push_str("};");
 
     Some(result)

@@ -416,6 +416,35 @@ take a `DiscoveryInputs` snapshot before applying it and hand it to
 filters and `[indexing] include`. The extra roots go in as a third field
 of that snapshot, not as a comparison of their own at either site.
 
+**A removed root leaves the index at once.** Taking a folder out of a
+multi-root workspace is routine, unlike deleting an `[indexing] include`
+entry, so a root that drops out of the snapshot is evicted immediately
+rather than kept until a restart. Compare the two snapshots' root lists
+after the containment dedup above, so a root that was hidden inside a
+removed parent counts as added. For each removed root,
+`reconcile_index_for_input_change` collects every file the indexes name
+under it, in every spelling `path_aliases` gives (`fqn_uri_index`,
+`uri_classes_index`, the autoload function and constant indexes,
+`symbol_maps`, `parsed_uris`), leaves out the files open in the editor,
+and hands the rest to `reindex_files_batch` as deletions. That is the
+route `evict_newly_filtered_symbols` already takes for a newly excluded
+tree, so no index is missed. If a remaining source still covers part of
+the removed tree (an `include` path under it, or another root), schedule
+the rediscovery walk after the eviction so that source gets its files
+back. A root that was added gets the walk the way a new `include` entry
+does, through `may_admit_more_than`.
+
+The root's library registration has to go too, or files under it would
+stay exempt from diagnostics and edits. `register_vendor_location`
+(`indexing/scan.rs`) only ever pushes onto `vendor_dir_paths` and
+`vendor_uri_prefixes`, so give it a counterpart that releases a spelling.
+One spelling can be registered for more than one reason (a folder that
+is also an `include` path outside the workspace), so record which
+sources claimed each one (Composer's vendor directories, `include`, each
+extra root) and drop a spelling only when its last claimant lets go.
+Finish by clearing the resolved-class and member-completion caches, as
+the filter eviction does.
+
 **Confirm the watchers before building any.** VS Code limits a
 string-pattern watcher to paths inside the workspace, and a sibling
 folder is inside it, so the `**/*.php` watchers every session registers
@@ -436,7 +465,7 @@ the extension's per-folder `documentSelector` as it is: a file opened
 from an extra root is served by its own folder's client. An
 `[indexing] include` path outside the workspace already gets exactly
 this treatment by being registered like a vendor directory
-(`add_library_path` in `indexing/scan.rs`), so register each extra root
+(`add_library_path` in `indexing/library_paths.rs`), so register each extra root
 the same way rather than adding a second notion of library code.
 
 ## X18. Watch `[indexing] include` paths outside the workspace

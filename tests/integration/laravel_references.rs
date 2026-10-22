@@ -1,5 +1,5 @@
 use crate::common::create_psr4_workspace;
-use tower_lsp::LanguageServer;
+use crate::common::{open_php, references_response};
 use tower_lsp::lsp_types::*;
 
 #[tokio::test]
@@ -87,37 +87,19 @@ User::query()->active();
         "usage.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let builder_uri = Url::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
 
     // Find references for UserBuilder::active() declaration (line 5, col 21)
-    let params = ReferenceParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier::new(builder_uri),
-            position: Position::new(5, 21),
-        },
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-        context: ReferenceContext {
-            include_declaration: true,
-        },
-    };
-
-    let locations = backend
-        .references(params)
+    let locations = references_response(&backend, &builder_uri, Position::new(5, 21), true)
         .await
-        .unwrap()
         .unwrap_or_default();
 
     let usage_uri = Url::from_file_path(dir.path().join("usage.php")).unwrap();
@@ -233,37 +215,19 @@ User::query()->active();
         "usage.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let usage_uri = Url::from_file_path(dir.path().join("usage.php")).unwrap();
 
     // Find references for User::active() usage (line 4, col 6)
-    let params = ReferenceParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier::new(usage_uri.clone()),
-            position: Position::new(4, 6),
-        },
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-        context: ReferenceContext {
-            include_declaration: true,
-        },
-    };
-
-    let locations = backend
-        .references(params)
+    let locations = references_response(&backend, &usage_uri, Position::new(4, 6), true)
         .await
-        .unwrap()
         .unwrap_or_default();
 
     let usage_locs: Vec<_> = locations.iter().filter(|l| l.uri == usage_uri).collect();
@@ -371,37 +335,19 @@ Member::query()->active();
         "usage.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let builder_uri = Url::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
 
     // Find references for UserBuilder::active() declaration (line 5, col 21)
-    let params = ReferenceParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier::new(builder_uri),
-            position: Position::new(5, 21),
-        },
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-        context: ReferenceContext {
-            include_declaration: true,
-        },
-    };
-
-    let locations = backend
-        .references(params)
+    let locations = references_response(&backend, &builder_uri, Position::new(5, 21), true)
         .await
-        .unwrap()
         .unwrap_or_default();
 
     let usage_uri = Url::from_file_path(dir.path().join("usage.php")).unwrap();

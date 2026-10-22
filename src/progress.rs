@@ -277,6 +277,21 @@ impl Backend {
         }
     }
 
+    /// [`log`](Self::log) for synchronous code, such as a blocking task
+    /// applying a watched-file batch: the message is sent from a task
+    /// spawned on the runtime.  Without a client or a runtime (the CLI
+    /// subcommands), it goes to `tracing` instead.
+    pub(crate) fn log_detached(&self, typ: MessageType, message: String) {
+        if let Some(client) = &self.client
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            let client = client.clone();
+            runtime.spawn(async move { client.log_message(typ, message).await });
+        } else {
+            tracing::warn!("{}", message);
+        }
+    }
+
     /// Create a server-initiated work-done progress token and send the
     /// `window/workDoneProgress/create` request to the client.
     ///
@@ -290,10 +305,7 @@ impl Backend {
         // Per the LSP spec, servers must only use
         // window/workDoneProgress/create when the client signals
         // support via the window.workDoneProgress capability.
-        if !self
-            .supports_work_done_progress
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if !self.caps().work_done_progress {
             return None;
         }
 

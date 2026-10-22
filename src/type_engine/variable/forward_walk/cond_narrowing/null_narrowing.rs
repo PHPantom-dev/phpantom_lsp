@@ -325,7 +325,7 @@ pub(crate) fn narrow_nullsafe_call_receiver(
     ctx: &ForwardWalkCtx<'_>,
 ) {
     let mut keys = nullsafe_receiver_keys(object);
-    if let Some(key) = narrowing::expr_to_subject_key(object) {
+    if let Some(key) = condition_facts::expr_to_subject_key(object) {
         keys.insert(0, key);
     }
     for key in keys {
@@ -346,7 +346,7 @@ fn nullsafe_receiver_keys(expr: &Expression<'_>) -> Vec<String> {
     let mut keys = Vec::new();
     let mut node = expr;
     while let Some((receiver, nullsafe)) = chain_receiver(node) {
-        if nullsafe && let Some(key) = narrowing::expr_to_subject_key(receiver) {
+        if nullsafe && let Some(key) = condition_facts::expr_to_subject_key(receiver) {
             keys.push(key);
         }
         node = receiver;
@@ -381,9 +381,9 @@ pub(crate) fn record_nullsafe_origin<'b>(
     let mut implied = nullsafe_receiver_keys(rhs);
     // A copy reads the value; a call only reads the receiver, and what it
     // returns is its own value, not the receiver's.
-    if let Some(key) = narrowing::expr_to_subject_key(rhs)
-        && narrowing::is_member_path_key(&key)
-        && !narrowing::is_call_key(&key)
+    if let Some(key) = condition_facts::expr_to_subject_key(rhs)
+        && condition_facts::is_member_path_key(&key)
+        && !condition_facts::is_call_key(&key)
     {
         implied.push(key);
     }
@@ -394,7 +394,9 @@ pub(crate) fn record_nullsafe_origin<'b>(
     // just performed.
     let implied: Vec<Atom> = implied
         .iter()
-        .filter(|key| key.as_str() != lhs_name && !narrowing::key_reads_variable(key, lhs_name))
+        .filter(|key| {
+            key.as_str() != lhs_name && !condition_facts::key_reads_variable(key, lhs_name)
+        })
         .map(|key| atom(key))
         .collect();
     scope.record_non_null_implication(lhs_name, implied);

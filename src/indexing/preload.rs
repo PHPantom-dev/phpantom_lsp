@@ -13,8 +13,6 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-use tower_lsp::lsp_types::Url;
-
 use crate::Backend;
 
 impl Backend {
@@ -63,7 +61,7 @@ impl Backend {
                 p.add_done(1);
             }
             let path = pending[i];
-            if let Ok(content) = std::fs::read_to_string(path) {
+            if let Some(content) = crate::util::read_php_source(path) {
                 let uri = crate::util::path_to_uri(path);
                 self.update_ast(&uri, &content);
             }
@@ -143,17 +141,17 @@ impl Backend {
         &self,
         progress: Option<&(dyn Fn(u32, String) + Sync)>,
     ) -> parking_lot::MutexGuard<'_, ()> {
-        if let Some(guard) = self.workspace_index_lock.try_lock() {
+        if let Some(guard) = self.workspace_index.lock.try_lock() {
             return guard;
         }
         // Nothing to report the wait to; take the plain blocking path.
         let Some(progress) = progress else {
-            return self.workspace_index_lock.lock();
+            return self.workspace_index.lock.lock();
         };
 
         let waiting_since = std::time::Instant::now();
         loop {
-            let (percentage, message) = match self.workspace_index_status.lock().as_ref() {
+            let (percentage, message) = match self.workspace_index.status.lock().as_ref() {
                 Some((percentage, message)) => (
                     *percentage,
                     format!("Waiting for workspace index: {message}"),
@@ -163,7 +161,8 @@ impl Backend {
             progress(percentage, message);
 
             if let Some(guard) = self
-                .workspace_index_lock
+                .workspace_index
+                .lock
                 .try_lock_for(std::time::Duration::from_millis(100))
             {
                 tracing::debug!(
@@ -186,7 +185,7 @@ impl Backend {
     ) {
         let percentage = percentage.min(100);
         let message = message.into();
-        *self.workspace_index_status.lock() = Some((percentage, message.clone()));
+        *self.workspace_index.status.lock() = Some((percentage, message.clone()));
         if let Some(progress) = progress {
             progress(percentage, message);
         }
@@ -216,7 +215,7 @@ impl Backend {
         // every batch, those requests must reuse it instead of walking the
         // workspace again.  Watched-file notifications keep the completed
         // index current after this point.
-        if !refresh_completed && self.workspace_indexed.load(Ordering::Acquire) {
+        if !refresh_completed && self.workspace_index.indexed.load(Ordering::Acquire) {
             return;
         }
 
@@ -224,7 +223,7 @@ impl Backend {
 
         // Another request may have completed the index while this one was
         // waiting for the single-flight lock.
-        if !refresh_completed && self.workspace_indexed.load(Ordering::Acquire) {
+        if !refresh_completed && self.workspace_index.indexed.load(Ordering::Acquire) {
             if let Some(progress) = progress {
                 progress(100, "Workspace index ready".to_string());
             }
@@ -235,9 +234,9 @@ impl Backend {
         // A refresh of a finished index must not re-infer every Blade
         // template when the walk finds nothing new. Captured before the
         // pass publishes `workspace_indexed`, which it does either way.
-        let already_indexed = self.workspace_indexed.load(Ordering::Acquire);
+        let already_indexed = self.workspace_index.indexed.load(Ordering::Acquire);
         self.report_workspace_index_progress(progress, 1, "Preparing workspace index");
-        let existing_uris: HashSet<String> = self.symbol_maps.read().keys().cloned().collect();
+        let existing_uris: HashSet<String> = self.uris_with_symbol_maps().into_iter().collect();
 
         // Build the vendor URI prefixes so we can skip vendor files in
         // Phase 1 (fqn_uri_index may contain vendor URIs from prior
@@ -258,8 +257,7 @@ impl Backend {
             .filter(|uri| {
                 !existing_uris.contains(*uri)
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
-                    && !uri.starts_with("phpantom-stub://")
-                    && !uri.starts_with("phpantom-stub-fn://")
+                    && !crate::stubs::is_stub_uri(uri)
             })
             .collect();
 
@@ -421,7 +419,8 @@ impl Backend {
             self.report_workspace_index_progress(progress, 99, "Finalizing workspace index");
             // Release pairs with the Acquire loads in
             // `reference_candidate_uris_for_keys` and `find_implementors`.
-            self.workspace_indexed
+            self.workspace_index
+                .indexed
                 .store(true, std::sync::atomic::Ordering::Release);
 
             // Blade templates parsed before their controllers saw no
@@ -444,7 +443,7 @@ impl Backend {
             }
         }
         self.report_workspace_index_progress(progress, 100, "Workspace index ready");
-        *self.workspace_index_status.lock() = None;
+        *self.workspace_index.status.lock() = None;
         tracing::info!("ensure_workspace_indexed: total time {:?}", start.elapsed());
     }
 
@@ -485,7 +484,7 @@ impl Backend {
             files,
             |(uri, _)| uri.as_str(),
             |(_, path)| index_progress_weight_for_path(path),
-            |(_, path)| std::fs::read_to_string(path).ok(),
+            |(_, path)| crate::util::read_php_source(path),
             progress,
         );
     }
@@ -573,9 +572,7 @@ impl Backend {
         if let Some(content) = self.open_files.read().get(uri) {
             return (content.len() as u64).max(1);
         }
-        Url::parse(uri)
-            .ok()
-            .and_then(|url| url.to_file_path().ok())
+        crate::util::uri_to_path(uri)
             .map(|path| index_progress_weight_for_path(&path))
             .unwrap_or(1)
     }

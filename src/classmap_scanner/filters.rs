@@ -136,7 +136,7 @@ fn respell_under_root(root: &Path, skip_dirs: Arc<Vec<PathBuf>>) -> Arc<Vec<Path
 /// reproducible across runs, where indexing both was reproducibly wrong.
 ///
 /// A claim covers the whole walk rather than the root that made it, even
-/// though [`walk_roots`](super::discovery) otherwise keeps each root's
+/// though [`walk_roots`](super::walk) otherwise keeps each root's
 /// files separate so it can namespace-filter them against that root's own
 /// PSR-4 prefix. Two roots whose links converge on one tree therefore see
 /// it once between them, which costs nothing real: a PHP file declares a

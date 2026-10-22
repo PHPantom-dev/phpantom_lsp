@@ -27,7 +27,7 @@ fn union_order_is_independent_of_visit_order() {
 #[test]
 fn headless_view_snapshot_builds_local_candidates() {
     let mut backend = Backend::new_test();
-    backend.skip_reference_index = true;
+    backend.state_mut().skip_reference_index = true;
     let uri = "file:///project/app/Controller.php";
     backend.update_ast(uri, "<?php\nview('shop', ['item' => new Item()]);\n");
 
@@ -64,7 +64,7 @@ fn headless_inference_skips_non_candidate_callers() {
     std::fs::write(&unrelated, unrelated_source).expect("failed to write unrelated caller");
 
     let mut backend = Backend::new_test_with_workspace(root, Vec::new());
-    backend.skip_reference_index = true;
+    backend.state_mut().skip_reference_index = true;
     for (path, source) in [(&matching, matching_source), (&unrelated, unrelated_source)] {
         let uri = Url::from_file_path(path).expect("caller path should become a file URI");
         backend.update_ast(uri.as_str(), source);

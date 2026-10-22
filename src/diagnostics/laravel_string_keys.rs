@@ -12,6 +12,7 @@ use tower_lsp::lsp_types::*;
 
 use super::helpers;
 use crate::Backend;
+use crate::class_lookup::Fqn;
 
 /// The [`crate::symbol_map::LaravelStringKind`]s
 /// [`Backend::collect_invalid_laravel_string_key_diagnostics`] can judge.
@@ -94,10 +95,10 @@ struct DeclaredKeys<'a> {
 impl<'a> DeclaredKeys<'a> {
     /// Enumerate what the project declares for the kinds in `spans`.
     ///
-    /// Must not run under the `symbol_maps` read lock: the enumerations
+    /// Must not run under the file-state read lock: the enumerations
     /// call `user_file_symbol_maps()` → `ensure_workspace_indexed()` →
     /// `parse_files_parallel()` → `update_ast()`, which acquires a WRITE
-    /// lock on `symbol_maps`.
+    /// lock on `Backend::files`.
     fn enumerate(backend: &'a Backend, spans: &[CheckedKeySpan]) -> Self {
         let names = |wanted: fn(CheckedStringKind) -> bool| spans.iter().any(|span| wanted(span.0));
         let has_route = names(|kind| kind == CheckedStringKind::Route);
@@ -159,7 +160,8 @@ impl<'a> DeclaredKeys<'a> {
         // is unknowable.
         let trans_keys: Arc<[String]> = if has_trans
             && !backend
-                .laravel_provider_resources
+                .laravel
+                .provider_resources
                 .read()
                 .custom_translation_loader
         {
@@ -172,13 +174,13 @@ impl<'a> DeclaredKeys<'a> {
         // entirely.  The scan is heuristic (it relies on the `*Command`
         // naming convention), so an empty index likely means discovery
         // failed rather than that every referenced command is invalid.
-        let commands_indexed = has_command && !backend.laravel_commands.read().is_empty();
+        let commands_indexed = has_command && !backend.laravel.commands.read().is_empty();
 
         // A morph alias is only checkable when the project calls
         // `Relation::enforceMorphMap()` / `requireMorphMap()`.  Without that,
         // an unmapped model still morphs under its class name, so the set of
         // valid `*_type` values is open and an unknown alias proves nothing.
-        let morph_map_enforced = has_morph_alias && backend.laravel_morph_map.read().is_enforced();
+        let morph_map_enforced = has_morph_alias && backend.laravel.morph_map.read().is_enforced();
 
         // Abilities are only checkable when the project defines some: an
         // empty set means gate discovery found nothing (a project that
@@ -193,7 +195,7 @@ impl<'a> DeclaredKeys<'a> {
         // ability space is open and the whole check has to stand down —
         // including the walk of every policy class that would enumerate it.
         let gate_abilities: Arc<[String]> =
-            if has_gate_ability && !backend.laravel_gates.read().ability_space_is_open() {
+            if has_gate_ability && !backend.laravel.gates.read().ability_space_is_open() {
                 backend.cached_gate_abilities()
             } else {
                 Arc::default()
@@ -242,14 +244,14 @@ impl<'a> DeclaredKeys<'a> {
             }
             CheckedStringKind::Command => self.commands_indexed.then(|| {
                 (
-                    self.backend.laravel_commands.read().contains_name(key),
+                    self.backend.laravel.commands.read().contains_name(key),
                     "command",
                     "invalid_laravel_command",
                 )
             }),
             CheckedStringKind::MorphAlias => self.morph_map_enforced.then(|| {
                 (
-                    self.backend.laravel_morph_map.read().has_alias(key),
+                    self.backend.laravel.morph_map.read().has_alias(key),
                     "morph type",
                     "invalid_laravel_morph_alias",
                 )
@@ -345,6 +347,7 @@ impl Backend {
     /// whose name is not a parameter of the enclosing command's `$signature`.
     pub(super) fn collect_invalid_command_param_diagnostics(
         &self,
+        ctx: &helpers::FileDiagnosticContext,
         uri: &str,
         content: &str,
         out: &mut Vec<Diagnostic>,
@@ -352,24 +355,19 @@ impl Backend {
         use crate::symbol_map::SymbolKind;
 
         // (name, is_option, start, end) for each own-param span.
-        let spans: Vec<(String, bool, u32, u32)> = {
-            let maps = self.symbol_maps.read();
-            let Some(symbol_map) = maps.get(uri) else {
-                return;
-            };
-            symbol_map
-                .spans
-                .iter()
-                .filter(|span| super::incremental::reports_site(span.start))
-                .filter_map(|span| {
-                    if let SymbolKind::CommandOwnParam { name, is_option } = &span.kind {
-                        Some((name.clone(), *is_option, span.start, span.end))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        };
+        let spans: Vec<(String, bool, u32, u32)> = ctx
+            .symbol_map
+            .spans
+            .iter()
+            .filter(|span| super::incremental::reports_site(span.start))
+            .filter_map(|span| {
+                if let SymbolKind::CommandOwnParam { name, is_option } = &span.kind {
+                    Some((name.clone(), *is_option, span.start, span.end))
+                } else {
+                    None
+                }
+            })
+            .collect();
         if spans.is_empty() {
             return;
         }
@@ -422,21 +420,19 @@ impl Backend {
     /// [`CheckedStringKind`].
     pub(super) fn collect_invalid_laravel_string_key_diagnostics(
         &self,
+        ctx: &helpers::FileDiagnosticContext,
         uri: &str,
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
         use crate::symbol_map::SymbolKind;
 
-        // Extract the LaravelStringKey spans we need, then DROP the read
-        // lock before enumerating declarations (see
-        // `DeclaredKeys::enumerate`): holding it while that takes the
-        // write lock would deadlock.
-        let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
-            return;
-        };
-        let extra = self.typed_receiver_view_spans_for(uri, &symbol_map);
-        let morph_columns = self.morph_column_spans_for(uri, &symbol_map);
+        // The pass holds the map by `Arc`, not under the file-state read
+        // lock, so enumerating declarations below can take the write lock
+        // (see `DeclaredKeys::enumerate`) without deadlocking.
+        let symbol_map = &ctx.symbol_map;
+        let extra = self.typed_receiver_view_spans_for(uri, symbol_map);
+        let morph_columns = self.morph_column_spans_for(uri, symbol_map);
         let key_spans: Vec<CheckedKeySpan> = symbol_map
             .spans
             .iter()
@@ -484,6 +480,7 @@ impl Backend {
             if kind == CheckedStringKind::GateAbility {
                 if !declared.gate_abilities.is_empty()
                     && let Some(message) = self.gate_ability_problem(
+                        ctx,
                         uri,
                         content,
                         key,
@@ -525,18 +522,19 @@ impl Backend {
     /// or the call names none — the ability only has to exist somewhere.
     fn gate_ability_problem(
         &self,
+        ctx: &helpers::FileDiagnosticContext,
         uri: &str,
         content: &str,
         ability: &str,
         span_start: u32,
         known_abilities: &[String],
     ) -> Option<String> {
-        let is_defined = self.laravel_gates.read().definition(ability).is_some();
+        let is_defined = self.laravel.gates.read().definition(ability).is_some();
         if is_defined {
             return None;
         }
 
-        if let Some(model_fqn) = self.gate_subject_model(uri, content, span_start)
+        if let Some(model_fqn) = self.gate_subject_model(ctx, uri, content, span_start)
             && let Some((policy, abilities)) =
                 crate::virtual_members::laravel::model_policy_abilities(self, &model_fqn)
         {
@@ -565,7 +563,13 @@ impl Backend {
 
     /// The FQN of the model a gate check named, when the symbol map recorded
     /// one and it resolves to a class.
-    fn gate_subject_model(&self, uri: &str, content: &str, span_start: u32) -> Option<String> {
+    fn gate_subject_model(
+        &self,
+        pass: &helpers::FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        span_start: u32,
+    ) -> Option<String> {
         // A Blade file's symbol map is built from the preprocessed virtual
         // PHP, so every offset in it — including the subject's — indexes that
         // text rather than the template the caller handed us.
@@ -573,8 +577,7 @@ impl Backend {
         let content = virtual_php.as_ref().map_or(content, |php| php.as_str());
 
         let (subject_text, is_static) = {
-            let maps = self.symbol_maps.read();
-            let map = maps.get(uri)?;
+            let map = &pass.symbol_map;
             // The subject is stored as a range into the text the map was
             // built from, so a map built from older text would slice the
             // wrong bytes (or none at all).
@@ -586,10 +589,18 @@ impl Backend {
             )
         };
 
-        let ctx = self.file_context_at(uri, span_start);
-        let class_loader = self.class_loader(&ctx);
-        let resolved_class_loader = self.resolved_class_loader(&ctx);
-        let function_loader = self.function_loader(&ctx);
+        // A file with several `namespace` blocks resolves the subject in
+        // the one it is written in.
+        let narrowed;
+        let ctx = if pass.file.namespace_spans.is_some() {
+            narrowed = pass.file.at(span_start);
+            &narrowed
+        } else {
+            &pass.file
+        };
+        let class_loader = self.class_loader(ctx);
+        let resolved_class_loader = self.resolved_class_loader(ctx);
+        let function_loader = self.function_loader(ctx);
         let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
             local_classes: &ctx.classes,
             use_map: &ctx.use_map,
@@ -609,7 +620,7 @@ impl Backend {
         .top_level_class_names()
         .into_iter()
         .next()?;
-        Some(resolved_class_loader(&name)?.fqn().to_string())
+        Some(resolved_class_loader(Fqn::new(&name))?.fqn().to_string())
     }
 
     /// Whether `literal` names no template this project ships, as a
@@ -637,7 +648,8 @@ impl Backend {
         let name = crate::virtual_members::laravel::canonical_view_name(literal);
         if let Some((namespace, _)) = name.split_once("::")
             && !self
-                .laravel_provider_resources
+                .laravel
+                .provider_resources
                 .read()
                 .view_dirs
                 .iter()
@@ -668,8 +680,10 @@ mod tests {
         let backend = crate::Backend::new_test();
         let mut out = Vec::new();
 
+        let uri = "file:///closed.php";
         backend.collect_invalid_laravel_string_key_diagnostics(
-            "file:///closed.php",
+            &super::helpers::FileDiagnosticContext::gather(&backend, uri),
+            uri,
             "<?php config('app.name');",
             &mut out,
         );
@@ -678,9 +692,9 @@ mod tests {
     }
 
     /// Regression test: `collect_invalid_laravel_string_key_diagnostics`
-    /// must not hold a `symbol_maps` read lock while calling enumeration
+    /// must not hold the file-state read lock while calling enumeration
     /// functions that reach `ensure_workspace_indexed()` →
-    /// `parse_files_parallel()` → `update_ast()` → `symbol_maps.write()`.
+    /// `parse_files_parallel()` → `update_ast()` → `files.write()`.
     ///
     /// Before the fix, this deadlocked because the read lock was held
     /// for the entire function body.  The fix extracts the needed spans
@@ -731,7 +745,7 @@ mod tests {
             Ok(_diags) => { /* success — no deadlock */ }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 panic!(
-                    "collect_slow_diagnostics deadlocked: symbol_maps read lock \
+                    "collect_slow_diagnostics deadlocked: the file-state read lock \
                      was likely held while enumeration functions tried to write"
                 );
             }

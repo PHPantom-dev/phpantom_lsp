@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_test_backend, hover_text_at, open_document};
+    use crate::common::{
+        create_test_backend, goto_definition_at, hover_response, hover_text_at, open_document,
+    };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -56,21 +58,7 @@ mod tests {
             })
             .await;
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 1,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let _ = backend.goto_definition(params).await.unwrap();
+        let _ = goto_definition_at(&backend, &blade_uri, 1, 1).await;
 
         let (virtual_php, _) = phpantom_lsp::blade::preprocessor::preprocess(&blade_text);
         println!("VIRTUAL PHP SENTRY:\n{}", virtual_php);
@@ -94,21 +82,7 @@ mod tests {
             })
             .await;
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 1,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let _ = backend.goto_definition(params).await.unwrap();
+        let _ = goto_definition_at(&backend, &blade_uri, 1, 1).await;
 
         // Print the preprocessed PHP
         let (virtual_php, _) = phpantom_lsp::blade::preprocessor::preprocess(&blade_text);
@@ -267,19 +241,8 @@ mod tests {
                     },
                 };
                 for column in start..start + 3 {
-                    let hover = backend
-                        .hover(HoverParams {
-                            text_document_position_params: TextDocumentPositionParams {
-                                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                                position: Position {
-                                    line,
-                                    character: column,
-                                },
-                            },
-                            work_done_progress_params: WorkDoneProgressParams::default(),
-                        })
+                    let hover = hover_response(&backend, &uri, line, column)
                         .await
-                        .unwrap()
                         .unwrap_or_else(|| panic!("expected a hover at {line}:{column}"));
                     let HoverContents::Markup(markup) = hover.contents else {
                         panic!("expected markup at {line}:{column}");
@@ -329,19 +292,8 @@ mod tests {
                     },
                 };
                 for column in start..start + 3 {
-                    let hover = backend
-                        .hover(HoverParams {
-                            text_document_position_params: TextDocumentPositionParams {
-                                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                                position: Position {
-                                    line,
-                                    character: column,
-                                },
-                            },
-                            work_done_progress_params: WorkDoneProgressParams::default(),
-                        })
+                    let hover = hover_response(&backend, &uri, line, column)
                         .await
-                        .unwrap()
                         .unwrap_or_else(|| panic!("expected a hover at {line}:{column}"));
                     let HoverContents::Markup(markup) = hover.contents else {
                         panic!("expected markup at {line}:{column}");

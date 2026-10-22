@@ -1,6 +1,8 @@
 //! End-to-end coverage for direct Laravel config-backed resource names.
 
-use crate::common::{create_psr4_workspace, position_after};
+use crate::common::{
+    completion_response, create_psr4_workspace, goto_definition_at, open_php, position_after,
+};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -92,32 +94,12 @@ async fn open_workspace(source: &str) -> (Backend, tempfile::TempDir, Url) {
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: source.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, source).await;
     (backend, dir, uri)
 }
 
 async fn completion_items(backend: &Backend, uri: &Url, position: Position) -> Vec<CompletionItem> {
-    let response = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .expect("completion request should succeed");
+    let response = completion_response(backend, uri, position.line, position.character, None).await;
     match response {
         Some(CompletionResponse::Array(items)) => items,
         Some(CompletionResponse::List(list)) => list.items,
@@ -469,16 +451,7 @@ function auth(?string $guard = null): object { return new \stdClass(); }
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: source.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, source).await;
     let position = position_after(source, "auth('we");
 
     let labels = completion_items(&backend, &uri, position)
@@ -498,17 +471,8 @@ function auth(?string $guard = null): object { return new \stdClass(); }
             .is_none()
     );
     assert!(
-        backend
-            .goto_definition(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position,
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
+        goto_definition_at(&backend, &uri, position.line, position.character)
             .await
-            .expect("definition request should succeed")
             .is_none()
     );
     assert!(
@@ -540,16 +504,7 @@ class Route { public static function middleware(string $name): void {} }
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: source.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, source).await;
 
     for prefix in ["\\Cache::store('red", "\\Route::middleware('auth:we"] {
         let position = position_after(source, prefix);
@@ -680,17 +635,8 @@ Broadcast::connection('missing-broadcast');
         assert!(text.contains(&format!("**{label}** `{key}`")), "{text}");
         assert!(text.contains("config/"), "{text}");
 
-        let response = backend
-            .goto_definition(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position,
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
+        let response = goto_definition_at(&backend, &uri, position.line, position.character)
             .await
-            .expect("definition request should succeed")
             .unwrap_or_else(|| panic!("missing definition at `{prefix}`"));
         let location = definition_location(response);
         assert!(
@@ -784,17 +730,8 @@ config('cache.stores.redis');
         .expect("parameter attribute should hover as a cache store");
     assert!(hover_text(hover).contains("**Cache store** `redis`"));
 
-    let definition = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: valid,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
+    let definition = goto_definition_at(&backend, &uri, valid.line, valid.character)
         .await
-        .expect("definition request should succeed")
         .expect("parameter attribute should navigate");
     let definition = definition_location(definition);
     assert!(definition.uri.path().ends_with("/config/cache.php"));
@@ -855,17 +792,8 @@ Queue::connection('null');
         .handle_hover(uri.as_str(), source, read)
         .expect("role-qualified database connection should hover");
     assert!(hover_text(hover).contains("**Database connection** `mysql::read`"));
-    let definition = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: read,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
+    let definition = goto_definition_at(&backend, &uri, read.line, read.character)
         .await
-        .expect("definition request should succeed")
         .expect("role-qualified database connection should navigate");
     assert_eq!(
         definition_location(definition).range.start,
@@ -915,16 +843,7 @@ async fn generic_config_diagnostics_accept_only_exact_segment_prefixes() {
     );
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: source.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, source).await;
 
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), source, &mut diagnostics);
@@ -967,16 +886,7 @@ Cache::store('r');
     let (backend, dir) = create_psr4_workspace(PACKAGE_COMPOSER_JSON, &workspace_files(source));
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: source.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, source).await;
 
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), source, &mut diagnostics);
@@ -1058,16 +968,7 @@ config('external.unknown');
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: source.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, source).await;
 
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), source, &mut diagnostics);
@@ -1139,16 +1040,7 @@ config('auth.guards.token.driver');
     let (backend, dir) = create_psr4_workspace(composer, &files);
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: source.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, source).await;
 
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), source, &mut diagnostics);
@@ -1182,16 +1074,7 @@ Cache::store('provided-at-runtime');
     );
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: source.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, source).await;
 
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), source, &mut diagnostics);

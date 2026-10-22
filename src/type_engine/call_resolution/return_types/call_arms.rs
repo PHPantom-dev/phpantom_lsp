@@ -6,6 +6,7 @@
 use super::laravel::laravel_helper_call_class;
 use super::literals::resolve_hint_keywords;
 use super::*;
+use crate::class_lookup::Fqn;
 use crate::type_engine::call_resolution::{
     facade_concrete_owner, is_reflected_property_call, is_reflected_property_class,
     resolve_reflected_property_at_call, resolve_reflected_property_at_new,
@@ -46,8 +47,8 @@ impl Backend {
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                 &ty,
                 "",
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
             if let Some(ref mut hint_out) = return_type_hint_out {
                 **hint_out = Some(ty);
@@ -92,8 +93,8 @@ impl Backend {
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                 &ty,
                 "",
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
             if let Some(ref mut hint_out) = return_type_hint_out {
                 **hint_out = Some(ty);
@@ -173,7 +174,7 @@ impl Backend {
             if !hint_captured && let Some(ref mut hint_out) = return_type_hint_out {
                 let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                     &owner,
-                    ctx.class_loader,
+                    ctx.file.class_loader,
                     ctx.resolved_class_cache,
                 );
                 if let Some(m) = merged.get_method_ci(method_name) {
@@ -199,7 +200,7 @@ impl Backend {
                             written_class: Some(&written),
                         },
                         &merged,
-                        ctx.class_loader,
+                        ctx.file.class_loader,
                     )
                     .or_else(|| {
                         m.return_type.as_ref().map(|ret| {
@@ -239,7 +240,7 @@ impl Backend {
                                     declaring: Some(merged.fqn().as_str()),
                                     written_class: Some(&written),
                                 },
-                                ctx.class_loader,
+                                ctx.file.class_loader,
                                 &tpl,
                             )
                         } else {
@@ -255,7 +256,7 @@ impl Backend {
                         **hint_out = Some(resolve_hint_keywords(
                             substituted,
                             &owner,
-                            ctx.class_loader,
+                            ctx.file.class_loader,
                             |s| match &rt.type_string.kind() {
                                 TypeKind::Generic(_) => s.replace_self_with_type(&rt.type_string),
                                 _ => s.replace_self(&owner.fqn()),
@@ -268,7 +269,7 @@ impl Backend {
             let mr_ctx =
                 MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, &written, false);
             if let Some((date_class, date_return_type)) =
-                Self::configured_laravel_date_return(&owner, method_name, ctx.class_loader)
+                Self::configured_laravel_date_return(&owner, method_name, ctx.file.class_loader)
             {
                 ClassInfo::push_unique_arc(&mut results, date_class);
                 if let Some(ref mut hint_out) = return_type_hint_out {
@@ -357,9 +358,9 @@ impl Backend {
             let concrete_owner = facade_concrete_owner(
                 owner,
                 method_name,
-                ctx.class_loader,
+                ctx.file.class_loader,
                 ctx.resolved_class_cache,
-                ctx.backend,
+                ctx.file.backend,
             );
             let owner = concrete_owner.as_deref().unwrap_or(owner);
 
@@ -372,7 +373,7 @@ impl Backend {
             // cached, so it doesn't duplicate work.
             let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                 owner,
-                ctx.class_loader,
+                ctx.file.class_loader,
                 ctx.resolved_class_cache,
             );
 
@@ -404,7 +405,7 @@ impl Backend {
                 **hint_out = Some(resolve_hint_keywords(
                     substituted,
                     &merged,
-                    ctx.class_loader,
+                    ctx.file.class_loader,
                     |s| s.replace_self(&merged.fqn()),
                 ));
             }
@@ -413,7 +414,7 @@ impl Backend {
             let mr_ctx =
                 MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, &written, true);
             if let Some((date_class, date_return_type)) =
-                Self::configured_laravel_date_return(&merged, method_name, ctx.class_loader)
+                Self::configured_laravel_date_return(&merged, method_name, ctx.file.class_loader)
             {
                 if let Some(ref mut hint_out) = return_type_hint_out {
                     **hint_out = Some(date_return_type);
@@ -454,14 +455,14 @@ impl Backend {
             let owner_name = owner_fqn.as_deref().unwrap_or("");
             let fn_args = TextArrayFuncArgs::new(text_args, ctx);
 
-            // String builtins over literal arguments: the stub
-            // declares the widest string the function can return,
-            // but a call whose arguments are all literals has one
-            // answer.  It names no class, so it travels purely as
-            // the hint.
-            if crate::type_engine::variable::string_func_rules::is_foldable_string_func(func_name)
+            // String builtins: the stub declares the widest string
+            // the function can return, but a call whose arguments
+            // are all literals has one answer, and other arguments
+            // can still decide a refinement of `string`.  It names
+            // no class, so it travels purely as the hint.
+            if crate::type_engine::variable::string_func_rules::has_string_func_rule(func_name)
                 && let Some(folded) =
-                    crate::type_engine::variable::string_func_rules::string_func_literal_type(
+                    crate::type_engine::variable::string_func_rules::string_func_return_type(
                         func_name, &fn_args,
                     )
             {
@@ -478,8 +479,8 @@ impl Backend {
                     crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                         &element_type,
                         owner_name,
-                        ctx.all_classes,
-                        ctx.class_loader,
+                        ctx.file.all_classes,
+                        ctx.file.class_loader,
                     );
                 if let Some(ref mut hint_out) = return_type_hint_out {
                     **hint_out = Some(element_type);
@@ -507,8 +508,8 @@ impl Backend {
                         crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             element_type,
                             owner_name,
-                            ctx.all_classes,
-                            ctx.class_loader,
+                            ctx.file.all_classes,
+                            ctx.file.class_loader,
                         )
                     })
                     .unwrap_or_default();
@@ -523,7 +524,7 @@ impl Backend {
             && let Some(func_info) = fl(func_name, 0)
         {
             if func_info.conditional_return.is_some()
-                || crate::type_engine::types::call_site_returns::has_call_site_return(func_name)
+                || crate::type_engine::type_ops::call_site_returns::has_call_site_return(func_name)
             {
                 let var_resolver = build_var_resolver(ctx);
                 // `is <Type>` conditions on an argument that isn't a
@@ -555,7 +556,7 @@ impl Backend {
                                 declaring: None,
                                 written_class: Some(&written),
                             },
-                            ctx.class_loader,
+                            ctx.file.class_loader,
                             &tpl,
                         )
                     })
@@ -565,7 +566,7 @@ impl Backend {
                     // its filter produces) is decided the same way: at
                     // the call site.
                     .or_else(|| {
-                        crate::type_engine::types::call_site_returns::call_site_return_type(
+                        crate::type_engine::type_ops::call_site_returns::call_site_return_type(
                             func_name,
                             &func_info.parameters,
                             text_args,
@@ -592,8 +593,8 @@ impl Backend {
                         crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             &parsed_ty,
                             "",
-                            ctx.all_classes,
-                            ctx.class_loader,
+                            ctx.file.all_classes,
+                            ctx.file.class_loader,
                         );
                     // The collapsed conditional is the call's real
                     // type; report it even when it names no class
@@ -648,8 +649,8 @@ impl Backend {
                         crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             &substituted,
                             "",
-                            ctx.all_classes,
-                            ctx.class_loader,
+                            ctx.file.all_classes,
+                            ctx.file.class_loader,
                         );
                     // Report the substituted type, not the raw
                     // `@return T[]` the fallback below would
@@ -683,8 +684,8 @@ impl Backend {
                 return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                     ret,
                     "",
-                    ctx.all_classes,
-                    ctx.class_loader,
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
                 );
             }
         }
@@ -715,8 +716,8 @@ impl Backend {
                 return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                     ret_type,
                     "",
-                    ctx.all_classes,
-                    ctx.class_loader,
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
                 );
             }
         }
@@ -739,8 +740,8 @@ impl Backend {
                 return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                     ret,
                     "",
-                    ctx.all_classes,
-                    ctx.class_loader,
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
                 );
             }
         }
@@ -764,9 +765,9 @@ impl Backend {
         // scope, so a same-namespace class wins over a global stub
         // of the same short name.
         let fqn = ctx.written_names().resolve_class(class_name);
-        let cls_arc = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &fqn)
+        let cls_arc = crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &fqn)
             .map(Arc::clone)
-            .or_else(|| (ctx.class_loader)(&fqn));
+            .or_else(|| (ctx.file.class_loader)(Fqn::new(&fqn)));
         let cls_arc = match cls_arc {
             Some(c) => c,
             None => return vec![],
@@ -826,8 +827,8 @@ impl Backend {
                     crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                         ret_type,
                         "",
-                        ctx.all_classes,
-                        ctx.class_loader,
+                        ctx.file.all_classes,
+                        ctx.file.class_loader,
                     );
                 if !classes.is_empty() {
                     if let Some(ref mut hint_out) = return_type_hint_out {
@@ -851,8 +852,8 @@ impl Backend {
                     crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                         ret,
                         "",
-                        ctx.all_classes,
-                        ctx.class_loader,
+                        ctx.file.all_classes,
+                        ctx.file.class_loader,
                     );
                 if !classes.is_empty() {
                     return classes;

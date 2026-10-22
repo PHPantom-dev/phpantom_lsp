@@ -5,7 +5,7 @@
 //! reach: `vendor/`'s own `lang/` files are still on disk, so the enumerated
 //! set is non-empty while covering none of the application's keys.
 
-use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace};
+use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -67,16 +67,7 @@ async fn trans_diagnostics(provider: &str) -> Vec<String> {
     let uri = Url::from_file_path(dir.path().join("src/Greeting.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: CONSUMER.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, CONSUMER).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER, &mut diags);

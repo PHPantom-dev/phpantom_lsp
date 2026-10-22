@@ -109,6 +109,6 @@ pub(super) fn narrowed_call(
     call: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    let key = crate::type_engine::types::narrowing::expr_to_subject_key(call)?;
+    let key = crate::type_engine::type_ops::condition_facts::expr_to_subject_key(call)?;
     narrowed_subject_from_scope(&key, call, ctx)
 }

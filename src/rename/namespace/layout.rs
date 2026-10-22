@@ -109,8 +109,8 @@ impl Backend {
             if new_dir.exists() {
                 collect_merge_move_ops(&old_dir, &old_dir, &new_dir, &mut ops);
             } else {
-                let old_url = Url::from_file_path(&old_dir).ok()?;
-                let new_url = Url::from_file_path(&new_dir).ok()?;
+                let old_url = crate::util::path_to_url(&old_dir)?;
+                let new_url = crate::util::path_to_url(&new_dir)?;
                 ops.push((old_url, new_url));
             }
         }
@@ -229,9 +229,9 @@ fn collect_merge_move_ops(dir: &Path, old_root: &Path, new_root: &Path, ops: &mu
             continue;
         }
 
-        if let (Ok(old_url), Ok(new_url)) = (
-            Url::from_file_path(&path),
-            Url::from_file_path(&destination),
+        if let (Some(old_url), Some(new_url)) = (
+            crate::util::path_to_url(&path),
+            crate::util::path_to_url(&destination),
         ) {
             ops.push((old_url, new_url));
         }

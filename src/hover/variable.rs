@@ -5,13 +5,13 @@
 //! parameters and scalar types.  Union types are shown as separate code
 //! blocks divided by a horizontal rule.
 
-use std::sync::Arc;
-
 use tower_lsp::lsp_types::Hover;
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::symbol_map::{SymbolSpan, VarDefKind};
+use crate::type_engine::resolver::FileCtx;
 use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FileContext, FunctionInfo};
 
@@ -98,9 +98,7 @@ impl Backend {
         // $this resolves to the enclosing class, but not inside static methods.
         if name == "this" {
             let in_static = self
-                .symbol_maps
-                .read()
-                .get(uri)
+                .symbol_map_for(uri)
                 .is_some_and(|map| map.is_in_static_method(cursor_offset));
             if !in_static && let Some(cc) = current_class {
                 let ns_line = namespace_line(cc.file_namespace.as_deref());
@@ -131,16 +129,15 @@ impl Backend {
         // (e.g. `int`) that the ClassInfo-based path would lose.
         if let Some(resolved_type) =
             crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
-                var_name: &var_name,
-                cursor_offset,
-                content,
-                current_class,
-                all_classes: &ctx.classes,
-                class_loader: &resolved_class_loader,
-                source_class_loader: &class_loader,
-                source_imports: Some(&ctx.use_map),
-                backend: Some(self),
                 loaders,
+                ..VarQuery::new(
+                    &var_name,
+                    FileCtx::new(content, &ctx.classes, &resolved_class_loader, &class_loader)
+                        .with_imports(Some(&ctx.use_map))
+                        .with_backend(Some(self)),
+                    current_class,
+                    cursor_offset,
+                )
             })
         {
             // When the type is a template parameter, show its variance
@@ -177,7 +174,7 @@ impl Backend {
 pub(super) fn build_variable_hover_body(
     var_name: &str,
     ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     template_line: Option<&str>,
 ) -> String {
     // A template bounded by a union is still the one template.
@@ -235,7 +232,7 @@ pub(super) fn build_variable_hover_body(
 /// from the FQN string itself.
 fn resolve_type_namespace_structured(
     ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<String> {
     // A template's name is not in any namespace, whatever its bound is.
     if ty.as_template_param().is_some() {
@@ -243,7 +240,7 @@ fn resolve_type_namespace_structured(
     }
     let base = ty.base_name()?;
 
-    if let Some(cls) = class_loader(base) {
+    if let Some(cls) = class_loader(Fqn::new(base)) {
         return cls
             .file_namespace
             .as_ref()

@@ -9,8 +9,8 @@ use mago_span::HasSpan;
 
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
-use crate::type_engine::types::narrowing;
-use crate::type_engine::variable::foreach_resolution::{
+use crate::type_engine::type_ops::condition_facts;
+use crate::type_engine::variable::iterable_elements::{
     is_unsubstituted_template_param, resolve_iterable_element_via_class,
 };
 use crate::types::ResolvedType;
@@ -134,7 +134,7 @@ fn guarded_collection_type<'b>(
         return None;
     };
     let var_name = bytes_to_str(dv.name).to_string();
-    let collection_key = narrowing::expr_to_subject_key(foreach.expression)?;
+    let collection_key = condition_facts::expr_to_subject_key(foreach.expression)?;
 
     // Replay the leading guards against the entry binding alone: what
     // survives all of them is what every entry had to be to get here.
@@ -187,11 +187,11 @@ pub(crate) fn resolve_foreach_iterable_type_raw<'b>(
 /// derivation reads.
 pub(crate) fn iterable_ctx<'a>(
     ctx: &'a ForwardWalkCtx<'_>,
-) -> crate::type_engine::variable::foreach_resolution::IterableCtx<'a> {
-    crate::type_engine::variable::foreach_resolution::IterableCtx {
+) -> crate::type_engine::variable::iterable_elements::IterableCtx<'a> {
+    crate::type_engine::variable::iterable_elements::IterableCtx {
         current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        class_loader: ctx.class_loader,
+        all_classes: ctx.file.all_classes,
+        class_loader: ctx.file.class_loader,
         resolved_class_cache: ctx.resolved_class_cache,
     }
 }
@@ -306,7 +306,7 @@ impl<'b> ForeachBinding<'b> {
         let mut value_docblock_override: Option<Vec<ResolvedType>> = None;
         let mut key_docblock_override: Option<Vec<ResolvedType>> = None;
         let foreach_offset = foreach.foreach.span().start.offset as usize;
-        if let Some(doc_text) = docblock_above(ctx.content, foreach_offset) {
+        if let Some(doc_text) = docblock_above(ctx.file.content, foreach_offset) {
             for (doc_var, php_type) in &parse_var_docblock_pairs(doc_text) {
                 if value_var_name.as_ref() == Some(doc_var) {
                     value_docblock_override = Some(resolve_type_to_resolved_types(php_type, ctx));
@@ -375,7 +375,7 @@ pub(crate) fn process_foreach<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let depth_guard = LoopDepthGuard::enter();
+    let depth_guard = LoopDepthGuard::enter(ctx.flow);
     let loop_depth = depth_guard.depth();
 
     // Hard limit: skip the body entirely at excessive nesting depth.
@@ -441,8 +441,8 @@ pub(crate) fn process_foreach<'b>(
         ForeachBody::Statement(inner) => vec![*inner],
         ForeachBody::ColonDelimited(body) => body.statements.iter().collect(),
     };
-    let assignment_depth =
-        clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
+    let assignments = loop_assignments(&body_stmts, std::iter::empty());
+    let assignment_depth = clamp_iterations_for_depth(assignments.depth, loop_depth);
 
     // A loop that walks an array's own keys and unconditionally writes the
     // entry at each key it visits (`foreach ($pairs as $cn => $_)` /
@@ -474,7 +474,7 @@ pub(crate) fn process_foreach<'b>(
         .is_some_and(|it| it.is_empty_array_shape())
     {
         binding.reset(scope, None);
-        let exit_frame = ExitFrameGuard::push();
+        let exit_frame = ExitFrameGuard::push(ctx.flow);
         walk_body_forward(body_stmts.iter().copied(), scope, &loop_ctxs.body_ctx);
         exit_frame.pop();
         // A cursor inside the body is answered by the walk that stopped at
@@ -485,11 +485,15 @@ pub(crate) fn process_foreach<'b>(
         return;
     }
 
-    let exit_frame = ExitFrameGuard::push();
+    let exit_frame = ExitFrameGuard::push(ctx.flow);
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        loop_ctxs.walk(&pre_loop_scope, assignment_depth),
+        loop_ctxs.walk(
+            &pre_loop_scope,
+            assignment_depth,
+            &assignments.self_dependent,
+        ),
         |next_scope, point| {
             if point != LoopSeedPoint::Entry {
                 return;
@@ -806,8 +810,8 @@ fn record_key_value_pairing(
     }
     let key_var = bytes_to_str(key_dv.name);
     let value_var = extract_foreach_var_name(kv.value);
-    let element_key =
-        narrowing::expr_to_subject_key(foreach.expression).map(|base| format!("{base}[{key_var}]"));
+    let element_key = condition_facts::expr_to_subject_key(foreach.expression)
+        .map(|base| format!("{base}[{key_var}]"));
     let targets: Vec<crate::atom::Atom> = value_var
         .iter()
         .map(|v| atom(v))
@@ -853,7 +857,7 @@ fn record_existing_keys(foreach: &Foreach<'_>, scope: &mut ScopeState) {
             let Expression::Variable(Variable::Direct(key_dv)) = kv.key else {
                 return;
             };
-            let Some(subject) = narrowing::expr_to_subject_key(foreach.expression) else {
+            let Some(subject) = condition_facts::expr_to_subject_key(foreach.expression) else {
                 return;
             };
             let value_var = match kv.value {
@@ -909,7 +913,8 @@ fn foreach_own_keys<'b>(foreach: &'b Foreach<'b>) -> Option<(String, String)> {
     if args.next().is_some() {
         return None;
     }
-    let Expression::Variable(Variable::Direct(arr_var)) = narrowing::argument_value(arg) else {
+    let Expression::Variable(Variable::Direct(arr_var)) = condition_facts::argument_value(arg)
+    else {
         return None;
     };
     Some((
@@ -1150,11 +1155,11 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
 ) -> Option<PhpType> {
     let raw = resolve_foreach_iterable_type_raw(foreach, scope, ctx)?;
     Some(
-        crate::type_engine::types::aliases::resolve_type_alias_typed(
+        crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &raw,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         )
         .unwrap_or(raw),
     )
@@ -1191,9 +1196,9 @@ pub(crate) fn bind_foreach_value<'b>(
             // (or, for tuple-style shapes, the union of positional values),
             // read through the class's traversal binding when it has one.
             let value_php_type =
-                crate::type_engine::variable::foreach_resolution::generic_traversal_value_type(
+                crate::type_engine::variable::iterable_elements::generic_traversal_value_type(
                     it,
-                    ctx.class_loader,
+                    ctx.file.class_loader,
                 )
                 .or_else(|| it.iterable_element_type());
             if let Some(vt) = value_php_type {
@@ -1250,7 +1255,7 @@ pub(crate) fn bind_foreach_value<'b>(
         // destructured variable's type from that element type using shape
         // keys or positional indices.
         let element_type: Option<PhpType> = iter_type.as_ref().and_then(|it| {
-            crate::type_engine::variable::foreach_resolution::iteration_value_type(
+            crate::type_engine::variable::iterable_elements::iteration_value_type(
                 it,
                 &iterable_ctx(ctx),
             )
@@ -1370,7 +1375,7 @@ pub(crate) fn bind_foreach_key<'b>(
         // A bare `array` says nothing about its keys, and neither does an
         // untyped iterable: both leave the key `int|string`.
         let key_type = iter_type.as_ref().and_then(|it| {
-            crate::type_engine::variable::foreach_resolution::iteration_key_type(
+            crate::type_engine::variable::iterable_elements::iteration_key_type(
                 it,
                 &iterable_ctx(ctx),
             )

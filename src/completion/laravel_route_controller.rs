@@ -26,6 +26,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::Fqn;
 use crate::symbol_map::extraction::laravel::ROUTE_HTTP_METHODS;
 use crate::text_position::position_to_offset;
 use crate::types::FileContext;
@@ -254,7 +255,7 @@ impl Backend {
         let rc_ctx = detect_laravel_route_controller_context(content, position)?;
         let fqn =
             super::array_callable::resolve_class_name_to_fqn(self, &rc_ctx.controller_class, ctx);
-        let class_info = self.resolved_class_loader(ctx)(&fqn)?;
+        let class_info = self.resolved_class_loader(ctx)(Fqn::new(&fqn))?;
         self.string_method_name_completions(
             uri,
             ctx,

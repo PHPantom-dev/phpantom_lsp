@@ -5544,7 +5544,7 @@ fn truthy_type_strips_null_from_every_nullable_union_member() {
             .truthy_type()
             .unwrap()
             .to_string(),
-        "int|true|string|DateTime"
+        "int|true|non-falsy-string|DateTime"
     );
     // A member that is certainly falsy on its own (`null`, `false`) is
     // dropped outright rather than surviving as an empty type.

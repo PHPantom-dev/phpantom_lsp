@@ -57,7 +57,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset};
 use crate::hover::{MemberKindForOrigin, find_declaring_class};
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
@@ -268,7 +268,7 @@ enum Verdict {
 fn declares_property(
     class: &ClassInfo,
     property: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     seen: &mut Vec<Atom>,
 ) -> bool {
     if class
@@ -284,7 +284,7 @@ fn declares_property(
             continue;
         }
         seen.push(*trait_name);
-        if let Some(used) = class_loader(trait_name)
+        if let Some(used) = class_loader(Fqn::new(trait_name))
             && declares_property(&used, property, class_loader, seen)
         {
             return true;
@@ -500,7 +500,7 @@ impl Backend {
         receiver: &Arc<ClassInfo>,
         site: &WriteSite<'_>,
         writes: &FileWrites,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Verdict {
         let property = site.property;
 
@@ -532,7 +532,8 @@ impl Backend {
 
         // The declaring class has to be traced through the *unmerged*
         // class: a merged one lists inherited properties as its own.
-        let raw = class_loader(merged.fqn().as_str()).unwrap_or_else(|| Arc::clone(receiver));
+        let raw =
+            class_loader(Fqn::new(merged.fqn().as_str())).unwrap_or_else(|| Arc::clone(receiver));
         let declaring =
             find_declaring_class(&raw, property, &MemberKindForOrigin::Property, class_loader);
 

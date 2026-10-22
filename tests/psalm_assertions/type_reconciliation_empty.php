@@ -13,7 +13,9 @@ namespace PsalmTest_type_reconciliation_empty_2 {
     /** @param string $a */
     function foo($a): void {
         if (!empty($a)) {
-            assertType('string', $a);
+            // PHPantom follows PHPStan here: `''` and `'0'` are the empty
+            // strings, so what is left is a `non-falsy-string`.
+            assertType('non-falsy-string', $a);
         }
     }
 }
@@ -22,7 +24,9 @@ namespace PsalmTest_type_reconciliation_empty_3 {
     /** @param string|null $a */
     function foo($a): void {
         if (!empty($a)) {
-            assertType('string', $a);
+            // PHPantom follows PHPStan here: `''` and `'0'` are the empty
+            // strings, so what is left is a `non-falsy-string`.
+            assertType('non-falsy-string', $a);
         }
     }
 }

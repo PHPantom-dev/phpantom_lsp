@@ -8,29 +8,12 @@
 //!
 //! This covers todo item #22 (type hints in code) and #23 (docblock types).
 
-use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
+use crate::common::{
+    assert_location, create_psr4_workspace, create_test_backend, goto_definition_at, open_php,
+};
 use tower_lsp::lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
-
-/// Assert that a definition response points to a given URI and line.
-fn assert_location(response: GotoDefinitionResponse, expected_uri: &Url, expected_line: u32) {
-    match response {
-        GotoDefinitionResponse::Scalar(location) => {
-            assert_eq!(
-                &location.uri, expected_uri,
-                "Expected URI {:?}, got {:?}",
-                expected_uri, location.uri
-            );
-            assert_eq!(
-                location.range.start.line, expected_line,
-                "Expected line {}, got {}",
-                expected_line, location.range.start.line
-            );
-        }
-        other => panic!("Expected Scalar location, got: {:?}", other),
-    }
-}
 
 /// Assert that a definition response points to a file path ending with the given suffix.
 fn assert_location_path_ends_with(

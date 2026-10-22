@@ -1,0 +1,27 @@
+// test: concatenation keeps a literal-string and a numeric-string
+// feature: hover
+// Written-out halves join into a literal-string, and an integer followed by
+// a fraction or more digits stays a number, the way PHPStan's
+// resolveConcatType() decides both.
+// expect_hover: $sql => literal-string&non-falsy-string
+// expect_hover: $appended => literal-string&non-falsy-string
+// expect_hover: $mixedIn => non-falsy-string
+// expect_hover: $price => numeric-string&non-falsy-string
+// expect_hover: $digits => numeric-string&non-falsy-string
+// expect_hover: $signed => non-falsy-string
+---
+<?php
+
+/** @param int<0, max> $k */
+function test(int $k, bool $lite, string $column, int $id, int $n): void {
+    $if = $lite ? 'IIF' : 'IF';
+    $sql = 'SUM(' . $if . '(x, 1, 0))';
+    $built = 'SELECT ';
+    $built .= $if;
+    $appended = $built;
+    $mixedIn = 'SUM(' . $column . ')';
+    $price = $id . '.95';
+    $digits = $id . $k;
+    $signed = $id . '-1';
+    $<>signed;
+}

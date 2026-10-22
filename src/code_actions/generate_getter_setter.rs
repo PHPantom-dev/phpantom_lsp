@@ -30,10 +30,11 @@ use super::detect_indent_from_members;
 use super::naming::to_pascal_case;
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::code_actions::render_docblock;
 use crate::docblock::{extract_var_type, get_docblock_text_for_node};
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
-use crate::text_position::offset_to_position;
+use crate::text_position::{find_line_end, offset_to_position};
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -325,15 +326,7 @@ fn build_getter(prop: &AccessorProperty, indent: &str) -> String {
     if prop.type_from_docblock
         && let Some(ref hint) = prop.type_hint
     {
-        let hint_str = hint.to_string();
-        result.push_str(indent);
-        result.push_str("/**\n");
-        result.push_str(indent);
-        result.push_str(" * @return ");
-        result.push_str(&hint_str);
-        result.push('\n');
-        result.push_str(indent);
-        result.push_str(" */\n");
+        result.push_str(&render_docblock(indent, &[format!("@return {hint}")], "\n"));
     }
 
     result.push_str(indent);
@@ -389,17 +382,11 @@ fn build_setter(prop: &AccessorProperty, indent: &str) -> String {
     if prop.type_from_docblock
         && let Some(ref hint) = prop.type_hint
     {
-        let hint_str = hint.to_string();
-        result.push_str(indent);
-        result.push_str("/**\n");
-        result.push_str(indent);
-        result.push_str(" * @param ");
-        result.push_str(&hint_str);
-        result.push_str(" $");
-        result.push_str(&prop.name);
-        result.push('\n');
-        result.push_str(indent);
-        result.push_str(" */\n");
+        result.push_str(&render_docblock(
+            indent,
+            &[format!("@param {hint} ${}", prop.name)],
+            "\n",
+        ));
     }
 
     result.push_str(indent);
@@ -479,15 +466,6 @@ fn find_accessor_insertion_offset<'a>(
 
     let end = last_method_end.or(last_member_end).unwrap_or(0);
     find_line_end(content, end as usize)
-}
-
-/// Find the end of the line at or after the given offset (past the newline).
-fn find_line_end(content: &str, offset: usize) -> usize {
-    if let Some(nl) = content[offset..].find('\n') {
-        offset + nl + 1
-    } else {
-        content.len()
-    }
 }
 
 /// Check if the modifier list includes `readonly`.

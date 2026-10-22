@@ -21,6 +21,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::completion::source::code_context::{CodeContext, Operator};
 use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::position_to_offset;
@@ -337,13 +338,12 @@ impl Backend {
             if let Some(cls) = &rt.class_info
                 && is_model(cls)
             {
-                return class_loader(&cls.fqn());
+                return class_loader(Fqn::new(&cls.fqn()));
             }
             if let TypeKind::Generic(g) = rt.type_string.kind() {
-                let model = g
-                    .args
-                    .iter()
-                    .find_map(|arg| class_loader(arg.base_name()?).filter(|cls| is_model(cls)));
+                let model = g.args.iter().find_map(|arg| {
+                    class_loader(Fqn::new(arg.base_name()?)).filter(|cls| is_model(cls))
+                });
                 if model.is_some() {
                     return model;
                 }
@@ -357,7 +357,7 @@ impl Backend {
         &self,
         model: &ClassInfo,
         es_ctx: &EloquentStringContext,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Vec<CompletionItem> {
         let partial = &es_ctx.partial;
 
@@ -371,7 +371,7 @@ impl Backend {
             else {
                 return Vec::new();
             };
-            let Some(resolved_model) = class_loader(&resolved_fqn) else {
+            let Some(resolved_model) = class_loader(Fqn::new(&resolved_fqn)) else {
                 return Vec::new();
             };
             // Resolve with inheritance for full method list.
@@ -522,7 +522,7 @@ impl Backend {
 
         let class_loader = self.resolved_class_loader(ctx);
 
-        let model_class = class_loader(model_name)?;
+        let model_class = class_loader(Fqn::new(model_name))?;
         let resolved = crate::virtual_members::resolve_class_fully_cached(
             &model_class,
             &class_loader,

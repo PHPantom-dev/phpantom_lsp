@@ -268,7 +268,11 @@ fn argument_dependent_builtins_get_conditional_returns() {
             &[("$string", "array|string"), ("$to_encoding", "string")],
             "$string is array ? array<array-key, string> : string|false",
         ),
-        ("abs", &[("$num", "int|float")], "$num is int ? int : float"),
+        (
+            "abs",
+            &[("$num", "int|float")],
+            "$num is int ? int<0, max> : float",
+        ),
     ];
 
     for (name, params, expected) in cases {

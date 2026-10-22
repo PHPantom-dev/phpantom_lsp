@@ -10,6 +10,7 @@ use mago_syntax::cst::*;
 use super::array_func_rules::{ArrayFuncArgs, array_func_element_type, array_func_raw_type};
 
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 
@@ -61,7 +62,7 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
                 builder.append(resolved);
             }
             ArrayElement::Variadic(v) => {
-                let raw = super::foreach_resolution::resolve_expression_type(v.value, ctx);
+                let raw = super::iterable_elements::resolve_expression_type(v.value, ctx);
                 builder.spread(raw.as_ref());
             }
             ArrayElement::Missing(_) => {}
@@ -544,7 +545,7 @@ fn infer_element_type<'b>(
         },
         Expression::Call(_) => {
             // Resolve call return type via the unified pipeline.
-            super::foreach_resolution::resolve_expression_type(value, ctx)
+            super::iterable_elements::resolve_expression_type(value, ctx)
         }
         Expression::Variable(Variable::Direct(dv)) => {
             let var_text = bytes_to_str(dv.name).to_string();
@@ -595,6 +596,7 @@ fn infer_element_type<'b>(
             // `array{int}`, not the `int|float` the annotation states for
             // the assignment above it.
             let current_class = ctx
+                .file
                 .all_classes
                 .iter()
                 .find(|c| c.fqn() == ctx.current_class.fqn())
@@ -610,7 +612,7 @@ fn infer_element_type<'b>(
         // Delegate to the unified pipeline which resolves property
         // type hints and method return types through the class
         // hierarchy.
-        _ => super::foreach_resolution::resolve_expression_type(value, ctx),
+        _ => super::iterable_elements::resolve_expression_type(value, ctx),
     }
 }
 
@@ -642,6 +644,13 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
         matches!(
             self.args.arguments.iter().nth(index),
             Some(Argument::Positional(pos)) if pos.ellipsis.is_some()
+        )
+    }
+
+    fn is_named(&self, index: usize) -> bool {
+        matches!(
+            self.args.arguments.iter().nth(index),
+            Some(Argument::Named(_))
         )
     }
 
@@ -706,20 +715,20 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
             expr,
             param_index,
             subject,
-            Some(&self.ctx.class_loader),
+            Some(&self.ctx.file.class_loader),
             &self.ctx.written_names(),
         )
     }
 
     fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
-        crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.class_loader)
+        crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.file.class_loader)
     }
 
     fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
-        crate::type_engine::types::narrowing::split_type_by_guard_name(
+        crate::type_engine::type_ops::condition_facts::split_type_by_guard_name(
             guard,
             subject,
-            Some(&self.ctx.class_loader),
+            Some(&self.ctx.file.class_loader),
         )
     }
 }
@@ -752,19 +761,20 @@ pub(in crate::type_engine) fn resolve_array_func_element_type(
     array_func_element_type(func_name, &AstArrayFuncArgs { args, ctx })
 }
 
-/// Constant-fold a string builtin whose arguments are all literals.
+/// The literal or refined `string` a string builtin returns for these
+/// arguments.
 ///
-/// See [`super::string_func_rules`] for which functions fold and why the
-/// literal answer matters.
-pub(in crate::type_engine) fn resolve_string_func_literal_type(
+/// See [`super::string_func_rules`] for which functions it covers and why
+/// the narrower answer matters.
+pub(in crate::type_engine) fn resolve_string_func_return_type(
     func_name: &str,
     args: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    if !super::string_func_rules::is_foldable_string_func(func_name) {
+    if !super::string_func_rules::has_string_func_rule(func_name) {
         return None;
     }
-    super::string_func_rules::string_func_literal_type(func_name, &AstArrayFuncArgs { args, ctx })
+    super::string_func_rules::string_func_return_type(func_name, &AstArrayFuncArgs { args, ctx })
 }
 
 /// Extract per-argument source text from a parsed `ArgumentList`.
@@ -859,7 +869,10 @@ fn infer_callback_return_type(
     // could only carry the union as its type string, leaving a `@return T`
     // on that class with no instantiation to substitute from.
     let seed_member = |ty: &PhpType| -> ResolvedType {
-        match ty.base_name().and_then(|name| (ctx.class_loader)(name)) {
+        match ty
+            .base_name()
+            .and_then(|name| (ctx.file.class_loader)(Fqn::new(name)))
+        {
             Some(cls) => ResolvedType::from_both_arc(ty.clone(), cls),
             None => ResolvedType::from_type_string(ty.clone()),
         }
@@ -905,23 +918,13 @@ fn infer_callback_return_type(
     // Create a synthetic context with the scope resolver.
     let body_offset = body_expr.span().start.offset;
     let infer_ctx = VarResolutionCtx {
-        source_imports: ctx.source_imports,
-        backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
         scope_var_resolver: Some(&scope_resolver),
-        ..VarResolutionCtx::new(
-            "",
-            ctx.current_class,
-            ctx.all_classes,
-            ctx.content,
-            body_offset,
-            ctx.class_loader,
-            ctx.source_class_loader,
-        )
+        ..VarResolutionCtx::new("", ctx.file, ctx.current_class, body_offset)
     };
 
-    super::foreach_resolution::resolve_expression_type(body_expr, &infer_ctx)
+    super::iterable_elements::resolve_expression_type(body_expr, &infer_ctx)
 }
 
 /// Walk a closure's own body with the shared forward walker, seeded with
@@ -939,15 +942,15 @@ fn walk_closure_body_scope(
     resolved_param: &[ResolvedType],
     ctx: &VarResolutionCtx<'_>,
 ) -> super::forward_walk::Locals {
+    let flow = super::forward_walk::WalkFlow::default();
     let fw_ctx =
-        super::forward_walk::ForwardWalkCtx::from_var_ctx(ctx).with_cursor_offset(u32::MAX);
+        super::forward_walk::ForwardWalkCtx::from_var_ctx(ctx, &flow).with_cursor_offset(u32::MAX);
     let mut scope = super::forward_walk::ScopeState::new();
     if let Some(name) = param_name {
         scope.seed(name, resolved_param.to_vec());
     }
 
     let _suspend = super::forward_walk::suspend_snapshot_recording();
-    let _barrier = super::forward_walk::suspend_return_edges();
     super::forward_walk::walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
 
     scope.locals

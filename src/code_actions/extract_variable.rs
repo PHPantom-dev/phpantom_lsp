@@ -339,7 +339,7 @@ fn extract_function_call_name(expr: &str) -> Option<String> {
     let before = expr[..paren_pos].trim();
 
     // Get the last segment if namespaced: `Foo\Bar\baz` → `baz`
-    let ident = before.rsplit('\\').next().unwrap_or(before);
+    let ident = crate::util::short_name(before);
 
     if ident.is_empty() || !ident.chars().next()?.is_alphabetic() {
         return None;

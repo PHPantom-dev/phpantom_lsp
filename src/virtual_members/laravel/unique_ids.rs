@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::class_lookup::ResolvedClassLoader;
 use crate::inheritance::{ancestors, find_declaring_trait};
 use crate::types::ClassInfo;
 
@@ -12,7 +13,7 @@ use super::ELOQUENT_MODEL_FQN;
 /// leaf class's trait names, so inspect the original declarations too.
 pub(super) fn uses_unique_string_ids(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     // The trait is recognised by the name a class uses it by, so it is
     // found even when its own source cannot be loaded.
@@ -38,7 +39,7 @@ pub(super) fn uses_unique_string_ids(
 pub(super) fn unique_ids_include(
     class: &ClassInfo,
     key: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     let unique_ids = |c: &ClassInfo| {
         c.laravel()
@@ -55,7 +56,7 @@ pub(super) fn unique_ids_include(
 /// application model would find nothing.
 fn model_ancestors<'a>(
     class: &ClassInfo,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
 ) -> impl Iterator<Item = Arc<ClassInfo>> + use<'a> {
     ancestors(class, class_loader)
         .take_while(|(name, _)| !name.eq_ignore_ascii_case(ELOQUENT_MODEL_FQN))

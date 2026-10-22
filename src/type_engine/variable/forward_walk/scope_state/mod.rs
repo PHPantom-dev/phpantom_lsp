@@ -495,7 +495,7 @@ impl ScopeState {
     /// tracked for it describes the old one.
     pub fn invalidate_dependent_keys(&mut self, var_name: &str) {
         self.locals.retain_compound(|key| {
-            !crate::type_engine::types::narrowing::key_reads_variable(key, var_name)
+            !crate::type_engine::type_ops::condition_facts::key_reads_variable(key, var_name)
         });
     }
 
@@ -540,12 +540,12 @@ impl ScopeState {
             key != receiver
                 && Some(key) != made
                 && !made.is_some_and(|made| {
-                    crate::type_engine::types::narrowing::key_reads_variable(key, made)
+                    crate::type_engine::type_ops::condition_facts::key_reads_variable(key, made)
                 })
-                && crate::type_engine::types::narrowing::key_reads_variable(key, receiver)
+                && crate::type_engine::type_ops::condition_facts::key_reads_variable(key, receiver)
                 && match members {
                     MemberInvalidation::Calls => {
-                        crate::type_engine::types::narrowing::is_call_key(key)
+                        crate::type_engine::type_ops::condition_facts::is_call_key(key)
                     }
                     MemberInvalidation::Members { kept } => !kept.iter().any(|k| k == key),
                 }
@@ -574,7 +574,9 @@ impl ScopeState {
         self.closure_captures.remove(&key);
         let stale = |subject: &Atom| {
             *subject == key
-                || crate::type_engine::types::narrowing::key_reads_variable(subject, var_name)
+                || crate::type_engine::type_ops::condition_facts::key_reads_variable(
+                    subject, var_name,
+                )
         };
         self.drop_proofs(key, var_name, stale);
         if !self.ruled_out.is_empty() {
@@ -601,7 +603,7 @@ impl ScopeState {
         let atom_key = atom(key);
         let stale = |subject: &Atom| {
             *subject == atom_key
-                || (crate::type_engine::types::narrowing::key_reads_variable(subject, key)
+                || (crate::type_engine::type_ops::condition_facts::key_reads_variable(subject, key)
                     && !subject
                         .as_str()
                         .strip_prefix(key)
@@ -664,7 +666,7 @@ impl ScopeState {
         let names_a_bound_var = |side: &Atom| {
             let reads = |var: &str| {
                 side.as_str() == var
-                    || crate::type_engine::types::narrowing::key_reads_variable(side, var)
+                    || crate::type_engine::type_ops::condition_facts::key_reads_variable(side, var)
             };
             reads(key_var) || value_var.is_some_and(reads)
         };
@@ -709,7 +711,7 @@ impl ScopeState {
         }
         let at_or_below = |side: &Atom| {
             side.as_str() == subject
-                || crate::type_engine::types::narrowing::key_reads_variable(side, subject)
+                || crate::type_engine::type_ops::condition_facts::key_reads_variable(side, subject)
         };
         if keys_lost {
             self.retain_key_facts(|s, _| !at_or_below(s), |side| !at_or_below(side));

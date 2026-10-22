@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::create_test_backend;
+    use crate::common::{create_test_backend, goto_definition_at};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -48,21 +48,7 @@ mod tests {
             })
             .await;
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 10,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        let result = goto_definition_at(&backend, &blade_uri, 5, 10).await;
         let _ = result;
     }
 }

@@ -4,12 +4,15 @@
 //! to a typed property where the assigned value's resolved type is
 //! incompatible with the declared property type.
 //!
-//! Handles both instance properties (`$this->prop = expr`) and static
-//! properties (`ClassName::$prop = expr`).
+//! Handles both instance properties (`$obj->prop = expr`) and static
+//! properties (`ClassName::$prop = expr`), through any receiver the type
+//! engine can resolve.
 //!
 //! Uses the same conservative approach as argument type checking:
 //! when in doubt (unresolved types, `mixed`, complex generics),
 //! the diagnostic is suppressed to avoid false positives.
+
+use std::sync::Arc;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::access::Access;
@@ -21,14 +24,16 @@ use mago_syntax::cst::variable::Variable;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::parser::{for_each_nested_statement_list, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::resolver::VarResolutionCtx;
-use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
+use crate::symbol_map::{SymbolKind, SymbolMap};
+use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
+use crate::type_engine::variable::iterable_elements::resolve_expression_type;
+use crate::types::{AccessKind, ClassInfo};
+use crate::virtual_members::resolve_class_fully_cached;
 
-use super::helpers::{TypeCheckCtx, collect_type_check};
+use super::helpers::{FileDiagnosticContext, TypeCheckCtx, collect_type_check};
 use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for property type mismatch diagnostics.
@@ -57,7 +62,7 @@ struct ResolvedPropertyAssignment {
 /// every walker function, eliminating `clippy::too_many_arguments`.
 struct PropertyCheckCtx<'a> {
     content: &'a str,
-    file_ctx: &'a crate::types::FileContext,
+    symbol_map: &'a SymbolMap,
     type_ctx: &'a TypeCheckCtx<'a>,
     backend: &'a Backend,
     out: &'a mut Vec<ResolvedPropertyAssignment>,
@@ -110,7 +115,8 @@ fn collect_from_class_member(
     }
 }
 
-/// Check an expression for property assignments (`$this->prop = expr`).
+/// Check an expression for a typed property assignment
+/// (`$obj->prop = expr`, `Cls::$prop = expr`).
 fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut PropertyCheckCtx<'_>) {
     // Only handle plain `=` assignments, not compound (`+=`, `.=`, etc.).
     let assign = match expr {
@@ -121,115 +127,99 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         return;
     }
 
-    // Check if the LHS is a property access.
-    let (prop_name, prop_class) = match assign.lhs {
-        // Instance property: `$this->propName = expr`
-        Expression::Access(Access::Property(pa)) => {
-            let is_this = matches!(
-                pa.object,
-                Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
-            );
-            if !is_this {
-                return;
-            }
-            let name = match &pa.property {
-                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
-                _ => return, // Dynamic property name -- skip
-            };
-
-            let offset = pa.object.span().start.offset;
-            let enclosing = find_class_at_offset(&ctx.file_ctx.classes, offset);
-            match enclosing {
-                Some(cls) => (name, cls),
-                None => return,
-            }
-        }
-        // Static property: `self::$propName = expr` or `static::$propName = expr`
-        Expression::Access(Access::StaticProperty(spa)) => {
-            match spa.class {
-                Expression::Identifier(ident) => {
-                    let raw = bytes_to_str(ident.value());
-                    let lower = raw.to_ascii_lowercase();
-                    if lower != "self" && lower != "static" {
-                        return; // Only handle self/static for now
-                    }
-                }
-                _ => return,
-            };
-
-            let prop_name = match &spa.property {
-                Variable::Direct(dv) => {
-                    let raw = bytes_to_str(dv.name).to_string();
-                    raw.strip_prefix('$').unwrap_or(&raw).to_string()
-                }
-                _ => return, // Dynamic variable name -- skip
-            };
-
-            let offset = spa.class.span().start.offset;
-            let enclosing = find_class_at_offset(&ctx.file_ctx.classes, offset);
-            match enclosing {
-                Some(cls) => (prop_name, cls),
-                None => return,
-            }
-        }
+    // The offset of the property name, where the symbol map records the
+    // member access.  Dynamic names (`$obj->$name`, `Cls::$$name`) are
+    // skipped.
+    let member_offset = match assign.lhs {
+        Expression::Access(Access::Property(pa)) => match &pa.property {
+            ClassLikeMemberSelector::Identifier(ident) => ident.span.start.offset,
+            _ => return,
+        },
+        Expression::Access(Access::StaticProperty(spa)) => match &spa.property {
+            Variable::Direct(dv) => dv.span.start.offset,
+            _ => return,
+        },
         _ => return,
     };
+    let Some(source) = ctx.symbol_map.source(ctx.content) else {
+        return;
+    };
+    let Some(SymbolKind::MemberAccess {
+        subject_text,
+        member_name,
+        is_static,
+        is_method_call: false,
+        ..
+    }) = ctx
+        .symbol_map
+        .lookup(member_offset)
+        .filter(|span| span.start == member_offset)
+        .map(|span| &span.kind)
+    else {
+        return;
+    };
+    let is_static = *is_static;
+    let prop_name = member_name.as_str();
 
-    // Look up the property's declared type.
-    let declared_type = prop_class
-        .properties
-        .iter()
-        .find(|p| p.name == prop_name)
-        .and_then(|p| p.type_hint.clone());
+    // Resolve the receiver the way member-access checks resolve theirs,
+    // so a write through any object, class name, or class-string is
+    // checked, not just `$this` and `self`.
+    let loaders = ctx.type_ctx.loaders;
+    let rctx = ResolutionCtx {
+        is_in_static_method: ctx.symbol_map.is_in_static_method(member_offset),
+        ..loaders.resolution_ctx_at(ctx.content, member_offset)
+    };
+    let SubjectOutcome::Resolved(receivers) = resolve_subject_outcome(
+        subject_text.as_str(source),
+        AccessKind::of_member_access(is_static),
+        &rctx,
+    ) else {
+        return;
+    };
 
-    let declared_type = match declared_type {
-        Some(t) if !t.is_untyped() && !t.is_mixed() => t,
-        _ => return,
+    let resolved_class_loader = loaders.resolved_class_loader();
+
+    // Every possible receiver has to declare a typed property of that name;
+    // otherwise the write may land on one this check knows nothing about.
+    let mut declared_types: Vec<PhpType> = Vec::with_capacity(receivers.len());
+    for receiver in &receivers {
+        let Some(declared) = declared_property_type(
+            receiver,
+            prop_name,
+            is_static,
+            resolved_class_loader,
+            ctx.backend,
+        ) else {
+            return;
+        };
+        if !declared_types.contains(&declared) {
+            declared_types.push(declared);
+        }
+    }
+    let declared_type = if declared_types.len() == 1 {
+        declared_types.pop().unwrap_or_else(PhpType::untyped)
+    } else {
+        PhpType::union(declared_types)
     };
 
     let site = assign.rhs.span().start.offset;
-    let class_loader = ctx.type_ctx.loaders.class_loader_at(site);
-    let resolved_class_loader = ctx.type_ctx.loaders.resolved_class_loader();
-
-    // Resolve `self`/`static`/`parent`/`$this` in the declared property
-    // type, then expand any remaining short class names to their
-    // fully-qualified form.
-    let declared_type = declared_type
-        .resolve_self_refs(
-            prop_class.fqn().as_str(),
-            prop_class.parent_class.as_deref(),
-        )
-        .resolve_names(&|name: &str| {
-            if name.contains("__anonymous@") {
-                return name.to_string();
-            }
-            if let Some(cls) = resolved_class_loader(name) {
-                cls.fqn().to_string()
-            } else {
-                name.to_string()
-            }
-        });
+    let declared_type = declared_type.resolve_names(&|name: &str| {
+        if name.contains("__anonymous@") {
+            return name.to_string();
+        }
+        if let Some(cls) = resolved_class_loader(Fqn::new(name)) {
+            cls.fqn().to_string()
+        } else {
+            name.to_string()
+        }
+    });
 
     // Resolve the RHS expression type.
     let rhs_span = assign.rhs.span();
     let rhs_start = rhs_span.start.offset as usize;
     let rhs_end = rhs_span.end.offset as usize;
 
-    let var_ctx = VarResolutionCtx {
-        source_imports: Some(ctx.type_ctx.file_ctx.use_map_at(site)),
-        backend: Some(ctx.backend),
-        loaders: ctx.type_ctx.loaders.loaders_at(site),
-        resolved_class_cache: Some(&ctx.backend.resolved_class_cache),
-        ..VarResolutionCtx::new(
-            "",
-            prop_class,
-            &ctx.file_ctx.classes,
-            ctx.content,
-            rhs_start as u32,
-            resolved_class_loader,
-            class_loader,
-        )
-    };
+    let var_ctx = loaders.var_ctx_at(ctx.content, site);
 
     let rhs_type = resolve_expression_type(assign.rhs, &var_ctx).unwrap_or_else(PhpType::untyped);
 
@@ -246,7 +236,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         if name.contains("__anonymous@") {
             return name.to_string();
         }
-        if let Some(cls) = resolved_class_loader(name) {
+        if let Some(cls) = resolved_class_loader(Fqn::new(name)) {
             cls.fqn().to_string()
         } else {
             name.to_string()
@@ -258,8 +248,48 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         declared_type,
         start: rhs_start,
         end: rhs_end,
-        property_name: prop_name,
+        property_name: prop_name.to_string(),
     });
+}
+
+/// The declared type of `receiver`'s property `name`, with `self` and
+/// `static` read as the receiver.
+///
+/// `None` when the receiver has no such property, when its staticness
+/// does not match the access, when the property is virtual (`@property`,
+/// framework attributes: magic `__set` decides what those accept), or
+/// when it carries no type worth checking.
+fn declared_property_type(
+    receiver: &Arc<ClassInfo>,
+    name: &str,
+    is_static: bool,
+    class_loader: &ResolvedClassLoader<'_>,
+    backend: &Backend,
+) -> Option<PhpType> {
+    let find = |class: &ClassInfo| {
+        class
+            .properties
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| (p.is_virtual, p.is_static, p.type_hint.clone()))
+    };
+    // The receiver itself first: it carries any generic substitutions
+    // the subject applied, which the cached merge of its class does not.
+    let found = match find(receiver) {
+        Some(found) => found,
+        None if receiver.name == "__object_shape" => return None,
+        None => find(&resolve_class_fully_cached(
+            receiver,
+            class_loader,
+            &backend.resolved_class_cache,
+        ))?,
+    };
+    let (is_virtual, prop_is_static, type_hint) = found;
+    if is_virtual || prop_is_static != is_static {
+        return None;
+    }
+    let ty = type_hint.filter(|t| !t.is_untyped() && !t.is_mixed())?;
+    Some(ty.resolve_self_refs(receiver.fqn().as_str(), receiver.parent_class.as_deref()))
 }
 
 // ── Main diagnostic collection ──────────────────────────────────────────────
@@ -275,19 +305,33 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        collect_type_check(
+        let ctx = FileDiagnosticContext::gather(self, uri);
+        self.collect_property_type_diagnostics_with_context(&ctx, uri, content, out);
+    }
+
+    /// [`Self::collect_property_type_diagnostics`] over an already-gathered
+    /// [`FileDiagnosticContext`].
+    pub(crate) fn collect_property_type_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let symbol_map = &ctx.symbol_map;
+        out.extend(collect_type_check(
             self,
+            &ctx.file,
             uri,
             content,
             TYPE_MISMATCH_PROPERTY_CODE,
-            out,
             |ctx| {
                 with_parsed_program(content, "property_type_diagnostics", |program, _content| {
                     let mut resolved: Vec<ResolvedPropertyAssignment> = Vec::new();
 
                     let mut walk_ctx = PropertyCheckCtx {
                         content,
-                        file_ctx: ctx.file_ctx,
+                        symbol_map,
                         type_ctx: ctx,
                         backend: self,
                         out: &mut resolved,
@@ -317,6 +361,6 @@ impl Backend {
                     ),
                 ))
             },
-        );
+        ));
     }
 }

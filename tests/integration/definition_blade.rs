@@ -5,9 +5,9 @@
 mod tests {
     use crate::common::{
         BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
-        create_psr4_workspace, open_document, open_php, workspace_uri,
+        create_psr4_workspace, goto_definition_at, open_document, open_php, workspace_uri,
     };
-    use tower_lsp::LanguageServer;
+
     use tower_lsp::lsp_types::*;
 
     /// A project holding one component of every shape a tag can name, with
@@ -65,17 +65,7 @@ mod tests {
         line: u32,
         character: u32,
     ) -> Option<String> {
-        let response = backend
-            .goto_definition(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
-            .await
-            .unwrap();
+        let response = goto_definition_at(backend, uri, line, character).await;
         let location = match response? {
             GotoDefinitionResponse::Scalar(location) => location,
             GotoDefinitionResponse::Array(locations) => locations.into_iter().next()?,

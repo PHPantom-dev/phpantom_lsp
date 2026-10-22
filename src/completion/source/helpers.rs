@@ -20,6 +20,7 @@
 //! `Backend`.
 
 use crate::atom::atom;
+use crate::class_lookup::ResolvedClassLoader;
 use std::sync::Arc;
 
 use crate::completion::source::code_context::CodeContext;
@@ -641,7 +642,7 @@ pub(crate) fn try_chained_array_access_with_candidates<'a>(
     segments: &[BracketSegment],
     current_class: Option<&ClassInfo>,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let current_class_fqn = current_class.map(ClassInfo::fqn);
     let current_class_name = current_class_fqn.as_deref().unwrap_or("");
@@ -673,14 +674,14 @@ fn walk_array_segments(
     segments: &[BracketSegment],
     current_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     // Expand type aliases before walking segments.  The raw type may
     // be an alias name like `UserData` that resolves to
     // `array{name: string, pen: Pen}`.  Without expansion the
     // segment walk would fail to extract shape values.
     let mut current = if let TypeKind::Named(_) = base_type.kind() {
-        if let Some(expanded) = crate::type_engine::types::aliases::resolve_type_alias_typed(
+        if let Some(expanded) = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             base_type,
             current_class_name,
             all_classes,
@@ -730,7 +731,7 @@ fn walk_array_segments(
                 let cache = crate::virtual_members::active_resolved_class_cache();
                 let merged =
                     crate::virtual_members::resolve_class_fully_maybe_cached(&cls, class_loader, cache);
-                crate::type_engine::variable::foreach_resolution::extract_iterable_element_type_from_class(
+                crate::type_engine::variable::iterable_elements::extract_iterable_element_type_from_class(
                     &merged,
                     class_loader,
                 )
@@ -741,7 +742,7 @@ fn walk_array_segments(
 
         // After each segment, the resulting type might itself be an
         // alias (e.g. a shape value defined as another alias).
-        if let Some(expanded) = crate::type_engine::types::aliases::resolve_type_alias_typed(
+        if let Some(expanded) = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &current,
             current_class_name,
             all_classes,

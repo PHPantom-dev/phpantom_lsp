@@ -1,4 +1,7 @@
-use crate::common::{create_psr4_workspace, create_test_backend, method_names, property_names};
+use crate::common::{
+    completion_response, create_psr4_workspace, create_test_backend, hover_response, method_names,
+    open_php, position_after, property_names,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -2448,33 +2451,10 @@ class User extends Model {
 }
 ";
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                // "$user->" at line 17, character 15
-                position: Position {
-                    line: 17,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    // "$user->" at line 17, character 15
+    let result = completion_response(&backend, &uri, 17, 15, None).await;
 
     match result {
         Some(CompletionResponse::Array(items))
@@ -2730,19 +2710,8 @@ class User extends Model {
 
     // Hover must be the concrete model, not Model|stdClass / Eloquent|stdClass.
     let uri = Url::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 13,
-                    character: 10,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
+    let hover = hover_response(&backend, &uri, 13, 10)
         .await
-        .unwrap()
         .expect("hover on $user");
     let hover_text = match hover.contents {
         HoverContents::Markup(m) => m.value,
@@ -2822,19 +2791,8 @@ class User extends Model {
 
     // Hover must name the concrete model, not `Model` or `TModel`.
     let uri = Url::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 11,
-                    character: 10,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
+    let hover = hover_response(&backend, &uri, 11, 10)
         .await
-        .unwrap()
         .expect("hover on $user");
     let hover_text = match hover.contents {
         HoverContents::Markup(m) => m.value,
@@ -2952,19 +2910,8 @@ class User extends Model {
     );
 
     let uri = Url::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 10,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
+    let hover = hover_response(&backend, &uri, 10, 10)
         .await
-        .unwrap()
         .expect("hover on $user");
     let hover_text = match hover.contents {
         HoverContents::Markup(m) => m.value,
@@ -3633,16 +3580,7 @@ async fn test_builder_chain_single_file_with_inline_stubs() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // ── Test 1: MyUser::where('active', true) should offer Builder methods ──
     // "MyUser::where('active', true);" is at line 8.
@@ -3754,21 +3692,7 @@ async fn test_builder_chain_single_file_with_inline_stubs() {
         .await;
 
     // "$q->" at line 9, character 12
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 9,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 9, 12, None).await;
 
     assert!(
         result.is_some(),
@@ -3911,33 +3835,10 @@ async fn test_inline_chain_after_static_builder_single_file() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // "BlogAuthor::where('active', 1)->" at line 7
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 7,
-                    character: 42,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 7, 42, None).await;
 
     assert!(
         result.is_some(),
@@ -4088,33 +3989,10 @@ async fn test_inline_orderby_chain_after_static_builder_single_file() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // "BlogAuthor::orderBy('name')->" at line 7
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 7,
-                    character: 37,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 7, 37, None).await;
 
     assert!(
         result.is_some(),
@@ -4666,32 +4544,9 @@ async fn test_custom_collection_same_file_plain_backend() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 61,
-                    character: 20,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 61, 20, None).await;
 
     let items = match result {
         Some(CompletionResponse::Array(items)) => items,
@@ -4755,33 +4610,10 @@ async fn test_accessor_on_variable_same_file_inline_stubs() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                // "$model->" at line 18, character 16
-                position: Position {
-                    line: 18,
-                    character: 16,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    // "$model->" at line 18, character 16
+    let result = completion_response(&backend, &uri, 18, 16, None).await;
 
     let items = match result {
         Some(CompletionResponse::Array(items)) => items,
@@ -6680,32 +6512,9 @@ async fn test_casts_same_file_plain_backend() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 13,
-                    character: 19,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 13, 19, None).await;
 
     let items = match result {
         Some(CompletionResponse::Array(items)) => items,
@@ -9010,16 +8819,7 @@ class DraftFactoryHarness extends DraftFactory {}
 
     let content = "<?php\nnamespace App;\nuse App\\Models\\Draft;\nuse Database\\Factories\\DraftFactoryHarness;\nclass Service {\n    public function makeOneDraft(Draft $article): Draft {\n        return Draft::factory()->makeOne(\n            $article->only(['title', 'body', 'user_id'])\n        );\n    }\n    public function createOneDraft(): Draft {\n        return Draft::factory()->createOne();\n    }\n    public function makeDraft(): Draft {\n        return Draft::factory()->make();\n    }\n    public function createDraft(): Draft {\n        return Draft::factory()->create();\n    }\n    public function makeFromHarness(DraftFactoryHarness $factory): Draft {\n        return $factory->makeOne();\n    }\n}\n";
     let uri = Url::from_file_path(dir.path().join("src/Service.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), content, &mut diags);
@@ -9201,16 +9001,7 @@ async fn test_factory_model_property_resolves_single_model_returns_through_base(
 
     let content = "<?php\nnamespace App\\Services;\nuse App\\Models\\Documents\\Draft;\nuse Database\\Factories\\DraftFactory;\nclass DraftService {\n    public function makeOneDraft(): Draft {\n        return Draft::factory()->makeOne();\n    }\n    public function createOneDraft(): Draft {\n        return Draft::factory()->createOne();\n    }\n    public function makeDraft(): Draft {\n        return Draft::factory()->make();\n    }\n    public function createDraft(): Draft {\n        return Draft::factory()->create();\n    }\n    public function incorrectlyReturnsFactory(): DraftFactory {\n        return Draft::factory()->makeOne();\n    }\n}\n";
     let uri = Url::from_file_path(dir.path().join("src/DraftService.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
@@ -9483,16 +9274,7 @@ async fn factory_argument_mismatches(body: &str) -> Vec<String> {
         "<?php\nuse App\\Models\\User;\nfunction needsUser(User $user): void {{}}\n{body}\n"
     );
     let uri = Url::from_file_path(dir.path().join("src/test.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.clone(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, &content).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), &content, &mut diags);
@@ -10955,16 +10737,7 @@ class ProductService {
 
     // Open the model file first so it's indexed
     let model_uri = Url::from_file_path(dir.path().join("src/Models/Product.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: model_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: product_php.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &model_uri, product_php).await;
 
     // "$q->" at line 6, character 12
     let items = complete_at(
@@ -11023,16 +10796,7 @@ class SomeModel extends Model {
 
     // Open NotAModel first so it's indexed
     let uri = Url::from_file_path(dir.path().join("src/Models/NotAModel.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: not_a_model_php.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, not_a_model_php).await;
 
     // "$q->" at line 10, character 12
     let items = complete_at(
@@ -11615,31 +11379,10 @@ class Service {
     }
 }
 ";
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: src.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, src).await;
 
     // line 33: "            $orders->"  cursor after ->
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 33,
-                character: 22,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let items = match backend.completion(completion_params).await.unwrap() {
+    let items = match completion_response(&backend, &uri, 33, 22, None).await {
         Some(CompletionResponse::Array(items)) => items,
         Some(CompletionResponse::List(list)) => list.items,
         None => vec![],
@@ -16370,10 +16113,16 @@ class User extends Model {
     ]);
 
     for (needle, expected) in [("$q->", "userOnly"), ("$f->", "factoryOnly")] {
-        let offset = user.find(needle).unwrap() + needle.len();
-        let line = user[..offset].matches('\n').count() as u32;
-        let character = (offset - user[..offset].rfind('\n').map_or(0, |i| i + 1)) as u32;
-        let items = complete_at(&backend, &dir, "src/Models/User.php", user, line, character).await;
+        let at = position_after(user, needle);
+        let items = complete_at(
+            &backend,
+            &dir,
+            "src/Models/User.php",
+            user,
+            at.line,
+            at.character,
+        )
+        .await;
         assert!(
             method_names(&items).contains(&expected),
             "{needle} should offer {expected}, got: {:?}",
@@ -16460,16 +16209,8 @@ final class DivisionFactory
         ("src/Models/DivisionFactory.php", caller),
     ]);
 
-    let position_after = |needle: &str| {
-        let offset = caller.find(needle).unwrap() + needle.len();
-        Position {
-            line: caller[..offset].matches('\n').count() as u32,
-            character: (offset - caller[..offset].rfind('\n').map_or(0, |i| i + 1)) as u32,
-        }
-    };
-
     for (needle, expected) in [("$q->", "eagleOnly"), ("$f->", "factoryOnly")] {
-        let at = position_after(needle);
+        let at = position_after(caller, needle);
         let items = complete_at(
             &backend,
             &dir,
@@ -16490,7 +16231,7 @@ final class DivisionFactory
     // same binding has to carry hover and go-to-definition, not just the
     // completion list.
     let uri = Url::from_file_path(dir.path().join("src/Models/DivisionFactory.php")).unwrap();
-    let on_method = position_after("$q->eagle");
+    let on_method = position_after(caller, "$q->eagle");
     let targets = crate::common::definition_locations(
         crate::common::goto_definition_at(&backend, &uri, on_method.line, on_method.character)
             .await,
@@ -16504,17 +16245,9 @@ final class DivisionFactory
 
     // On the variable itself, in the body — not the parameter it was
     // declared as.
-    let on_var = position_after("return $");
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: on_var,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
+    let on_var = position_after(caller, "return $");
+    let hover = hover_response(&backend, &uri, on_var.line, on_var.character)
         .await
-        .unwrap()
         .expect("hover on the closure parameter");
     let text = match hover.contents {
         HoverContents::Markup(markup) => markup.value,

@@ -3,11 +3,10 @@
 //! `@return` corrected or enriched, with every other line kept as written.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
+use crate::class_lookup::{ResolvedClassLoader, SourceClassLoader};
 use crate::completion::phpdoc::generation::{enrichment_plain, enrichment_plain_typed};
 use crate::php_type::PhpType;
-use crate::types::ClassInfo;
 
 use super::changes::{is_type_contradiction, should_remove_return, should_update_return};
 use super::{BodyFacts, DocParam, FunctionWithDocblock, SigParam};
@@ -15,7 +14,7 @@ use super::{BodyFacts, DocParam, FunctionWithDocblock, SigParam};
 /// The file's imports and class loader, for spelling the types a rewrite
 /// writes.
 struct TypeSpelling<'a> {
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a SourceClassLoader<'a>,
     use_map: &'a HashMap<String, String>,
     file_namespace: &'a Option<String>,
 }
@@ -32,7 +31,8 @@ impl TypeSpelling<'_> {
 pub(super) fn build_updated_docblock(
     info: &FunctionWithDocblock,
     facts: &BodyFacts,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> String {
@@ -75,9 +75,13 @@ pub(super) fn build_updated_docblock(
 
     // Body-based @return enrichment.
     if let Some(enriched) = &facts.enriched_return {
-        let enriched =
-            crate::names::shorten_type_for_file(enriched, use_map, file_namespace, class_loader)
-                .to_string();
+        let enriched = crate::names::shorten_type_for_file(
+            enriched,
+            use_map,
+            file_namespace,
+            resolved_class_loader,
+        )
+        .to_string();
         // Update the existing @return line or insert a new one.
         if !set_return_type(&mut lines, info, &enriched) {
             let close_pos = lines

@@ -172,7 +172,7 @@ impl Backend {
 
                     let see_refs = info
                         .as_ref()
-                        .map(docblock::extract_see_references_from_info)
+                        .map(docblock::extract_see_refs_from_info)
                         .unwrap_or_default();
 
                     let throws = info

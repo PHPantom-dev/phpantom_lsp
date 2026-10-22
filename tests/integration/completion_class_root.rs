@@ -4,37 +4,16 @@
 //! keywords — and suppresses classes, functions, and constants, which
 //! are invalid at that position.
 
-use crate::common::create_test_backend;
-use tower_lsp::LanguageServer;
+use crate::common::{completion_response, create_test_backend, open_php};
 use tower_lsp::lsp_types::*;
 
 async fn completion_items(text: &str, uri: &str, line: u32, character: u32) -> Vec<CompletionItem> {
     let backend = create_test_backend();
     let uri = Url::parse(uri).unwrap();
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, line, character, None).await;
 
     match result {
         Some(CompletionResponse::Array(items)) => items,
@@ -731,43 +710,19 @@ async fn demo_php_class_root_trigger_works() {
     text.insert_str(close, "    o\n");
 
     let backend = create_test_backend();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: Url::parse("file:///scaffolding.php").unwrap(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: scaffolding.clone(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &Url::parse("file:///scaffolding.php").unwrap(),
+        &scaffolding,
+    )
+    .await;
     let demo_uri = Url::parse("file:///demo_trigger.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: demo_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.clone(),
-            },
-        })
-        .await;
+    open_php(&backend, &demo_uri, &text).await;
     let completion_at = |line: u32, character: u32| {
         let backend = &backend;
         let uri = demo_uri.clone();
         async move {
-            let result = backend
-                .completion(CompletionParams {
-                    text_document_position: TextDocumentPositionParams {
-                        text_document: TextDocumentIdentifier { uri },
-                        position: Position { line, character },
-                    },
-                    work_done_progress_params: WorkDoneProgressParams::default(),
-                    partial_result_params: PartialResultParams::default(),
-                    context: None,
-                })
-                .await
-                .unwrap();
+            let result = completion_response(backend, &uri, line, character, None).await;
             match result {
                 Some(CompletionResponse::Array(items)) => items,
                 Some(CompletionResponse::List(list)) => list.items,

@@ -15,6 +15,7 @@ use super::*;
 use std::cell::OnceCell;
 
 use crate::atom::{Atom, AtomMap};
+use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 use crate::references::member_scope::MemberScope;
 use crate::symbol_map::SymbolKind;
@@ -48,7 +49,7 @@ impl Backend {
         let method = class.get_method(member_name)?;
         let kind = MagicMemberKind::of(method)?;
         let use_name = kind.use_name(&method.name)?;
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         if !extends_eloquent_model(&class, &class_loader) {
             return None;
         }

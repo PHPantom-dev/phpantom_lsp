@@ -32,11 +32,11 @@ mod file_lookup;
 mod laravel;
 mod shape_keys;
 
-use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use super::point_location;
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::text_position::position_to_offset;
 use crate::types::ResolvedType;
 use crate::types::*;
@@ -103,7 +103,7 @@ struct MemberLookup<'a> {
     cursor_offset: u32,
     member_name: &'a str,
     access_hint: MemberAccessHint,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
 }
 
 impl Backend {
@@ -118,7 +118,7 @@ impl Backend {
         member_name: &str,
     ) -> Option<Location> {
         let target_class = self.find_or_load_class(class_fqn)?;
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let (declaring_class, declaring_fqn) =
             Self::find_declaring_class(&target_class, member_name, &class_loader)?;
         let member_kind =
@@ -239,7 +239,7 @@ impl Backend {
             (
                 effective_name.clone(),
                 ClassInfo::clone(target_class),
-                target_class.name.to_string(),
+                target_class.fqn().to_string(),
             )
         });
 
@@ -310,7 +310,7 @@ impl Backend {
             Self::resolve_trait_alias(target_class, lookup.member_name);
 
         if let Some(ref trait_name) = alias_trait
-            && let Some(ref trait_info) = (lookup.class_loader)(trait_name)
+            && let Some(ref trait_info) = (lookup.class_loader)(Fqn::new(trait_name))
             && let Some(location) = self.member_position_location(
                 trait_name,
                 lookup.uri,
@@ -424,7 +424,7 @@ impl Backend {
             )
             .map(|(_, fqn)| fqn)
         })?;
-        let trait_info = (lookup.class_loader)(&trait_name)?;
+        let trait_info = (lookup.class_loader)(Fqn::new(&trait_name))?;
         Self::classify_member(&trait_info, effective_name, lookup.access_hint)?;
         self.member_position_location(
             &trait_name,
@@ -453,7 +453,7 @@ impl Backend {
             self.find_class_file_content(declaring_fqn, uri, content)?;
         let member_position =
             Self::find_member_position(&class_content, search_name, member_kind, declaring_class)?;
-        let parsed_uri = Url::parse(&class_uri).ok()?;
+        let parsed_uri = crate::util::parse_url(&class_uri)?;
         Some(point_location(parsed_uri, member_position))
     }
 
@@ -471,7 +471,7 @@ impl Backend {
             search_name,
             Some(cursor_offset as usize),
         )?;
-        let parsed_uri = Url::parse(uri).ok()?;
+        let parsed_uri = crate::util::parse_url(uri)?;
         Some(point_location(parsed_uri, position))
     }
 
@@ -490,7 +490,7 @@ impl Backend {
         target_class: &ClassInfo,
         lookup_class: &ClassInfo,
         effective_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         cache: Option<&ResolvedClassCache>,
     ) -> Option<(String, ClassInfo, String)> {
         if let Some((cls, fqn)) =
@@ -602,8 +602,7 @@ impl Backend {
         content: &str,
         offset: u32,
     ) -> Option<(String, AccessKind)> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         let source = map.source(content)?;
         let span = map.lookup(offset)?;
         match &span.kind {

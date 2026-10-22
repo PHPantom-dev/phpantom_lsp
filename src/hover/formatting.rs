@@ -396,8 +396,8 @@ pub(crate) fn hover_for_function(
         let unresolved: Vec<ResolvedSeeRef> = func
             .see_refs
             .iter()
-            .map(|raw| ResolvedSeeRef {
-                raw: raw.clone(),
+            .map(|see| ResolvedSeeRef {
+                raw: see.text.clone(),
                 location_uri: None,
             })
             .collect();

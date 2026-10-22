@@ -7,6 +7,7 @@
 //! empty" is the wrong question to ask.
 
 use crate::common::create_psr4_workspace;
+use crate::common::open_php;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -58,16 +59,7 @@ async fn route_diagnostics(files: &[(&str, &str)]) -> Vec<String> {
     let uri = Url::from_file_path(dir.path().join("src/Links.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: CONSUMER.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, CONSUMER).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER, &mut diags);

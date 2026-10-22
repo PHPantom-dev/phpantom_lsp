@@ -101,6 +101,27 @@ fn import_action_offered_for_static_point_request_at_first_character() {
     );
 }
 
+/// The bulk import appears wherever the single one does, the first
+/// character of a name included.
+#[test]
+fn import_all_offered_for_point_request_at_first_character() {
+    let backend = create_test_backend();
+    declare_request(&backend);
+    declare_carbon(&backend);
+    let uri = "file:///test.php";
+    let content = "<?php\nnamespace App;\n\nnew Request();\nCarbon::now();\n";
+    backend.update_ast(uri, content);
+
+    for (line, character) in [(3, 4), (4, 0)] {
+        let actions = get_code_actions_at(&backend, uri, content, line, character);
+        assert!(
+            find_action(&actions, "Import all missing classes").is_some(),
+            "at {line}:{character}, got: {:?}",
+            titles(&actions)
+        );
+    }
+}
+
 #[test]
 fn no_import_action_when_already_imported() {
     let backend = create_test_backend();

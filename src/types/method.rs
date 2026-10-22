@@ -140,11 +140,11 @@ pub struct MethodExtras {
     pub links: Vec<String>,
     /// Symbol and URL references from `@see` tags in the docblock.
     ///
-    /// Each entry is the raw text after `@see`, which may be a symbol
+    /// Each entry's `text` is what follows `@see`, which may be a symbol
     /// reference (e.g. `"UnsetDemo"`, `"MyClass::method()"`) or a URL
     /// (e.g. `"https://example.com/docs"`).  Rendered in hover below
     /// `@link` entries.
-    pub see_refs: Vec<String>,
+    pub see_refs: Vec<SeeRef>,
     /// Optional PHPStan conditional return type parsed from the docblock.
     ///
     /// When present, the resolver should use this instead of `return_type`
@@ -327,7 +327,7 @@ impl MethodInfo {
     }
 
     /// Raw `@see` references.
-    pub fn see_refs(&self) -> &[String] {
+    pub fn see_refs(&self) -> &[SeeRef] {
         self.extras.as_ref().map_or(&[], |e| &e.see_refs)
     }
 

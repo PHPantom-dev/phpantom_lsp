@@ -79,9 +79,7 @@ impl Backend {
     /// contributions.
     pub(crate) fn update_resource_symbol_index(&self, uri: &str, content: &str) {
         let symbol_map = Arc::new(self.resource_symbol_map(content));
-        self.symbol_maps
-            .write()
-            .insert(uri.to_string(), Arc::clone(&symbol_map));
+        self.publish_symbol_maps([(uri.to_string(), Arc::clone(&symbol_map))]);
         self.reindex_references_for_symbol_maps_batch(vec![(uri.to_string(), symbol_map)]);
     }
 
@@ -98,12 +96,7 @@ impl Backend {
             return;
         }
 
-        {
-            let mut symbol_maps = self.symbol_maps.write();
-            for (uri, map) in &maps {
-                symbol_maps.insert(uri.clone(), Arc::clone(map));
-            }
-        }
+        self.publish_symbol_maps(maps.iter().cloned());
         self.reindex_references_for_symbol_maps_batch(maps);
     }
 

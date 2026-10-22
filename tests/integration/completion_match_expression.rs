@@ -1,5 +1,4 @@
-use crate::common::create_test_backend;
-use tower_lsp::LanguageServer;
+use crate::common::{completion_response, create_test_backend, open_php};
 use tower_lsp::lsp_types::*;
 
 /// Match expression with `new` instantiations: each arm contributes a
@@ -33,31 +32,10 @@ async fn test_completion_match_expression_multiple_new_instantiations() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$service->` on line 18
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 18,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 18, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $service-> from match"
@@ -123,31 +101,10 @@ async fn test_completion_match_expression_static_method_calls() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$logger->` on line 21
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 21,
-                character: 17,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 21, 17, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $logger-> from match with static calls"
@@ -202,31 +159,10 @@ async fn test_completion_match_expression_single_arm() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$proc->` on line 12
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 12,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 12, 16, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $proc->"
@@ -285,31 +221,10 @@ async fn test_completion_match_expression_this_method_call() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$driver->` on line 22
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 17,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 17, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $driver-> from match with method calls"
@@ -369,31 +284,10 @@ async fn test_completion_match_expression_top_level() {
         "$x->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$x->` on line 13
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 13,
-                character: 4,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 13, 4, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for top-level $x-> from match"
@@ -450,31 +344,10 @@ async fn test_completion_match_expression_property_access() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$svc->` on line 20
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 20,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 20, 14, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $svc-> from match with property access"
@@ -560,31 +433,10 @@ async fn test_completion_match_expression_cross_file() {
     );
 
     let uri = Url::parse("file:///src/Handler.php").unwrap();
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: handler_php.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, handler_php).await;
 
     // Cursor after `$svc->` on line 12
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 12,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 12, 14, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for cross-file match expression"
@@ -651,31 +503,10 @@ async fn test_completion_match_expression_overridden_by_reassignment() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$obj->` on line 20
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 20,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 20, 14, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $obj->"
@@ -738,31 +569,10 @@ async fn test_completion_match_expression_three_arms() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$cache->` on line 20
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 20,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 20, 16, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $cache-> with three match arms"
@@ -827,31 +637,10 @@ async fn test_completion_match_expression_method_call_on_variable() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$device->` on line 23
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 23,
-                character: 17,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 23, 17, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $device-> from match with method calls on variable"
@@ -910,31 +699,10 @@ async fn test_completion_match_expression_inside_if_block() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$svc->` on line 22
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 14, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $svc-> with match inside if"
@@ -997,30 +765,9 @@ async fn test_completion_match_expression_detail_shows_merged_classes() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 18,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 18, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $service->"

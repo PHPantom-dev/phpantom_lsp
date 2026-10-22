@@ -35,7 +35,27 @@ impl Backend {
     /// [`Self::blade_virtual_php`] without the copy, for the request paths
     /// that only need to read the text.
     pub(crate) fn blade_virtual_php_arc(&self, uri: &str) -> Option<Arc<String>> {
-        self.blade_virtual_content.read().get(uri).cloned()
+        let files = self.files.read();
+        Some(Arc::clone(&files.get(uri)?.blade.as_ref()?.virtual_php))
+    }
+
+    /// The source map from a template's virtual PHP back to the template.
+    pub(crate) fn blade_source_map(
+        &self,
+        uri: &str,
+    ) -> Option<Arc<crate::blade::source_map::BladeSourceMap>> {
+        let files = self.files.read();
+        Some(Arc::clone(&files.get(uri)?.blade.as_ref()?.source_map))
+    }
+
+    /// Every template whose lowering has been recorded.
+    pub(crate) fn lowered_template_uris(&self) -> Vec<String> {
+        self.files
+            .read()
+            .iter()
+            .filter(|(_, state)| state.blade.is_some())
+            .map(|(uri, _)| uri.clone())
+            .collect()
     }
 
     /// Borrow the global defines mutex (used by integration tests to
@@ -66,8 +86,8 @@ impl Backend {
     /// to verify that provider edits keep the `Date::use()` selection
     /// current).  The outer option is `None` until startup discovery runs;
     /// the inner option is `None` when no project override was found.
-    pub fn laravel_date_class(&self) -> &Arc<RwLock<Option<Option<String>>>> {
-        &self.laravel_date_class
+    pub fn laravel_date_class(&self) -> &RwLock<Option<Option<String>>> {
+        &self.laravel.date_class
     }
 
     /// Borrow the set of parsed file URIs (used by integration tests to
@@ -129,8 +149,7 @@ impl Backend {
     /// Pretend the client cannot call `codeAction/resolve` (used by
     /// integration tests, which skip the `initialize` round-trip).
     pub fn disable_code_action_resolve(&self) {
-        self.supports_code_action_resolve
-            .store(false, std::sync::atomic::Ordering::Release);
+        self.client_caps.write().code_action_resolve = false;
     }
 
     /// Borrow the open files map (used by integration tests to inject
@@ -143,7 +162,8 @@ impl Backend {
     /// the state `ensure_workspace_indexed` leaves behind without running
     /// a real workspace scan).
     pub fn mark_workspace_indexed(&self) {
-        self.workspace_indexed
+        self.workspace_index
+            .indexed
             .store(true, std::sync::atomic::Ordering::Release);
     }
 
@@ -152,8 +172,7 @@ impl Backend {
     /// once its count lands (used by integration tests to pick the path
     /// without going through `initialize`).
     pub fn set_supports_code_lens_refresh(&self, supported: bool) {
-        self.supports_code_lens_refresh
-            .store(supported, std::sync::atomic::Ordering::Release);
+        self.client_caps.write().code_lens_refresh = supported;
     }
 
     /// Borrow the PHPStan diagnostics cache (used by integration tests
@@ -182,7 +201,11 @@ impl Backend {
     /// Set from the `initialize` handshake; integration tests use it to
     /// exercise both code lens command shapes.
     pub fn set_supports_show_document(&self, supported: bool) {
-        self.supports_show_document
-            .store(supported, std::sync::atomic::Ordering::Release);
+        self.client_caps.write().show_document = supported;
+    }
+
+    /// What the connected client supports.
+    pub(crate) fn caps(&self) -> crate::backend::ClientCaps {
+        *self.client_caps.read()
     }
 }

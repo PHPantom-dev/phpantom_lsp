@@ -20,6 +20,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use super::resolve::CompletionItemData;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::hover::{MemberKindForOrigin, find_declaring_class, shorten_php_type};
 use crate::types::Visibility;
 use crate::types::*;
@@ -595,7 +596,7 @@ pub(crate) fn deprecation_tag(is_deprecated: bool) -> Option<Vec<CompletionItemT
 pub(crate) fn is_ancestor_of(
     current_class: Option<&ClassInfo>,
     target_class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     let Some(cc) = current_class else {
         return false;
@@ -620,7 +621,7 @@ pub(crate) fn is_ancestor_of(
         {
             return true;
         }
-        ancestor_name = class_loader(name).and_then(|ci| ci.parent_class);
+        ancestor_name = class_loader(Fqn::new(name)).and_then(|ci| ci.parent_class);
     }
     false
 }
@@ -641,7 +642,7 @@ pub(crate) fn build_union_completion_items(
     candidates: &[Arc<ClassInfo>],
     effective_access: AccessKind,
     current_class: Option<&ClassInfo>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: &crate::virtual_members::ResolvedClassCache,
     uri: &str,
 ) -> Vec<CompletionItem> {
@@ -730,7 +731,7 @@ pub(crate) fn build_union_completion_items(
 fn apply_declaring_class_label(
     item: &mut CompletionItem,
     owner: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) {
     let Some(data_value) = item.data.as_ref() else {
         return;
@@ -1048,7 +1049,7 @@ mod tests {
             name: atom("Foo"),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+        let loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
         assert!(is_ancestor_of(Some(&cls), &cls, &loader));
     }
 
@@ -1058,7 +1059,7 @@ mod tests {
             name: atom("Foo"),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+        let loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
         assert!(!is_ancestor_of(None, &target, &loader));
     }
 
@@ -1073,7 +1074,7 @@ mod tests {
             parent_class: Some(atom("Parent")),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+        let loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
         assert!(is_ancestor_of(Some(&child), &parent, &loader));
     }
 
@@ -1088,7 +1089,8 @@ mod tests {
             parent_class: Some(atom("Parent")),
             ..ClassInfo::default()
         };
-        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+            let name = name.as_str();
             if name == "Parent" {
                 Some(Arc::new(ClassInfo {
                     name: atom("Parent"),
@@ -1113,7 +1115,7 @@ mod tests {
             name: atom("Baz"),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+        let loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
         assert!(!is_ancestor_of(Some(&current), &target, &loader));
     }
 
@@ -1129,7 +1131,7 @@ mod tests {
             parent_class: Some(atom("App\\BaseService")),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+        let loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
         assert!(is_ancestor_of(Some(&child), &parent_target, &loader));
     }
 

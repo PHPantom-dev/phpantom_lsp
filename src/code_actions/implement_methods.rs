@@ -6,13 +6,12 @@
 //! for all missing methods.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{ResolvedClassLoader, find_class_at_offset};
 use crate::signature_render::{detect_class_indent, format_params, format_return_type};
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, Visibility};
@@ -111,7 +110,7 @@ impl Backend {
 /// class itself or inherited as concrete from parent classes.
 pub(crate) fn collect_missing_methods(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<MethodInfo> {
     use crate::inheritance::{ancestors, supertypes, used_traits_deep};
 
@@ -240,8 +239,10 @@ fn build_method_stubs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::class_lookup::Fqn;
     use crate::php_type::PhpType;
     use crate::types::{ParameterInfo, Visibility};
+    use std::sync::Arc;
 
     // ── collect_missing_methods tests ───────────────────────────────────
 
@@ -266,7 +267,8 @@ mod tests {
             ..Default::default()
         };
 
-        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+            let name = name.as_str();
             if name == "Renderable" {
                 Some(Arc::new(interface.clone()))
             } else {
@@ -304,7 +306,8 @@ mod tests {
             ..Default::default()
         };
 
-        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+            let name = name.as_str();
             if name == "Renderable" {
                 Some(Arc::new(interface.clone()))
             } else {
@@ -342,7 +345,8 @@ mod tests {
             ..Default::default()
         };
 
-        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+            let name = name.as_str();
             if name == "AbstractBase" {
                 Some(Arc::new(parent.clone()))
             } else {
@@ -380,7 +384,8 @@ mod tests {
             ..Default::default()
         };
 
-        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+            let name = name.as_str();
             if name == "Renderable" {
                 Some(Arc::new(interface.clone()))
             } else {
@@ -422,7 +427,8 @@ mod tests {
             ..Default::default()
         };
 
-        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+            let name = name.as_str();
             match name {
                 "AbstractBase" => Some(Arc::new(parent.clone())),
                 "Serializable" => Some(Arc::new(serializable.clone())),

@@ -1,13 +1,12 @@
 use crate::common::{
     class_items, complete_at, create_test_backend, create_test_backend_with_stubs, labels,
-    open_php_str,
+    open_php, open_php_str,
 };
 use phpantom_lsp::Backend;
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
 use phpantom_lsp::types::{ClassInfo, ClassLikeKind};
 use std::sync::Arc;
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
@@ -401,24 +400,19 @@ async fn test_top_level_use_no_filter() {
     // Load classes in a namespace so they appear in class name completions
     // when the test file types a `use` import for them.
     let scaffolding_uri = Url::parse("file:///ns_scaffolding.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: scaffolding_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: concat!(
-                    "<?php\n",
-                    "namespace Qx;\n",
-                    "class QxConcreteClass {}\n",
-                    "interface QxSomeInterface {}\n",
-                    "trait QxSomeTrait {}\n",
-                    "enum QxSomeEnum {}\n",
-                )
-                .to_string(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &scaffolding_uri,
+        concat!(
+            "<?php\n",
+            "namespace Qx;\n",
+            "class QxConcreteClass {}\n",
+            "interface QxSomeInterface {}\n",
+            "trait QxSomeTrait {}\n",
+            "enum QxSomeEnum {}\n",
+        ),
+    )
+    .await;
 
     let uri = Url::parse("file:///test_ns_use.php").unwrap();
     let text = "<?php\nuse Qx";
@@ -819,16 +813,12 @@ async fn test_parsed_stub_interface_filtered_in_extends_class() {
     // Force the BackedEnum stub to be parsed by requesting it.
     // We do this by opening a file that references it.
     let ref_uri = Url::parse("file:///ref.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: ref_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: concat!("<?php\n", "enum Color: string { case Red = 'red'; }\n",).to_string(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &ref_uri,
+        concat!("<?php\n", "enum Color: string { case Red = 'red'; }\n",),
+    )
+    .await;
 
     // Trigger completion on Color to force enum stub parsing.
     let _ = complete_at(
@@ -1345,21 +1335,16 @@ async fn test_loaded_stub_class_excluded_from_extends_interface() {
 
     // Force the stubs to be parsed by opening a file that references them.
     let ref_uri = Url::parse("file:///ref_stub.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: ref_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: concat!(
-                    "<?php\n",
-                    "class Preload extends BadUrlException {}\n",
-                    "class Preload2 implements SomeStubInterface {}\n",
-                )
-                .to_string(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &ref_uri,
+        concat!(
+            "<?php\n",
+            "class Preload extends BadUrlException {}\n",
+            "class Preload2 implements SomeStubInterface {}\n",
+        ),
+    )
+    .await;
 
     // Trigger resolution so the stubs get parsed into ast_map.
     let _ = complete_at(
@@ -1418,16 +1403,12 @@ async fn test_loaded_stub_class_excluded_from_trait_use() {
 
     // Force the stub to be parsed.
     let ref_uri = Url::parse("file:///ref_stub2.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: ref_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: "<?php\nclass Preload extends JsonException {}\n".to_string(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &ref_uri,
+        "<?php\nclass Preload extends JsonException {}\n",
+    )
+    .await;
     let _ = complete_at(
         &backend,
         &ref_uri,
@@ -1469,16 +1450,12 @@ async fn test_loaded_class_filtered_on_second_use() {
 
     // First use: `interface A extends BadUrlException {}` — loads the stub.
     let first_uri = Url::parse("file:///first_use.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: first_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: "<?php\nclass Preload extends BadUrlException {}\n".to_string(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &first_uri,
+        "<?php\nclass Preload extends BadUrlException {}\n",
+    )
+    .await;
     let _ = complete_at(
         &backend,
         &first_uri,
@@ -1512,16 +1489,12 @@ async fn test_classmap_loaded_interface_excluded_from_extends_class() {
 
     // Load an interface into ast_map.
     let iface_uri = Url::parse("file:///app/Contracts/Searchable.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: iface_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: "<?php\nnamespace App\\Contracts;\ninterface Searchable {}\n".to_string(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &iface_uri,
+        "<?php\nnamespace App\\Contracts;\ninterface Searchable {}\n",
+    )
+    .await;
 
     // Put it in the class index.
     {
@@ -1552,16 +1525,12 @@ async fn test_classmap_loaded_trait_excluded_from_implements() {
     let backend = create_test_backend();
 
     let trait_uri = Url::parse("file:///app/Traits/Sortable.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: trait_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: "<?php\nnamespace App\\Traits;\ntrait Sortable {}\n".to_string(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &trait_uri,
+        "<?php\nnamespace App\\Traits;\ntrait Sortable {}\n",
+    )
+    .await;
 
     {
         let mut idx = backend.fqn_uri_index().write();
@@ -1983,25 +1952,20 @@ async fn test_extends_interface_does_not_demote_interface_names() {
 /// anonymous-class exclusion tests below.
 async fn load_anon_scaffolding(backend: &Backend) {
     let uri = Url::parse("file:///anon_scaffolding.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: concat!(
-                    "<?php\n",
-                    "namespace AnonTest;\n",
-                    "class AnonContainer {\n",
-                    "    public function make() {\n",
-                    "        return new class extends AnonContainer {};\n",
-                    "    }\n",
-                    "}\n",
-                )
-                .to_string(),
-            },
-        })
-        .await;
+    open_php(
+        backend,
+        &uri,
+        concat!(
+            "<?php\n",
+            "namespace AnonTest;\n",
+            "class AnonContainer {\n",
+            "    public function make() {\n",
+            "        return new class extends AnonContainer {};\n",
+            "    }\n",
+            "}\n",
+        ),
+    )
+    .await;
 }
 
 /// In a plain (unfiltered) context, the named class should appear but
@@ -2142,16 +2106,7 @@ async fn test_loaded_final_stub_class_filtered_in_all_contexts() {
         "class Preload extends V8JsScriptException {}\n",
         "$x = new Preload(); $x->",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: load_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: load_text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &load_uri, load_text).await;
     let _ = complete_at(&backend, &load_uri, load_text, 2, 24).await;
 
     // ── extends (class) — final class must be excluded ──
@@ -2374,16 +2329,7 @@ async fn test_real_multi_class_stub_loaded_filtering() {
         "class Preload extends V8JsScriptException {}\n",
         "$x = new Preload(); $x->",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: load_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: load_text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &load_uri, load_text).await;
     let _ = complete_at(&backend, &load_uri, load_text, 2, 24).await;
 
     // After loading, the same filtering should apply via the ast_map fast path.
@@ -2435,17 +2381,12 @@ async fn test_use_import_excludes_constants_and_functions() {
     let backend = create_test_backend_with_stubs();
 
     let scaffolding_uri = Url::parse("file:///use_scaffold.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: scaffolding_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: concat!("<?php\n", "namespace Scaffold;\n", "class SomeWidget {}\n",)
-                    .to_string(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &scaffolding_uri,
+        concat!("<?php\n", "namespace Scaffold;\n", "class SomeWidget {}\n",),
+    )
+    .await;
 
     // Register a global function so we can verify it's excluded.
     {
@@ -2663,16 +2604,12 @@ async fn test_use_import_inserts_fqn_no_redundant_text_edit() {
 
     // Load a namespaced class so it appears in completions.
     let scaffolding_uri = Url::parse("file:///decimal_scaffolding.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: scaffolding_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: "<?php\nnamespace Decimal;\nclass Decimal {}\n".to_string(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &scaffolding_uri,
+        "<?php\nnamespace Decimal;\nclass Decimal {}\n",
+    )
+    .await;
 
     let uri = Url::parse("file:///test_use_fqn.php").unwrap();
     let text = "<?php\nuse De";
@@ -2708,16 +2645,12 @@ async fn test_use_import_same_namespace_still_uses_fqn() {
 
     // Load a class in namespace App\Models.
     let scaffolding_uri = Url::parse("file:///models_scaffolding.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: scaffolding_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: "<?php\nnamespace App\\Models;\nclass Order {}\n".to_string(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &scaffolding_uri,
+        "<?php\nnamespace App\\Models;\nclass Order {}\n",
+    )
+    .await;
 
     // The test file is in the SAME namespace.
     let uri = Url::parse("file:///test_same_ns_use.php").unwrap();

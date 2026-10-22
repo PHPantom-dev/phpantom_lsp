@@ -7,24 +7,20 @@
 
 use std::sync::Arc;
 
-use mago_span::Span;
-use mago_syntax::cst::Block;
-use mago_syntax::cst::Statement;
+use mago_span::HasSpan;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::variable::Variable;
-use tower_lsp::lsp_types::Position;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::Fqn;
+use crate::code_actions::cursor_context::{FunctionKinds, FunctionLike, find_enclosing_function};
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::return_collection::collect_returns;
-use crate::text_position::line_start_byte_offset;
-use crate::type_engine::resolver::{Loaders, SourceImports, VarResolutionCtx};
-use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
+use crate::type_engine::resolver::{FileCtx, Loaders, VarResolutionCtx};
+use crate::type_engine::variable::iterable_elements::resolve_expression_type;
 use crate::types::{ClassInfo, FunctionLoader};
-
-use super::edits::find_open_brace_from_declaration;
 
 // ── Return type inference result ────────────────────────────────────────────
 
@@ -56,8 +52,9 @@ pub(crate) struct InferredReturnType {
 // ── Backend methods ─────────────────────────────────────────────────────────
 
 impl Backend {
-    /// Infer the return type of the function at `func_line` by scanning
-    /// all return statements in the body.
+    /// Infer the return type of the innermost function, method, closure or
+    /// arrow function whose declaration contains `offset` (a method's
+    /// `name_offset` will do) from what its body returns.
     ///
     /// Returns an [`InferredReturnType`] that separates the native PHP
     /// type hint from the richer effective type.  When they differ (e.g.
@@ -66,20 +63,6 @@ impl Backend {
     /// When `self_as_marker` is `true`, `return $this;` yields the self-like
     /// marker `$this` so the type engine can map it to the receiver class
     /// rather than the (possibly trait) class that declares the method.
-    pub(crate) fn infer_return_type_for_function(
-        &self,
-        uri: &str,
-        content: &str,
-        func_line: usize,
-        self_as_marker: bool,
-    ) -> Option<InferredReturnType> {
-        let offset = body_brace_offset(content, func_line)?;
-        self.infer_return_type_at(uri, content, offset, self_as_marker)
-    }
-
-    /// [`infer_return_type_for_function`](Self::infer_return_type_for_function)
-    /// for the function or method whose declaration, from its name to its
-    /// closing brace, contains `offset` (its `name_offset` will do).
     pub(crate) fn infer_return_type_at(
         &self,
         uri: &str,
@@ -96,7 +79,9 @@ impl Backend {
             .cloned()
             .unwrap_or_default();
         let block = self.import_block_at(uri, offset as usize);
-        let class_loader = self.class_loader_with(&local_classes, &block.use_map, &block.namespace);
+        let class_loader = self.resolved_class_loader_with(&local_classes);
+        let source_class_loader =
+            self.class_loader_with(&local_classes, &block.use_map, &block.namespace);
         let function_loader = self.function_loader_with(
             None,
             &block.use_map,
@@ -105,12 +90,10 @@ impl Backend {
         );
 
         infer_return_type_at(
-            content,
+            FileCtx::new(content, &local_classes, &class_loader, &source_class_loader)
+                .with_imports(Some(&block.use_map))
+                .with_backend(Some(self)),
             offset,
-            &local_classes,
-            &class_loader,
-            Some(&block.use_map),
-            Some(self),
             Some(&function_loader),
             self_as_marker,
         )
@@ -119,21 +102,10 @@ impl Backend {
 
 // ── Shared return-type inference ────────────────────────────────────────────
 
-/// The offset of the opening brace of the declaration on `func_line`, which
-/// falls inside the body however it is formatted.
-fn body_brace_offset(content: &str, func_line: usize) -> Option<u32> {
-    let lines: Vec<&str> = content.lines().collect();
-    if func_line >= lines.len() {
-        return None;
-    }
-    let brace_line = find_open_brace_from_declaration(&lines, func_line)?;
-    let brace_col = lines[brace_line].find('{')?;
-    Some((line_start_byte_offset(content, brace_line) + brace_col) as u32)
-}
-
 /// Infer the return type of a function by walking all `return`
 /// statements reachable from its body (not crossing into nested
-/// closures/arrow functions, which have their own return types).
+/// closures/arrow functions, which have their own return types).  An
+/// arrow function returns its expression.
 ///
 /// Every returned expression is resolved through
 /// [`resolve_expression_type`] — the same RHS resolution pipeline used
@@ -157,19 +129,20 @@ fn body_brace_offset(content: &str, func_line: usize) -> Option<u32> {
 /// - `Backend::infer_return_type_at` (PHPStan code actions)
 /// - `enrichment_return_type` (Generate / Update PHPDoc)
 ///
-/// The function or method inferred is the one whose declaration, from its
-/// name to its closing brace, contains `offset`.
-#[allow(clippy::too_many_arguments)]
+/// The function inferred is the innermost function, method, closure or
+/// arrow function whose declaration contains `offset`.
 fn infer_return_type_at(
-    content: &str,
+    file: FileCtx<'_>,
     offset: u32,
-    local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    source_imports: SourceImports<'_>,
-    backend: Option<&Backend>,
     function_loader: FunctionLoader<'_>,
     self_as_marker: bool,
 ) -> Option<InferredReturnType> {
+    let FileCtx {
+        content,
+        all_classes: local_classes,
+        class_loader,
+        ..
+    } = file;
     let enclosing_class = local_classes.iter().find(|c| {
         !c.name.starts_with("__anonymous@") && offset >= c.start_offset && offset <= c.end_offset
     });
@@ -181,17 +154,19 @@ fn infer_return_type_at(
             &no_class
         }
     };
-    // `class_loader` resolves names as written in source; the types the
-    // engine hands back are already resolved.
-    let resolved_class_loader =
-        |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
 
     let (mut return_types, has_bare_return, has_return_with_value) =
         with_parsed_program(content, "fix_return_type_infer", |program, _content| {
-            let body = declared_body(program.statements.iter(), offset)?;
+            let function = find_enclosing_function(program, offset, FunctionKinds::All)?;
 
             let mut returns: Vec<(Option<&Expression<'_>>, usize, usize, usize)> = Vec::new();
-            collect_returns(body.statements.iter(), &mut returns);
+            if let FunctionLike::ArrowFunction(arrow) = function {
+                let span = arrow.expression.span();
+                let (start, end) = (span.start.offset as usize, span.end.offset as usize);
+                returns.push((Some(arrow.expression), start, end, start));
+            } else {
+                collect_returns(function.body()?.statements.iter(), &mut returns);
+            }
 
             let mut return_types: Vec<PhpType> = Vec::new();
             let mut has_bare_return = false;
@@ -215,23 +190,13 @@ fn infer_return_type_at(
                 }
 
                 let ctx = VarResolutionCtx {
-                    source_imports,
-                    backend,
                     loaders: Loaders::with_function(function_loader),
-                    ..VarResolutionCtx::new(
-                        "",
-                        enclosing_class,
-                        local_classes,
-                        content,
-                        start as u32,
-                        &resolved_class_loader,
-                        class_loader,
-                    )
+                    ..VarResolutionCtx::new("", file, enclosing_class, start as u32)
                 };
 
                 let ty = resolve_expression_type(expr, &ctx).unwrap_or_else(PhpType::mixed);
                 let ty = ty.resolve_names(&|name: &str| {
-                    if let Some(cls) = resolved_class_loader(name) {
+                    if let Some(cls) = class_loader(Fqn::new(name)) {
                         cls.fqn().to_string()
                     } else {
                         name.to_string()
@@ -317,81 +282,28 @@ fn infer_return_type_at(
     })
 }
 
-/// The body of the function or method among `statements` whose
-/// declaration, from its name to its closing brace, contains `offset`.
-fn declared_body<'a>(
-    statements: impl Iterator<Item = &'a Statement<'a>>,
-    offset: u32,
-) -> Option<&'a Block<'a>> {
-    let declares = |name: &Span, body: &Block<'_>| {
-        name.start.offset <= offset && offset <= body.right_brace.end.offset
-    };
-    for stmt in statements {
-        let members = match stmt {
-            Statement::Function(func) if declares(&func.name.span, &func.body) => {
-                return Some(&func.body);
-            }
-            Statement::Namespace(ns) => {
-                if let Some(body) = declared_body(ns.statements().iter(), offset) {
-                    return Some(body);
-                }
-                continue;
-            }
-            _ if let Some(body) = crate::parser::class_like_body(stmt) => body.members,
-            _ => continue,
-        };
-        let mut found = None;
-        crate::parser::for_each_concrete_method(members, |method, body| {
-            if found.is_none() && declares(&method.name.span, body) {
-                found = Some(body);
-            }
-        });
-        if found.is_some() {
-            return found;
-        }
-    }
-    None
-}
-
 /// Whether `expr` is the bare `$this` variable.
 fn is_this_variable(expr: &Expression<'_>) -> bool {
     matches!(expr, Expression::Variable(Variable::Direct(dv)) if bytes_to_str(dv.name) == "$this")
 }
 
-/// Infer a `@return` type string for a function whose signature is
-/// at `position` in `content`.
+/// Infer a `@return` type string for the function whose declaration
+/// contains `decl_offset` (the start of its declaration will do).
 ///
 /// Returns `Some("list<string>")` when the body analysis produces a
 /// type richer than the native hint, or `None` when inference fails
 /// or the native type already captures the full information.
 ///
 /// This is the entry point for docblock generation (`enrichment_plain`
-/// replacement for `@return`) — it finds the function line from the
-/// position and delegates to [`infer_return_type_at`].
+/// replacement for `@return`); it delegates to [`infer_return_type_at`].
 pub(crate) fn enrichment_return_type(
-    content: &str,
-    position: Position,
-    local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    source_imports: SourceImports<'_>,
-    backend: Option<&Backend>,
+    file: FileCtx<'_>,
+    decl_offset: u32,
     function_loader: FunctionLoader<'_>,
 ) -> Option<PhpType> {
-    // The position is on or near the docblock / function signature.
-    // Search forward from that line to find the `function` keyword.
-    let lines: Vec<&str> = content.lines().collect();
-    let start = position.line as usize;
-    let end = (start + 10).min(lines.len());
-    let func_line =
-        (start..end).find(|&i| lines[i].contains("function ") || lines[i].contains("function("))?;
-
     let inferred = infer_return_type_at(
-        content,
-        body_brace_offset(content, func_line)?,
-        local_classes,
-        class_loader,
-        source_imports,
-        backend,
+        file,
+        decl_offset,
         function_loader,
         // Docblock generation wants a concrete written type, not a `$this`
         // marker, so resolve `return $this` to the enclosing class.

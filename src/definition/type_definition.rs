@@ -14,14 +14,14 @@
 //! definition location.
 
 use crate::atom::atom;
+use crate::class_lookup::{ResolvedClassLoader, SourceClassLoader, find_class_at_offset};
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::class_lookup::find_class_at_offset;
 use crate::php_type::PhpType;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
-use crate::type_engine::resolver::Loaders;
+use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::*;
 
@@ -54,9 +54,7 @@ impl Backend {
         let resolved_types: Vec<PhpType> = match &symbol.kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                 let in_static = self
-                    .symbol_maps
-                    .read()
-                    .get(uri)
+                    .symbol_map_for(uri)
                     .is_some_and(|map| map.is_in_static_method(offset));
                 // $this is not available in static methods.
                 if name == "this" && in_static {
@@ -68,7 +66,8 @@ impl Backend {
                         offset,
                         current_class,
                         &ctx,
-                        &class_loader,
+                        resolved_class_loader,
+                        class_loader,
                         Some(self),
                         &function_loader,
                     )
@@ -176,7 +175,7 @@ impl Backend {
         candidates: &[Arc<ClassInfo>],
         member_name: &str,
         is_method_call: bool,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<PhpType> {
         for target_class in candidates {
             let merged = crate::virtual_members::resolve_class_fully_cached(
@@ -297,7 +296,8 @@ fn resolve_variable_type_names(
     cursor_offset: u32,
     current_class: Option<&ClassInfo>,
     ctx: &FileContext,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
+    source_class_loader: &SourceClassLoader<'_>,
     backend: Option<&Backend>,
     function_loader: &dyn Fn(&str, u32) -> Option<FunctionInfo>,
 ) -> Option<PhpType> {
@@ -307,19 +307,16 @@ fn resolve_variable_type_names(
     }
 
     // Delegate to the unified pipeline.
-    let resolved_class_loader =
-        |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
     let resolved = crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
-        var_name: name,
-        cursor_offset,
-        content,
-        current_class,
-        all_classes: &ctx.classes,
-        class_loader: &resolved_class_loader,
-        source_class_loader: class_loader,
-        source_imports: Some(&ctx.use_map),
-        backend,
         loaders: Loaders::with_function(Some(function_loader)),
+        ..VarQuery::new(
+            name,
+            FileCtx::new(content, &ctx.classes, class_loader, source_class_loader)
+                .with_imports(Some(&ctx.use_map))
+                .with_backend(backend),
+            current_class,
+            cursor_offset,
+        )
     });
 
     // Only return types that contain at least one class name (scalars

@@ -34,7 +34,6 @@
 //! `array|string|int|bool|null` union.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
@@ -42,6 +41,7 @@ use mago_syntax::cst::*;
 
 use super::file_contributions::FileContributions;
 use super::helpers::{extract_string_literal, walks_parent_chain};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, PropertySource};
@@ -446,7 +446,7 @@ pub(crate) fn resolve_accessor_type(
     class: &ClassInfo,
     method_name: &str,
     key: Option<&str>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&crate::Backend>,
 ) -> Option<PhpType> {
     if !is_command_accessor(method_name) {
@@ -460,7 +460,9 @@ pub(crate) fn resolve_accessor_type(
     // to reinterpret.  The receiver may already be a merged class, so the
     // own-member check goes through the loader, which hands back the class
     // as parsed.
-    if class_loader(&class.fqn()).is_some_and(|raw| raw.get_method_ci(method_name).is_some()) {
+    if class_loader(Fqn::new(&class.fqn()))
+        .is_some_and(|raw| raw.get_method_ci(method_name).is_some())
+    {
         return None;
     }
 
@@ -510,7 +512,7 @@ fn class_signature(
     }
 
     let backend = backend?;
-    let index = backend.laravel_commands.read();
+    let index = backend.laravel.commands.read();
     let entry = index.get_by_fqn(&class.fqn())?;
     Some(entry.signature.clone())
 }

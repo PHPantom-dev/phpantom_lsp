@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::Hover;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::docblock::extract_template_params_full;
 use crate::symbol_map::{ClassRefContext, SelfStaticParentKind};
 use crate::types::*;
@@ -40,10 +41,12 @@ impl Backend {
         // A fully qualified reference (`\stdClass`, stored without
         // its backslash) must not go through the file's imports
         // and namespace again.
-        let class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = if is_fqn {
-            &resolved_class_loader
-        } else {
-            &class_loader
+        let class_loader = |name: &str| {
+            if is_fqn {
+                resolved_class_loader(Fqn::new(name))
+            } else {
+                class_loader(name)
+            }
         };
         // On `new ClassName`, show the __construct method hover
         // instead of the class hover.
@@ -52,21 +55,21 @@ impl Backend {
         {
             let merged = crate::virtual_members::resolve_class_fully_cached(
                 &cls,
-                &resolved_class_loader,
+                resolved_class_loader,
                 &self.resolved_class_cache,
             );
             if let Some(constructor) = merged.get_method_ci("__construct") {
                 return Some(self.hover_for_method(
                     constructor,
                     &merged,
-                    &resolved_class_loader,
+                    resolved_class_loader,
                     uri,
                     content,
                 ));
             }
         }
 
-        self.hover_class_reference(name, uri, content, class_loader, cursor_offset)
+        self.hover_class_reference(name, uri, content, &class_loader, cursor_offset)
     }
 
     /// Hover for `self`, `static`, `parent` or `$this`: the class the
@@ -96,7 +99,7 @@ impl Backend {
             SelfStaticParentKind::Parent => current_class
                 .and_then(|cc| cc.parent_class.as_ref())
                 .and_then(|parent_name| {
-                    resolved_class_loader(parent_name).map(Arc::unwrap_or_clone)
+                    resolved_class_loader(Fqn::new(parent_name)).map(Arc::unwrap_or_clone)
                 }),
         };
         if let Some(cls) = resolved {

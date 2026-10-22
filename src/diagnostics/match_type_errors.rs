@@ -20,9 +20,9 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
+use crate::type_engine::variable::iterable_elements::resolve_expression_type;
 
-use super::helpers::make_diagnostic;
+use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
 struct LiteralCondition {
     scalar_type: &'static str,
@@ -53,9 +53,21 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let file_ctx = self.file_context(uri);
+        let ctx = FileDiagnosticContext::gather(self, uri);
+        self.collect_match_type_diagnostics_with_context(&ctx, uri, content, out);
+    }
+
+    /// [`Self::collect_match_type_diagnostics`] over an already-gathered
+    /// [`FileDiagnosticContext`].
+    pub(crate) fn collect_match_type_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
         let _parse_guard = with_parse_cache(content);
-        let loaders = self.file_loaders(&file_ctx);
+        let loaders = self.file_loaders(&ctx.file);
 
         let issues: Vec<MatchArmIssue> =
             with_parsed_program(content, "match_type_diagnostics", |program, _| {

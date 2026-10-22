@@ -146,6 +146,11 @@ pub(crate) fn text_arg_value(arg: &str) -> &str {
     split_named_text_arg(arg).1
 }
 
+/// Whether a textual argument is written with a `name:` label.
+pub(crate) fn text_arg_is_named(arg: &str) -> bool {
+    split_named_text_arg(arg).0.is_some()
+}
+
 /// Bind already-split textual arguments to parameters by PHP's rules.
 ///
 /// This is the text-source counterpart of [`bind_args_to_params`], used by

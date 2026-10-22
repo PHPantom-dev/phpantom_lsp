@@ -66,6 +66,24 @@ keyword_types! {
     parent_ => "parent",
     /// `numeric` pseudo-type.
     numeric => "numeric",
+    /// `non-empty-string` type.
+    non_empty_string => "non-empty-string",
+    /// `non-falsy-string` type.
+    non_falsy_string => "non-falsy-string",
+    /// `literal-string` type.
+    literal_string => "literal-string",
+    /// `non-empty-literal-string` type.
+    non_empty_literal_string => "non-empty-literal-string",
+    /// `numeric-string` type.
+    numeric_string => "numeric-string",
+    /// `lowercase-string` type.
+    lowercase_string => "lowercase-string",
+    /// `non-empty-lowercase-string` type.
+    non_empty_lowercase_string => "non-empty-lowercase-string",
+    /// `uppercase-string` type.
+    uppercase_string => "uppercase-string",
+    /// `non-empty-uppercase-string` type.
+    non_empty_uppercase_string => "non-empty-uppercase-string",
     /// Internal `__empty` sentinel used during type narrowing to represent
     /// a fully-filtered-out union member.
     empty_sentinel => "__empty",
@@ -194,6 +212,7 @@ impl PhpType {
         if normalize::absorb_non_empty_refinements(&mut members) && members.len() == 1 {
             return members.into_iter().next().unwrap();
         }
+        normalize::absorb_int_ranges(&mut members);
         normalize::absorb_subsumed_shapes(&mut members);
         normalize::absorb_exact_class_names(&mut members);
         if members.len() == 1 {

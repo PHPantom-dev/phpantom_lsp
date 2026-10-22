@@ -27,7 +27,10 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::parser::with_parse_cache;
 
-use super::helpers::{CallTargetCache, is_position_independent_call_expression, make_diagnostic};
+use super::helpers::{
+    CallTargetCache, FileDiagnosticContext, is_position_independent_call_expression,
+    make_diagnostic,
+};
 
 /// Diagnostic code used for argument-count diagnostics.
 pub(crate) const ARGUMENT_COUNT_MISMATCH_CODE: &str = "argument_count_mismatch";
@@ -223,16 +226,21 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        // ── Gather context under locks ──────────────────────────────
-        let symbol_map = {
-            let maps = self.symbol_maps.read();
-            match maps.get(uri) {
-                Some(sm) => sm.clone(),
-                None => return,
-            }
-        };
+        let ctx = FileDiagnosticContext::gather(self, uri);
+        self.collect_argument_count_diagnostics_with_context(&ctx, uri, content, out);
+    }
 
-        let file_ctx = self.file_context(uri);
+    /// [`Self::collect_argument_count_diagnostics`] over an already-gathered
+    /// [`FileDiagnosticContext`].
+    pub(crate) fn collect_argument_count_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let symbol_map = &ctx.symbol_map;
+        let file_ctx = &ctx.file;
 
         // Activate the thread-local parse cache so that every call to
         // `with_parsed_program(content, …)` in the resolution pipeline
@@ -251,7 +259,7 @@ impl Backend {
         // target depends on the call site's position. There is one cache
         // per `namespace` block, since the same text can name a different
         // target under another block's imports.
-        let call_targets = CallTargetCache::new(&file_ctx);
+        let call_targets = CallTargetCache::new(file_ctx);
 
         // ── Walk every call site ────────────────────────────────────
         for call_site in &symbol_map.call_sites {
@@ -265,13 +273,13 @@ impl Backend {
 
             // Look up or populate the call expression cache.
             let resolved = if is_position_independent_call_expression(expr) {
-                call_targets.target(self, expr, content, call_site.args_start, &file_ctx)
+                call_targets.target(self, expr, content, call_site.args_start, file_ctx)
             } else {
                 self.resolve_callable_target_at_offset(
                     expr,
                     content,
                     call_site.args_start,
-                    &file_ctx,
+                    file_ctx,
                 )
             };
 

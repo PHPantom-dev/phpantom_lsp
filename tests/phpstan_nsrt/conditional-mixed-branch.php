@@ -27,7 +27,7 @@ class MixedBranchConditional
 			$file = null;
 		}
 		if ($file) {
-			assertType('string', $file);
+			assertType('non-falsy-string', $file);
 		}
 	}
 }

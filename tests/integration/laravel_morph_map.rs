@@ -7,10 +7,10 @@
 //! `enforceMorphMap()` — an unregistered alias is flagged.
 
 use crate::common::{
-    LARAVEL_SRC_COMPOSER, create_initialized_psr4_workspace, definition_locations,
-    goto_definition_at, hover_text_at, open_php_str, position_after,
+    LARAVEL_SRC_COMPOSER, completion_response, create_initialized_psr4_workspace,
+    definition_locations, goto_definition_at, hover_text_at, open_php_str, position_after,
+    references_response,
 };
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
@@ -298,20 +298,14 @@ class Consumer {
     let (backend, _dir, uri) = workspace(false, consumer).await;
 
     let position = position_after(consumer, "getMorphedModel('");
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(&uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Url::parse(&uri).unwrap(),
+        position.line,
+        position.character,
+        None,
+    )
+    .await;
     let labels: Vec<String> = match result {
         Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
         Some(CompletionResponse::List(list)) => list.items.into_iter().map(|i| i.label).collect(),
@@ -393,23 +387,14 @@ async fn find_references_links_usages_to_the_registration() {
 
     // Search from the registration's own alias key.
     let position = position_after(&provider_src, "'po");
-    let locations = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(&provider_uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext {
-                include_declaration: true,
-            },
-        })
-        .await
-        .unwrap()
-        .unwrap_or_default();
+    let locations = references_response(
+        &backend,
+        &Url::parse(&provider_uri).unwrap(),
+        position,
+        true,
+    )
+    .await
+    .unwrap_or_default();
 
     let uris: Vec<String> = locations.iter().map(|l| l.uri.to_string()).collect();
     assert!(
@@ -987,23 +972,10 @@ class Consumer {
         (&uri, position_after(consumer, usages[0])),
         (&uri, position_after(consumer, usages[1])),
     ] {
-        let locations = backend
-            .references(ReferenceParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier {
-                        uri: Url::parse(source_uri).unwrap(),
-                    },
-                    position,
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: ReferenceContext {
-                    include_declaration: true,
-                },
-            })
-            .await
-            .unwrap()
-            .unwrap_or_default();
+        let locations =
+            references_response(&backend, &Url::parse(source_uri).unwrap(), position, true)
+                .await
+                .unwrap_or_default();
         assert!(
             locations
                 .iter()

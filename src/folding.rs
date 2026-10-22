@@ -48,7 +48,7 @@ impl Backend {
                 .filter_map(|r| self.translate_folding_range(uri, r))
                 .collect();
             if let Some(raw) = self.get_file_content_arc(uri) {
-                collect_blade_native_folds(&raw, &self.blade_directives.read(), &mut ranges);
+                collect_blade_native_folds(&raw, &self.blade.directives.read(), &mut ranges);
             }
         }
 

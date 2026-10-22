@@ -78,13 +78,13 @@ pub(crate) fn seed_constructor_readonly_properties(
         return;
     }
     let Some(_guard) =
-        ConstructorWalkGuard::enter((ctx.content.as_ptr() as usize, class.start_offset))
+        ConstructorWalkGuard::enter((ctx.file.content.as_ptr() as usize, class.start_offset))
     else {
         return;
     };
 
     let narrowed = crate::parser::with_parsed_program(
-        ctx.content,
+        ctx.file.content,
         "seed_constructor_readonly_properties",
         |program, _| {
             let Some(ctor) = find_constructor(program.statements.iter(), class.start_offset) else {
@@ -125,6 +125,7 @@ fn constructor_narrowed_properties(
     if candidates.is_empty() {
         let span = body.span();
         let body_text = ctx
+            .file
             .content
             .get(span.start.offset as usize..span.end.offset as usize)
             .unwrap_or("");
@@ -161,7 +162,7 @@ fn constructor_narrowed_properties(
     }
     {
         let _suspend = suspend_snapshot_recording();
-        let return_frame = push_return_frame();
+        let return_frame = push_return_frame(walk_ctx.flow);
         walk_body_forward(body.statements.iter(), &mut ctor_scope, &walk_ctx);
         // An object exists once its constructor returns, early or off the
         // end; a path that throws leaves no object behind to read.
@@ -251,7 +252,11 @@ fn narrower_than_declared(
     }
     let assigned_type = ResolvedType::types_joined(assigned);
     if assigned_type.equivalent(declared)
-        || !crate::class_lookup::is_subtype_of_typed(&assigned_type, declared, ctx.class_loader)
+        || !crate::class_lookup::is_subtype_of_typed(
+            &assigned_type,
+            declared,
+            ctx.file.class_loader,
+        )
     {
         return None;
     }
@@ -269,7 +274,7 @@ fn readonly_property_type(
     for holder in holders {
         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
             holder,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         let prop = merged.properties.iter().find(|p| p.name == name)?;

@@ -21,12 +21,9 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::phpstan::fix_return_type::{
-    find_close_paren_before_brace, find_open_brace_from_declaration, find_return_type_edit,
-    native_return_type, paren_function_docblock,
-};
+use crate::code_actions::phpstan::fix_return_type::{Anchor, target_function};
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{CodeActionData, deferred_quickfix};
 use crate::php_type::{PhpType, TypeKind};
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
@@ -142,6 +139,12 @@ fn format_type_list(types: &[&PhpType], sep: &str) -> PhpType {
     }
 }
 
+/// Whether `unused_type` can be removed from `return_type`.
+fn holds_unused_type(return_type: Option<PhpType>, unused_type: &str) -> bool {
+    return_type
+        .is_some_and(|return_type| remove_type_from_union(&return_type, unused_type).is_some())
+}
+
 // ── Backend methods ─────────────────────────────────────────────────────────
 
 impl Backend {
@@ -154,8 +157,6 @@ impl Backend {
         out: &mut Vec<CodeActionOrCommand>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
-
-        let lines: Vec<&str> = content.lines().collect();
 
         for diag in &phpstan_diags {
             let Some(identifier) = phpstan_identifier(diag) else {
@@ -173,56 +174,35 @@ impl Backend {
 
             let diag_line = diag.range.start.line as usize;
 
-            // The diagnostic is reported on the function/method declaration
-            // line.  Find the opening `{` and the return type.
-            let brace_line = match find_open_brace_from_declaration(&lines, diag_line) {
-                Some(l) => l,
-                None => continue,
+            // The diagnostic is reported on the function's declaration.
+            let Some(target) =
+                target_function(content, diag_line, Anchor::Declaration, &diag.message)
+            else {
+                continue;
             };
-            let (paren_line, paren_col) = match find_close_paren_before_brace(&lines, brace_line) {
-                Some(p) => p,
-                None => continue,
-            };
-
-            // Check that the native return type contains the unused type.
-            let native_type = native_return_type(&lines, paren_line, paren_col, brace_line);
-            let has_native_match = native_type
-                .as_ref()
-                .is_some_and(|t| remove_type_from_union(t, unused_type).is_some());
-
-            // Check the docblock @return tag.
-            let doc_return_type = paren_function_docblock(content, paren_line, paren_col)
-                .and_then(|docblock| docblock.return_type());
-            let has_doc_match = doc_return_type
-                .as_ref()
-                .is_some_and(|t| remove_type_from_union(t, unused_type).is_some());
 
             // Only offer the action if we can actually remove the type
-            // from at least one location.
-            if !has_native_match && !has_doc_match {
+            // from the native return type or the docblock @return tag.
+            if !holds_unused_type(target.native_return_type(content), unused_type)
+                && !holds_unused_type(target.docblock.return_type(), unused_type)
+            {
                 continue;
             }
 
             let extra = serde_json::json!({
-                "diagnostic_line": diag_line,
                 "unused_type": unused_type,
+                "message": &diag.message,
             });
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("Remove '{}' from return type", unused_type),
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diag.clone()]),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(make_code_action_data(
-                    ACTION_KIND,
-                    uri,
-                    &params.range,
-                    extra,
-                )),
-            }));
+            out.push(deferred_quickfix(
+                format!("Remove '{}' from return type", unused_type),
+                ACTION_KIND,
+                uri,
+                &params.range,
+                vec![diag.clone()],
+                true,
+                extra,
+            ));
         }
     }
 
@@ -236,21 +216,15 @@ impl Backend {
         let extra = &data.extra;
         let diag_line = extra.get("diagnostic_line")?.as_u64()? as usize;
         let unused_type = extra.get("unused_type")?.as_str()?;
+        let message = extra.get("message")?.as_str()?;
 
         let doc_uri: Url = data.uri.parse().ok()?;
-        let lines: Vec<&str> = content.lines().collect();
-
-        if diag_line >= lines.len() {
-            return None;
-        }
-
-        let brace_line = find_open_brace_from_declaration(&lines, diag_line)?;
-        let (paren_line, paren_col) = find_close_paren_before_brace(&lines, brace_line)?;
+        let target = target_function(content, diag_line, Anchor::Declaration, message)?;
 
         let mut edits = Vec::new();
 
         // ── Update native return type ───────────────────────────────
-        if let Some(native_type) = native_return_type(&lines, paren_line, paren_col, brace_line)
+        if let Some(native_type) = target.native_return_type(content)
             && let Some(new_type) = remove_type_from_union(&native_type, unused_type)
         {
             // Convert the new type to a valid native hint.
@@ -258,18 +232,15 @@ impl Backend {
                 .to_native_hint()
                 .unwrap_or_else(|| new_type.to_string());
 
-            if let Some(edit) =
-                find_return_type_edit(&lines, paren_line, paren_col, brace_line, &native_hint)
-            {
-                edits.push(edit);
-            }
+            edits.extend(target.replace_return_type_edit(content, &native_hint));
         }
 
         // ── Update @return docblock tag ─────────────────────────────
-        if let Some(docblock) = paren_function_docblock(content, paren_line, paren_col)
-            && let Some(doc_type) = docblock.return_type()
+        if let Some(doc_type) = target.docblock.return_type()
             && let Some(new_type) = remove_type_from_union(&doc_type, unused_type)
-            && let Some(edit) = docblock.replace_return_type_edit(content, &new_type.to_string())
+            && let Some(edit) = target
+                .docblock
+                .replace_return_type_edit(content, &new_type.to_string())
         {
             edits.push(edit);
         }
@@ -298,40 +269,18 @@ pub(crate) fn is_remove_unused_return_type_stale(
         None => return true,
     };
 
-    let lines: Vec<&str> = content.lines().collect();
-
-    if diag_line >= lines.len() {
+    if content.lines().nth(diag_line).is_none() {
         return true;
     }
 
-    // Find the function's return type area.
-    let brace_line = match find_open_brace_from_declaration(&lines, diag_line) {
-        Some(l) => l,
-        None => return false,
-    };
-    let (paren_line, paren_col) = match find_close_paren_before_brace(&lines, brace_line) {
-        Some(p) => p,
-        None => return false,
+    let Some(target) = target_function(content, diag_line, Anchor::Declaration, message) else {
+        return false;
     };
 
-    // Check native return type.
-    if let Some(native_type) = native_return_type(&lines, paren_line, paren_col, brace_line)
-        && remove_type_from_union(&native_type, unused_type).is_some()
-    {
-        // The unused type is still present → not stale.
-        return false;
-    }
-
-    // Check docblock @return tag.
-    if let Some(doc_type) = paren_function_docblock(content, paren_line, paren_col)
-        .and_then(|docblock| docblock.return_type())
-        && remove_type_from_union(&doc_type, unused_type).is_some()
-    {
-        return false;
-    }
-
-    // The unused type is no longer present in any return type → stale.
-    true
+    // Stale once the unused type is in neither the native return type
+    // nor the docblock @return tag.
+    !holds_unused_type(target.native_return_type(content), unused_type)
+        && !holds_unused_type(target.docblock.return_type(), unused_type)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -463,39 +412,62 @@ mod tests {
         assert!(is_remove_unused_return_type_stale(content, 5, msg));
     }
 
+    #[test]
+    fn stale_once_the_closure_no_longer_declares_the_type() {
+        let content = "<?php\nfunction run(): ?int {\n    $f = function (): int {\n        return 1;\n    };\n    return null;\n}\n";
+        let msg =
+            "Anonymous function never returns null so it can be removed from the return type.";
+        assert!(is_remove_unused_return_type_stale(content, 2, msg));
+    }
+
+    #[test]
+    fn not_stale_while_the_closure_declares_the_type() {
+        let content = "<?php\nfunction run(): int {\n    $f = function (): ?int {\n        return 1;\n    };\n    return 1;\n}\n";
+        let msg =
+            "Anonymous function never returns null so it can be removed from the return type.";
+        assert!(!is_remove_unused_return_type_stale(content, 2, msg));
+    }
+
     // ── Reading and editing the return types ───────────────────────
 
-    /// The `(paren_line, paren_col, brace_line)` of the function declared
-    /// on `decl_line`, the way the action navigates to them.
-    fn signature_at(lines: &[&str], decl_line: usize) -> (usize, usize, usize) {
-        let brace_line = find_open_brace_from_declaration(lines, decl_line).unwrap();
-        let (paren_line, paren_col) = find_close_paren_before_brace(lines, brace_line).unwrap();
-        (paren_line, paren_col, brace_line)
+    const MESSAGE: &str =
+        "Function foo() never returns null so it can be removed from the return type.";
+
+    /// The native return type of the function declared on `decl_line`.
+    fn native_type_at(content: &str, decl_line: usize) -> Option<PhpType> {
+        target_function(content, decl_line, Anchor::Declaration, MESSAGE)?
+            .native_return_type(content)
     }
 
     /// The `@return` type of the function declared on `decl_line`.
     fn return_tag_type(content: &str, decl_line: usize) -> Option<PhpType> {
-        let lines: Vec<&str> = content.lines().collect();
-        let (paren_line, paren_col, _) = signature_at(&lines, decl_line);
-        paren_function_docblock(content, paren_line, paren_col)?.return_type()
+        target_function(content, decl_line, Anchor::Declaration, MESSAGE)?
+            .docblock
+            .return_type()
     }
 
     #[test]
     fn extracts_native_return_type_simple() {
         let content = "<?php\nfunction foo(): string|null {\n    return 'hello';\n}\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let (paren_line, paren_col, brace_line) = signature_at(&lines, 1);
-        let result = native_return_type(&lines, paren_line, paren_col, brace_line);
-        assert_eq!(result, Some(PhpType::parse("string|null")));
+        assert_eq!(
+            native_type_at(content, 1),
+            Some(PhpType::parse("string|null"))
+        );
     }
 
     #[test]
     fn extracts_native_return_type_nullable() {
         let content = "<?php\nfunction foo(): ?string {\n    return 'hello';\n}\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let (paren_line, paren_col, brace_line) = signature_at(&lines, 1);
-        let result = native_return_type(&lines, paren_line, paren_col, brace_line);
-        assert_eq!(result, Some(PhpType::parse("?string")));
+        assert_eq!(native_type_at(content, 1), Some(PhpType::parse("?string")));
+    }
+
+    #[test]
+    fn extracts_native_return_type_with_spaces_inside_it() {
+        let content = "<?php\nfunction foo(): Countable & Traversable {\n    return new ArrayIterator();\n}\n";
+        assert_eq!(
+            native_type_at(content, 1),
+            Some(PhpType::parse("Countable&Traversable"))
+        );
     }
 
     #[test]
@@ -537,10 +509,9 @@ mod tests {
     fn replaces_return_tag_type() {
         let content =
             "<?php\n/**\n * @return string|null The value\n */\nfunction foo(): string|null {\n}\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let (paren_line, paren_col, _) = signature_at(&lines, 4);
-        let edit = paren_function_docblock(content, paren_line, paren_col)
+        let edit = target_function(content, 4, Anchor::Declaration, MESSAGE)
             .unwrap()
+            .docblock
             .replace_return_type_edit(content, "string")
             .unwrap();
         assert_eq!(
@@ -552,10 +523,13 @@ mod tests {
     #[test]
     fn replaces_native_return_type() {
         let content = "<?php\nfunction foo(): string|null {\n    return 'hello';\n}\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let (paren_line, paren_col, brace_line) = signature_at(&lines, 1);
-        let edit =
-            find_return_type_edit(&lines, paren_line, paren_col, brace_line, "string").unwrap();
-        assert_eq!(edit.new_text, ": string");
+        let edit = target_function(content, 1, Anchor::Declaration, MESSAGE)
+            .unwrap()
+            .replace_return_type_edit(content, "string")
+            .unwrap();
+        assert_eq!(
+            crate::text_position::apply_text_edits(content, &[edit]),
+            "<?php\nfunction foo(): string {\n    return 'hello';\n}\n"
+        );
     }
 }

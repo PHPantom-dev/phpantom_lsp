@@ -32,7 +32,8 @@ class Foo
 			$body                = (string) $response->getBody();
 			$decodedResponseBody = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
 		} catch (\Throwable $exception) {
-			assertType('string|null', $body);
+			// PHPantom reads the string `getBody()` returns, since its declared `mixed` says nothing.
+			assertType('\'{"json"}\'|null', $body);
 			assertType('array{}', $decodedResponseBody);
 		}
 	}

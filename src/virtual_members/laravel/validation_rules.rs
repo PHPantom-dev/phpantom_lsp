@@ -28,6 +28,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
 use crate::util::short_name;
 
@@ -669,10 +670,7 @@ fn is_request_fqn(name: &str) -> bool {
 }
 
 /// Whether `class` is a `FormRequest` subclass (or `FormRequest` itself).
-pub(crate) fn is_form_request(
-    class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
+pub(crate) fn is_form_request(class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
     is_form_request_fqn(&class.fqn())
         || super::helpers::walks_parent_chain(class, class_loader, is_form_request_fqn)
 }
@@ -684,10 +682,7 @@ pub(crate) fn is_form_request(
 /// `walks_parent_chain` matches parent names, which post-processing has
 /// already resolved to FQNs; the class's own `name` is the short name, so
 /// it is checked separately against its `fqn()`.
-pub(crate) fn is_request_like(
-    class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
+pub(crate) fn is_request_like(class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
     is_request_fqn(&class.fqn())
         || super::helpers::walks_parent_chain(class, class_loader, is_request_fqn)
 }
@@ -941,7 +936,7 @@ pub(crate) fn rules_in_scope(
     content: &str,
     offset: usize,
 ) -> Option<ResolvedRules> {
-    let loader = |name: &str| backend.find_or_load_class(name);
+    let loader = |name: Fqn<'_>| backend.find_or_load_class(&name);
     if is_form_request(class, &loader)
         && let Some(resolved) = form_request_rules(backend, class, current_uri, content)
     {

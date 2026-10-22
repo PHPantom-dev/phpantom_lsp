@@ -166,9 +166,9 @@ function probe(int $i, float $f, mixed $anything): void {
     assert_assigned_types(
         content,
         &[
-            ("$whole", "int"),
+            ("$whole", "int<0, max>"),
             ("$fractional", "float"),
-            ("$unknown", "int|float"),
+            ("$unknown", "int<0, max>|float"),
         ],
     );
 }
@@ -238,6 +238,7 @@ function probe(array $names, array $weights, int $count, mixed $anything): void 
     $mixedNumbers = min(1, 2.5);
     $lightest = min($weights);
     $bounded = max($count, 0);
+    $capped = min($count, 10);
     $unknown = max($anything, $anything);
 }
 "#;
@@ -248,7 +249,8 @@ function probe(array $names, array $weights, int $count, mixed $anything): void 
             ("$widest", "string"),
             ("$mixedNumbers", "1"),
             ("$lightest", "float"),
-            ("$bounded", "int"),
+            ("$bounded", "int<0, max>"),
+            ("$capped", "int<min, 10>"),
             ("$unknown", "mixed"),
         ],
     );
@@ -492,7 +494,7 @@ function probe(bool $flag, string $unknown): void {
             ("$titled", "'Hello'"),
             ("$trimmed", "'padded'"),
             ("$swapped", "'a-b'"),
-            ("$unfoldable", "string"),
+            ("$unfoldable", "lowercase-string"),
         ],
     );
 }
@@ -500,7 +502,8 @@ function probe(bool $flag, string $unknown): void {
 /// A constant's value in the stubs describes the machine the stubs came
 /// from, so folding a builtin over one would turn an
 /// environment-dependent answer into a literal the engine then treats as
-/// certain. The declared type is the honest answer there.
+/// certain. The declared type, refined only by what the function itself
+/// guarantees, is the honest answer there.
 #[test]
 fn a_string_builtin_over_a_constant_keeps_its_declared_type() {
     let content = r#"<?php
@@ -509,7 +512,78 @@ function probe(string $path): void {
     $os = strtolower(PHP_OS);
 }
 "#;
-    assert_assigned_types(content, &[("$normalised", "string"), ("$os", "string")]);
+    assert_assigned_types(
+        content,
+        &[("$normalised", "string"), ("$os", "lowercase-string")],
+    );
+}
+
+/// A string builtin handed values that are not literals can still be
+/// known to return a refinement of `string`: what its arguments decide
+/// survives the call instead of collapsing to the stub's `string`.
+#[test]
+fn string_builtins_return_the_refinement_their_arguments_decide() {
+    let content = r#"<?php
+/** @param non-empty-string $name */
+function probe(string $u, float $x, int $n, string $name): void {
+    $key = sprintf('key-%s', $u);
+    $zeroed = \sprintf('0%s', $u);
+    $digits = sprintf('%d', $n);
+    $plain = sprintf('%s%s', $u, $u);
+    $amount = number_format($x, 2, '.', '');
+    $grouped = number_format($x, 2);
+    $lower = strtolower($u);
+    $upperName = mb_strtoupper($name);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$key", "non-falsy-string"),
+            ("$zeroed", "non-empty-string"),
+            ("$digits", "numeric-string"),
+            ("$plain", "string"),
+            ("$amount", "numeric-string"),
+            ("$grouped", "string"),
+            ("$lower", "lowercase-string"),
+            ("$upperName", "non-empty-uppercase-string"),
+        ],
+    );
+}
+
+/// A string's case and emptiness survive its use as an array key, so a
+/// map keyed by `strtolower()` matches an `array<lowercase-string, …>`
+/// declaration rather than collapsing to `array<string, …>`.
+#[test]
+fn an_array_keyed_by_a_refined_string_keeps_the_refinement() {
+    let content = r#"<?php
+/**
+ * @param list<string> $names
+ * @param list<non-falsy-string> $labels
+ */
+function probe(array $names, array $labels): void {
+    $byName = [];
+    foreach ($names as $name) {
+        $byName[strtolower($name)] = $name;
+    }
+    $byLabel = [];
+    foreach ($labels as $label) {
+        $byLabel[strtolower($label)] = $label;
+    }
+    $names = $byName;
+    $labels = $byLabel;
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$names", "array<lowercase-string, string>"),
+            (
+                "$labels",
+                "array<non-empty-lowercase-string&non-falsy-string, non-falsy-string>",
+            ),
+        ],
+    );
 }
 
 /// `pow()`'s `object` branch belongs to the operator-overloading extensions

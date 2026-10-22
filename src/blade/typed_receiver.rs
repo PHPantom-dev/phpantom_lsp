@@ -58,7 +58,8 @@ impl Backend {
         if map.view_receiver_sites.is_empty() {
             return empty_spans();
         }
-        if let Some((source_len, spans)) = self.typed_receiver_view_spans_cache.read().get(uri)
+        if let Some((source_len, spans)) =
+            self.blade.typed_receiver_view_spans_cache.read().get(uri)
             && *source_len == map.source_len
         {
             return Arc::clone(spans);
@@ -75,7 +76,8 @@ impl Backend {
 
         let spans =
             Arc::new(self.confirm_view_receiver_sites(uri, &content, &map.view_receiver_sites));
-        self.typed_receiver_view_spans_cache
+        self.blade
+            .typed_receiver_view_spans_cache
             .write()
             .insert(uri.to_string(), (map.source_len, Arc::clone(&spans)));
         spans
@@ -86,10 +88,13 @@ impl Backend {
     pub(crate) fn evict_typed_receiver_view_spans(&self, uri: &str) {
         // Files with no candidate sites never get an entry, so the common
         // case is a miss on a map that is almost always empty.
-        if self.typed_receiver_view_spans_cache.read().is_empty() {
+        if self.blade.typed_receiver_view_spans_cache.read().is_empty() {
             return;
         }
-        self.typed_receiver_view_spans_cache.write().remove(uri);
+        self.blade
+            .typed_receiver_view_spans_cache
+            .write()
+            .remove(uri);
     }
 
     /// The source every offset in a file's symbol map indexes: a Blade
@@ -131,7 +136,7 @@ impl Backend {
                 // local reassigned earlier reads as it does there.
                 let var_ctx = loaders.var_ctx_at(content, call.receiver.span().start.offset);
                 let Some(ty) =
-                    crate::type_engine::variable::foreach_resolution::resolve_expression_type(
+                    crate::type_engine::variable::iterable_elements::resolve_expression_type(
                         call.receiver,
                         &var_ctx,
                     )

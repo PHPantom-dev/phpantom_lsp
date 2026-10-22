@@ -7,7 +7,10 @@
 //! `app('sentry')` helper form and the container's own
 //! `app()->make('sentry')` resolve to the bound class.
 
-use crate::common::{APP_HELPERS_PHP, consumer_class, create_psr4_workspace, position_of};
+use crate::common::{
+    APP_HELPERS_PHP, consumer_class, create_psr4_workspace, goto_definition_at, open_php,
+    position_of,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -180,16 +183,7 @@ async fn hover_over_x_with_extra_files(extra: &[(&str, &str)], consumer: &str) -
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, consumer).await;
 
     let idx = consumer.rfind("$x;").expect("consumer should use $x");
     let prefix = &consumer[..idx + 1];
@@ -215,16 +209,7 @@ async fn hover_over_key(extra: &[(&str, &str)], consumer: &str, key: &str) -> St
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, consumer).await;
 
     let position = position_of(consumer, key);
     let hover = backend
@@ -492,16 +477,7 @@ async fn goto_definition_on_key(consumer: &str, needle: &str) -> Option<GotoDefi
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, consumer).await;
 
     backend
         .goto_definition(GotoDefinitionParams {
@@ -597,35 +573,14 @@ async fn concurrent_requests_all_resolve_the_same_key() {
         let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
         backend.initialized(InitializedParams {}).await;
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: source.clone(),
-                },
-            })
-            .await;
+        open_php(&backend, &uri, &source).await;
 
         let backend = Arc::new(backend);
         let position = position_of(&source, "app');");
         let request = || {
             let backend = Arc::clone(&backend);
             let uri = uri.clone();
-            async move {
-                backend
-                    .goto_definition(GotoDefinitionParams {
-                        text_document_position_params: TextDocumentPositionParams {
-                            text_document: TextDocumentIdentifier { uri },
-                            position,
-                        },
-                        work_done_progress_params: WorkDoneProgressParams::default(),
-                        partial_result_params: PartialResultParams::default(),
-                    })
-                    .await
-                    .unwrap()
-            }
+            async move { goto_definition_at(&backend, &uri, position.line, position.character).await }
         };
 
         let (first, second, third) = tokio::join!(request(), request(), request());
@@ -665,16 +620,7 @@ class GhostServiceProvider
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: source.clone(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, &source).await;
 
     let response = backend
         .goto_definition(GotoDefinitionParams {
@@ -728,16 +674,7 @@ class Usages
     let uri = Url::from_file_path(dir.path().join("src/Usages.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: USAGES_PHP.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, USAGES_PHP).await;
 
     let locations = backend
         .references(ReferenceParams {

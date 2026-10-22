@@ -14,8 +14,6 @@
 //! first, so a name a grandparent layout declares reaches the child as
 //! well.
 
-use tower_lsp::lsp_types::Url;
-
 use crate::Backend;
 
 use super::call_site_inference::InjectedVars;
@@ -70,7 +68,7 @@ impl Backend {
     /// an unsaved edit to a layout is what its children see.
     pub(crate) fn blade_view_source(&self, view_name: &str) -> Option<String> {
         let path = self.blade_view_path(view_name)?;
-        if let Ok(uri) = Url::from_file_path(&path)
+        if let Some(uri) = crate::util::path_to_url(&path)
             && let Some(content) = self.get_file_content(uri.as_str())
         {
             return Some(content);

@@ -1,8 +1,7 @@
 //! Completion after narrowing carried by a boolean variable (the
 //! interactive counterpart of `diagnostics_assertion_variables`).
 
-use crate::common::create_test_backend;
-use tower_lsp::LanguageServer;
+use crate::common::{completion_response, create_test_backend, open_php};
 use tower_lsp::lsp_types::*;
 
 /// Open `text`, request completion at `(line, character)`, and return the
@@ -10,29 +9,9 @@ use tower_lsp::lsp_types::*;
 async fn completion_methods(text: &str, line: u32, character: u32) -> Vec<String> {
     let backend = create_test_backend();
     let uri = Url::parse("file:///assertion_variable.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, line, character, None).await;
 
     match result {
         Some(CompletionResponse::Array(items)) => items

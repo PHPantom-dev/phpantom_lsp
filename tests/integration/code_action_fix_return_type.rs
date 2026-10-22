@@ -1693,3 +1693,200 @@ fn return_void_keeps_a_bare_return_in_a_crlf_file() {
         )
     );
 }
+
+// ── Closures and arrow functions ────────────────────────────────────────────
+
+/// Resolve the action titled `title` for the diagnostic on `line` and
+/// return the edited source.
+fn apply_fix(content: &str, line: u32, message: &str, identifier: &str, title: &str) -> String {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    backend.update_ast(uri, content);
+    inject_phpstan_diag(&backend, uri, line, message, identifier);
+
+    let actions = get_code_actions_on_line(&backend, uri, content, line);
+    let action = find_action(&actions, title).unwrap_or_else(|| panic!("should offer '{title}'"));
+    let resolved = resolve_action(&backend, uri, content, action);
+    apply_edits(content, &extract_edits(&resolved))
+}
+
+#[test]
+fn return_type_update_on_a_closure_writes_the_closure_type() {
+    let content = r#"<?php
+class Foo {
+    public function run(): array {
+        $f = function (): string {
+            return 42;
+        };
+        return [];
+    }
+}
+"#;
+    let result = apply_fix(
+        content,
+        4,
+        "Anonymous function should return string but returns int.",
+        "return.type",
+        "Update return type",
+    );
+    assert_eq!(
+        result,
+        r#"<?php
+class Foo {
+    public function run(): array {
+        $f = function (): int {
+            return 42;
+        };
+        return [];
+    }
+}
+"#
+    );
+}
+
+#[test]
+fn return_type_update_on_an_arrow_function() {
+    let content = r#"<?php
+class Foo {
+    public function run(): array {
+        $f = fn (): string => 42;
+        return [];
+    }
+}
+"#;
+    let result = apply_fix(
+        content,
+        3,
+        "Anonymous function should return string but returns int.",
+        "return.type",
+        "Update return type",
+    );
+    assert_eq!(
+        result,
+        r#"<?php
+class Foo {
+    public function run(): array {
+        $f = fn (): int => 42;
+        return [];
+    }
+}
+"#
+    );
+}
+
+#[test]
+fn return_type_update_on_a_method_returning_a_closure_from_the_same_line() {
+    let content = r#"<?php
+class Foo {
+    public function run(): string {
+        return array_map(fn (int $x): int => $x, [1, 2]);
+    }
+}
+"#;
+    let result = apply_fix(
+        content,
+        3,
+        "Method Foo::run() should return string but returns array<int, int>.",
+        "return.type",
+        "Update return type",
+    );
+    assert!(
+        result.contains("public function run(): array {"),
+        "should update the method's type:\n{result}"
+    );
+    assert!(
+        result.contains("fn (int $x): int => $x"),
+        "should leave the arrow function alone:\n{result}"
+    );
+}
+
+#[test]
+fn return_void_on_an_arrow_function_changes_its_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {
+    public function run(): void {
+        $f = fn (): void => 42;
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        3,
+        "Anonymous function with return type void returns int but should not return anything.",
+        "return.void",
+    );
+
+    let actions = get_code_actions_on_line(&backend, uri, content, 3);
+    assert!(
+        find_action(&actions, "Remove return statement").is_none(),
+        "an arrow function has no return statement to remove"
+    );
+    let action = find_action(&actions, "Change return type to int")
+        .expect("should offer 'Change return type to int'");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edits(content, &extract_edits(&resolved));
+
+    assert!(
+        result.contains("public function run(): void {"),
+        "should leave the method's type alone:\n{result}"
+    );
+    assert!(
+        result.contains("$f = fn (): int => 42;"),
+        "should change the arrow function's type:\n{result}"
+    );
+}
+
+#[test]
+fn return_void_strips_the_closure_return_not_the_method_one() {
+    let content = r#"<?php
+class Foo {
+    public function run(): array {
+        return array_map(function ($x): void { return $x; }, [1]);
+    }
+}
+"#;
+    let result = apply_fix(
+        content,
+        3,
+        "Anonymous function with return type void returns int but should not return anything.",
+        "return.void",
+        "Remove return statement",
+    );
+    assert!(
+        result.contains("return array_map(function ($x): void { $x; }, [1]);"),
+        "should strip the closure's return:\n{result}"
+    );
+}
+
+#[test]
+fn return_empty_in_a_closure_changes_the_closure_type() {
+    let content = r#"<?php
+class Foo {
+    public function run(): int {
+        $f = function (): int {
+            return;
+        };
+        return 1;
+    }
+}
+"#;
+    let result = apply_fix(
+        content,
+        4,
+        "Anonymous function should return int but empty return statement found.",
+        "return.empty",
+        "Change return type to void",
+    );
+    assert!(
+        result.contains("public function run(): int {"),
+        "should leave the method's type alone:\n{result}"
+    );
+    assert!(
+        result.contains("$f = function (): void {"),
+        "should change the closure's type:\n{result}"
+    );
+}

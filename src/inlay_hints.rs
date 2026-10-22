@@ -57,7 +57,7 @@ impl Backend {
         content: &str,
         range: Range,
     ) -> Option<Vec<InlayHint>> {
-        let symbol_map = self.symbol_maps.read().get(uri).cloned()?;
+        let symbol_map = self.symbol_map_for(uri)?;
         let ctx = self.file_context(uri);
 
         // A template's request range arrives in Blade coordinates; the

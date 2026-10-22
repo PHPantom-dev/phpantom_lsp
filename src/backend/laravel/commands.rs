@@ -6,7 +6,7 @@ use crate::virtual_members::laravel::file_contributions::refresh_file;
 
 impl Backend {
     /// Scan project and vendor Artisan command classes and build the
-    /// [`laravel_commands`](Backend::laravel_commands) index.
+    /// [`commands`](super::LaravelState::commands) index.
     ///
     /// Candidate files are those declaring a class whose short name ends in
     /// `Command` (the near-universal Laravel/Symfony convention), those living
@@ -62,9 +62,7 @@ impl Backend {
 
         let has_commands = !index.is_empty();
         let count = index.all_names().len();
-        *self.laravel_commands.write() = index;
-        self.laravel_has_commands
-            .store(has_commands, std::sync::atomic::Ordering::Relaxed);
+        self.laravel.commands.replace(index, has_commands);
 
         tracing::info!(
             "PHPantom: scanned {} Laravel command candidates, indexed {} commands",
@@ -78,7 +76,7 @@ impl Backend {
     /// Cheap: re-scans only the edited file when it is a command candidate
     /// (or was contributing before), replacing just that file's entries.
     pub(crate) fn refresh_laravel_command_index(&self, uri: &str) {
-        if !self.resolved_class_cache.read().is_laravel() {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
             return;
         }
         // Same candidate rule as the full build: a contributor file, a
@@ -88,23 +86,29 @@ impl Backend {
             || crate::virtual_members::laravel::is_command_directory_uri(uri)
             || (!uri.contains("/vendor/") && uri.ends_with(".php"));
 
-        let touched = refresh_file(&self.laravel_commands, uri, looks_like_command_file, || {
-            self.get_file_content(uri)
-                .filter(|content| {
-                    let bytes = content.as_bytes();
-                    // `ignature` matches both the `$signature` property and the
-                    // `#[Signature]` attribute.
-                    memchr::memmem::find(bytes, b"ignature").is_some()
-                        || memchr::memmem::find(bytes, b"AsCommand").is_some()
-                        || memchr::memmem::find(bytes, b"$name").is_some()
-                })
-                .map(|content| crate::virtual_members::laravel::scan_command_file(&content, uri))
-                .unwrap_or_default()
-        });
+        let touched = refresh_file(
+            self.laravel.commands.index(),
+            uri,
+            looks_like_command_file,
+            || {
+                self.get_file_content(uri)
+                    .filter(|content| {
+                        let bytes = content.as_bytes();
+                        // `ignature` matches both the `$signature` property and the
+                        // `#[Signature]` attribute.
+                        memchr::memmem::find(bytes, b"ignature").is_some()
+                            || memchr::memmem::find(bytes, b"AsCommand").is_some()
+                            || memchr::memmem::find(bytes, b"$name").is_some()
+                    })
+                    .map(|content| {
+                        crate::virtual_members::laravel::scan_command_file(&content, uri)
+                    })
+                    .unwrap_or_default()
+            },
+        );
         if touched {
-            let has_commands = !self.laravel_commands.read().is_empty();
-            self.laravel_has_commands
-                .store(has_commands, std::sync::atomic::Ordering::Relaxed);
+            let has_commands = !self.laravel.commands.read().is_empty();
+            self.laravel.commands.set_has_any(has_commands);
         }
     }
 }

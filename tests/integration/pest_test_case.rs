@@ -327,3 +327,61 @@ it('opens the basket', function (): void {
         "Expected spec/Pest.php to bind BrowserTestCase, got: {messages:?}"
     );
 }
+
+/// A `Pest.php` written outside the editor, as `pest --init` or a branch
+/// switch does, binds the tests under it from the next lookup on, even
+/// after a lookup found the directory without one.
+#[tokio::test]
+async fn a_pest_php_created_on_disk_is_read() {
+    use tower_lsp::LanguageServer;
+    use tower_lsp::lsp_types::{DidChangeWatchedFilesParams, FileChangeType, FileEvent, Url};
+
+    let files = [
+        ("vendor/pest/Functions.php", PEST_FUNCTIONS),
+        ("vendor/pest/TestCall.php", TEST_CALL),
+        ("vendor/phpunit/TestCase.php", PHPUNIT_TEST_CASE),
+        ("tests/BrowserTestCase.php", BROWSER_TEST_CASE),
+        ("tests/Page.php", PAGE),
+    ];
+    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    for (path, content) in files {
+        backend.update_ast(workspace_uri(&backend, path).as_str(), content);
+    }
+    let text = r#"<?php
+it('opens the basket', function (): void {
+    $this->visitPage('/basket')->missing();
+});
+"#;
+
+    let before = unknown_members_in(&backend, "tests/Browser/BasketTest.php", text);
+    assert!(
+        before.iter().any(|m| m.contains("visitPage")),
+        "Without a Pest.php `visitPage()` should be unknown, got: {before:?}"
+    );
+
+    let pest_path = dir.path().join("tests/Pest.php");
+    std::fs::write(
+        &pest_path,
+        "<?php\npest()->extends(Tests\\BrowserTestCase::class)->in('Browser');\n",
+    )
+    .unwrap();
+    backend
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Url::from_file_path(&pest_path).unwrap(),
+                typ: FileChangeType::CREATED,
+            }],
+        })
+        .await;
+
+    let after = unknown_members_in(&backend, "tests/Browser/BasketTest.php", text);
+    assert_eq!(
+        after.len(),
+        1,
+        "Only `missing()` on the page should be unknown, got: {after:?}"
+    );
+    assert!(
+        after[0].contains("Tests\\Page"),
+        "Expected the new Pest.php to bind BrowserTestCase, got: {after:?}"
+    );
+}

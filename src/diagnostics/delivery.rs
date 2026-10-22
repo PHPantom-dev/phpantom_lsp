@@ -53,7 +53,12 @@ impl Backend {
             let content = Arc::clone(content);
             crate::server::run_blocking_cancel_safe("fast diagnostics", move || {
                 let mut out = Vec::new();
-                let effective = backend.analysable_content_or(&uri, &content);
+                let effective = backend
+                    .blade_virtual_php_arc(&uri)
+                    .unwrap_or_else(|| Arc::clone(&content));
+                // Hand the parse cache the shared buffer, so the collector's
+                // own guard finds it instead of copying the file.
+                let _parse_guard = crate::parser::with_parse_cache_arc(Arc::clone(&effective));
                 backend.collect_fast_diagnostics(&uri, &effective, &mut out);
                 out
             })
@@ -307,7 +312,7 @@ impl Backend {
                 &self.workspace.config.lock().diagnostics.ignore,
             );
             if !rules.is_empty()
-                && let Ok(file_path) = uri.to_file_path()
+                && let Some(file_path) = crate::util::url_to_path(&uri)
                 && let Some(root) = self.workspace.workspace_root.read().clone()
             {
                 let relative_path = file_path
@@ -331,7 +336,7 @@ impl Backend {
             cache.insert(uri_str.to_string(), pruned);
         }
 
-        let pull_mode = self.supports_pull_diagnostics.load(Ordering::Acquire);
+        let pull_mode = self.caps().pull_diagnostics;
 
         if pull_mode {
             // ── Pull mode ───────────────────────────────────────────
@@ -346,17 +351,18 @@ impl Backend {
             // and the `resultId` alone, so a pull still answers
             // `Unchanged` and the caller skips the refresh.  A missing
             // cache entry counts as changed: the client has nothing yet.
-            {
-                let mut cache = self.diag.last_full.lock();
-                if cache.get(uri_str).is_some_and(|prev| *prev == full) {
-                    return false;
-                }
-                cache.insert(uri_str.to_string(), full);
+            //
+            // The set and its `resultId` change under one `last_full`
+            // guard, so a racing pull never sees the new set paired with
+            // the old id (which would answer `Unchanged` for a set that
+            // just changed).
+            let mut cache = self.diag.last_full.lock();
+            if cache.get(uri_str).is_some_and(|prev| *prev == full) {
+                return false;
             }
-            {
-                let id = self.diag.result_id_seq.fetch_add(1, Ordering::Relaxed) + 1;
-                self.diag.result_ids.lock().insert(uri_str.to_string(), id);
-            }
+            cache.insert(uri_str.to_string(), full);
+            let id = self.diag.result_id_seq.fetch_add(1, Ordering::Relaxed) + 1;
+            self.diag.result_ids.lock().insert(uri_str.to_string(), id);
             true
         } else {
             // ── Push mode ───────────────────────────────────────────
@@ -388,7 +394,7 @@ impl Backend {
     /// nothing but the pump itself, and signals landing while a refresh
     /// is in flight coalesce into a single follow-up.
     pub(crate) async fn request_diagnostic_refresh(&self) {
-        if !self.supports_pull_diagnostics.load(Ordering::Acquire) {
+        if !self.caps().pull_diagnostics {
             return;
         }
         let Some(client) = &self.client else {
@@ -515,7 +521,7 @@ impl Backend {
             return;
         }
 
-        let pull_mode = self.supports_pull_diagnostics.load(Ordering::Acquire);
+        let pull_mode = self.caps().pull_diagnostics;
 
         let uris = self.open_files_affected_by_save(exclude_uri);
         if uris.is_empty() {
@@ -779,7 +785,7 @@ impl Backend {
             .workspace_diag_pass_started
             .load(Ordering::Acquire)
         {
-            let backend = self.clone_for_diagnostic_worker();
+            let backend = self.clone_for_blocking();
             let uri = uri_str.to_string();
             tokio::spawn(async move {
                 backend

@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::atom::{Atom, AtomSet};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::inheritance;
 use crate::inheritance::bind_template_args;
 use crate::php_type::PhpType;
@@ -112,11 +113,7 @@ impl VirtualMemberProvider for PHPDocProvider {
     ///
     /// This is a cheap pre-check: the tags were parsed once when each
     /// class was extracted, so this only inspects already-structured data.
-    fn applies_to(
-        &self,
-        class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> bool {
+    fn applies_to(&self, class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
         // Declares @method/@property tags itself.
         if class.doc_members.is_some() {
             return true;
@@ -129,7 +126,7 @@ impl VirtualMemberProvider for PHPDocProvider {
 
         // Has used traits that carry @method/@property tags.
         for trait_name in &class.used_traits {
-            if let Some(trait_info) = class_loader(trait_name)
+            if let Some(trait_info) = class_loader(Fqn::new(trait_name))
                 && trait_info.doc_members.is_some()
             {
                 return true;
@@ -150,7 +147,7 @@ impl VirtualMemberProvider for PHPDocProvider {
             }
             // `provide` also reads tags off the traits an ancestor uses.
             for trait_name in &parent.used_traits {
-                if let Some(trait_info) = class_loader(trait_name)
+                if let Some(trait_info) = class_loader(Fqn::new(trait_name))
                     && trait_info.doc_members.is_some()
                 {
                     return true;
@@ -166,7 +163,7 @@ impl VirtualMemberProvider for PHPDocProvider {
             if !visited.insert(iface_name) {
                 continue;
             }
-            let Some(iface) = class_loader(&iface_name) else {
+            let Some(iface) = class_loader(Fqn::new(&iface_name)) else {
                 continue;
             };
             if iface.doc_members.is_some() {
@@ -190,7 +187,7 @@ impl VirtualMemberProvider for PHPDocProvider {
     fn provide(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         cache: Option<&super::ResolvedClassCache>,
     ) -> VirtualMembers {
         let ancestors = template_bound_ancestors(class, class_loader);
@@ -246,7 +243,7 @@ impl DocTags {
     fn of(
         class: &ClassInfo,
         ancestors: &[(Arc<ClassInfo>, HashMap<String, PhpType>)],
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Self {
         let mut tags = DocTags {
             methods: Vec::new(),
@@ -280,7 +277,7 @@ impl DocTags {
             .interfaces
             .iter()
             .filter_map(|iface_name| {
-                let iface = class_loader(iface_name)?;
+                let iface = class_loader(Fqn::new(iface_name))?;
                 Some((*iface_name, build_interface_substitution_map(class, &iface)))
             })
             .collect();
@@ -289,14 +286,14 @@ impl DocTags {
             if !visited.insert(iface_name) {
                 continue;
             }
-            let Some(iface) = class_loader(&iface_name) else {
+            let Some(iface) = class_loader(Fqn::new(&iface_name)) else {
                 continue;
             };
             if let Some(doc) = iface.doc_members.as_deref() {
                 tags.add(doc, &subs);
             }
             for parent_iface_name in &iface.interfaces {
-                if let Some(parent_iface) = class_loader(parent_iface_name) {
+                if let Some(parent_iface) = class_loader(Fqn::new(parent_iface_name)) {
                     let parent_subs =
                         build_interface_extends_substitution_map(&iface, &parent_iface, &subs);
                     iface_queue.push((*parent_iface_name, parent_subs));
@@ -343,10 +340,10 @@ impl DocTags {
         &mut self,
         owner: &ClassInfo,
         owner_subs: &HashMap<String, PhpType>,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) {
         for trait_name in &owner.used_traits {
-            let Some(trait_info) = class_loader(trait_name) else {
+            let Some(trait_info) = class_loader(Fqn::new(trait_name)) else {
                 continue;
             };
             if let Some(doc) = trait_info.doc_members.as_deref() {

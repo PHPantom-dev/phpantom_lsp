@@ -9,9 +9,8 @@
 
 use crate::common::{
     LARAVEL_APP_COMPOSER, complete_labels_at_opened, create_initialized_psr4_workspace,
-    definitions_at, hover_on, position_after, position_of,
+    definitions_at, hover_on, position_after, position_of, references_response,
 };
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 /// A class in `app/` whose one method runs `body`.
@@ -318,21 +317,14 @@ async fn find_references_lists_every_dotenv_declaration() {
     .await;
 
     let position = position_of(&content, "MAIL_MAILER");
-    let found = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position::new(position.line, position.character + 2),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext {
-                include_declaration: true,
-            },
-        })
-        .await
-        .unwrap()
-        .expect("an env key should have references");
+    let found = references_response(
+        &backend,
+        &uri,
+        Position::new(position.line, position.character + 2),
+        true,
+    )
+    .await
+    .expect("an env key should have references");
 
     for name in ["app/Demo.php", ".env", ".env.example"] {
         assert!(

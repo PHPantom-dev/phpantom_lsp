@@ -1,5 +1,4 @@
-use crate::common::create_test_backend;
-use tower_lsp::LanguageServer;
+use crate::common::{create_test_backend, goto_definition_at, open_php};
 use tower_lsp::lsp_types::*;
 
 // ─── Tests: Stored byte offsets and offset_to_position ──────────────────────
@@ -28,15 +27,7 @@ async fn test_parsed_members_have_nonzero_name_offset() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -102,15 +93,7 @@ async fn test_keyword_offset_populated_for_all_class_kinds() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -179,15 +162,7 @@ async fn test_name_offset_points_to_correct_token() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -245,15 +220,7 @@ async fn test_enum_case_name_offset() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -289,15 +256,7 @@ async fn test_promoted_property_name_offset() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -351,30 +310,10 @@ async fn test_offset_to_position_matches_text_search() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "MAX_RETRIES" in `self::MAX_RETRIES` on line 8
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 8,
-                character: 45,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 8, 45).await;
     assert!(
         result.is_some(),
         "Should resolve self::MAX_RETRIES to its declaration"
@@ -393,20 +332,9 @@ async fn test_offset_to_position_matches_text_search() {
     }
 
     // Also test method go-to-definition
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            // Place cursor on "retryCount" in `$this->retryCount` on line 8
-            position: Position {
-                line: 8,
-                character: 25,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
 
-    let result = backend.goto_definition(params).await.unwrap();
+    // Place cursor on "retryCount" in `$this->retryCount` on line 8
+    let result = goto_definition_at(&backend, &uri, 8, 25).await;
     assert!(
         result.is_some(),
         "Should resolve $this->retryCount to its declaration"
@@ -458,15 +386,7 @@ async fn test_class_name_inside_string_does_not_false_match() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // The real `class Greeter` is on line 7, NOT line 3 (which is inside
     // a string).  Verify keyword_offset points to line 7.
@@ -489,19 +409,7 @@ async fn test_class_name_inside_string_does_not_false_match() {
     );
 
     // Verify go-to-definition for `new Greeter()` on line 14 lands on line 7
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 14,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 14, 14).await;
     assert!(
         result.is_some(),
         "Should resolve Greeter to its declaration"
@@ -544,30 +452,10 @@ async fn test_member_name_in_heredoc_does_not_false_match() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "write" in `$logger->write('test')` on line 13
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 13,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 13, 15).await;
     assert!(
         result.is_some(),
         "Should resolve $logger->write() to its declaration"
@@ -600,15 +488,7 @@ async fn test_trait_member_offset() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -668,15 +548,7 @@ async fn test_offsets_with_comments_heredocs_and_strings() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -729,15 +601,7 @@ async fn test_backed_enum_case_offsets() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -784,15 +648,7 @@ async fn test_interface_constant_definition_via_offset() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -830,15 +686,7 @@ async fn test_anonymous_class_keyword_offset_is_zero() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -882,33 +730,11 @@ async fn test_goto_definition_on_a_function_declaration_offers_usages() {
     let uri = Url::parse("file:///function_declaration.php").unwrap();
     let content = "<?php\nfunction helper(): void {}\n\nhelper();\n";
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: content.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, content).await;
 
     // Click on "helper" in `function helper(): void {}` on line 1.
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 1,
-                character: 11,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend
-        .goto_definition(params)
+    let result = goto_definition_at(&backend, &uri, 1, 11)
         .await
-        .unwrap()
         .expect("a function declaration should answer with itself");
 
     match result {

@@ -128,6 +128,7 @@ fn function_docblock_at<'a>(
     Some(build_info_for_function_like(
         docblock_text,
         docblock_start as usize,
+        node.span().start.offset,
         param_list,
         return_type_hint,
         content,
@@ -139,6 +140,7 @@ fn function_docblock_at<'a>(
 fn build_info_for_function_like<'a>(
     docblock_text: &str,
     docblock_start: usize,
+    decl_offset: u32,
     param_list: &function_like::parameter::FunctionLikeParameterList<'a>,
     return_type_hint: Option<&function_like::r#return::FunctionLikeReturnTypeHint<'a>>,
     content: &str,
@@ -175,7 +177,7 @@ fn build_info_for_function_like<'a>(
         .map(parse_doc_throws_from_info)
         .unwrap_or_default();
 
-    let indent = indent_of_line_at(content, docblock_start);
+    let indent = indent_of_line_at(content, docblock_start).to_string();
 
     // Compute LSP position for throws analysis.
     let docblock_position = offset_to_position(content, docblock_start);
@@ -191,6 +193,7 @@ fn build_info_for_function_like<'a>(
         doc_throws,
         indent,
         docblock_position,
+        decl_offset,
     }
 }
 

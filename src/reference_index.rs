@@ -17,6 +17,7 @@ use tower_lsp::lsp_types::Range;
 use crate::Backend;
 use crate::atom::{Atom, AtomMap, AtomSet, atom};
 use crate::backend::file_access::namespace_in_spans;
+use crate::names::resolve_to_fqn;
 use crate::symbol_map::{LaravelStringKind, SelfStaticParentKind, SymbolKind, SymbolMap};
 use crate::types::NamespaceSpan;
 use crate::util::{build_fqn, short_name, strip_fqn_prefix};
@@ -381,10 +382,8 @@ impl Backend {
         // semantic walk was running. The result remains usable by its caller,
         // which owns the same snapshot, but must not become the current cache.
         if !self
-            .symbol_maps
-            .read()
-            .get(uri)
-            .is_some_and(|current| Arc::ptr_eq(current, &symbol_map))
+            .symbol_map_for(uri)
+            .is_some_and(|current| Arc::ptr_eq(&current, &symbol_map))
         {
             return built;
         }
@@ -471,7 +470,7 @@ impl Backend {
         &self,
         keys: &[ReferenceIndexKey],
     ) -> Option<HashSet<Arc<str>>> {
-        if self.skip_reference_index || !self.workspace_indexed.load(Ordering::Acquire) {
+        if self.skip_reference_index || !self.workspace_index.indexed.load(Ordering::Acquire) {
             return None;
         }
 
@@ -491,7 +490,7 @@ impl Backend {
     /// is conclusive: semantic filtering can remove name matches, but it
     /// cannot create a reference that the symbol map did not index.
     pub(crate) fn indexed_reference_count(&self, key: &ReferenceIndexKey) -> Option<usize> {
-        if self.skip_reference_index || !self.workspace_indexed.load(Ordering::Acquire) {
+        if self.skip_reference_index || !self.workspace_index.indexed.load(Ordering::Acquire) {
             return None;
         }
 
@@ -508,7 +507,7 @@ impl Backend {
     /// instance method on a custom builder; the exact search searches both
     /// keys for exactly that reason (see `member_candidate_keys`).
     pub(crate) fn indexed_member_reference_count(&self, member: &str) -> Option<usize> {
-        if self.skip_reference_index || !self.workspace_indexed.load(Ordering::Acquire) {
+        if self.skip_reference_index || !self.workspace_index.indexed.load(Ordering::Acquire) {
             return None;
         }
 
@@ -537,7 +536,7 @@ impl Backend {
         keys: &[ReferenceIndexKey],
         uris: &mut Vec<String>,
     ) -> bool {
-        if !self.workspace_indexed.load(Ordering::Acquire) {
+        if !self.workspace_index.indexed.load(Ordering::Acquire) {
             return false;
         }
 
@@ -688,7 +687,7 @@ impl Backend {
         let mut entries: Vec<(ReferenceIndexKey, bool)> = Vec::new();
         // Resolving a namespace-qualified name back to the namespace it
         // was written in needs the file's namespace blocks; cloning them
-        // once beats re-locking `file_namespaces` per span.
+        // once beats re-locking the file states per span.
         let namespaces = OnceCell::new();
         for span in &symbol_map.spans {
             let is_declaration = matches!(
@@ -717,7 +716,7 @@ impl Backend {
         // and every consumer of it re-checks what it found. Outside Laravel
         // no candidate can ever be confirmed, and morph sites are recorded
         // for every plain `$x->prop === 'literal'`, so skip them there.
-        if self.resolved_class_cache.read().is_laravel() {
+        if self.resolved_class_cache.read().laravel().is_enabled() {
             for site in &symbol_map.view_receiver_sites {
                 entries.push((
                     ReferenceIndexKey::LaravelString {
@@ -791,7 +790,7 @@ impl Backend {
                     fqn
                 } else {
                     let (use_map, namespace) = self.use_map_and_namespace_at(uri, span.start);
-                    normalize_symbol_name(Self::resolve_to_fqn(name, &use_map, &namespace))
+                    normalize_symbol_name(resolve_to_fqn(name, &use_map, &namespace))
                 };
                 class_keys(&resolved, name)
             }
@@ -818,7 +817,7 @@ impl Backend {
                     fqn
                 } else {
                     let (use_map, namespace) = self.use_map_and_namespace_at(uri, span.start);
-                    normalize_symbol_name(Self::resolve_to_fqn(name, &use_map, &namespace))
+                    normalize_symbol_name(resolve_to_fqn(name, &use_map, &namespace))
                 };
                 let global_fallback =
                     self.names_global_fallback(uri, span.start, name, &resolved, namespaces);
@@ -855,7 +854,7 @@ impl Backend {
     }
 
     fn is_reference_indexable_uri(&self, uri: &str) -> bool {
-        if uri.starts_with("phpantom-stub://") || uri.starts_with("phpantom-stub-fn://") {
+        if crate::stubs::is_stub_uri(uri) {
             return false;
         }
         !self
@@ -904,10 +903,13 @@ impl Backend {
     }
 
     fn resolved_name_at(&self, uri: &str, offset: u32) -> Option<String> {
-        self.resolved_names
+        self.files
             .read()
-            .get(uri)
-            .and_then(|rn| rn.get(offset).map(normalize_symbol_name))
+            .get(uri)?
+            .resolved_names
+            .as_ref()?
+            .get(offset)
+            .map(normalize_symbol_name)
     }
 
     /// The key a function named at `offset` in `uri` is indexed under.
@@ -935,7 +937,7 @@ impl Backend {
             fqn
         } else {
             let (use_map, namespace) = self.use_map_and_namespace_at(uri, offset);
-            Self::resolve_to_fqn(name, &use_map, &namespace)
+            resolve_to_fqn(name, &use_map, &namespace)
         };
         normalize_symbol_name(resolved)
     }
@@ -1110,8 +1112,11 @@ mod tests {
     #[test]
     fn candidate_lookup_is_disabled_when_reference_indexing_is_skipped() {
         let mut backend = Backend::new_test();
-        backend.skip_reference_index = true;
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend.state_mut().skip_reference_index = true;
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         let candidates =
             backend.reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("App\\Foo")]);
@@ -1127,7 +1132,10 @@ mod tests {
             uri,
             "<?php\nnamespace App;\nclass Foo { public string $name; public function save(): void {} }\nfunction helper(): void {}\n$foo = new Foo();\n$foo->save();\nconfig('app.name');\n",
         );
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         assert_candidate_contains(&backend, ReferenceIndexKey::class("App\\Foo"), uri);
         assert_candidate_contains(&backend, ReferenceIndexKey::function("App\\helper"), uri);
@@ -1160,7 +1168,10 @@ mod tests {
     #[test]
     fn config_resources_and_generic_config_keys_share_one_canonical_candidate_key() {
         let backend = Backend::new_test();
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
         let resource_uri = "file:///project/src/CacheConsumer.php";
         let config_uri = "file:///project/src/ConfigConsumer.php";
         let queue_uri = "file:///project/src/QueueConsumer.php";
@@ -1245,7 +1256,10 @@ mod tests {
         let backend = Backend::new_test();
         let uri = "file:///project/src/Foo.php";
         backend.update_ast(uri, "<?php\nnamespace App;\nclass Foo {}\nnew Foo();\n");
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         assert_candidate_contains(&backend, ReferenceIndexKey::class("App\\Foo"), uri);
 
@@ -1259,7 +1273,10 @@ mod tests {
     #[test]
     fn batch_reindex_replaces_existing_uri_and_keeps_last_duplicate() {
         let backend = Backend::new_test();
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
         let uri = "file:///project/src/Foo.php".to_string();
 
         backend.reindex_references_for_symbol_maps_batch(vec![(
@@ -1306,7 +1323,10 @@ mod tests {
 
         let backend = Backend::new_test();
         backend.add_vendor_dir(&vendor);
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         let user_uri = "file:///project/src/User.php".to_string();
         let vendor_uri = crate::util::path_to_uri(&vendor.join("Package.php"));
@@ -1340,7 +1360,10 @@ mod tests {
     #[test]
     fn self_static_parent_without_enclosing_class_is_not_indexed() {
         let backend = Backend::new_test();
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
         let uri = "file:///project/src/Loose.php".to_string();
 
         backend.reindex_references_for_symbol_maps_batch(vec![(
@@ -1364,7 +1387,10 @@ mod tests {
     #[test]
     fn zero_offset_property_declaration_is_not_indexed() {
         let backend = Backend::new_test();
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
         let uri = "file:///project/src/Foo.php".to_string();
 
         let mut class = crate::types::ClassInfo {
@@ -1423,7 +1449,10 @@ mod tests {
         let backend = Backend::new_test();
         let uri = "file:///project/src/constants.php";
         backend.update_ast(uri, "<?php\nconst FOO = 1;\necho FOO;\n");
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         assert_eq!(
             reference_count(&backend, ReferenceIndexKey::Constant("FOO".to_string())),
@@ -1437,7 +1466,10 @@ mod tests {
         let backend = Backend::new_test();
         let uri = "file:///project/src/constants.php";
         backend.update_ast(uri, "<?php\ndefine('FOO', 1);\necho FOO;\n");
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         assert_eq!(
             reference_count(&backend, ReferenceIndexKey::Constant("FOO".to_string())),
@@ -1453,7 +1485,10 @@ mod tests {
             uri,
             "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n}\n",
         );
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         // PHP calls `App\helper` when it exists and the global `helper`
         // otherwise, so both spellings are credited.
@@ -1475,7 +1510,10 @@ mod tests {
             uri,
             "<?php\nnamespace App;\nuse function Support\\helper;\nfunction run(): void {\n    helper();\n}\n",
         );
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         // The `use function` import names it too, so both spans count.
         assert_eq!(
@@ -1494,7 +1532,10 @@ mod tests {
         let backend = Backend::new_test();
         let uri = "file:///project/src/Service.php";
         backend.update_ast(uri, "<?php\nfunction helper(): void {}\nHELPER();\n");
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         assert_eq!(
             reference_count(&backend, ReferenceIndexKey::function("helper")),
@@ -1510,7 +1551,10 @@ mod tests {
             uri,
             "<?php\nnamespace App;\nclass Widget {}\n$a = new WIDGET();\n$b = new widget();\n",
         );
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         assert_eq!(
             reference_count(&backend, ReferenceIndexKey::class("App\\Widget")),

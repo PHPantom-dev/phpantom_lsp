@@ -4,8 +4,10 @@
 use mago_syntax::cst::{Expression, unary};
 
 use crate::atom::atom;
-use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, keyword_lowercase};
-use crate::types::ResolvedType;
+use crate::class_lookup::ResolvedClassLoader;
+use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, with_keyword_lowercase};
+use crate::types::{ClassInfo, ResolvedType};
+use crate::virtual_members::ResolvedClassCache;
 
 use super::scalar_fold;
 
@@ -15,10 +17,13 @@ use super::scalar_fold;
 ///
 /// A cast, sign or `~` of an operand that holds one known scalar folds to
 /// the value PHP computes (`(int) '1'` is `1`, `~1` is `-2`, `-(1)` is
-/// `-1`). `resolve_operand` is always called for `(object)`, `(array)`,
-/// `~`, `-` and `+`, and for the other casts only when `operand` is cheap
-/// to resolve (a literal, variable, or constant), so a cast of a call pays
-/// nothing for it.
+/// `-1`). `resolve_operand` is always called for `(string)`, `(object)`,
+/// `(array)`, `~`, `-` and `+`, and for the other casts only when `operand`
+/// is cheap to resolve (a literal, variable, or constant), so an `(int)`
+/// cast of a call pays nothing for it.
+///
+/// `class_loader` and `cache` are used by `(string)` to read the type an
+/// object's `__toString()` declares.
 ///
 /// Returns `None` for `@`, `&`, `++` and `--`, whose result is the
 /// operand's own type or its numeric step, which the caller works out.
@@ -26,6 +31,8 @@ pub(crate) fn unary_prefix_result_type(
     operator: &unary::UnaryPrefixOperator<'_>,
     operand: &Expression<'_>,
     resolve_operand: impl FnOnce() -> Vec<ResolvedType>,
+    class_loader: &ResolvedClassLoader<'_>,
+    cache: Option<&ResolvedClassCache>,
 ) -> Option<PhpType> {
     use unary::UnaryPrefixOperator;
 
@@ -44,7 +51,7 @@ pub(crate) fn unary_prefix_result_type(
         }
         UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => PhpType::int(),
         UnaryPrefixOperator::StringCast(..) | UnaryPrefixOperator::BinaryCast(..) => {
-            PhpType::string()
+            return Some(string_cast_type(&resolve_operand(), class_loader, cache));
         }
         UnaryPrefixOperator::FloatCast(..)
         | UnaryPrefixOperator::DoubleCast(..)
@@ -137,6 +144,89 @@ fn apply_numeric_sign(ty: &PhpType, negated: bool) -> Option<PhpType> {
         }
         _ => None,
     }
+}
+
+/// `(string) $expr`, applied member by member: a string stays as it is, a
+/// number becomes a `numeric-string`, `bool` and `null` become the strings
+/// PHP spells them as, and an object becomes what its `__toString()`
+/// declares. Any member without a better answer makes the result `string`.
+fn string_cast_type(
+    operand: &[ResolvedType],
+    class_loader: &ResolvedClassLoader<'_>,
+    cache: Option<&ResolvedClassCache>,
+) -> PhpType {
+    fn cast_member(member: &PhpType, class: Option<&ClassInfo>, out: &mut Vec<PhpType>) -> bool {
+        if let Some(scalar) = scalar_fold::Scalar::from_type(member)
+            && let Some(text) = scalar.to_php_string()
+        {
+            out.push(PhpType::literal_string_value(text));
+            return true;
+        }
+        match member.kind() {
+            TypeKind::Union(members) => {
+                return members.iter().all(|member| cast_member(member, class, out));
+            }
+            TypeKind::Nullable(inner) => {
+                out.push(PhpType::literal_string_value(String::new()));
+                return cast_member(inner, class, out);
+            }
+            _ => {}
+        }
+        // A non-finite float spells `INF` or `NAN`, which is not numeric;
+        // like PHPStan, the cast ignores that to keep every other float's
+        // `numeric-string`.
+        let cast = if member.is_subtype_of(&PhpType::string()) {
+            member.clone()
+        } else if member.is_int_subtype()
+            || member.is_float_subtype()
+            || member.is_named_ci("numeric")
+        {
+            PhpType::numeric_string()
+        } else if member.is_named_ci("bool") || member.is_named_ci("boolean") {
+            out.push(PhpType::literal_string_value(String::new()));
+            PhpType::literal_string_value("1")
+        } else if let Some(declared) = class.and_then(to_string_return_type) {
+            declared
+        } else {
+            return false;
+        };
+        out.push(cast);
+        true
+    }
+
+    let mut members = Vec::new();
+    for resolved in operand {
+        // The class a resolved value carries belongs to its one object
+        // member; with two in the same entry it is not clear which one.
+        let class = resolved.class_info.as_deref().filter(|_| {
+            resolved
+                .type_string
+                .union_members()
+                .iter()
+                .filter(|member| !member.is_scalar() && !member.is_null())
+                .count()
+                == 1
+        });
+        let class = class.map(|class| {
+            crate::virtual_members::resolve_class_fully_maybe_cached(class, class_loader, cache)
+        });
+        if !cast_member(&resolved.type_string, class.as_deref(), &mut members) {
+            return PhpType::string();
+        }
+    }
+    if members.is_empty() {
+        return PhpType::string();
+    }
+    PhpType::join_runtime_value_types(members)
+}
+
+/// The string type a class's `__toString()` declares, if it has one.
+fn to_string_return_type(class: &ClassInfo) -> Option<PhpType> {
+    class
+        .get_method_ci("__toString")?
+        .return_type
+        .clone()
+        .filter(|ty| ty.is_subtype_of(&PhpType::string()))
 }
 
 /// `~` yields a string for string operands and an int otherwise.
@@ -288,19 +378,21 @@ fn array_cast_type(operand: Vec<ResolvedType>) -> PhpType {
 /// wrapper rather than a plain `stdClass`.
 fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
     match ty.kind() {
-        TypeKind::Named(name) => matches!(
-            keyword_lowercase(name).as_str(),
-            "int"
-                | "integer"
-                | "string"
-                | "float"
-                | "double"
-                | "real"
-                | "bool"
-                | "boolean"
-                | "true"
-                | "false"
-        ),
+        TypeKind::Named(name) => with_keyword_lowercase(name, |lower| {
+            matches!(
+                lower,
+                "int"
+                    | "integer"
+                    | "string"
+                    | "float"
+                    | "double"
+                    | "real"
+                    | "bool"
+                    | "boolean"
+                    | "true"
+                    | "false"
+            )
+        }),
         TypeKind::Union(members) => {
             !members.is_empty() && members.iter().all(is_object_cast_scalar_type)
         }

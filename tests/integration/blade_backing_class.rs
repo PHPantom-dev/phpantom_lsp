@@ -7,8 +7,8 @@
 mod tests {
     use crate::common::{
         BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
-        blade_undefined_variables, create_psr4_workspace, markup_hover_at, open_blade_template,
-        open_php_at,
+        blade_undefined_variables, completion_response, create_psr4_workspace, goto_definition_at,
+        markup_hover_at, open_blade_template, open_php_at,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
@@ -320,24 +320,17 @@ mod tests {
         );
         let uri = open_blade_template(&backend, "resources/views/livewire/counter.blade.php").await;
 
-        let result = backend
-            .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position {
-                        line: 0,
-                        character: 10,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: Some(CompletionContext {
-                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-                    trigger_character: Some(">".to_string()),
-                }),
-            })
-            .await
-            .unwrap();
+        let result = completion_response(
+            &backend,
+            &uri,
+            0,
+            10,
+            Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                trigger_character: Some(">".to_string()),
+            }),
+        )
+        .await;
         let labels: Vec<String> = match result {
             Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
             Some(CompletionResponse::List(list)) => {
@@ -383,20 +376,7 @@ mod tests {
         );
         let uri = open_blade_template(&backend, "resources/views/livewire/counter.blade.php").await;
 
-        let target = backend
-            .goto_definition(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position {
-                        line: 0,
-                        character: 34,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
-            .await
-            .unwrap();
+        let target = goto_definition_at(&backend, &uri, 0, 34).await;
         let uri_of = |r: &GotoDefinitionResponse| match r {
             GotoDefinitionResponse::Scalar(l) => l.uri.to_string(),
             GotoDefinitionResponse::Array(ls) => ls[0].uri.to_string(),

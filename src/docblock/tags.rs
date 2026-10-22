@@ -194,6 +194,15 @@ pub fn extract_see_references_from_info(info: &DocblockInfo) -> Vec<String> {
         .collect()
 }
 
+/// [`extract_see_references_from_info`] as the [`SeeRef`]s a declaration
+/// stores, their classes still to be qualified.
+pub fn extract_see_refs_from_info(info: &DocblockInfo) -> Vec<crate::types::SeeRef> {
+    extract_see_references_from_info(info)
+        .into_iter()
+        .map(crate::types::SeeRef::from)
+        .collect()
+}
+
 /// Extract the deprecation message from a `@deprecated` PHPDoc tag,
 /// enriched with any `@see` references from the same docblock.
 ///

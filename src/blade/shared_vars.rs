@@ -24,9 +24,10 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
-use crate::type_engine::resolver::{LendsLoaders, VarResolutionCtx};
+use crate::type_engine::resolver::{FileCtx, LendsLoaders, VarResolutionCtx};
 use crate::types::ClassInfo;
 use crate::virtual_members::laravel::SharedViewVar;
 
@@ -69,7 +70,8 @@ impl Backend {
     /// The resolved registrations, built once per provider scan.
     fn blade_shared_var_groups(&self) -> Arc<Vec<SharedVarGroup>> {
         if let Some(cached) = self
-            .laravel_string_key_cache
+            .laravel
+            .string_key_cache
             .read()
             .shared_view_vars
             .clone()
@@ -78,9 +80,10 @@ impl Backend {
         }
         // One builder resolves while the rest wait, rather than every
         // diagnostic worker repeating the same parse of the same providers.
-        let _guard = self.laravel_string_key_build_locks.shared_view_vars.lock();
+        let _guard = self.laravel.string_key_build_locks.shared_view_vars.lock();
         if let Some(cached) = self
-            .laravel_string_key_cache
+            .laravel
+            .string_key_cache
             .read()
             .shared_view_vars
             .clone()
@@ -88,13 +91,13 @@ impl Backend {
             return cached;
         }
         let groups = Arc::new(self.build_shared_var_groups());
-        self.laravel_string_key_cache.write().shared_view_vars = Some(Arc::clone(&groups));
+        self.laravel.string_key_cache.write().shared_view_vars = Some(Arc::clone(&groups));
         groups
     }
 
     fn build_shared_var_groups(&self) -> Vec<SharedVarGroup> {
         let (shared, composers) = {
-            let resources = self.laravel_provider_resources.read();
+            let resources = self.laravel.provider_resources.read();
             (
                 resources.shared_view_vars.clone(),
                 resources.view_composers.clone(),
@@ -170,9 +173,7 @@ impl Backend {
         let Some(uri) = self.resolve_class_uri(fqn) else {
             return Vec::new();
         };
-        let path = tower_lsp::lsp_types::Url::parse(&uri)
-            .ok()
-            .and_then(|url| url.to_file_path().ok());
+        let path = crate::util::uri_to_path(&uri);
         let (Some(path), Some(content)) = (path, self.get_file_content(&uri)) else {
             return Vec::new();
         };
@@ -226,26 +227,30 @@ impl Backend {
                         crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset);
                     let current_class = enclosing.unwrap_or(&default_class);
                     let var_ctx = VarResolutionCtx {
-                        source_imports: Some(&use_map),
-                        backend: Some(self),
                         loaders: owned_loaders.loaders(),
                         resolved_class_cache: Some(&self.resolved_class_cache),
                         ..VarResolutionCtx::new(
                             "",
+                            FileCtx::new(
+                                content,
+                                &file_ctx.classes,
+                                &resolved_class_loader,
+                                &class_loader,
+                            )
+                            .with_imports(Some(&use_map))
+                            .with_backend(Some(self)),
                             current_class,
-                            &file_ctx.classes,
-                            content,
                             offset,
-                            &resolved_class_loader,
-                            &class_loader,
                         )
                     };
                     let ty =
-                        crate::type_engine::variable::foreach_resolution::resolve_expression_type(
+                        crate::type_engine::variable::iterable_elements::resolve_expression_type(
                             expr, &var_ctx,
                         )
                         .unwrap_or_else(PhpType::mixed);
-                    let ty = ty.resolve_names(&|name: &str| match resolved_class_loader(name) {
+                    let ty = ty.resolve_names(&|name: &str| match resolved_class_loader(Fqn::new(
+                        name,
+                    )) {
                         Some(class) => format!("\\{}", class.fqn()),
                         None => name.to_string(),
                     });

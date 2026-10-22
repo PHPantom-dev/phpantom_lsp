@@ -3,8 +3,7 @@
 //! Tests go-to-definition, completion, and references for method-name
 //! strings inside `Route::controller(X::class)->group(fn(){…})`.
 
-use crate::common::{complete_at, create_test_backend, open_php};
-use tower_lsp::LanguageServer;
+use crate::common::{complete_at, create_test_backend, goto_definition_at, open_php};
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -15,15 +14,7 @@ async fn goto_def(
     line: u32,
     character: u32,
 ) -> Option<GotoDefinitionResponse> {
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-    backend.goto_definition(params).await.unwrap()
+    goto_definition_at(backend, uri, line, character).await
 }
 
 fn method_labels(items: &[CompletionItem]) -> Vec<String> {

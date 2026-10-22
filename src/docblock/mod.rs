@@ -62,12 +62,12 @@ pub use tags::{
     extract_removed_version, extract_require_extends, extract_require_extends_from_info,
     extract_require_implements, extract_require_implements_from_info, extract_return_description,
     extract_return_description_from_info, extract_return_type, extract_return_type_from_info,
-    extract_see_references, extract_see_references_from_info, extract_self_out_type,
-    extract_self_out_type_from_info, extract_throws_tags, extract_throws_tags_from_info,
-    extract_type_assertions, extract_type_assertions_from_info, extract_var_type,
-    extract_var_type_from_info, extract_var_type_with_name, extract_var_type_with_name_from_info,
-    get_docblock_info_for_node, get_docblock_text_for_node, has_deprecated_tag,
-    has_deprecated_tag_from_info, sanitise_and_parse_docblock_type,
+    extract_see_references, extract_see_references_from_info, extract_see_refs_from_info,
+    extract_self_out_type, extract_self_out_type_from_info, extract_throws_tags,
+    extract_throws_tags_from_info, extract_type_assertions, extract_type_assertions_from_info,
+    extract_var_type, extract_var_type_from_info, extract_var_type_with_name,
+    extract_var_type_with_name_from_info, get_docblock_info_for_node, get_docblock_text_for_node,
+    has_deprecated_tag, has_deprecated_tag_from_info, sanitise_and_parse_docblock_type,
 };
 
 // Docblock vs. native type selection

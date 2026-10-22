@@ -45,81 +45,85 @@ pub(crate) fn widen_by_ref_captures_by_later_writes(
     let span = closure.span();
     let target = (span.start.offset, span.end.offset);
 
-    let widened = with_parsed_program(ctx.content, "by_ref_capture_later_writes", |program, _| {
-        let mut site = Site {
-            target,
-            body: None,
-            found: false,
-            in_class_like: false,
-            runs_in_place: false,
-            outer,
-            ctx,
-        };
-        SiteFinder.walk_program(program, &mut site);
-        if !site.found || site.runs_in_place {
-            return Vec::new();
-        }
+    let widened = with_parsed_program(
+        ctx.file.content,
+        "by_ref_capture_later_writes",
+        |program, _| {
+            let mut site = Site {
+                target,
+                body: None,
+                found: false,
+                in_class_like: false,
+                runs_in_place: false,
+                outer,
+                ctx,
+            };
+            SiteFinder.walk_program(program, &mut site);
+            if !site.found || site.runs_in_place {
+                return Vec::new();
+            }
 
-        let mut writes = Writes {
-            target,
-            names: &captured,
-            enclosing_loops: 0,
-            found: Vec::new(),
-        };
-        match site.body {
-            Some(Body::Block(block)) => {
-                for stmt in block.statements.iter() {
-                    WriteCollector.walk_statement(stmt, &mut writes);
+            let mut writes = Writes {
+                target,
+                names: &captured,
+                enclosing_loops: 0,
+                found: Vec::new(),
+            };
+            match site.body {
+                Some(Body::Block(block)) => {
+                    for stmt in block.statements.iter() {
+                        WriteCollector.walk_statement(stmt, &mut writes);
+                    }
+                }
+                Some(Body::Expression(expr)) => WriteCollector.walk_expression(expr, &mut writes),
+                None if site.in_class_like => return Vec::new(),
+                None => {
+                    for stmt in program.statements.iter() {
+                        WriteCollector.walk_statement(stmt, &mut writes);
+                    }
                 }
             }
-            Some(Body::Expression(expr)) => WriteCollector.walk_expression(expr, &mut writes),
-            None if site.in_class_like => return Vec::new(),
-            None => {
-                for stmt in program.statements.iter() {
-                    WriteCollector.walk_statement(stmt, &mut writes);
-                }
+            if writes.found.is_empty() {
+                return Vec::new();
             }
-        }
-        if writes.found.is_empty() {
-            return Vec::new();
-        }
 
-        let probe_ctx = ctx.with_cursor_offset(u32::MAX);
-        let _suspend = suspend_snapshot_recording();
-        let _barrier = suspend_return_edges();
-        let mut widened: Vec<(String, Option<Vec<ResolvedType>>)> = Vec::new();
-        for (expr, written) in writes.found {
-            let mut probe = outer.clone();
-            process_assignment_expr(expr, &mut probe, &probe_ctx);
-            for name in written {
-                let types = probe.get(name);
-                // A call that takes the variable by value, or a write
-                // through one of its properties, leaves it as it was.
-                if probe.contains(name) == outer.contains(name)
-                    && !resolved_types_differ(types, outer.get(name))
-                {
-                    continue;
-                }
-                let entry = match widened.iter_mut().find(|(n, _)| n == name) {
-                    Some((_, entry)) => entry,
-                    None => {
-                        widened.push((name.to_string(), Some(Vec::new())));
-                        &mut widened.last_mut().expect("just pushed").1
+            let probe_ctx = ctx.with_cursor_offset(u32::MAX);
+            let _suspend = suspend_snapshot_recording();
+            let _barrier = suspend_return_edges(ctx.flow);
+            let mut widened: Vec<(String, Option<Vec<ResolvedType>>)> = Vec::new();
+            for (expr, written) in writes.found {
+                let mut probe = outer.clone();
+                process_assignment_expr(expr, &mut probe, &probe_ctx);
+                for name in written {
+                    let types = probe.get(name);
+                    // A call that takes the variable by value, or a write
+                    // through one of its properties, leaves it as it was.
+                    if probe.contains(name) == outer.contains(name)
+                        && !resolved_types_differ(types, outer.get(name))
+                    {
+                        continue;
                     }
-                };
-                // A write whose value cannot be resolved leaves the
-                // capture unknown rather than keeping a narrowing it may
-                // have undone.
-                match entry {
-                    Some(acc) if !types.is_empty() => {
-                        ResolvedType::extend_unique(acc, types.to_vec());
+                    let entry = match widened.iter_mut().find(|(n, _)| n == name) {
+                        Some((_, entry)) => entry,
+                        None => {
+                            widened.push((name.to_string(), Some(Vec::new())));
+                            &mut widened.last_mut().expect("just pushed").1
+                        }
+                    };
+                    // A write whose value cannot be resolved leaves the
+                    // capture unknown rather than keeping a narrowing it may
+                    // have undone.
+                    match entry {
+                        Some(acc) if !types.is_empty() => {
+                            ResolvedType::extend_unique(acc, types.to_vec());
+                        }
+                        _ => *entry = None,
                     }
-                    _ => *entry = None,
                 }
             }
-        }
-        widened
-    });
+            widened
+        },
+    );
 
     for (name, types) in widened {
         closure_scope.invalidate_dependent_keys(&name);

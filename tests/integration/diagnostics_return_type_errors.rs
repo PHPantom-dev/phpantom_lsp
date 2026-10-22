@@ -3864,6 +3864,73 @@ class Ids {
     assert!(messages[0].contains("'nope'"), "{messages:?}");
 }
 
+/// `array_key_exists()` narrows its key to the keys of the array it
+/// checks, like `isset()` does, including an array read straight from a
+/// class constant and a key written as a cast.
+#[test]
+fn array_key_exists_narrows_the_key_to_a_constant_arrays_keys() {
+    let php = r#"<?php
+namespace App;
+
+final class Filter {
+    public const array SORTS = ['score' => 1, 'revenue' => 2];
+    public ?string $sort = null;
+
+    /** @return key-of<self::SORTS> */
+    public function byIsset(string $k): string {
+        if (isset(self::SORTS[$k])) return $k;
+        return 'score';
+    }
+
+    /** @return key-of<self::SORTS> */
+    public function byKeyExists(string $k): string {
+        if (array_key_exists($k, self::SORTS)) return $k;
+        return 'score';
+    }
+
+    /** @return key-of<self::SORTS> */
+    public function byCastInTernary(): string {
+        return array_key_exists((string)$this->sort, self::SORTS)
+            ? (string)$this->sort
+            : 'score';
+    }
+
+    /** @return key-of<self::SORTS> */
+    public function byCastInIsset(): string {
+        if (isset(self::SORTS[(string)$this->sort])) return strval($this->sort);
+        return 'score';
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A cast key narrowed by a check stops being narrowed once the value it
+/// casts is written.
+#[test]
+fn a_narrowed_cast_key_is_dropped_when_its_operand_is_written() {
+    let php = r#"<?php
+namespace App;
+
+final class Filter {
+    public const array SORTS = ['score' => 1, 'revenue' => 2];
+    public ?string $sort = null;
+
+    /** @return key-of<self::SORTS> */
+    public function rewritten(string $other): string {
+        if (array_key_exists((string)$this->sort, self::SORTS)) {
+            $this->sort = $other;
+            return (string)$this->sort;
+        }
+        return 'score';
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
 /// A constant nobody can read leaves the operator standing, and an
 /// operator that names no set of values cannot reject anything.
 #[test]

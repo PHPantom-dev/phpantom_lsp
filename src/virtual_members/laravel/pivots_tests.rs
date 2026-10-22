@@ -1,4 +1,5 @@
 use super::*;
+use crate::class_lookup::Fqn;
 use crate::test_fixtures::{make_class, make_method};
 use crate::types::{PivotAccessor, PivotRelation, PropertySource};
 use std::collections::HashMap;
@@ -16,12 +17,15 @@ fn push_method(class: &mut ClassInfo, name: &str, return_type: &str) {
         .push(Arc::new(make_method(name, Some(return_type))));
 }
 
-fn loader_from(classes: Vec<Arc<ClassInfo>>) -> impl Fn(&str) -> Option<Arc<ClassInfo>> {
+fn loader_from(classes: Vec<Arc<ClassInfo>>) -> impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> {
     let map: HashMap<String, Arc<ClassInfo>> = classes
         .into_iter()
         .map(|c| (c.fqn().to_string(), c))
         .collect();
-    move |name: &str| map.get(name.trim_start_matches('\\')).cloned()
+    move |name: Fqn<'_>| {
+        let name = name.as_str();
+        map.get(name.trim_start_matches('\\')).cloned()
+    }
 }
 
 fn permission() -> Arc<ClassInfo> {

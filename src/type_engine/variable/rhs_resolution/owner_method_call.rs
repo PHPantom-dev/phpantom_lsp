@@ -4,12 +4,12 @@
 //! when its declaration says too little.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::atom;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo, ResolvedType};
 
@@ -39,7 +39,7 @@ pub(super) fn resolve_conditional_return_for_call(
     var_resolver: crate::type_engine::conditional_resolution::VarClassStringResolver<'_>,
     call_site: crate::type_engine::conditional_resolution::ConditionalClassContext<'_>,
     owner: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     template_subs: &HashMap<String, PhpType>,
     arg_type_resolver: crate::type_engine::conditional_resolution::ArgTypeResolver<'_>,
     replace_self: impl Fn(&PhpType) -> PhpType,
@@ -194,7 +194,7 @@ fn refine_declared_return(
     if !crate::type_engine::call_resolution::body_inference_in_progress() {
         return declared;
     }
-    let (Some(method), Some(backend)) = (method, ctx.backend) else {
+    let (Some(method), Some(backend)) = (method, ctx.file.backend) else {
         return declared;
     };
     // Only a bare class name can gain type arguments, and only a real
@@ -260,7 +260,7 @@ pub(super) fn resolve_owner_method_call(
         .map(|list| {
             crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
                 list,
-                ctx.content,
+                ctx.file.content,
             )
         })
         .unwrap_or_default();
@@ -275,11 +275,11 @@ pub(super) fn resolve_owner_method_call(
     // method to preserve template substitutions.
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         owner,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
     if let Some((date_class, date_return_type)) =
-        Backend::configured_laravel_date_return(&merged, method_name, ctx.class_loader)
+        Backend::configured_laravel_date_return(&merged, method_name, ctx.file.class_loader)
     {
         return ResolvedType::from_classes_with_hint(vec![date_class], date_return_type);
     }
@@ -342,7 +342,7 @@ pub(super) fn resolve_owner_method_call(
         // we know which collection subclass the model really builds.
         crate::virtual_members::laravel::replace_eloquent_collections_in_type(
             &resolved,
-            ctx.class_loader,
+            ctx.file.class_loader,
         )
         .unwrap_or(resolved)
     });
@@ -370,7 +370,7 @@ pub(super) fn resolve_owner_method_call(
             written_class: Some(&written),
         },
         owner,
-        ctx.class_loader,
+        ctx.file.class_loader,
         template_subs,
         Some(&arg_ty_resolver),
         self_replace,
@@ -402,7 +402,7 @@ pub(super) fn resolve_owner_method_call(
                     declaring: Some(owner.fqn().as_str()),
                     written_class: Some(&written),
                 },
-                ctx.class_loader,
+                ctx.file.class_loader,
                 &tpl,
             )
         } else {
@@ -426,9 +426,9 @@ pub(super) fn resolve_owner_method_call(
         .map(|d| refine_declared_return(d, method_ref, owner, ctx, &call_args));
 
     let mr_ctx = MethodReturnCtx {
-        all_classes: ctx.all_classes,
-        class_loader: ctx.class_loader,
-        backend: ctx.backend,
+        all_classes: ctx.file.all_classes,
+        class_loader: ctx.file.class_loader,
+        backend: ctx.file.backend,
         template_subs,
         var_resolver: Some(&var_resolver),
         cache: ctx.resolved_class_cache,
@@ -464,7 +464,7 @@ pub(super) fn resolve_owner_method_call(
     // something better to offer.
     if method_ref.is_some_and(|m| {
         m.return_type.as_ref().is_none_or(|t| t.is_mixed()) && m.name_offset != 0 && !m.is_virtual
-    }) && let Some(backend) = ctx.backend
+    }) && let Some(backend) = ctx.file.backend
         && let Some(inferred) = crate::type_engine::call_resolution::try_infer_body_return_type(
             backend,
             &owner.fqn(),
@@ -476,8 +476,8 @@ pub(super) fn resolve_owner_method_call(
     {
         return vec![resolved_type_with_lookup(
             inferred,
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         )];
     }
 
@@ -494,17 +494,17 @@ pub(super) fn resolve_owner_method_call(
     // before returning so that `@phpstan-type UserList array<int, User>`
     // with `@return UserList` is expanded to its concrete type.
     if let Some(hint) = ret_type_string {
-        let expanded = crate::type_engine::types::aliases::resolve_type_alias_typed(
+        let expanded = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &hint,
             &owner.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
         let parsed_effective = expanded.unwrap_or(hint);
         return vec![resolved_type_with_lookup(
             parsed_effective,
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         )];
     }
 

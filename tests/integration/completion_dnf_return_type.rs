@@ -9,7 +9,7 @@
 //! model.  This mirrors Laravel's `BelongsToMany::first()`.
 
 use crate::common::create_psr4_workspace;
-use tower_lsp::LanguageServer;
+use crate::common::open_php;
 use tower_lsp::lsp_types::*;
 
 #[tokio::test]
@@ -118,16 +118,7 @@ class Product extends Model {
         let full = dir.path().join(path);
         let uri = Url::from_file_path(&full).unwrap();
         let text = std::fs::read_to_string(&full).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text,
-                },
-            })
-            .await;
+        open_php(&backend, &uri, &text).await;
     }
 
     let product_path = dir.path().join("src/Models/Product.php");

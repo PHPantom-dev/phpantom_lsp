@@ -426,7 +426,10 @@ mod tests {
             backend.update_ast(uri, content);
             backend.capture_declaration_baseline(uri);
         }
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
         backend
     }
 
@@ -715,7 +718,10 @@ mod tests {
     #[test]
     fn an_unindexed_workspace_falls_back_to_every_open_file() {
         let backend = workspace("  public function handle(int $n): void {}\n");
-        backend.workspace_indexed.store(false, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(false, Ordering::Release);
 
         let affected = save(
             &backend,

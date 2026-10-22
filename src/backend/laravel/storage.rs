@@ -16,8 +16,8 @@ impl Backend {
         &self,
         drivers: crate::virtual_members::laravel::LaravelStorageDriverIndex,
     ) {
-        let stale = !self.laravel_storage_drivers.read().is_empty() || !drivers.is_empty();
-        *self.laravel_storage_drivers.write() = drivers;
+        let stale = !self.laravel.storage_drivers.read().is_empty() || !drivers.is_empty();
+        *self.laravel.storage_drivers.write() = drivers;
         if stale {
             self.invalidate_storage_disk_type();
         }
@@ -26,7 +26,7 @@ impl Backend {
     /// Drop the memoized filesystem disk type and evict the two classes it was
     /// baked into, so the next load of either recomputes it.
     fn invalidate_storage_disk_type(&self) {
-        *self.storage_disk_type_cache.write() = None;
+        *self.laravel.storage_disk_type_cache.write() = None;
         {
             let mut cache = self.resolved_class_cache.write();
             for fqn in [
@@ -51,11 +51,11 @@ impl Backend {
     /// `Storage::extend()` driver.  Every other file is a byte-prefiltered
     /// no-op.
     pub(crate) fn refresh_laravel_storage_drivers(&self, uri: &str, content: &str) {
-        if !self.resolved_class_cache.read().is_laravel() {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
             return;
         }
         let config_changed = uri.contains("/config/");
-        let touched = refresh_file(&self.laravel_storage_drivers, uri, true, || {
+        let touched = refresh_file(&self.laravel.storage_drivers, uri, true, || {
             let mut regs =
                 crate::virtual_members::laravel::extract_storage_driver_registrations(content);
             self.infer_storage_driver_return_types(&mut regs, uri, content);

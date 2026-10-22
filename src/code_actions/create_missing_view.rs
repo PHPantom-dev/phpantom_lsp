@@ -12,8 +12,8 @@ use std::path::PathBuf;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::diagnostics::checked_byte_range_to_lsp_range;
 use crate::diagnostics::helpers::make_diagnostic;
-use crate::diagnostics::offset_range_to_lsp_range;
 use crate::symbol_map::{LaravelStringKind, SymbolKind};
 use crate::text_position::ranges_overlap;
 
@@ -30,14 +30,11 @@ impl Backend {
     ) {
         // The fix creates a file, which only a client that accepts the
         // `create` resource operation can apply.
-        if !self
-            .supports_file_create
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if !self.caps().file_create {
             return;
         }
 
-        let symbol_map = match self.symbol_maps.read().get(uri).cloned() {
+        let symbol_map = match self.symbol_map_for(uri) {
             Some(sm) => sm,
             None => return,
         };
@@ -57,7 +54,7 @@ impl Backend {
             };
 
             let Some(range) =
-                offset_range_to_lsp_range(content, span.start as usize, span.end as usize)
+                checked_byte_range_to_lsp_range(content, span.start as usize, span.end as usize)
             else {
                 continue;
             };
@@ -82,7 +79,7 @@ impl Backend {
             if file_path.exists() {
                 continue;
             }
-            let Ok(new_file_uri) = Url::from_file_path(&file_path) else {
+            let Some(new_file_uri) = crate::util::path_to_url(&file_path) else {
                 continue;
             };
 
@@ -124,7 +121,8 @@ impl Backend {
     fn laravel_view_create_target(&self, view_key: &str) -> Option<PathBuf> {
         if let Some((namespace, _)) = view_key.split_once("::") {
             return self
-                .laravel_provider_resources
+                .laravel
+                .provider_resources
                 .read()
                 .view_dirs
                 .iter()

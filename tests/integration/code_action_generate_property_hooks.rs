@@ -139,6 +139,23 @@ fn get_hook_edit_contains_correct_php() {
 }
 
 #[test]
+fn get_hook_follows_two_space_indentation() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "<?php\nclass Foo {\n  public string $name;\n}";
+
+    let position = position_of(content, "public string");
+    let actions = get_code_actions_in_range(&backend, uri, content, Range::new(position, position));
+    let ca = find_action_titled(&actions, "Generate get hook")
+        .expect("should have a 'Generate get hook' action");
+
+    assert_eq!(
+        extract_edit_text(ca),
+        "public string $name {\n    get => $this->name;\n  }"
+    );
+}
+
+#[test]
 fn set_hook_edit_contains_correct_php() {
     let backend = create_test_backend();
     let uri = "file:///test.php";

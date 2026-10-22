@@ -4,18 +4,16 @@
 //! [`super::call_site_inference`] resolves their types against the caller's
 //! scope.
 
-use std::sync::Arc;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::literal::{Literal, LiteralString};
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::*;
 
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::extraction::laravel::is_render_each_method;
 use crate::type_engine::resolver::VarResolutionCtx;
-use crate::types::ClassInfo;
 use crate::virtual_members::laravel::is_view_facade;
 
 use super::call_site_inference::ByteRange;
@@ -438,7 +436,7 @@ pub(super) fn each_variable_type(
     part: IterationPart,
     var_ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
-    use crate::type_engine::variable::foreach_resolution as iter;
+    use crate::type_engine::variable::iterable_elements as iter;
 
     let derived = iter::resolve_expression_type(collection, var_ctx).and_then(|collection_ty| {
         let iter_ctx = iter::IterableCtx::from_var_ctx(var_ctx);
@@ -460,11 +458,8 @@ pub(super) fn each_variable_type(
 /// namespace: an injected `@var User $user` in a template's prologue means
 /// the global `\User`, and a template's contract is qualified the same way
 /// before a call site is judged against it.
-pub(super) fn qualify_class_names(
-    ty: PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> PhpType {
-    ty.resolve_names(&|name: &str| match class_loader(name) {
+pub(super) fn qualify_class_names(ty: PhpType, class_loader: &ResolvedClassLoader<'_>) -> PhpType {
+    ty.resolve_names(&|name: &str| match class_loader(Fqn::new(name)) {
         Some(cls) => format!("\\{}", cls.fqn()),
         None => name.to_string(),
     })
@@ -489,7 +484,7 @@ pub(super) fn data_shape_entries(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<(String, PhpType)>> {
-    let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(expr, ctx)?;
+    let ty = crate::type_engine::variable::iterable_elements::resolve_expression_type(expr, ctx)?;
     array_shape_entries(&ty).or_else(|| arrayable_shape_entries(&ty, ctx))
 }
 
@@ -522,13 +517,13 @@ fn arrayable_shape_entries(
     ty: &PhpType,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<(String, PhpType)>> {
-    let class = (ctx.class_loader)(ty.base_name()?)?;
+    let class = (ctx.file.class_loader)(Fqn::new(ty.base_name()?))?;
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         &class,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
-    if !crate::class_lookup::is_subtype_of(&merged, ARRAYABLE, ctx.class_loader) {
+    if !crate::class_lookup::is_subtype_of(&merged, ARRAYABLE, ctx.file.class_loader) {
         return None;
     }
     array_shape_entries(merged.get_method_ci("toArray")?.return_type.as_ref()?)

@@ -11,10 +11,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::atom::Atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, MAX_TRAIT_DEPTH};
 
 /// A class loader, as every hierarchy walk receives it.
-pub(crate) type ClassLoader<'a> = &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>;
+pub(crate) type ClassLoader<'a> = &'a ResolvedClassLoader<'a>;
 
 /// The parents of `class`, nearest first, each with the name it was loaded
 /// by.
@@ -36,7 +37,7 @@ pub(crate) fn ancestors<'a>(
         if depth > MAX_INHERITANCE_DEPTH {
             return None;
         }
-        let ancestor = class_loader(&name)?;
+        let ancestor = class_loader(Fqn::new(&name))?;
         next = ancestor.parent_class;
         Some((name, ancestor))
     })
@@ -103,7 +104,7 @@ fn find_declaring_trait_at(
         return None;
     }
     for name in trait_names {
-        let Some(used) = class_loader(name) else {
+        let Some(used) = class_loader(Fqn::new(name)) else {
             continue;
         };
         if declares(&used) {
@@ -147,7 +148,7 @@ fn collect_used_traits(
         if !visited.insert(*name) {
             continue;
         }
-        let Some(used) = class_loader(name) else {
+        let Some(used) = class_loader(Fqn::new(name)) else {
             continue;
         };
         out.push((*name, Arc::clone(&used)));
@@ -172,7 +173,7 @@ fn find_declaring_interface(
     if depth > MAX_INHERITANCE_DEPTH || !visited.insert(iface_name) {
         return None;
     }
-    let iface = class_loader(&iface_name)?;
+    let iface = class_loader(Fqn::new(&iface_name))?;
     if declares(&iface) {
         return Some((iface_name, iface));
     }
@@ -225,7 +226,7 @@ fn collect_supertypes(
         (&class.interfaces, class.parent_class.as_slice())
     };
     for name in first.iter().chain(then) {
-        let Some(loaded) = class_loader(name) else {
+        let Some(loaded) = class_loader(Fqn::new(name)) else {
             continue;
         };
         if !visited.insert(loaded.fqn().to_ascii_lowercase()) {

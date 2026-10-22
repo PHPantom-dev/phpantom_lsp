@@ -35,8 +35,7 @@ impl Backend {
             _ => return None,
         };
 
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         let def = map.find_template_def(name, cursor_offset)?;
 
         let bound_display = if let Some(ref bound) = def.bound {
@@ -62,8 +61,7 @@ impl Backend {
         name: &str,
         cursor_offset: u32,
     ) -> Option<Hover> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         let def = map.find_template_def(name, cursor_offset)?;
 
         let bound_display = if let Some(ref bound) = def.bound {

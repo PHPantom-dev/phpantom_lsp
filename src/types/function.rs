@@ -119,11 +119,11 @@ pub struct FunctionInfo {
     pub links: Vec<String>,
     /// Symbol and URL references from `@see` tags in the docblock.
     ///
-    /// Each entry is the raw text after `@see`, which may be a symbol
+    /// Each entry's `text` is what follows `@see`, which may be a symbol
     /// reference (e.g. `"UnsetDemo"`, `"MyClass::method()"`) or a URL
     /// (e.g. `"https://example.com/docs"`).  Rendered in hover below
     /// `@link` entries.
-    pub see_refs: Vec<String>,
+    pub see_refs: Vec<SeeRef>,
     /// The namespace this function is declared in, if any.
     /// For example, `Amp\delay` would have namespace `Some("Amp")`.
     pub namespace: Option<String>,

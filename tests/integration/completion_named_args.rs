@@ -35,6 +35,41 @@ async fn test_named_args_this_method() {
     );
 }
 
+/// A call still missing its `)` inside a braced `namespace` block offers
+/// the parameters of the function that block imports.
+#[tokio::test]
+async fn test_named_args_unclosed_call_in_braced_namespace_block() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///na_braced_block.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Lib {\n",
+        "    function greet(string $name): void {}\n",
+        "}\n",
+        "namespace Other {\n",
+        "    function greet(int $count): void {}\n",
+        "}\n",
+        "namespace App {\n",
+        "    use function Lib\\greet;\n",
+        "    greet(\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 9, 10).await;
+    let tags = filter_texts(&items);
+
+    assert!(
+        tags.contains(&"name"),
+        "Should suggest Lib\\greet's 'name' param. Got: {:?}",
+        tags
+    );
+    assert!(
+        !tags.contains(&"count"),
+        "Should not suggest Other\\greet's 'count' param. Got: {:?}",
+        tags
+    );
+}
+
 /// Named arg items should have VARIABLE kind.
 #[tokio::test]
 async fn test_named_args_have_variable_kind() {

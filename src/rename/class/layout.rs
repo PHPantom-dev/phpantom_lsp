@@ -2,8 +2,6 @@
 //! its file, and the file itself, which a rename or move carries along
 //! to the path [`psr4_path_for_class`] gives the new name.
 
-use std::sync::atomic::Ordering;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -206,7 +204,7 @@ impl Backend {
         old_fqn: &str,
         new_short_name: &str,
     ) -> Option<(Url, Url)> {
-        if !self.supports_file_rename.load(Ordering::Acquire) {
+        if !self.caps().file_rename {
             return None;
         }
 
@@ -214,8 +212,8 @@ impl Backend {
 
         let def_uri_str = self.symbols.fqn_uri_index.read().get(old_fqn).cloned()?;
 
-        let def_url = Url::parse(&def_uri_str).ok()?;
-        let def_path = def_url.to_file_path().ok()?;
+        let def_url = crate::util::parse_url(&def_uri_str)?;
+        let def_path = crate::util::url_to_path(&def_url)?;
 
         let stem = def_path.file_stem()?.to_str()?;
         if stem != old_short {
@@ -230,7 +228,7 @@ impl Backend {
         let mut new_path = def_path.clone();
         new_path.set_file_name(format!("{}.php", new_short_name));
 
-        let new_url = Url::from_file_path(&new_path).ok()?;
+        let new_url = crate::util::path_to_url(&new_path)?;
 
         Some((def_url, new_url))
     }
@@ -244,18 +242,18 @@ impl Backend {
         old_fqn: &str,
         new_fqn: &str,
     ) -> Option<(Url, Url)> {
-        if !self.supports_file_rename.load(Ordering::Acquire) {
+        if !self.caps().file_rename {
             return None;
         }
 
         let def_uri_str = self.symbols.fqn_uri_index.read().get(old_fqn).cloned()?;
-        let old_url = Url::parse(&def_uri_str).ok()?;
+        let old_url = crate::util::parse_url(&def_uri_str)?;
 
         let workspace_root = self.workspace_root().read().clone()?;
         let mappings = self.psr4_mappings().read().clone();
 
         let new_path = psr4_path_for_class(&mappings, &workspace_root, new_fqn)?;
-        let new_url = Url::from_file_path(&new_path).ok()?;
+        let new_url = crate::util::path_to_url(&new_path)?;
 
         if old_url == new_url {
             return None;
@@ -306,8 +304,8 @@ impl Backend {
             .fqn_uri_index
             .read()
             .get(old_fqn)
-            .and_then(|u| Url::parse(u).ok())
-            .and_then(|u| u.to_file_path().ok());
+            .and_then(|u| crate::util::parse_url(u))
+            .and_then(|u| crate::util::url_to_path(&u));
 
         if new_path.exists() && old_path.as_deref() != Some(new_path.as_path()) {
             return Some(format!(
@@ -323,9 +321,7 @@ impl Backend {
 
 /// A file URI rendered as a plain path for a user-facing message.
 pub(super) fn display_uri(uri: &str) -> String {
-    Url::parse(uri)
-        .ok()
-        .and_then(|u| u.to_file_path().ok())
+    crate::util::uri_to_path(uri)
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| uri.to_string())
 }

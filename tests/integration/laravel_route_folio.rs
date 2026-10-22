@@ -92,19 +92,17 @@ async fn goto_definition_on_a_folio_route_name_lands_on_the_page() {
     let (backend, _dir) = workspace();
     let service_uri = open_initialized_php(&backend, "src/Services/Service.php").await;
 
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier {
-                uri: service_uri.clone(),
-            },
-            position: position_after(SERVICE_PHP, "route('expl"),
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
     let result = backend
-        .goto_definition(params)
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: service_uri.clone(),
+                },
+                position: position_after(SERVICE_PHP, "route('expl"),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
         .await
         .unwrap()
         .expect("route('explore') should resolve to the Folio page that names it");

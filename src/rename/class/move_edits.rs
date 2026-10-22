@@ -51,10 +51,7 @@ impl Backend {
             .get_file_content(&definition_uri)
             .ok_or_else(|| format!("Could not read the definition of `{old_fqn}`."))?;
         let symbol_map = self
-            .symbol_maps
-            .read()
-            .get(&definition_uri)
-            .cloned()
+            .symbol_map_for(&definition_uri)
             .ok_or_else(|| format!("Could not index the definition of `{old_fqn}`."))?;
         let span = class_declaration_span(
             &symbol_map,
@@ -285,7 +282,7 @@ impl Backend {
         blocks: &[FileRewrite],
         file_uri_str: &str,
     ) -> Result<Option<Vec<TextEdit>>, String> {
-        let Some(sm) = self.symbol_maps.read().get(file_uri_str).cloned() else {
+        let Some(sm) = self.symbol_map_for(file_uri_str) else {
             return Ok(Some(Vec::new()));
         };
 

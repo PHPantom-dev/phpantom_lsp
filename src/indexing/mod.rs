@@ -6,8 +6,12 @@
 //!
 //! - [`init`] — the three workspace-shape initializers (single Composer
 //!   project, monorepo, no-Composer).
-//! - [`scan`] — vendor registration and Composer-derived index (re)builds,
-//!   autoload-file and PHAR scanning.
+//! - [`scan`] — vendor registration, Composer-derived index (re)builds and
+//!   autoload-file scanning.
+//! - [`phar`] — indexing the classes inside the PHAR archives an autoload
+//!   file loads.
+//! - [`library_paths`] — the `[indexing] include` paths every pipeline
+//!   indexes last.
 //! - [`preload`] — autoload preloading and the `ensure_workspace_indexed*`
 //!   parallel parse pipeline.
 //! - [`watch`] — applying `didChangeWatchedFiles` batches to the indexes.
@@ -19,6 +23,8 @@
 use std::path::{Path, PathBuf};
 
 mod init;
+mod library_paths;
+mod phar;
 pub(crate) mod preload;
 mod reconcile;
 mod reindex;

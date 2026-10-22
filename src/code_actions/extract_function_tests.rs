@@ -1,4 +1,7 @@
 use super::*;
+use crate::class_lookup::Fqn;
+use crate::types::ClassInfo;
+use std::sync::Arc;
 
 // ── Enclosing return type resolution ────────────────────────────
 
@@ -1764,7 +1767,8 @@ fn detects_method_context_with_this() {
 
 // ── PHPDoc generation on extracted method ───────────────────────
 
-fn no_classes(_name: &str) -> Option<Arc<ClassInfo>> {
+fn no_classes(_name: Fqn<'_>) -> Option<Arc<ClassInfo>> {
+    let _name = _name.as_str();
     None
 }
 

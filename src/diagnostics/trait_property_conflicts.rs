@@ -15,6 +15,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::symbol_map::SymbolKind;
 use crate::types::{ClassInfo, ClassLikeKind, MAX_TRAIT_DEPTH, PropertyInfo};
 
@@ -30,9 +31,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
-            return;
-        };
+        let ctx = FileDiagnosticContext::gather(self, uri);
         self.collect_trait_property_conflict_diagnostics_with_context(&ctx, uri, content, out);
     }
 
@@ -99,10 +98,7 @@ struct Conflict {
 /// that trait, matching how PHP has already composed the trait by the
 /// time it is bound into the class; conflicts *inside* a trait are
 /// reported on the trait's own declaration.
-fn find_conflicts(
-    class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Vec<Conflict> {
+fn find_conflicts(class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> Vec<Conflict> {
     let class_name = class.fqn();
     let mut seen: Vec<(Arc<PropertyInfo>, Atom)> = class
         .properties
@@ -114,7 +110,7 @@ fn find_conflicts(
     let mut reported: HashSet<Atom> = HashSet::new();
 
     for trait_name in &class.used_traits {
-        let Some(trait_info) = class_loader(trait_name) else {
+        let Some(trait_info) = class_loader(Fqn::new(trait_name)) else {
             continue;
         };
         let mut trait_props = Vec::new();
@@ -147,7 +143,7 @@ fn find_conflicts(
 /// first declaration of each name winning.
 fn collect_trait_properties(
     trait_info: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     visited: &mut HashSet<Atom>,
     depth: u32,
     out: &mut Vec<Arc<PropertyInfo>>,
@@ -161,7 +157,7 @@ fn collect_trait_properties(
         }
     }
     for nested in &trait_info.used_traits {
-        if let Some(nested_info) = class_loader(nested) {
+        if let Some(nested_info) = class_loader(Fqn::new(nested)) {
             collect_trait_properties(&nested_info, class_loader, visited, depth + 1, out);
         }
     }

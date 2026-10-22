@@ -12,6 +12,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
@@ -70,7 +71,7 @@ fn resolve_property_with_hint(
     prop_name: &str,
     owner: &ClassInfo,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<ResolvedType> {
     let type_hint = crate::inheritance::resolve_property_type_hint(owner, prop_name, class_loader);
     let resolved = crate::type_engine::type_resolution::resolve_property_types(
@@ -107,16 +108,16 @@ fn class_constant_access_type(
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     let current_class_fqn = ctx.current_class.fqn();
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
     let is_class_fetch = crate::parser::is_class_fetch(cca);
 
     let target_classes = match crate::class_lookup::class_expression_name(
         cca.class,
         ctx.current_class,
-        ctx.all_classes,
-        ctx.source_class_loader,
-        ctx.source_imports,
+        ctx.file.all_classes,
+        ctx.file.source_class_loader,
+        ctx.file.source_imports,
     ) {
         Some(class_name) => {
             let resolved_name = class_name.strip_prefix('\\').unwrap_or(&class_name);
@@ -247,9 +248,9 @@ fn static_property_type(
     let Some(class_name) = crate::class_lookup::class_expression_name(
         spa.class,
         ctx.current_class,
-        ctx.all_classes,
-        ctx.source_class_loader,
-        ctx.source_imports,
+        ctx.file.all_classes,
+        ctx.file.source_class_loader,
+        ctx.file.source_imports,
     ) else {
         return vec![];
     };
@@ -258,8 +259,8 @@ fn static_property_type(
     let target_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &resolved_typed,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     // `self::`, `static::`, and `parent::` all forward late static
     // binding, so a property typed `static` stays open; an explicit
@@ -271,7 +272,7 @@ fn static_property_type(
     );
     for cls in &target_classes {
         let resolved =
-            resolve_property_with_hint(prop_name, cls, ctx.all_classes, ctx.class_loader);
+            resolve_property_with_hint(prop_name, cls, ctx.file.all_classes, ctx.file.class_loader);
         if !resolved.is_empty() {
             return if forwards_lsb {
                 resolved
@@ -316,7 +317,7 @@ fn narrowed_property_read(
     prop_name: &str,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    let class_loader = ctx.class_loader;
+    let class_loader = ctx.file.class_loader;
 
     // ── `Enum::CASE->value` / `Enum::CASE->name` ────────
     if let Expression::Access(Access::ClassConstant(cca)) = object
@@ -324,11 +325,11 @@ fn narrowed_property_read(
         && let Some(enum_name) = crate::class_lookup::class_expression_name(
             cca.class,
             ctx.current_class,
-            ctx.all_classes,
-            ctx.source_class_loader,
-            ctx.source_imports,
+            ctx.file.all_classes,
+            ctx.file.source_class_loader,
+            ctx.file.source_imports,
         )
-        && let Some(enum_cls) = class_loader(&enum_name)
+        && let Some(enum_cls) = class_loader(Fqn::new(&enum_name))
         && let Some(literal) = crate::type_engine::call_resolution::enum_case_property_literal(
             &enum_cls,
             bytes_to_str(case.value),
@@ -375,9 +376,10 @@ fn narrowed_property_read(
     // property) the narrowed type is the best we have; one wider than
     // declared falls through to normal property type resolution.
     let declared_type =
-        crate::class_lookup::find_class_by_fqn(ctx.all_classes, &ctx.current_class.fqn()).and_then(
-            |cls| crate::inheritance::resolve_property_type_hint(cls, prop_name, class_loader),
-        );
+        crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &ctx.current_class.fqn())
+            .and_then(|cls| {
+                crate::inheritance::resolve_property_type_hint(cls, prop_name, class_loader)
+            });
     match declared_type {
         Some(declared)
             if !narrowed
@@ -395,7 +397,7 @@ fn narrowed_property_read(
 fn fits_declared_type(
     assigned: &PhpType,
     declared: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     // Structural check covers scalars, unions, intersections, nullable,
     // generic, etc.
@@ -404,7 +406,7 @@ fn fits_declared_type(
     }
     // Nominal check: if both are class-like, walk the class hierarchy.
     if let Some(assigned_base) = assigned.base_name()
-        && let Some(cls) = class_loader(assigned_base)
+        && let Some(cls) = class_loader(Fqn::new(assigned_base))
         && let Some(declared_base) = declared.base_name()
     {
         return crate::class_lookup::is_subtype_of(&cls, declared_base, class_loader);
@@ -504,8 +506,12 @@ impl PropertyReceiver {
     ) -> Vec<ResolvedType> {
         let mut all_resolved: Vec<ResolvedType> = Vec::new();
         for owner in &self.owners {
-            let resolved =
-                resolve_property_with_hint(prop_name, owner, ctx.all_classes, ctx.class_loader);
+            let resolved = resolve_property_with_hint(
+                prop_name,
+                owner,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
             for mut rt in resolved {
                 // A synthetic owner (`__object_shape`) leaves `self` to the
                 // caller's context, as `replace_self_in_property_type` does.
@@ -540,7 +546,7 @@ impl PropertyReceiver {
 /// guaranteed to be that declare it.
 fn this_property_owners(prop_name: &str, ctx: &VarResolutionCtx<'_>) -> Vec<Arc<ClassInfo>> {
     let mut owners: Vec<Arc<ClassInfo>> =
-        crate::class_lookup::find_class_by_fqn(ctx.all_classes, &ctx.current_class.fqn())
+        crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &ctx.current_class.fqn())
             .map(Arc::clone)
             .into_iter()
             .collect();
@@ -561,15 +567,15 @@ fn this_property_owners(prop_name: &str, ctx: &VarResolutionCtx<'_>) -> Vec<Arc<
     } else {
         crate::type_engine::trait_context::trait_this_bounds(
             ctx.current_class,
-            ctx.all_classes,
-            ctx.class_loader,
-            ctx.backend,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+            ctx.file.backend,
         )
     };
     for bound in bounds {
         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
             &bound,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         if merged
@@ -651,7 +657,7 @@ pub(super) fn try_resolve_this_property_from_assignment(
     }
 
     let result = with_parsed_program(
-        ctx.content,
+        ctx.file.content,
         "try_resolve_this_property_from_assignment",
         |program, _content| {
             // Find the RHS of the last `$this->propName = <expr>` in the

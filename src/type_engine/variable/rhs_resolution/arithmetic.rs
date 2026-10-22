@@ -9,9 +9,10 @@ use mago_syntax::cst::binary::{Binary, BinaryOperator};
 use mago_syntax::cst::unary::UnaryPrefixOperator;
 use mago_syntax::cst::{Expression, Literal, Variable};
 
-use crate::php_type::{PhpType, TypeKind, keyword_lowercase};
+use crate::php_type::{PhpType, TypeKind, with_keyword_lowercase};
 use crate::type_engine::resolver::VarResolutionCtx;
-use crate::type_engine::types::const_fold::{self, BitwiseOp};
+use crate::type_engine::type_ops::const_fold::{self, BitwiseOp};
+use crate::type_engine::type_ops::int_interval::IntInterval;
 use crate::types::ResolvedType;
 
 use super::resolve_rhs_expression;
@@ -204,19 +205,21 @@ fn classify_php_type(ty: &PhpType, saw_float: &mut bool, saw_int: &mut bool) -> 
     }
     match ty.kind() {
         TypeKind::Named(n) => {
-            let lower = keyword_lowercase(n);
-            if lower == "bool" || lower == "boolean" || lower == "true" || lower == "false" {
-                *saw_int = true;
-            } else if lower == "numeric" || n == "number" {
-                *saw_int = true;
-                *saw_float = true;
-            } else if lower == "null" {
+            with_keyword_lowercase(n, |lower| match lower {
+                "bool" | "boolean" | "true" | "false" => {
+                    *saw_int = true;
+                    Some(())
+                }
+                "numeric" | "number" => {
+                    *saw_int = true;
+                    *saw_float = true;
+                    Some(())
+                }
                 // null coerces to 0 (int) in arithmetic; ignore it so that
                 // `int|null` classifies as int-like.
-            } else {
-                return None; // mixed, string, object, etc.
-            }
-            Some(())
+                "null" => Some(()),
+                _ => None, // mixed, string, object, etc.
+            })
         }
         TypeKind::Union(members) => {
             for member in members {
@@ -322,7 +325,7 @@ pub(crate) fn infer_arithmetic_result_type(
                 // operator invented, and it stays strict.
                 PhpType::benevolent(PhpType::union(vec![PhpType::int(), PhpType::float()]))
             } else {
-                PhpType::int()
+                int_arithmetic_result(lhs_types, rhs_types, op_kind).unwrap_or_else(PhpType::int)
             }
         }
         // At least one float, the other is known: result is float.
@@ -349,6 +352,64 @@ pub(crate) fn infer_arithmetic_result_type(
             }
         }
     }
+}
+
+/// How many pairs of alternatives two integer operands may make before
+/// `+`, `-` and `*` answer with the range covering every operand value
+/// instead of working each pair out. PHPStan's `CALCULATE_SCALARS_LIMIT`.
+const INT_COMBINATION_LIMIT: usize = 128;
+
+/// The result of `+`, `-` or `*` on two integer operands, worked out for
+/// each pair of their alternatives the way PHPStan's `integerRangeMath()`
+/// does: `(1|2) + 1` is `2|3` and `int<0, max> + 1` is `int<1, max>`.
+/// `None` for any other operator, or an operand that is not made of
+/// integers.
+fn int_arithmetic_result(
+    lhs_types: &[ResolvedType],
+    rhs_types: &[ResolvedType],
+    op_kind: ArithmeticOpKind,
+) -> Option<PhpType> {
+    let apply = match op_kind {
+        ArithmeticOpKind::Addition => IntInterval::add,
+        ArithmeticOpKind::Subtraction => IntInterval::sub,
+        ArithmeticOpKind::Multiplication => IntInterval::mul,
+        ArithmeticOpKind::Division | ArithmeticOpKind::Exponentiation => return None,
+    };
+    let mut lhs = operand_intervals(lhs_types)?;
+    let mut rhs = operand_intervals(rhs_types)?;
+    if lhs.len() * rhs.len() > INT_COMBINATION_LIMIT {
+        lhs = vec![IntInterval::hull_of(&lhs)];
+        rhs = vec![IntInterval::hull_of(&rhs)];
+    }
+
+    let mut results: Vec<IntInterval> = lhs
+        .iter()
+        .flat_map(|&a| rhs.iter().map(move |&b| apply(a, b)))
+        .collect();
+    if results.contains(&IntInterval::UNBOUNDED) {
+        return Some(PhpType::int());
+    }
+    results.sort_by_key(|interval| (interval.min.is_some(), interval.min, interval.max));
+    results.dedup();
+    Some(PhpType::union(
+        results.into_iter().map(IntInterval::into_type).collect(),
+    ))
+}
+
+/// The interval of each alternative of an arithmetic operand, or `None`
+/// when one of them is not an integer (nor a `null` or `bool`, which
+/// arithmetic reads as one).
+fn operand_intervals(types: &[ResolvedType]) -> Option<Vec<IntInterval>> {
+    let mut intervals = Vec::new();
+    for rt in types {
+        for member in rt.type_string.union_members() {
+            let interval = IntInterval::of_operand(member)?;
+            if !intervals.contains(&interval) {
+                intervals.push(interval);
+            }
+        }
+    }
+    (!intervals.is_empty()).then_some(intervals)
 }
 
 /// Infer the result type of `+` / `+=`, which PHP overloads for the array

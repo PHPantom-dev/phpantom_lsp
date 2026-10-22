@@ -66,7 +66,7 @@ impl Backend {
                 sig.options.into_iter().map(|p| p.name).collect()
             }
             ParamContext::CallArrayKey { command_name } => {
-                let index = self.laravel_commands.read();
+                let index = self.laravel.commands.read();
                 let entry = index.get(command_name)?;
                 let mut labels: Vec<String> = entry
                     .signature

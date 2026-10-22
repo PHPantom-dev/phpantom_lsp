@@ -7,7 +7,9 @@
 namespace PsalmTest_return_type_provider_sprintf_1 {
     $val = sprintf("%s", "");
 
-    assertType('string', $val);
+    // PHPantom is more precise than Psalm here: a format that is a lone
+    // `%s` returns its value unchanged.
+    assertType("''", $val);
 }
 
 // Test: sprintfStringPlaceholderStringParamFormat
@@ -63,7 +65,9 @@ namespace PsalmTest_return_type_provider_sprintf_10 {
     $flt = 1.234;
     $val = sprintf("%.*f", $precision, $flt);
 
-    assertType('string', $val);
+    // PHPantom is more precise than Psalm here: a lone `%f` conversion
+    // writes a number.
+    assertType('numeric-string', $val);
 }
 
 // Test: sprintfComplexPlaceholderNotYetSupported5

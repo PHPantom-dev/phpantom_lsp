@@ -1,9 +1,12 @@
-//! Shared subject-extraction helpers.
+//! Subject extraction: the first step of resolving a member access from
+//! source text.
 //!
 //! This module contains free functions for extracting the expression
 //! ("subject") to the left of an access operator (`->`, `?->`, `::`) in
-//! a line of PHP source code.  These are used by both the **completion**
-//! and **definition** subsystems so that the logic is defined once.
+//! a line of PHP source code, for the **completion** and **definition**
+//! subsystems.  [`subject_expr`](super::subject_expr) then parses the
+//! text, and the resolver (or
+//! [`subject_resolution`](super::subject_resolution)) types it.
 //!
 //! All functions operate on a `&[char]` slice representing a single
 //! (already-collapsed) line and work backwards from a given position.

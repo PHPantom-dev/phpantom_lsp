@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::{Hover, HoverContents};
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::symbol_map::SubjectText;
 use crate::types::*;
@@ -179,7 +180,7 @@ fn raw_class_has_member(
     owner: &ClassInfo,
     member_name: &str,
     member_kind: &MemberKindForOrigin,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     let fqn = owner.fqn();
 
@@ -187,7 +188,7 @@ fn raw_class_has_member(
     // is only known through the current file's AST and not yet indexed),
     // fall back to assuming the member is declared — this avoids hiding
     // indicators when the project is only partially indexed.
-    match class_loader(&fqn) {
+    match class_loader(Fqn::new(&fqn)) {
         Some(raw) => declares_member(&raw, member_name, member_kind),
         None => true,
     }
@@ -225,7 +226,7 @@ fn build_origin_lines(
     is_virtual: bool,
     is_macro: bool,
     member_kind: MemberKindForOrigin,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> String {
     let mut origins: Vec<MemberOrigin> = Vec::new();
 
@@ -243,14 +244,14 @@ fn build_origin_lines(
 
     if declared_on_owner {
         if let Some(ref parent_name) = owner.parent_class
-            && let Some(parent) = class_loader(parent_name)
+            && let Some(parent) = class_loader(Fqn::new(parent_name))
             && declares_member(&parent, member_name, &member_kind)
         {
             origins.push(MemberOrigin::Override(short_name(parent_name).to_string()));
         }
 
         for iface_name in &owner.interfaces {
-            if let Some(iface) = class_loader(iface_name)
+            if let Some(iface) = class_loader(Fqn::new(iface_name))
                 && declares_member(&iface, member_name, &member_kind)
             {
                 origins.push(MemberOrigin::Implements(short_name(iface_name).to_string()));
@@ -302,7 +303,7 @@ pub(crate) fn find_declaring_class(
     owner: &ClassInfo,
     member_name: &str,
     member_kind: &MemberKindForOrigin,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Arc<ClassInfo> {
     if raw_class_has_member(owner, member_name, member_kind, class_loader) {
         return Arc::new(owner.clone());
@@ -317,7 +318,7 @@ pub(crate) fn find_declaring_class(
     owner
         .mixins
         .iter()
-        .filter_map(|name| class_loader(name))
+        .filter_map(|name| class_loader(Fqn::new(name)))
         .find(|mixin| declares(mixin))
         .unwrap_or_else(|| Arc::new(owner.clone()))
 }
@@ -588,7 +589,7 @@ impl Backend {
         &self,
         method: &MethodInfo,
         owner: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         uri: &str,
         content: &str,
     ) -> Hover {
@@ -708,7 +709,7 @@ impl Backend {
         &self,
         property: &PropertyInfo,
         owner: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Hover {
         let visibility = format_visibility(property.visibility);
         let static_kw = if property.is_static { "static " } else { "" };
@@ -781,7 +782,7 @@ impl Backend {
         &self,
         constant: &ConstantInfo,
         owner: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Hover {
         let member_line = if constant.is_enum_case {
             if let Some(ref val) = constant.enum_value {

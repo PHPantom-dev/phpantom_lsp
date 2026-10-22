@@ -228,9 +228,11 @@ Each action needs tests following the existing pattern:
 
 ### Attribute insertion pattern
 
-`find_method_insertion_point` is shared from `code_actions/phpstan/mod.rs`
-and used by `add_override.rs` and `add_return_type_will_change.rs`. Future attribute-related actions should
-reuse it.
+`attributed_member_at` (`code_actions/phpstan/attributes.rs`) reads the
+attributes written on the member a diagnostic points at, and
+`add_attribute.rs` adds the one a PHPStan identifier asks for. A future
+action that adds an attribute is a new row in its `MISSING_ATTRIBUTES`
+table.
 
 ### PHPDoc type mismatch pattern
 

@@ -7,6 +7,7 @@ use super::*;
 use std::sync::Arc;
 
 use crate::atom::bytes_to_str;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::docblock;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
@@ -108,7 +109,7 @@ impl ParamSite {
         self,
         current_class: &ClassInfo,
         content: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         source_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<PhpType> {
         let effective =
@@ -117,7 +118,11 @@ impl ParamSite {
             (Some(settled), Some(written))
                 if settled != written
                     && !param_docblock_narrows_hint(
-                        &crate::names::resolve_php_type_names(&settled, source_class_loader),
+                        &crate::names::resolve_php_type_names(
+                            &settled,
+                            source_class_loader,
+                            class_loader,
+                        ),
                         &written,
                         self.decl_start,
                         current_class,

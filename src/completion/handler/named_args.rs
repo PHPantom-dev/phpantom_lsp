@@ -83,7 +83,7 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<NamedArgContext> {
-        let symbol_map = self.symbol_maps.read().get(uri).cloned()?;
+        let symbol_map = self.symbol_map_for(uri)?;
 
         let cursor_byte_offset = position_to_offset(content, position);
         let cs = symbol_map.find_enclosing_call_site(cursor_byte_offset)?;

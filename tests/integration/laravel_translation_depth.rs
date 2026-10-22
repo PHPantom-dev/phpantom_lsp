@@ -1,6 +1,6 @@
 use crate::common::{
-    create_psr4_workspace, definition_locations, find_references, goto_definition_at,
-    lsp_pos_to_offset, markup_hover_at, open_document, open_php, position_of,
+    completion_response, create_psr4_workspace, definition_locations, find_references,
+    goto_definition_at, lsp_pos_to_offset, markup_hover_at, open_document, open_php, position_of,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -192,18 +192,8 @@ async fn translation_argument_completion_uses_both_language_folders() {
         let at = position_of(source, "|");
         let php = source.replace('|', "");
         open_php(&backend, &uri, &php).await;
-        let response = backend
-            .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: at,
-                },
-                work_done_progress_params: Default::default(),
-                partial_result_params: Default::default(),
-                context: None,
-            })
+        let response = completion_response(&backend, &uri, at.line, at.character, None)
             .await
-            .unwrap()
             .unwrap();
         let items = match response {
             CompletionResponse::Array(items) => items,

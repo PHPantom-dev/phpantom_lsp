@@ -25,6 +25,7 @@ use tower_lsp::lsp_types::*;
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::text_position::{find_line_end, find_line_start};
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -454,41 +455,6 @@ fn count_occurrences(haystack: &str, needle: &str) -> usize {
         start = abs_pos + 1;
     }
     count
-}
-
-/// Find the start of the line containing `offset` (the position after the
-/// preceding newline, or 0 if at the start of the file).
-fn find_line_start(content: &str, offset: usize) -> usize {
-    let bytes = content.as_bytes();
-    let mut pos = offset;
-    while pos > 0 {
-        let prev = bytes[pos - 1];
-        if prev == b'\n' {
-            break;
-        }
-        pos -= 1;
-    }
-    pos
-}
-
-/// Find the end of the line containing `offset` (past the trailing newline).
-fn find_line_end(content: &str, offset: usize) -> usize {
-    let bytes = content.as_bytes();
-    let mut pos = offset;
-    while pos < bytes.len() {
-        if bytes[pos] == b'\n' {
-            return pos + 1;
-        }
-        if bytes[pos] == b'\r' {
-            pos += 1;
-            if pos < bytes.len() && bytes[pos] == b'\n' {
-                pos += 1;
-            }
-            return pos;
-        }
-        pos += 1;
-    }
-    pos
 }
 
 /// Extract the default value expression text from a plain property.

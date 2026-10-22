@@ -53,13 +53,9 @@ pub(crate) type RenameOutcome = Result<Option<tower_lsp::lsp_types::WorkspaceEdi
 /// the structured [`tower_lsp::lsp_types::Url`] instead, so each one is
 /// reparsed here rather than trusted as already valid.
 fn parse_edit_target_uri(file_uri_str: &str) -> Option<tower_lsp::lsp_types::Url> {
-    match tower_lsp::lsp_types::Url::parse(file_uri_str) {
-        Ok(u) => Some(u),
-        Err(e) => {
-            tracing::warn!(
-                "rename: dropping edits for file with unparseable URI {file_uri_str:?}: {e}"
-            );
-            None
-        }
+    let url = crate::util::parse_url(file_uri_str);
+    if url.is_none() {
+        tracing::warn!("rename: dropping edits for file with unparseable URI {file_uri_str:?}");
     }
+    url
 }

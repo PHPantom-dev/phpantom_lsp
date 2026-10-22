@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::*;
 use crate::atom::{AtomMap, atom};
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::types::{ClassLikeKind, MethodInfo, Visibility};
 
@@ -401,7 +402,8 @@ fn test_extends_generics_propagate_through_parent_use_generics() {
         ..ClassInfo::default()
     };
 
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "DataCollection" => Some(Arc::new(parent_class.clone())),
@@ -626,7 +628,8 @@ fn method_tag_does_not_shadow_a_real_inherited_method() {
         "/**\n * @method MockInterface mock(string $abstract)\n */".to_string(),
     ));
 
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "TestCase" => Some(Arc::new(parent_class.clone())),
@@ -669,7 +672,8 @@ fn find_declaring_ancestor_loads_each_interface_once() {
         })
         .collect();
     let loads = Cell::new(0usize);
-    let loader = |name: &str| {
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
         loads.set(loads.get() + 1);
         classes.iter().find(|c| c.name == name).cloned()
     };

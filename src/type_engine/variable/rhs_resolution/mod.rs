@@ -60,6 +60,7 @@ use std::sync::Arc;
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -86,7 +87,7 @@ mod scope_reads;
 mod static_calls;
 mod unary_prefix;
 
-pub(crate) use scalar_fold::fold_concat_types;
+pub(crate) use scalar_fold::{fold_concat_types, is_literal_string_type};
 
 use arithmetic::resolve_binary_result_type;
 use array_access::resolve_rhs_array_access;
@@ -144,7 +145,7 @@ pub(super) fn runtime_named_member_type() -> Vec<ResolvedType> {
 fn resolved_type_with_lookup(
     ty: PhpType,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> ResolvedType {
     if let Some(base) = ty.base_name() {
         let base = base.strip_prefix('\\').unwrap_or(base);
@@ -284,7 +285,7 @@ fn resolve_rhs_expression_inner<'b>(
         Expression::AnonymousClass(anon) => {
             let start = anon.left_brace.start.offset;
             let name = format!("__anonymous@{}", start);
-            if let Some(cls) = ctx.all_classes.iter().find(|c| c.name == name) {
+            if let Some(cls) = ctx.file.all_classes.iter().find(|c| c.name == name) {
                 return ResolvedType::from_classes(vec![Arc::clone(cls)]);
             }
             vec![]
@@ -296,7 +297,8 @@ fn resolve_rhs_expression_inner<'b>(
             // `is_a(..., true)` guard).  The completion/hover paths carry
             // a `scope_var_resolver`; the diagnostic path instead reads
             // the forward walker's snapshot cache, so both are consulted.
-            if let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
+            if let Some(key) =
+                crate::type_engine::type_ops::condition_facts::expr_to_subject_key(expr)
                 && key.contains('[')
                 && let Some(from_scope) = narrowed_subject_from_scope(&key, expr, ctx)
             {
@@ -321,7 +323,8 @@ fn resolve_rhs_expression_inner<'b>(
             // lookup because the arm describes this branch specifically,
             // where the scope entry describes the statement as a whole.
             if !ctx.match_arm_narrowing.is_empty()
-                && let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
+                && let Some(key) =
+                    crate::type_engine::type_ops::condition_facts::expr_to_subject_key(expr)
                 && let Some(narrowed) = ctx.match_arm_narrowing.get(&key)
             {
                 return narrowed.clone();
@@ -332,7 +335,8 @@ fn resolve_rhs_expression_inner<'b>(
             // property (`self::$repo`) is read the same way: the walker
             // records writes and checks under its own key, and reading
             // straight from the declaration is what loses them.
-            if let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
+            if let Some(key) =
+                crate::type_engine::type_ops::condition_facts::expr_to_subject_key(expr)
                 && (key.contains("->") || key.contains("::$"))
                 && let Some(from_scope) = narrowed_subject_from_scope(&key, expr, ctx)
             {
@@ -358,9 +362,21 @@ fn resolve_rhs_expression_inner<'b>(
         // directly.  The signs are separate AST nodes rather than part of
         // numeric literals, so `-1` keeps its exact value through here.
         Expression::UnaryPrefix(unary) => {
-            match unary_prefix_result_type(&unary.operator, unary.operand, || {
-                resolve_rhs_expression(unary.operand, ctx)
-            }) {
+            // A scalar cast checked earlier (`isset($map[(string) $k])`)
+            // reads the entry the check left under the cast's key, the
+            // way a function call does.
+            if unary.operator.is_cast()
+                && let Some(narrowed) = narrowed_call(expr, ctx)
+            {
+                return narrowed;
+            }
+            match unary_prefix_result_type(
+                &unary.operator,
+                unary.operand,
+                || resolve_rhs_expression(unary.operand, ctx),
+                ctx.file.class_loader,
+                ctx.resolved_class_cache,
+            ) {
                 Some(ty) => vec![ResolvedType::from_type_string(ty)],
                 None => vec![],
             }
@@ -389,8 +405,8 @@ fn resolve_rhs_expression_inner<'b>(
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &lookup_ty,
                 &ctx.current_class.fqn(),
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
             if classes.is_empty() {
                 vec![ResolvedType::from_type_string(closure_ty)]
@@ -409,8 +425,8 @@ fn resolve_rhs_expression_inner<'b>(
                     crate::type_engine::type_resolution::type_hint_to_classes_typed(
                         send_php_type,
                         &ctx.current_class.fqn(),
-                        ctx.all_classes,
-                        ctx.class_loader,
+                        ctx.file.all_classes,
+                        ctx.file.class_loader,
                     ),
                     send_php_type.clone(),
                 );
@@ -439,18 +455,24 @@ fn resolve_rhs_expression_inner<'b>(
         }
         // ── Concatenation: `"prefix" . $var` → string ───────────────
         // Two operands that each hold one known scalar concatenate to the
-        // literal PHP would build (`'1' . 'a'` is `'1a'`).
+        // literal PHP would build (`'1' . 'a'` is `'1a'`). Otherwise a
+        // non-empty operand makes the result non-empty (`'x' . $u`).
         Expression::Binary(binary) if binary.operator.is_concatenation() => {
-            let folded = (scalar_fold::is_cheap_scalar_operand(binary.lhs)
-                && scalar_fold::is_cheap_scalar_operand(binary.rhs))
-            .then(|| {
-                let lhs = scalar_fold::single_scalar(&resolve_rhs_expression(binary.lhs, ctx))?;
-                let rhs = scalar_fold::single_scalar(&resolve_rhs_expression(binary.rhs, ctx))?;
-                scalar_fold::fold_concat(&lhs, &rhs)
-            })
-            .flatten();
+            let foldable = scalar_fold::is_cheap_scalar_operand(binary.lhs)
+                && scalar_fold::is_cheap_scalar_operand(binary.rhs);
+            let lhs = resolve_rhs_expression(binary.lhs, ctx);
+            if !foldable {
+                return vec![ResolvedType::from_type_string(scalar_fold::concat_result(
+                    &lhs,
+                    || resolve_rhs_expression(binary.rhs, ctx),
+                ))];
+            }
+            let rhs = resolve_rhs_expression(binary.rhs, ctx);
+            let folded = scalar_fold::single_scalar(&lhs)
+                .zip(scalar_fold::single_scalar(&rhs))
+                .and_then(|(l, r)| scalar_fold::fold_concat(&l, &r));
             vec![ResolvedType::from_type_string(
-                folded.unwrap_or_else(PhpType::string),
+                folded.unwrap_or_else(|| scalar_fold::concat_result(&lhs, || rhs)),
             )]
         }
         // ── Interpolated strings: `"$a-$b"`, heredocs ───────────────

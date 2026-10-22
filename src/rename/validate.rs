@@ -1,6 +1,6 @@
 //! Buffer verification for the edit-producing rename paths.
 //!
-//! `symbol_maps` is refreshed on a background task after each `didChange`
+//! A file's symbol map is refreshed on a background task after each `didChange`
 //! and is left untouched entirely when a parse panics, so a request can
 //! read a map whose byte offsets index an *older* version of the file.
 //! Every other read-only feature degrades to a wrong hover or a missing
@@ -56,9 +56,7 @@ impl Backend {
     /// nothing to invalidate; the per-range check below still applies to
     /// the locations it produced through other indices.
     pub(super) fn rename_map_matches(&self, uri: &str, content: &str) -> bool {
-        self.symbol_maps
-            .read()
-            .get(uri)
+        self.symbol_map_for(uri)
             .is_none_or(|map| map.matches_source(content))
     }
 

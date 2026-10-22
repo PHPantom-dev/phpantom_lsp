@@ -66,6 +66,10 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         | "register_tick_function"
         | "header_register_callback" => mark_later_invoked(func, "$callback"),
         "pcntl_signal" => mark_later_invoked(func, "$handler"),
+        // The arbitrary-precision functions answer with the number they
+        // computed, which PHP 8 never replaces with `null` or `false`.
+        "bcadd" | "bcsub" | "bcmul" | "bcdiv" | "bcmod" | "bcpow" | "bcpowmod" | "bcsqrt"
+        | "bcfloor" | "bcceil" | "bcround" => func.return_type = Some(PhpType::numeric_string()),
         "define" => widen_parameter_to_mixed(func, "$value"),
         name if name.starts_with("ctype_") => widen_parameter_to_mixed(func, "$text"),
         _ => {}
@@ -638,7 +642,7 @@ fn patch_print_r(func: &mut FunctionInfo) {
 ///
 /// The stubs declare `string[]|false`; each entry is the name of a class-like
 /// keyed by that same name. Whether the `false` can happen is decided at the
-/// call site (see `type_engine::types::call_site_returns`).
+/// call site (see `type_engine::type_ops::call_site_returns`).
 fn patch_class_relation(func: &mut FunctionInfo, name_type: &str) {
     func.return_type = Some(PhpType::parse(&format!("array<string, {name_type}>|false")));
 }
@@ -718,13 +722,15 @@ fn patch_mb_convert_encoding(func: &mut FunctionInfo) {
 /// `abs()` returns the type it was given; the declared `int|float` union
 /// leaves an `int` argument's result carrying a `float` branch that cannot
 /// happen. An argument that is neither (a numeric string, a `mixed`) leaves
-/// both branches, which is all the call can promise.
+/// both branches, which is all the call can promise. An `int` comes back
+/// non-negative, as PHPStan types it (`abs(PHP_INT_MIN)` overflows into a
+/// `float`, which the range ignores the way PHPStan's does).
 fn patch_abs(func: &mut FunctionInfo) {
     conditional_on(
         func,
         "$num",
         PhpType::int(),
-        PhpType::int(),
+        PhpType::int_range("0", "max"),
         PhpType::float(),
     );
 }

@@ -1,6 +1,6 @@
 //! JSON translation declarations with their source positions.
 
-use tower_lsp::lsp_types::{Location, Position, Url};
+use tower_lsp::lsp_types::{Location, Position};
 
 use crate::Backend;
 use crate::symbol_map::LaravelStringKind;
@@ -71,11 +71,12 @@ pub(crate) fn find_json_trans_references(
     if !uri.ends_with(".json") {
         return None;
     }
-    let path = Url::parse(uri).ok()?.to_file_path().ok()?;
+    let path = crate::util::uri_to_path(uri)?;
     let parent = path.parent()?;
     if !parent.ends_with("lang")
         && !backend
-            .laravel_provider_resources
+            .laravel
+            .provider_resources
             .read()
             .trans_dirs
             .iter()

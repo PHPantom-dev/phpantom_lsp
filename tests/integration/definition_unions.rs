@@ -1,7 +1,6 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Union Return Type Resolution ───────────────────────────────────────────
@@ -40,30 +39,10 @@ async fn test_goto_definition_union_return_type_function() {
         "}\n",                                                    // 17
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "onlyOnB" on line 14 — B has it, C doesn't
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 14,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 14, 16).await;
     assert!(
         result.is_some(),
         "Should resolve $a->onlyOnB() via union return type B|C"
@@ -81,19 +60,7 @@ async fn test_goto_definition_union_return_type_function() {
     }
 
     // Click on "onlyOnC" on line 15 — C has it, B doesn't
-    let params2 = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 15,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result2 = backend.goto_definition(params2).await.unwrap();
+    let result2 = goto_definition_at(&backend, &uri, 15, 16).await;
     assert!(
         result2.is_some(),
         "Should resolve $a->onlyOnC() via union return type B|C"
@@ -141,15 +108,7 @@ async fn test_goto_definition_union_return_type_standalone_function() {
         "}\n",                                   // 19
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Register the standalone function in global_functions so the resolver
     // can look up its return type.
@@ -169,19 +128,7 @@ async fn test_goto_definition_union_return_type_standalone_function() {
     }
 
     // Click on "bark" on line 16 — Dog has it
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 16,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 16, 16).await;
     assert!(
         result.is_some(),
         "Should resolve $pet->bark() via Dog|Cat union return type"
@@ -199,19 +146,7 @@ async fn test_goto_definition_union_return_type_standalone_function() {
     }
 
     // Click on "meow" on line 17 — Cat has it
-    let params2 = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 17,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result2 = backend.goto_definition(params2).await.unwrap();
+    let result2 = goto_definition_at(&backend, &uri, 17, 16).await;
     assert!(
         result2.is_some(),
         "Should resolve $pet->meow() via Dog|Cat union return type"
@@ -254,30 +189,10 @@ async fn test_goto_definition_nullable_union_return_type() {
         "}\n",                                                            // 14
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "format" on line 12
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 12,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 12, 16).await;
     assert!(
         result.is_some(),
         "Should resolve $f->format() via ?Formatter nullable return type"
@@ -321,30 +236,10 @@ async fn test_goto_definition_union_property_type() {
         "}\n",                                    // 16
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "start" on line 13 — Engine has it
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 13,
-                character: 30,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 13, 30).await;
     assert!(
         result.is_some(),
         "Should resolve $this->powerUnit->start() via Engine|Motor union property type"
@@ -362,19 +257,7 @@ async fn test_goto_definition_union_property_type() {
     }
 
     // Click on "rev" on line 14 — Motor has it
-    let params2 = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 14,
-                character: 27,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result2 = backend.goto_definition(params2).await.unwrap();
+    let result2 = goto_definition_at(&backend, &uri, 14, 27).await;
     assert!(
         result2.is_some(),
         "Should resolve $this->powerUnit->rev() via Engine|Motor union property type"
@@ -416,30 +299,10 @@ async fn test_goto_definition_union_parameter_type_hint() {
         "}\n",                                                         // 14
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "read" on line 11 — Reader has it
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 11,
-                character: 18,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 11, 18).await;
     assert!(
         result.is_some(),
         "Should resolve $input->read() via Reader|Stream union param type"
@@ -457,19 +320,7 @@ async fn test_goto_definition_union_parameter_type_hint() {
     }
 
     // Click on "consume" on line 12 — Stream has it
-    let params2 = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 12,
-                character: 18,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result2 = backend.goto_definition(params2).await.unwrap();
+    let result2 = goto_definition_at(&backend, &uri, 12, 18).await;
     assert!(
         result2.is_some(),
         "Should resolve $input->consume() via Reader|Stream union param type"
@@ -512,30 +363,10 @@ async fn test_goto_definition_union_with_scalar_parts() {
         "}\n",                                                    // 14
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "unwrap" on line 12 — `string` part is ignored, Result has it
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 12,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 12, 14).await;
     assert!(
         result.is_some(),
         "Should resolve $r->unwrap() via string|Result, ignoring scalar part"
@@ -601,30 +432,10 @@ async fn test_goto_definition_union_return_type_cross_file() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "encode" on line 11 — Encoder has it (cross-file)
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 11,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 11, 14).await;
     assert!(
         result.is_some(),
         "Should resolve $c->encode() via Encoder|Decoder union return type (cross-file)"
@@ -647,19 +458,7 @@ async fn test_goto_definition_union_return_type_cross_file() {
     }
 
     // Click on "decode" on line 12 — Decoder has it (cross-file)
-    let params2 = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 12,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result2 = backend.goto_definition(params2).await.unwrap();
+    let result2 = goto_definition_at(&backend, &uri, 12, 14).await;
     assert!(
         result2.is_some(),
         "Should resolve $c->decode() via Encoder|Decoder union return type (cross-file)"
@@ -723,33 +522,12 @@ async fn test_goto_definition_union_of_same_short_name_classes() {
         "}\n",                                                  // 28
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // (call site line, declaration line) — the second member is the one the
     // short-name collapse used to lose.
     for (call_line, decl_line) in [(24u32, 3u32), (25, 10)] {
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position {
-                    line: call_line,
-                    character: 30,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        let result = goto_definition_at(&backend, &uri, call_line, 30).await;
         match result {
             Some(GotoDefinitionResponse::Scalar(location)) => {
                 assert_eq!(

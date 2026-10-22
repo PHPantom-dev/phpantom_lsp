@@ -1,19 +1,100 @@
 //! Class lookup by name/offset and subtype-relationship checks.
 //!
-//! These helpers answer "which class is this?" and, through
-//! [`subtyping`], "is this class a subtype of that one?" against an
-//! already-loaded slice of [`ClassInfo`] values (or via a `class_loader`
+//! These helpers answer "which class is this?", through [`subtyping`]
+//! "is this class a subtype of that one?", and through [`compatibility`]
+//! "can a value of this type be passed where that one is declared?" against an
+//! already-loaded slice of [`ClassInfo`] values (or via a class loader
 //! closure for cross-file lookups). Cross-file/PSR-4/stub resolution
 //! itself lives in [`crate::resolution`]; this module is the shared
 //! kernel that resolution and the completion/diagnostics pipelines both
 //! call into.
+//!
+//! # Which class loader to use
+//!
+//! A class name is either *written*, as it appears in a file (`new Foo`,
+//! `Foo::bar()`, `@var Foo`), or *resolved*, a fully-qualified name the
+//! engine already worked out (a stored `parent_class`, a type hint, a type
+//! string the type engine carries around).  The two read differently: a
+//! written `Redis` goes through the file's imports and namespace, a
+//! resolved `Redis` is the global class.  Each kind has its own loader,
+//! and the types keep them apart:
+//!
+//! - **Resolved names** go through a [`ResolvedClassLoader`], which only
+//!   accepts an [`Fqn`].  Build one with
+//!   [`Backend::resolved_class_loader`](crate::Backend::resolved_class_loader)
+//!   (or `_with` for a re-parsed class list); inside the type engine it is
+//!   [`FileCtx::class_loader`](crate::type_engine::resolver::FileCtx::class_loader).
+//!   [`find_or_load_resolved`] checks the file's own classes first, and
+//!   [`load_ancestor`] loads a stored parent, interface or trait.
+//! - **Written names** go through a [`SourceClassLoader`], which takes the
+//!   name as spelled (`&str`) and applies the imports and namespace of one
+//!   `namespace` block.  Build one with
+//!   [`Backend::class_loader`](crate::Backend::class_loader) for a cursor,
+//!   [`Backend::class_loaders`](crate::Backend::class_loaders) for a whole
+//!   file, or [`FileLoaders::class_loader_at`](crate::resolution::FileLoaders::class_loader_at);
+//!   inside the type engine it is
+//!   [`FileCtx::source_class_loader`](crate::type_engine::resolver::FileCtx::source_class_loader).
+//!   To turn a written name into an FQN without loading it, use
+//!   [`resolve_code_class_name`](crate::names::resolve_code_class_name).
+//!
+//! Wrapping a written name in [`Fqn::new`] is the one way to get this
+//! wrong, so build an `Fqn` only from a name that is already resolved.
 
+mod compatibility;
 mod subtyping;
 
 use std::sync::Arc;
 
 use crate::types::ClassInfo;
 
+/// A fully-qualified class name, without a leading `\`.
+///
+/// The only argument a [`ResolvedClassLoader`] takes, so a name has to be
+/// declared resolved before it can be looked up as one.  [`Fqn::new`]
+/// strips a leading `\`, so callers never do it by hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Fqn<'a>(&'a str);
+
+impl<'a> Fqn<'a> {
+    /// The already-resolved `name`, with or without a leading `\`.
+    #[inline]
+    pub fn new(name: &'a str) -> Self {
+        Self(name.strip_prefix('\\').unwrap_or(name))
+    }
+
+    /// The name, without a leading `\`.
+    #[inline]
+    pub fn as_str(self) -> &'a str {
+        self.0
+    }
+}
+
+impl std::ops::Deref for Fqn<'_> {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &str {
+        self.0
+    }
+}
+
+impl std::fmt::Display for Fqn<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+/// A class loader for already-resolved names; see the [module docs](self).
+pub type ResolvedClassLoader<'a> = dyn Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> + 'a;
+
+/// A class loader for names as written in one `namespace` block of a file;
+/// see the [module docs](self).
+pub type SourceClassLoader<'a> = dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a;
+
+pub(crate) use compatibility::{
+    first_rejected_callable_param, is_type_compatible, missing_required_shape_keys,
+    shape_breaks_list_order,
+};
 pub(crate) use subtyping::{
     evaluate_constant_shape_key, is_subclass_of, is_subtype_of, is_subtype_of_named,
     is_subtype_of_names, is_subtype_of_typed,
@@ -183,7 +264,7 @@ pub(crate) fn class_expression_name(
     expr: &mago_syntax::cst::Expression<'_>,
     current_class: &ClassInfo,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
     imports: crate::type_engine::resolver::SourceImports<'_>,
 ) -> Option<String> {
     use mago_syntax::cst::Expression;
@@ -269,42 +350,21 @@ pub(crate) fn resolve_class_keyword(
 pub(crate) fn load_ancestor(
     class_fqn: &str,
     ancestor_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<Arc<ClassInfo>> {
-    load_resolved_name(ancestor_name, class_loader)
-        .filter(|cls| !cls.fqn().eq_ignore_ascii_case(class_fqn))
-}
-
-/// Load the class an already-resolved `name` names, whichever loader
-/// `class_loader` is.
-///
-/// A resolved name is fully qualified.  A source-name loader would resolve
-/// it against the consuming file's imports and namespace (`Exception`
-/// through `use Foo\Exception;`, `App\Model` as `App\App\Model` inside
-/// `namespace App`), so it is looked up as the explicit reference `\Name`,
-/// which every loader reads as exactly that class.  A miss is final: read
-/// any other way, a class that does not exist would be answered by a
-/// same-named import.
-pub(crate) fn load_resolved_name(
-    name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<Arc<ClassInfo>> {
-    if name.starts_with('\\') {
-        return class_loader(name);
-    }
-    class_loader(&format!("\\{name}"))
+    class_loader(Fqn::new(ancestor_name)).filter(|cls| !cls.fqn().eq_ignore_ascii_case(class_fqn))
 }
 
 /// The class an already-resolved `fqn` names: one of `all_classes`, else
-/// whatever `class_loader` loads for it (see [`load_resolved_name`]).
+/// whatever `class_loader` loads for it.
 pub(crate) fn find_or_load_resolved(
     fqn: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<Arc<ClassInfo>> {
     find_class_by_fqn(all_classes, fqn)
         .map(Arc::clone)
-        .or_else(|| load_resolved_name(fqn, class_loader))
+        .or_else(|| class_loader(Fqn::new(fqn)))
 }
 
 #[cfg(test)]

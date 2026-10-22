@@ -77,15 +77,13 @@ pub(crate) fn resolve_laravel_string_key(
 /// core alias the framework declares has no registration of its own, so the
 /// bound class is the only answer it has.
 fn resolve_container_binding_definitions(backend: &crate::Backend, key: &str) -> Vec<Location> {
-    use tower_lsp::lsp_types::Url;
-
     let Some(target) = backend.container_binding_target(key) else {
         return Vec::new();
     };
 
     let mut locations = Vec::new();
     if let Some(site) = target.site
-        && let Ok(parsed_uri) = Url::parse(&site.uri)
+        && let Some(parsed_uri) = crate::util::parse_url(&site.uri)
         && let Some(content) = backend.get_file_content(&site.uri)
     {
         let position = crate::text_position::offset_to_position(&content, site.offset as usize);
@@ -105,17 +103,16 @@ fn resolve_container_binding_definitions(backend: &crate::Backend, key: &str) ->
 /// broadest answer — followed by each policy method, ordered by policy FQN so
 /// the list is stable between requests.
 fn resolve_gate_ability_definitions(backend: &crate::Backend, ability: &str) -> Vec<Location> {
-    use tower_lsp::lsp_types::Url;
-
     let mut locations = Vec::new();
 
     let definition = backend
-        .laravel_gates
+        .laravel
+        .gates
         .read()
         .definition(ability)
         .map(|target| (target.uri.clone(), target.offset));
     if let Some((uri, offset)) = definition
-        && let Ok(parsed_uri) = Url::parse(&uri)
+        && let Some(parsed_uri) = crate::util::parse_url(&uri)
         && let Some(content) = backend.get_file_content(&uri)
     {
         let position = crate::text_position::offset_to_position(&content, offset as usize);
@@ -146,8 +143,6 @@ fn policy_method_location(
     policy: &crate::types::ClassInfo,
     method: &crate::types::MethodInfo,
 ) -> Option<Location> {
-    use tower_lsp::lsp_types::Url;
-
     let fqn = policy.fqn();
     let at_declaration = (method.name_offset != 0)
         .then(|| {
@@ -161,7 +156,7 @@ fn policy_method_location(
             let position =
                 crate::text_position::offset_to_position(&content, method.name_offset as usize);
             Some(crate::definition::point_location(
-                Url::parse(&uri).ok()?,
+                crate::util::parse_url(&uri)?,
                 position,
             ))
         })
@@ -177,10 +172,9 @@ fn policy_method_location(
 /// jumps to the config file, a view name to the template).  The mapped model
 /// follows so that go-to-definition also offers the class the alias stands for.
 fn resolve_morph_alias_definitions(backend: &crate::Backend, alias: &str) -> Vec<Location> {
-    use tower_lsp::lsp_types::Url;
-
     let Some((fqn, uri, offset)) = backend
-        .laravel_morph_map
+        .laravel
+        .morph_map
         .read()
         .get(alias)
         .map(|target| (target.fqn.clone(), target.uri.clone(), target.offset))
@@ -189,7 +183,7 @@ fn resolve_morph_alias_definitions(backend: &crate::Backend, alias: &str) -> Vec
     };
 
     let mut locations = Vec::new();
-    if let Ok(parsed_uri) = Url::parse(&uri)
+    if let Some(parsed_uri) = crate::util::parse_url(&uri)
         && let Some(content) = backend.get_file_content(&uri)
     {
         let position = crate::text_position::offset_to_position(&content, offset as usize);
@@ -204,10 +198,9 @@ fn resolve_morph_alias_definitions(backend: &crate::Backend, alias: &str) -> Vec
 /// Resolve an Artisan command name to the declaration site inside its
 /// command class (the `$signature` / `$name` / `#[AsCommand]` literal).
 fn resolve_command_definition(backend: &crate::Backend, name: &str) -> Option<Location> {
-    use tower_lsp::lsp_types::Url;
-    let index = backend.laravel_commands.read();
+    let index = backend.laravel.commands.read();
     let entry = index.get(name)?;
-    let uri = Url::parse(&entry.uri).ok()?;
+    let uri = crate::util::parse_url(&entry.uri)?;
     let content = backend.get_file_content(&entry.uri)?;
     let position = crate::text_position::offset_to_position(&content, entry.name_offset as usize);
     Some(crate::definition::point_location(uri, position))
@@ -287,7 +280,6 @@ fn find_string_key_usages(
     use crate::references::push_location;
     use crate::symbol_map::SymbolKind;
     use crate::text_position::LineIndex;
-    use tower_lsp::lsp_types::Url;
 
     let mut locations = Vec::new();
     for (file_uri, symbol_map) in snapshot {
@@ -337,7 +329,7 @@ fn find_string_key_usages(
             continue;
         }
 
-        let Ok(parsed_uri) = Url::parse(file_uri) else {
+        let Some(parsed_uri) = crate::util::parse_url(file_uri) else {
             continue;
         };
         // A template's spans index the virtual PHP it lowers to, which the

@@ -805,7 +805,7 @@ function demo(): void {
     let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     assert!(
-        result.contains("@param Closure(int): string $fn"),
+        result.contains("@param Closure(int): numeric-string $fn"),
         "a closure parameter should carry its signature: {result}"
     );
     assert!(

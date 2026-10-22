@@ -6,8 +6,8 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        APP_PSR4_COMPOSER, create_psr4_workspace, open_document, with_code, workspace_path,
-        workspace_uri,
+        APP_PSR4_COMPOSER, completion_response, create_psr4_workspace, hover_response,
+        open_document, references_response, with_code, workspace_path, workspace_uri,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
@@ -21,16 +21,7 @@ mod tests {
         line: u32,
         character: u32,
     ) -> String {
-        let result = backend
-            .hover(HoverParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .unwrap();
+        let result = hover_response(backend, uri, line, character).await;
         match result {
             Some(Hover {
                 contents: HoverContents::Markup(m),
@@ -76,26 +67,17 @@ mod tests {
         .await;
 
         // Completion after `$item->` must offer Item's members.
-        let result = backend
-            .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier {
-                        uri: blade_uri.clone(),
-                    },
-                    position: Position {
-                        line: 0,
-                        character: 10,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: Some(CompletionContext {
-                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-                    trigger_character: Some(">".to_string()),
-                }),
-            })
-            .await
-            .unwrap();
+        let result = completion_response(
+            &backend,
+            &blade_uri,
+            0,
+            10,
+            Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                trigger_character: Some(">".to_string()),
+            }),
+        )
+        .await;
 
         let items = match result {
             Some(CompletionResponse::Array(items)) => items,
@@ -918,25 +900,8 @@ mod tests {
         let (backend, _dir, item_uri, blade_uri) =
             workspace_naming_item_only_in_the_prologue().await;
 
-        let locations = backend
-            .references(ReferenceParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier {
-                        uri: item_uri.clone(),
-                    },
-                    position: Position {
-                        line: 2,
-                        character: 7,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: ReferenceContext {
-                    include_declaration: true,
-                },
-            })
+        let locations = references_response(&backend, &item_uri, Position::new(2, 7), true)
             .await
-            .unwrap()
             .unwrap_or_default();
 
         let in_template: Vec<_> = locations.iter().filter(|l| l.uri == blade_uri).collect();
@@ -1376,25 +1341,8 @@ mod tests {
         )
         .await;
 
-        let locations = backend
-            .references(ReferenceParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier {
-                        uri: blade_uri.clone(),
-                    },
-                    position: Position {
-                        line: 1,
-                        character: 9,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: ReferenceContext {
-                    include_declaration: false,
-                },
-            })
+        let locations = references_response(&backend, &blade_uri, Position::new(1, 9), false)
             .await
-            .unwrap()
             .unwrap_or_default();
 
         let in_template: Vec<Range> = locations

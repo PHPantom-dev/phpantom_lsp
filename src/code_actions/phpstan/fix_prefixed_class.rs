@@ -39,7 +39,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{CodeActionData, deferred_quickfix};
 use crate::text_position::byte_offset_to_utf16_col;
 
 use super::split_phpstan_tip;
@@ -116,25 +116,19 @@ impl Backend {
             let title = format!("Replace {} with {}", actual_prefixed, info.corrected);
 
             let extra = serde_json::json!({
-                "diagnostic_message": diag.message,
-                "diagnostic_line": diag_line,
-                "diagnostic_code": CLASS_PREFIXED_ID,
                 "prefixed_name": actual_prefixed,
                 "corrected_name": info.corrected,
             });
 
-            let data = make_code_action_data(ACTION_KIND, uri, &params.range, extra);
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(deferred_quickfix(
                 title,
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diag.clone()]),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(data),
-            }));
+                ACTION_KIND,
+                uri,
+                &params.range,
+                vec![diag.clone()],
+                true,
+                extra,
+            ));
         }
     }
 

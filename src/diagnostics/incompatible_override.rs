@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::SymbolKind;
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo};
@@ -16,9 +17,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
-            return;
-        };
+        let ctx = FileDiagnosticContext::gather(self, uri);
         self.collect_incompatible_override_diagnostics_with_context(&ctx, uri, content, out);
     }
 
@@ -122,7 +121,7 @@ fn contains_static_type(ty: &PhpType) -> bool {
 fn find_parent_method(
     class: &ClassInfo,
     method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<(Arc<MethodInfo>, String)> {
     let declares = |candidate: &ClassInfo| match candidate.kind {
         ClassLikeKind::Trait => candidate

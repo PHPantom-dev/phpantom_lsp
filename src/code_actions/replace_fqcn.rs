@@ -13,6 +13,8 @@ use crate::text_position::position_to_byte_offset;
 use crate::types::{FileContext, NamespaceSpan};
 use crate::util::{short_name, strip_fqn_prefix};
 
+use super::span_overlaps_request;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum ImportKind {
     Class,
@@ -82,14 +84,6 @@ impl ImportBatch {
             claimed: use_map.clone(),
             planned_any: false,
         }
-    }
-}
-
-fn overlaps(span: &SymbolSpan, start: usize, end: usize) -> bool {
-    if start == end {
-        span.start as usize <= start && start < span.end as usize
-    } else {
-        (span.start as usize) < end && span.end as usize > start
     }
 }
 
@@ -166,7 +160,7 @@ impl Backend {
         let Some(cursor_span) = symbol_map
             .spans
             .iter()
-            .find(|span| overlaps(span, request_start, request_end))
+            .find(|span| span_overlaps_request(span, request_start, request_end))
         else {
             return;
         };

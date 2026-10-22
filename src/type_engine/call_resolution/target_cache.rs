@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::{Atom, atom};
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::types::*;
 
@@ -298,7 +299,7 @@ fn infer_body_return_type(
     // that offset would land on the wrong location.  Resolve the class
     // that actually declares the method and read *its* file.
     let declaring_class = backend.find_or_load_class(class_fqn).map(|receiver| {
-        let loader = |name: &str| backend.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| backend.find_or_load_class(&name);
         crate::hover::find_declaring_class(
             &receiver,
             &method.name,
@@ -416,13 +417,12 @@ pub(crate) struct TypeEngineCaches {
 /// Activate every request-scoped type-engine memo for the current
 /// thread, returning one RAII guard that clears them all on drop.
 ///
-/// Called from [`Backend::with_file_content`], which every LSP handler
-/// goes through, and from the few entry points that fetch their own file
-/// content (completion, completion/code-action resolve, the diagnostic
-/// pass, and the `analyse` CLI).  Nested activation is a no-op, so an
-/// inner pass cannot clobber the memos an outer one installed.
+/// Every LSP request enters these through [`RequestScope`]; the
+/// diagnostic pass and the `analyse` CLI activate them directly.  Nested
+/// activation is a no-op, so an inner pass cannot clobber the memos an
+/// outer one installed.
 ///
-/// [`Backend::with_file_content`]: Backend::with_file_content
+/// [`RequestScope`]: crate::backend::requests::RequestScope
 pub(crate) fn activate_type_engine_caches() -> TypeEngineCaches {
     TypeEngineCaches {
         _callable_target: with_callable_target_cache(),

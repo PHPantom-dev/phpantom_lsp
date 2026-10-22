@@ -7,10 +7,10 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        complete_labels_at_opened_with_trigger, create_test_backend, hover_text_at, open_document,
-        open_php,
+        complete_labels_at_opened_with_trigger, create_test_backend, goto_definition_at,
+        hover_response, hover_text_at, open_document, open_php,
     };
-    use tower_lsp::LanguageServer;
+
     use tower_lsp::lsp_types::*;
 
     // ── Scaffolding classes shared across all tests ─────────────────────
@@ -100,20 +100,9 @@ echo e( config('app.name') ); echo e( date('Y') );
         line: u32,
         col: u32,
     ) -> bool {
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).unwrap(),
-                },
-                position: Position {
-                    line,
-                    character: col,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-        backend.goto_definition(params).await.unwrap().is_some()
+        goto_definition_at(backend, &Url::parse(uri).unwrap(), line, col)
+            .await
+            .is_some()
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -479,20 +468,7 @@ foreach ($users->active()->byName() as $user) {
         open_scaffolding(&backend).await;
         let uri = open_blade(&backend).await;
 
-        let params = HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(&uri).unwrap(),
-                },
-                position: Position {
-                    line: 11,
-                    character: 10,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        };
-
-        let result = backend.hover(params).await.unwrap();
+        let result = hover_response(&backend, &Url::parse(&uri).unwrap(), 11, 10).await;
         assert!(result.is_some(), "Should return hover for $author");
 
         let hover = result.unwrap();

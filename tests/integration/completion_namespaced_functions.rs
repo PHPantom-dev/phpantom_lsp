@@ -12,12 +12,11 @@
 
 use crate::common::{
     complete_at, create_psr4_workspace, create_test_backend,
-    create_test_backend_with_function_stubs, labels,
+    create_test_backend_with_function_stubs, labels, open_php,
 };
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
 use phpantom_lsp::types::FunctionInfo;
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 /// Register a namespaced helper function in the global_functions map.
@@ -514,16 +513,7 @@ async fn test_no_short_name_fallback_in_global_functions() {
         "    return $value;\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     let fmap = backend.global_functions().read();
 
@@ -594,16 +584,7 @@ async fn test_psr4_namespaced_function_completion() {
     let helpers_path = _dir.path().join("src/Helpers/helpers.php");
     let helpers_uri = Url::from_file_path(&helpers_path).unwrap();
     let helpers_text = std::fs::read_to_string(&helpers_path).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: helpers_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: helpers_text,
-            },
-        })
-        .await;
+    open_php(&backend, &helpers_uri, &helpers_text).await;
 
     // Complete in a different file.
     let test_uri = Url::parse("file:///test.php").unwrap();

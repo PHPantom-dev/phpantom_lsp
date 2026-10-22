@@ -31,7 +31,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{
-    CodeActionData, DocblockAbove, find_docblock_above_line, make_code_action_data,
+    CodeActionData, DocblockAbove, deferred_quickfix, find_docblock_above_line,
 };
 use crate::docblock::strip_docblock_line_delimiters;
 
@@ -109,54 +109,32 @@ impl Backend {
                 continue;
             }
 
-            let extra = serde_json::json!({
-                "diagnostic_message": diag.message,
-                "diagnostic_line": diag_line,
-                "diagnostic_code": identifier,
-            });
-
             // ── Action 1: Update tag type ───────────────────────────
             {
                 let title = build_update_title(&mismatch);
-                let data = make_code_action_data(
+                out.push(deferred_quickfix(
+                    title,
                     "phpstan.fixPhpDocType.update",
                     uri,
                     &params.range,
-                    extra.clone(),
-                );
-
-                out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                    title,
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    diagnostics: Some(vec![diag.clone()]),
-                    edit: None,
-                    command: None,
-                    is_preferred: Some(false),
-                    disabled: None,
-                    data: Some(data),
-                }));
+                    vec![diag.clone()],
+                    false,
+                    serde_json::Value::Null,
+                ));
             }
 
             // ── Action 2: Remove tag (preferred) ────────────────────
             {
                 let title = build_remove_title(&mismatch);
-                let data = make_code_action_data(
+                out.push(deferred_quickfix(
+                    title,
                     "phpstan.fixPhpDocType.remove",
                     uri,
                     &params.range,
-                    extra,
-                );
-
-                out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                    title,
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    diagnostics: Some(vec![diag.clone()]),
-                    edit: None,
-                    command: None,
-                    is_preferred: Some(true),
-                    disabled: None,
-                    data: Some(data),
-                }));
+                    vec![diag.clone()],
+                    true,
+                    serde_json::Value::Null,
+                ));
             }
         }
     }

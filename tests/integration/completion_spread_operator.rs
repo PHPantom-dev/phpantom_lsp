@@ -1,7 +1,7 @@
 use crate::common::{
-    complete_at_opened, create_psr4_workspace, create_test_backend, method_names, property_names,
+    complete_at_opened, create_psr4_workspace, create_test_backend, method_names, open_php,
+    property_names,
 };
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Basic Spread: single spread variable ───────────────────────────────────
@@ -24,15 +24,7 @@ async fn test_spread_single_list_variable() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 8, 10).await;
     assert!(
@@ -81,15 +73,7 @@ async fn test_spread_multiple_variables_union() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 15, 10).await;
     assert!(
@@ -130,15 +114,7 @@ async fn test_spread_array_generic_annotation() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 8, 10).await;
     assert!(
@@ -180,15 +156,7 @@ async fn test_spread_type_array_shorthand() {
         "$merged[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 8, 12).await;
     assert!(
@@ -226,15 +194,7 @@ async fn test_spread_with_keyed_entries() {
         "$config['\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 9, 9).await;
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
@@ -280,15 +240,7 @@ async fn test_spread_inside_class_method() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 16, 18).await;
     assert!(
@@ -339,15 +291,7 @@ async fn test_spread_with_foreach_annotated() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Verify element access still works (the core spread feature).
     let items = complete_at_opened(&backend, &uri, 15, 10).await;
@@ -394,15 +338,7 @@ async fn test_spread_combined_with_push() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 13, 10).await;
     assert!(
@@ -443,15 +379,7 @@ async fn test_spread_array_function_syntax() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 8, 10).await;
     assert!(
@@ -525,15 +453,7 @@ async fn test_spread_cross_file_psr4() {
     );
 
     let uri = Url::parse("file:///service.php").unwrap();
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: service_php.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, service_php).await;
 
     let items = complete_at_opened(&backend, &uri, 11, 18).await;
     assert!(
@@ -579,15 +499,7 @@ async fn test_spread_param_annotation() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 11, 18).await;
     assert!(
@@ -620,15 +532,7 @@ async fn test_spread_empty_array() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Should not crash, just no completions.
     let items = complete_at_opened(&backend, &uri, 5, 10).await;
@@ -658,15 +562,7 @@ async fn test_spread_deduplicates_same_type() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 10, 10).await;
     assert!(
@@ -718,15 +614,7 @@ async fn test_spread_three_variables() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 17, 10).await;
     assert!(
@@ -773,15 +661,7 @@ async fn test_spread_source_from_push_assignments() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 8, 10).await;
     // This may or may not work depending on whether the resolver can

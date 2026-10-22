@@ -1,9 +1,10 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        create_test_backend, hover_text_at, open_document, open_php, workspace_uri,
+        completion_response, create_test_backend, goto_definition_at, hover_text_at, open_document,
+        open_php, references_response, workspace_uri,
     };
-    use tower_lsp::LanguageServer;
+
     use tower_lsp::lsp_types::*;
 
     #[tokio::test]
@@ -22,21 +23,9 @@ mod tests {
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         // 3. Click on "info" in the Blade file
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 13, // $logger->in|fo()
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
 
-        let result = backend.goto_definition(params).await.unwrap();
+        // $logger->in|fo()
+        let result = goto_definition_at(&backend, &blade_uri, 1, 13).await;
 
         assert!(result.is_some(), "Should resolve definition in Blade file");
 
@@ -63,21 +52,8 @@ mod tests {
 
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 13, // $logger->in|fo()
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        // $logger->in|fo()
+        let result = goto_definition_at(&backend, &blade_uri, 1, 13).await;
 
         assert!(
             result.is_some(),
@@ -109,21 +85,8 @@ mod tests {
 
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 4,
-                    character: 13, // $logger->in|fo()
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        // $logger->in|fo()
+        let result = goto_definition_at(&backend, &blade_uri, 4, 13).await;
 
         assert!(
             result.is_some(),
@@ -142,21 +105,9 @@ mod tests {
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         // We check if it can resolve "config" inside the @if block.
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 7, // con|fig
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
 
-        let result = backend.goto_definition(params).await.unwrap();
+        // con|fig
+        let result = goto_definition_at(&backend, &blade_uri, 1, 7).await;
         // Even if config is not resolved (depends on stubs),
         // the important thing is that the server didn't crash or return error due to @endif.
         let _ = result;
@@ -172,21 +123,7 @@ mod tests {
 
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 10,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        let result = goto_definition_at(&backend, &blade_uri, 1, 10).await;
         let _ = result;
     }
 
@@ -212,21 +149,8 @@ mod tests {
         // (Note: Backend::new_test might not automatically publish diagnostics to a list we can check easily here,
         // but we can check if it parses correctly by trying to resolve something inside).
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 4,
-                    character: 31, // $item->u|rl
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        // $item->u|rl
+        let result = goto_definition_at(&backend, &blade_uri, 4, 31).await;
         // The fact that it doesn't return a JSON-RPC error means it parsed.
         let _ = result;
     }
@@ -244,24 +168,8 @@ mod tests {
 
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
-        let params = ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: php_uri.clone(),
-                },
-                position: Position {
-                    line: 0,
-                    character: 37, // info
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext {
-                include_declaration: true,
-            },
-        };
-
-        let result = backend.references(params).await.unwrap();
+        // info
+        let result = references_response(&backend, &php_uri, Position::new(0, 37), true).await;
         assert!(result.is_some());
         let locations = result.unwrap();
 
@@ -291,21 +199,7 @@ mod tests {
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         // If it parses successfully without crashing or returning syntax errors, we are good.
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 2,
-                    character: 1,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        let result = goto_definition_at(&backend, &blade_uri, 2, 1).await;
         let _ = result;
     }
 
@@ -324,25 +218,18 @@ mod tests {
 
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
-        let params = CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 10, // after "$item->"
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: Some(CompletionContext {
+        // after "$item->"
+        let result = completion_response(
+            &backend,
+            &blade_uri,
+            1,
+            10,
+            Some(CompletionContext {
                 trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
                 trigger_character: Some(">".to_string()),
             }),
-        };
-
-        let result = backend.completion(params).await.unwrap();
+        )
+        .await;
         assert!(result.is_some(), "Should return completions for $item->");
 
         let items = match result.unwrap() {
@@ -795,21 +682,7 @@ mod tests {
         let php_uri = Url::parse("file:///helpers.php").unwrap();
         let php = "<?php\nblade\n";
         open_php(&backend, &php_uri, php).await;
-        let completions = backend
-            .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: php_uri },
-                    position: Position {
-                        line: 1,
-                        character: 5,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: None,
-            })
-            .await
-            .unwrap();
+        let completions = completion_response(&backend, &php_uri, 1, 5, None).await;
         let offered: Vec<String> = match completions {
             Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
             Some(CompletionResponse::List(list)) => {

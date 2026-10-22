@@ -22,30 +22,10 @@ async fn test_goto_definition_same_file_class() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "Logger" in the parameter type hint on line 5
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 5,
-                character: 27,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 5, 27).await;
     assert!(
         result.is_some(),
         "Should resolve same-file class definition"
@@ -75,30 +55,10 @@ async fn test_goto_definition_same_file_interface() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "Cacheable" in the parameter type hint on line 5
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 5,
-                character: 30,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 5, 30).await;
     assert!(
         result.is_some(),
         "Should resolve same-file interface definition"
@@ -153,30 +113,10 @@ async fn test_goto_definition_cross_file_psr4() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "Logger" in the parameter type hint on line 4
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 4,
-                character: 27,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 4, 27).await;
     assert!(
         result.is_some(),
         "Should resolve cross-file PSR-4 class definition"
@@ -221,16 +161,7 @@ async fn test_goto_definition_after_target_did_close() {
     let uri_b = Url::from_file_path(src_dir.join("ClassB.php")).unwrap();
 
     // Open ClassB so it gets indexed.
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri_b.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text_b.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri_b, text_b).await;
 
     // Close ClassB — simulates VS Code peek preview closing.
     backend
@@ -252,31 +183,10 @@ async fn test_goto_definition_after_target_did_close() {
         "    }\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri_a.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text_a.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri_a, text_a).await;
 
     // Go-to-definition on "ClassB" (line 5, char 21 = inside "ClassB")
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri_a.clone() },
-            position: Position {
-                line: 5,
-                character: 21,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri_a, 5, 21).await;
     assert!(
         result.is_some(),
         "Go-to-definition should work after target file is closed (issue #99)"
@@ -290,19 +200,7 @@ async fn test_goto_definition_after_target_did_close() {
     }
 
     // Also test member access: $b->doSomething() (line 6, char 14)
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri_a },
-            position: Position {
-                line: 6,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri_a, 6, 14).await;
     assert!(
         result.is_some(),
         "Go-to-definition on member should work after target file is closed (issue #99)"
@@ -355,30 +253,10 @@ async fn test_goto_definition_cross_file_with_use_statement() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "Repository" in the constructor parameter on line 6
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 6,
-                character: 47,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 6, 47).await;
     assert!(
         result.is_some(),
         "Should resolve class imported via use statement"
@@ -436,30 +314,10 @@ async fn test_goto_definition_on_use_statement_name() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on the use statement FQN "App\\Models\\User" on line 3
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 17,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 3, 17).await;
     assert!(
         result.is_some(),
         "Should resolve goto-def on use statement FQN"
@@ -521,30 +379,9 @@ async fn test_goto_definition_cross_file_with_grouped_use_statement() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 6,
-                character: 25,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 6, 25).await;
     assert!(
         result.is_some(),
         "Should resolve class imported via grouped use statement"
@@ -593,30 +430,9 @@ async fn test_goto_definition_on_grouped_use_statement_name() {
         "class ProductController {}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 3,
-                character: 53,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 3, 53).await;
     assert!(
         result.is_some(),
         "Should resolve class name inside grouped use statement"
@@ -659,30 +475,10 @@ async fn test_goto_definition_class_reference_via_namespace() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "Status" in Status::class on line 5
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 5,
-                character: 22,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 5, 22).await;
     assert!(
         result.is_some(),
         "Should resolve namespace-relative class reference"
@@ -740,30 +536,10 @@ async fn test_goto_definition_return_type_hint() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "Collection" in the return type on line 4
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 4,
-                character: 33,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 4, 33).await;
     assert!(result.is_some(), "Should resolve return type hint");
 
     match result.unwrap() {
@@ -788,30 +564,10 @@ async fn test_goto_definition_unresolvable_returns_none() {
     let uri = Url::parse("file:///test.php").unwrap();
     let text = "<?php\n$x = 42;\n";
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on a number — no class to resolve
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 1,
-                character: 5,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 1, 5).await;
     // "42" gets extracted as a word but can't be resolved to any class
     assert!(result.is_none(), "Non-class symbol should return None");
 }
@@ -823,29 +579,9 @@ async fn test_goto_definition_whitespace_returns_none() {
     let uri = Url::parse("file:///test.php").unwrap();
     let text = "<?php\n    \n";
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 1,
-                character: 2,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 1, 2).await;
     assert!(result.is_none(), "Whitespace should return None");
 }
 
@@ -903,30 +639,10 @@ async fn test_goto_definition_vendor_cross_file() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "Logger" in the parameter type hint on line 6
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 6,
-                character: 30,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 6, 30).await;
     assert!(result.is_some(), "Should resolve vendor class via classmap");
 
     match result.unwrap() {
@@ -981,30 +697,10 @@ async fn test_goto_definition_trait() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "Auditable" in `use Auditable;` inside the class on line 6
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 6,
-                character: 10,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 6, 10).await;
     assert!(result.is_some(), "Should resolve trait via use statement");
 
     match result.unwrap() {
@@ -1057,30 +753,10 @@ async fn test_goto_definition_extends_class() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "BaseModel" in the extends clause on line 3
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 22,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 3, 22).await;
     assert!(result.is_some(), "Should resolve parent class in extends");
 
     match result.unwrap() {
@@ -1140,30 +816,10 @@ async fn test_goto_definition_aliased_use_does_not_match_same_file_short_name() 
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "BaseController" in the extends clause on line 5
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 5,
-                character: 30,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 5, 30).await;
     assert!(
         result.is_some(),
         "Should resolve aliased BaseController to Illuminate\\Routing\\Controller"

@@ -143,15 +143,15 @@ class Foo
 
 		// ── Arithmetic: bool operands ───────────────────────────────────
 
-		assertType('int', true + false);
+		assertType('1', true + false);
 
 		// ── String concatenation ────────────────────────────────────────
 
 		assertType('string', $string . $string);
-		assertType('string', $string . 'foo');
-		assertType('string', 'foo' . $string);
-		assertType('string', $string . $integer);
-		assertType('string', $integer . $string);
+		assertType('non-falsy-string', $string . 'foo');
+		assertType('non-falsy-string', 'foo' . $string);
+		assertType('non-empty-string', $string . $integer);
+		assertType('non-empty-string', $integer . $string);
 
 		// ── Comparison operators ────────────────────────────────────────
 

@@ -10,7 +10,8 @@ use super::*;
 
 use std::collections::HashMap;
 
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset};
+use crate::names::resolve_to_fqn;
 use crate::types::ClassInfo;
 
 /// The class a member declared at `offset` belongs to.
@@ -263,7 +264,7 @@ impl Backend {
         subject_text: &str,
         use_map: &HashMap<String, String>,
         namespace: &Option<String>,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Vec<String> {
         let expr = crate::type_engine::subject_expr::SubjectExpr::parse(subject_text);
         let Some((class_name, method_name)) = static_call_root(&expr) else {
@@ -273,8 +274,8 @@ impl Backend {
             return Vec::new();
         }
 
-        let class_fqn = normalize_fqn(&Self::resolve_to_fqn(class_name, use_map, namespace));
-        let Some(class_info) = class_loader(&class_fqn) else {
+        let class_fqn = normalize_fqn(&resolve_to_fqn(class_name, use_map, namespace));
+        let Some(class_info) = class_loader(Fqn::new(&class_fqn)) else {
             return Vec::new();
         };
         let Some(laravel) = class_info.laravel() else {
@@ -305,7 +306,8 @@ impl Backend {
     ///   the hierarchy)
     pub(super) fn collect_hierarchy_for_fqns(&self, seed_fqns: &[String]) -> MemberScope {
         let mut hierarchy = HashSet::new();
-        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let class_loader =
+            |name: Fqn<'_>| -> Option<Arc<ClassInfo>> { self.find_or_load_class(&name) };
 
         for fqn in seed_fqns {
             hierarchy.insert(normalize_fqn(fqn).to_string());
@@ -322,7 +324,7 @@ impl Backend {
         // add that builder to the hierarchy.
         let mut extensions = Vec::new();
         for fqn in &hierarchy {
-            if let Some(cls) = class_loader(fqn)
+            if let Some(cls) = class_loader(Fqn::new(fqn))
                 && let Some(builder_fqn) = cls
                     .laravel()
                     .and_then(|l| l.custom_builder.as_ref())
@@ -384,7 +386,8 @@ impl Backend {
     /// reverse-inheritance index has no edge for — which is every class in a
     /// package nothing has parsed yet.
     fn inherits_from_any(&self, fqn: &str, roots: &HashSet<String>) -> bool {
-        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let class_loader =
+            |name: Fqn<'_>| -> Option<Arc<ClassInfo>> { self.find_or_load_class(&name) };
         let mut ancestors = HashSet::new();
         self.collect_ancestors(fqn, &class_loader, &mut ancestors);
         ancestors.iter().any(|ancestor| roots.contains(ancestor))
@@ -443,7 +446,8 @@ impl Backend {
         is_static: bool,
         include_declaring_interfaces: bool,
     ) -> Option<MemberScope> {
-        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let class_loader =
+            |name: Fqn<'_>| -> Option<Arc<ClassInfo>> { self.find_or_load_class(&name) };
         let mut roots = HashSet::new();
         let mut seen = HashSet::new();
 
@@ -486,7 +490,7 @@ impl Backend {
         fqn: &str,
         member_name: &str,
         is_static: bool,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         roots: &mut HashSet<String>,
         seen: &mut HashSet<String>,
     ) {
@@ -494,7 +498,7 @@ impl Backend {
         if !seen.insert(normalized.clone()) {
             return;
         }
-        let Some(cls) = class_loader(&normalized) else {
+        let Some(cls) = class_loader(Fqn::new(&normalized)) else {
             return;
         };
 
@@ -515,10 +519,11 @@ impl Backend {
     }
 
     fn extend_laravel_member_roots(&self, roots: &mut HashSet<String>) {
-        if !self.resolved_class_cache.read().is_laravel() {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
             return;
         }
-        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let class_loader =
+            |name: Fqn<'_>| -> Option<Arc<ClassInfo>> { self.find_or_load_class(&name) };
         let initial_roots: Vec<String> = roots.iter().cloned().collect();
         let mut candidate_roots: HashSet<String> = initial_roots.iter().cloned().collect();
         let mut builder_roots: HashSet<String> = HashSet::new();
@@ -527,7 +532,7 @@ impl Backend {
         }
 
         for fqn in &initial_roots {
-            if let Some(cls) = class_loader(fqn)
+            if let Some(cls) = class_loader(Fqn::new(fqn))
                 && let Some(builder_fqn) = cls
                     .laravel()
                     .and_then(|l| l.custom_builder.as_ref())
@@ -567,7 +572,7 @@ impl Backend {
         fqn: &str,
         member_name: &str,
         is_static: bool,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         roots: &mut HashSet<String>,
         seen: &mut HashSet<String>,
     ) {
@@ -575,7 +580,7 @@ impl Backend {
         if !seen.insert(normalized.clone()) {
             return;
         }
-        let Some(cls) = class_loader(&normalized) else {
+        let Some(cls) = class_loader(Fqn::new(&normalized)) else {
             return;
         };
 
@@ -611,7 +616,8 @@ impl Backend {
         seed_fqns: &[String],
         member_name: &str,
     ) -> Option<Vec<String>> {
-        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let class_loader =
+            |name: Fqn<'_>| -> Option<Arc<ClassInfo>> { self.find_or_load_class(&name) };
         let mut candidates = HashSet::new();
         for seed in seed_fqns {
             let normalized = normalize_fqn(seed);
@@ -623,7 +629,7 @@ impl Backend {
         // index too, and a reader queues behind a waiting writer, so a
         // rebuild arriving mid-walk would wait on a guard held here while
         // the walk waited on the rebuild.
-        let index = self.laravel_macros.read();
+        let index = self.laravel.macros.read();
         let targets: Vec<String> = candidates
             .into_iter()
             .filter(|candidate| index.has_macro(candidate, member_name))
@@ -636,9 +642,9 @@ impl Backend {
         fqn: &str,
         name: &str,
         is_static: bool,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> bool {
-        let Some(cls) = class_loader(fqn) else {
+        let Some(cls) = class_loader(Fqn::new(fqn)) else {
             return false;
         };
 
@@ -663,7 +669,7 @@ impl Backend {
                 .custom_builder
                 .as_ref()
                 .and_then(|b| b.base_name())
-                .and_then(class_loader)
+                .and_then(|name| class_loader(Fqn::new(name)))
                 && builder_cls
                     .methods
                     .iter()
@@ -671,13 +677,15 @@ impl Backend {
             {
                 return true;
             }
-            if class_loader(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN)
-                .filter(|bc| {
-                    bc.methods
-                        .iter()
-                        .any(|m| m.name.eq_ignore_ascii_case(name) && (!is_static || !m.is_static))
-                })
-                .is_some()
+            if class_loader(Fqn::new(
+                crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN,
+            ))
+            .filter(|bc| {
+                bc.methods
+                    .iter()
+                    .any(|m| m.name.eq_ignore_ascii_case(name) && (!is_static || !m.is_static))
+            })
+            .is_some()
             {
                 return true;
             }
@@ -690,10 +698,10 @@ impl Backend {
     fn collect_ancestors(
         &self,
         fqn: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         hierarchy: &mut HashSet<String>,
     ) {
-        let cls = match class_loader(fqn) {
+        let cls = match class_loader(Fqn::new(fqn)) {
             Some(c) => c,
             None => return,
         };

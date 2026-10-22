@@ -25,7 +25,7 @@ use crate::Backend;
 use crate::names::resolve_to_fqn;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 
-use super::helpers::make_diagnostic;
+use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
 /// Diagnostic code for class-reference case mismatches so that the
 /// quick-fix code action can match on it.
@@ -52,7 +52,20 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        for m in self.class_case_mismatches(uri, content) {
+        let ctx = FileDiagnosticContext::gather(self, uri);
+        self.collect_class_case_mismatch_diagnostics_with_context(&ctx, uri, content, out);
+    }
+
+    /// [`Self::collect_class_case_mismatch_diagnostics`] over an
+    /// already-gathered [`FileDiagnosticContext`].
+    pub(crate) fn collect_class_case_mismatch_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        for m in self.class_case_mismatches_in(ctx, uri, content) {
             out.push(make_diagnostic(
                 m.range,
                 DiagnosticSeverity::WARNING,
@@ -66,12 +79,17 @@ impl Backend {
     ///
     /// Shared by the diagnostic collector and the quick-fix code action.
     pub(crate) fn class_case_mismatches(&self, uri: &str, content: &str) -> Vec<ClassCaseMismatch> {
-        let symbol_map = match self.symbol_maps.read().get(uri) {
-            Some(sm) => sm.clone(),
-            None => return Vec::new(),
-        };
+        self.class_case_mismatches_in(&FileDiagnosticContext::gather(self, uri), uri, content)
+    }
 
-        let file_ctx = self.file_context(uri);
+    fn class_case_mismatches_in(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+    ) -> Vec<ClassCaseMismatch> {
+        let symbol_map = &ctx.symbol_map;
+        let file_ctx = &ctx.file;
         let file_resolved_names = &file_ctx.resolved_names;
 
         let mut out = Vec::new();
@@ -162,9 +180,9 @@ impl Backend {
                 None => continue,
             };
             // Built-in classes (phpstorm-stubs) are case-insensitive and
-            // always available; they are indexed under a `phpantom-stub://`
-            // URI and never reach the PSR-4 autoloader.
-            if decl_uri.starts_with("phpantom-stub://") {
+            // always available; they are indexed under a stub URI and never
+            // reach the PSR-4 autoloader.
+            if crate::stubs::is_stub_uri(&decl_uri) {
                 continue;
             }
             // A class declared in the same file is already loaded, so its

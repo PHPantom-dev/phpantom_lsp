@@ -14,10 +14,10 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let Ok(url) = Url::parse(uri) else {
+        let Some(url) = crate::util::parse_url(uri) else {
             return;
         };
-        let Ok(file_path) = url.to_file_path() else {
+        let Some(file_path) = crate::util::url_to_path(&url) else {
             return;
         };
         let file_stem = match file_path.file_stem().and_then(|s| s.to_str()) {

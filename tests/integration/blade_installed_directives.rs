@@ -7,7 +7,9 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_psr4_workspace, open_document, template_diagnostics};
+    use crate::common::{
+        completion_response, create_psr4_workspace, open_document, template_diagnostics,
+    };
     use phpantom_lsp::Backend;
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
@@ -99,21 +101,8 @@ trait CompilesConditionals
     #[tokio::test]
     async fn only_the_installed_directives_are_offered() {
         let (backend, _dir, uri) = start("<div>\n@\n</div>\n").await;
-        let response = backend
-            .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri },
-                    position: Position {
-                        line: 1,
-                        character: 1,
-                    },
-                },
-                work_done_progress_params: Default::default(),
-                partial_result_params: Default::default(),
-                context: None,
-            })
+        let response = completion_response(&backend, &uri, 1, 1, None)
             .await
-            .unwrap()
             .expect("directive completion should answer");
         let items = match response {
             CompletionResponse::Array(items) => items,

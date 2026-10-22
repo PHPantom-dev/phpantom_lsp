@@ -11,14 +11,21 @@
 //! - **call_resolution**: Call expression and callable target resolution (method
 //!   calls, static calls, function calls, constructor calls, signature help,
 //!   named-argument completion)
-//! - **subject_expr / subject_extraction / subject_resolution**: Extracting and
-//!   resolving the left-hand side of `->`, `?->`, and `::` operators
+//! - **subject_extraction**: Finding the text to the left of `->`, `?->`, or
+//!   `::` in a line of source
+//! - **subject_expr**: Parsing that text into a [`SubjectExpr`](subject_expr::SubjectExpr),
+//!   which the resolver walks
+//! - **subject_resolution**: The type of a subject a caller already has as
+//!   text, for features outside completion; it hands everything but the
+//!   class keywords to the forward walker and the resolver
 //!
-//! ### `types/` — Type resolution
+//! ### `type_ops/` — Operations on types
 //!
 //! - **resolution**: Type-hint string to `ClassInfo` mapping (unions,
 //!   intersections, generics, type aliases, object shapes, property types)
-//! - **narrowing**: instanceof / assert / custom type guard narrowing
+//! - **condition_facts**: What a condition (instanceof, an assertion, a
+//!   type-check call) says about a variable; `forward_walk::cond_narrowing`
+//!   applies it to the scope
 //! - **conditional**: PHPStan conditional return type resolution at call sites
 //!
 //! ### `variable/` — Variable type resolution
@@ -32,7 +39,8 @@
 //! - **class_string_resolution**: Class-string variable resolution (`$cls = User::class`)
 //! - **raw_type_inference**: Raw type inference for variable assignments (array shapes,
 //!   array functions, generator yields)
-//! - **foreach_resolution**: Foreach value/key and array destructuring type resolution
+//! - **iterable_elements**: The element and key types an iterable yields, for
+//!   foreach and array destructuring
 //! - **closure_resolution**: Closure and arrow-function parameter resolution
 
 pub(crate) mod body_reads;
@@ -43,7 +51,7 @@ pub mod subject_expr;
 pub(crate) mod subject_extraction;
 pub(crate) mod subject_resolution;
 pub(crate) mod trait_context;
-pub mod types;
+pub mod type_ops;
 pub(crate) mod variable;
 
 // ─── Pass-scoped memos ──────────────────────────────────────────────────────
@@ -261,5 +269,5 @@ where
 // These preserve the `conditional_resolution` / `type_resolution` aliases used
 // throughout the codebase.
 
-pub use types::conditional as conditional_resolution;
-pub(crate) use types::resolution as type_resolution;
+pub use type_ops::conditional as conditional_resolution;
+pub(crate) use type_ops::resolution as type_resolution;

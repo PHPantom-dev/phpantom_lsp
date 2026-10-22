@@ -69,7 +69,7 @@ impl ExistenceGuards {
         self.class_guards
             .get(name)
             .or_else(|| {
-                let short = name.rsplit('\\').next().unwrap_or(name);
+                let short = crate::util::short_name(name);
                 if short != name {
                     self.class_guards.get(short)
                 } else {

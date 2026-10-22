@@ -96,8 +96,9 @@ pub(crate) use return_types::{
 #[cfg(test)]
 pub(crate) use target_cache::test_body_inferences;
 pub(crate) use target_cache::{
-    activate_body_infer_memo, activate_type_engine_caches, body_inference_context,
-    body_inference_in_progress, call_site_param_types, try_infer_body_return_type,
+    TypeEngineCaches, activate_body_infer_memo, activate_type_engine_caches,
+    body_inference_context, body_inference_in_progress, call_site_param_types,
+    try_infer_body_return_type,
 };
 pub(crate) use template_binding::{TemplateCallee, bind_template_args, instantiate_class};
 pub(crate) use template_subs::{

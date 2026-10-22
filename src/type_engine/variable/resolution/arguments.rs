@@ -7,6 +7,7 @@ use super::*;
 use mago_span::HasSpan;
 
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::types::ResolvedType;
@@ -59,7 +60,7 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                 {
                     let method_name = bytes_to_str(ident.value).to_string();
                     let current = ctx.current_class.fqn();
-                    crate::class_lookup::find_class_by_fqn(ctx.all_classes, &current).and_then(
+                    crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &current).and_then(
                         |cls| {
                             cls.get_method(&method_name)
                                 .and_then(|m| m.return_type.clone())
@@ -84,9 +85,10 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                     && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
                 {
                     let method_name = bytes_to_str(ident.value).to_string();
-                    let owner = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &cls_name)
-                        .cloned()
-                        .or_else(|| (ctx.class_loader)(&cls_name));
+                    let owner =
+                        crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &cls_name)
+                            .cloned()
+                            .or_else(|| (ctx.file.class_loader)(Fqn::new(&cls_name)));
                     owner.and_then(|o| {
                         o.get_method(&method_name)
                             .and_then(|m| m.return_type.clone())
@@ -206,5 +208,5 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
         }
     }
     // Fall back to the unified pipeline (method calls, etc.)
-    super::super::foreach_resolution::resolve_expression_type(arg_expr, ctx)
+    super::super::iterable_elements::resolve_expression_type(arg_expr, ctx)
 }

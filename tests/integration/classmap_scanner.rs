@@ -5,6 +5,7 @@
 //! and that cross-file resolution works using the self-scanned classmap.
 
 use crate::common::create_psr4_workspace;
+use crate::common::open_php;
 use phpantom_lsp::classmap_scanner;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -326,16 +327,7 @@ class Service {
     let service_uri = Url::from_file_path(dir.path().join("src/Service.php")).unwrap();
     let service_content = std::fs::read_to_string(dir.path().join("src/Service.php")).unwrap();
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: service_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: service_content,
-            },
-        })
-        .await;
+    open_php(&backend, &service_uri, &service_content).await;
 
     // Trigger completion at `$product->`
     let result = backend
@@ -432,16 +424,7 @@ class Test {
 "#;
 
     let uri = Url::parse("file:///test.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: test_file.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, test_file).await;
 
     let result = backend
         .completion(CompletionParams {

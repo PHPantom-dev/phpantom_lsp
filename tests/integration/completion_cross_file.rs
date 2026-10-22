@@ -1,4 +1,5 @@
 use crate::common::create_psr4_workspace;
+use crate::common::{completion_response, open_php};
 use phpantom_lsp::Backend;
 use phpantom_lsp::composer::parse_autoload_classmap;
 use std::collections::HashMap;
@@ -42,31 +43,10 @@ async fn test_cross_file_double_colon_psr4() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `Acme\Service::` on line 3
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 23,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 3, 23, None).await;
     assert!(
         result.is_some(),
         "Completion should resolve Acme\\Service::"
@@ -138,31 +118,10 @@ async fn test_cross_file_new_variable_psr4() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$w->` on line 4
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 4,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 4, 12, None).await;
     assert!(
         result.is_some(),
         "Completion should resolve $w-> to Acme\\Widget members"
@@ -228,31 +187,10 @@ async fn test_cross_file_param_type_hint_psr4() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$log->` on line 3
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 3, 14, None).await;
     assert!(
         result.is_some(),
         "Completion should resolve $log-> via param type hint"
@@ -314,15 +252,7 @@ async fn test_cross_file_caches_parsed_class() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
@@ -385,30 +315,9 @@ async fn test_cross_file_no_psr4_mapping_falls_back() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 24,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 3, 24, None).await;
     assert!(
         result.is_none(),
         "Should return None when no PSR-4 mapping resolves the class"
@@ -446,30 +355,9 @@ async fn test_cross_file_nested_namespace_psr4() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 36,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 3, 36, None).await;
     assert!(result.is_some(), "Should resolve deeply nested namespace");
 
     match result.unwrap() {
@@ -532,31 +420,10 @@ async fn test_cross_file_use_statement_new_variable() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$e->` on line 8
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 8,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 8, 12, None).await;
     assert!(
         result.is_some(),
         "Completion should resolve $e-> via use statement + PSR-4"
@@ -626,31 +493,10 @@ async fn test_cross_file_use_statement_double_colon() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `Factory::` on line 7
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 7,
-                character: 17,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 7, 17, None).await;
     assert!(
         result.is_some(),
         "Completion should resolve Factory:: via use statement"
@@ -718,31 +564,10 @@ async fn test_cross_file_use_statement_aliased() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$s->` on line 6
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 6,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 6, 12, None).await;
     assert!(
         result.is_some(),
         "Completion should resolve aliased $s-> via use statement"
@@ -801,31 +626,10 @@ async fn test_cross_file_use_statement_param_type_hint() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$m->` on line 7
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 7,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 7, 12, None).await;
     assert!(
         result.is_some(),
         "Completion should resolve $m-> via use-statement + param type hint"
@@ -917,31 +721,10 @@ async fn test_cross_file_classmap_resolution() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$w->` on line 4
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 4,
-                character: 13,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 4, 13, None).await;
     assert!(
         result.is_some(),
         "Completion should resolve Legacy\\Widget via classmap"
@@ -1029,32 +812,9 @@ async fn test_cross_file_classmap_double_colon() {
         "    }\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 3,
-                    character: 23,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 3, 23, None).await;
 
     assert!(
         result.is_some(),
@@ -1129,31 +889,10 @@ async fn test_cross_file_namespace_relative_resolution() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$s->` on line 6
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 6,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 6, 12, None).await;
     assert!(
         result.is_some(),
         "Completion should resolve $s-> via namespace-relative lookup"
@@ -1209,32 +948,9 @@ async fn test_unqualified_class_in_namespace_does_not_fall_back_to_global() {
         "    }\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 5,
-                    character: 13,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 5, 13, None).await;
 
     let has_pdo_methods = match &result {
         Some(CompletionResponse::Array(items)) => items
@@ -1270,32 +986,9 @@ async fn test_fqn_class_in_namespace_resolves_globally() {
         "    }\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 5,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 5, 14, None).await;
 
     assert!(result.is_some(), "\\PDO:: should resolve to global PDO");
     match result.unwrap() {
@@ -1330,32 +1023,9 @@ async fn new_pdo_member_completions(class_spelling: &str) -> Vec<String> {
     let text = format!(
         "<?php\nnamespace Demo;\n\nclass Foo {{\n    function test() {{\n{line}\n    }}\n}}\n"
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text,
-            },
-        })
-        .await;
+    open_php(&backend, &uri, &text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 5,
-                    character: line.len() as u32,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 5, line.len() as u32, None).await;
 
     match result {
         Some(CompletionResponse::Array(items)) => items
@@ -1412,32 +1082,9 @@ async fn test_imported_class_in_namespace_resolves_via_use() {
         "    }\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 7,
-                    character: 13,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 7, 13, None).await;
 
     assert!(
         result.is_some(),
@@ -1472,32 +1119,9 @@ async fn test_unqualified_class_in_global_scope_resolves() {
 
     let uri = Url::parse("file:///test.php").unwrap();
     let text = concat!("<?php\n", "PDO::\n",);
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 1,
-                    character: 5,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 1, 5, None).await;
 
     assert!(
         result.is_some(),
@@ -1556,32 +1180,9 @@ async fn test_fqn_namespaced_class_resolves_globally() {
         "    }\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 5,
-                    character: 24,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 5, 24, None).await;
 
     assert!(result.is_some(), "\\Acme\\Service:: should resolve via FQN");
     match result.unwrap() {
@@ -1624,32 +1225,9 @@ async fn test_aliased_import_resolves_in_namespace() {
         "    }\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 7,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 7, 12, None).await;
 
     assert!(
         result.is_some(),
@@ -1709,33 +1287,8 @@ async fn test_cross_file_variable_in_standalone_function() {
         "    }\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri_class.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text_class.to_string(),
-            },
-        })
-        .await;
-    let result_class = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: uri_class.clone(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    open_php(&backend, &uri_class, text_class).await;
+    let result_class = completion_response(&backend, &uri_class, 5, 12, None).await;
     let class_methods: Vec<&str> = match result_class.as_ref() {
         Some(CompletionResponse::Array(items)) => items
             .iter()
@@ -1760,33 +1313,8 @@ async fn test_cross_file_variable_in_standalone_function() {
         "    $w->\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri_func.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text_func.to_string(),
-            },
-        })
-        .await;
-    let result_func = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: uri_func.clone(),
-                },
-                position: Position {
-                    line: 4,
-                    character: 8,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    open_php(&backend, &uri_func, text_func).await;
+    let result_func = completion_response(&backend, &uri_func, 4, 8, None).await;
     let func_methods: Vec<&str> = match result_func.as_ref() {
         Some(CompletionResponse::Array(items)) => items
             .iter()
@@ -1861,33 +1389,8 @@ async fn test_cross_file_static_chain_variable_in_standalone_function() {
         "    Factory::create()->build()->\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri_inline.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text_inline.to_string(),
-            },
-        })
-        .await;
-    let result_inline = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: uri_inline.clone(),
-                },
-                position: Position {
-                    line: 3,
-                    character: 33,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    open_php(&backend, &uri_inline, text_inline).await;
+    let result_inline = completion_response(&backend, &uri_inline, 3, 33, None).await;
     let inline_methods: Vec<&str> = match result_inline.as_ref() {
         Some(CompletionResponse::Array(items)) => items
             .iter()
@@ -1906,33 +1409,8 @@ async fn test_cross_file_static_chain_variable_in_standalone_function() {
         "    $p->\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri_func.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text_func.to_string(),
-            },
-        })
-        .await;
-    let result_func = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: uri_func.clone(),
-                },
-                position: Position {
-                    line: 4,
-                    character: 8,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    open_php(&backend, &uri_func, text_func).await;
+    let result_func = completion_response(&backend, &uri_func, 4, 8, None).await;
     let func_methods: Vec<&str> = match result_func.as_ref() {
         Some(CompletionResponse::Array(items)) => items
             .iter()
@@ -1949,33 +1427,8 @@ async fn test_cross_file_static_chain_variable_in_standalone_function() {
         "$p = Factory::create()->build();\n",
         "$p->\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri_top.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text_top.to_string(),
-            },
-        })
-        .await;
-    let result_top = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: uri_top.clone(),
-                },
-                position: Position {
-                    line: 3,
-                    character: 4,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    open_php(&backend, &uri_top, text_top).await;
+    let result_top = completion_response(&backend, &uri_top, 3, 4, None).await;
     let top_methods: Vec<&str> = match result_top.as_ref() {
         Some(CompletionResponse::Array(items)) => items
             .iter()

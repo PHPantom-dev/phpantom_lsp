@@ -55,6 +55,10 @@ use std::path::{Path, PathBuf};
 use flate2::read::GzDecoder;
 use tar::Archive;
 
+#[path = "src/stub_map.rs"]
+mod stub_map;
+use stub_map::parse_section;
+
 /// Relative path (from the stubs root) to the stubs map file.
 const MAP_FILE_REL: &str = "jetbrains/phpstorm-stubs/PhpStormStubsMap.php";
 
@@ -100,6 +104,7 @@ fn main() {
     println!("cargo:rerun-if-changed=.");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=stubs.lock");
+    println!("cargo:rerun-if-changed=src/stub_map.rs");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_OFFLINE_STUBS");
     // Re-run when HEAD moves (commit, checkout, tag) so the embedded
     // version string stays current.
@@ -594,70 +599,6 @@ fn write_empty_stubs() {
         "pub(crate) static STUB_CONSTANT_MAP: [(&str, usize); 0] = [];\n",
     );
     write_if_changed(content);
-}
-
-/// Parse one of the `const CLASSES = array(...)`, `const FUNCTIONS = array(...)`,
-/// or `const CONSTANTS = array(...)` sections from the PhpStormStubsMap.php file.
-///
-/// Returns a `BTreeMap<String, String>` of `symbol_name → relative_file_path`.
-fn parse_section(content: &str, section_name: &str) -> BTreeMap<String, String> {
-    let mut map = BTreeMap::new();
-
-    // Find the start: `const SECTION = array (`
-    let marker = format!("const {} = array (", section_name);
-    let start = match content.find(&marker) {
-        Some(pos) => pos + marker.len(),
-        None => return map,
-    };
-
-    // Walk line by line until we hit `);`
-    for line in content[start..].lines() {
-        let trimmed = line.trim();
-        if trimmed == ");" {
-            break;
-        }
-
-        // Lines look like:  'ClassName' => 'relative/path.php',
-        if let Some(entry) = parse_map_entry(trimmed) {
-            map.insert(entry.0, entry.1);
-        }
-    }
-
-    map
-}
-
-/// Parse a single `'key' => 'value',` line.
-fn parse_map_entry(line: &str) -> Option<(String, String)> {
-    // Strip leading whitespace and trailing comma.
-    let trimmed = line.trim().trim_end_matches(',');
-
-    // Split on ` => `.
-    let (lhs, rhs) = trimmed.split_once(" => ")?;
-
-    // Strip surrounding single quotes.
-    let key = lhs.trim().strip_prefix('\'')?.strip_suffix('\'')?;
-    let value = rhs.trim().strip_prefix('\'')?.strip_suffix('\'')?;
-
-    // Unescape PHP single-quoted string escapes:
-    //   `\\` → `\`   and   `\'` → `'`
-    // This is needed because the PhpStormStubsMap.php file uses PHP
-    // single-quoted strings where namespace separators are written as
-    // `\\` (e.g. `'Couchbase\\GetUserOptions'` → `Couchbase\GetUserOptions`).
-    let key = php_unescape_single_quoted(key);
-    let value = php_unescape_single_quoted(value);
-
-    Some((key, value))
-}
-
-/// Unescape a PHP single-quoted string value.
-///
-/// PHP single-quoted strings only recognise two escape sequences:
-///   - `\\` → `\`
-///   - `\'` → `'`
-fn php_unescape_single_quoted(s: &str) -> String {
-    s.replace("\\\\", "\x00")
-        .replace("\\'", "'")
-        .replace('\x00', "\\")
 }
 
 /// Escape a string for embedding in a Rust string literal.

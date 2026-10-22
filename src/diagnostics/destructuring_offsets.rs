@@ -27,7 +27,7 @@ use crate::type_engine::variable::forward_walk::{
     destructured_element_type, destructuring_rhs_type,
 };
 
-use super::helpers::make_diagnostic;
+use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
 /// An offset a destructuring element reads, as PHP stores it: a decimal
 /// integer string such as `'1'` is the integer key `1`.
@@ -75,9 +75,21 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let file_ctx = self.file_context(uri);
+        let ctx = FileDiagnosticContext::gather(self, uri);
+        self.collect_destructuring_offset_diagnostics_with_context(&ctx, uri, content, out);
+    }
+
+    /// [`Self::collect_destructuring_offset_diagnostics`] over an already-gathered
+    /// [`FileDiagnosticContext`].
+    pub(crate) fn collect_destructuring_offset_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
         let _parse_guard = with_parse_cache(content);
-        let loaders = self.file_loaders(&file_ctx);
+        let loaders = self.file_loaders(&ctx.file);
 
         let issues: Vec<OffsetIssue> =
             with_parsed_program(content, "destructuring_offset_diagnostics", |program, _| {

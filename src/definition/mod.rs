@@ -57,6 +57,8 @@
 
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
+use crate::types::ClassInfo;
+
 mod blade_component;
 mod global_symbols;
 pub(crate) mod implementation;
@@ -78,4 +80,21 @@ pub(crate) fn point_location(uri: Url, position: Position) -> Location {
             end: position,
         },
     }
+}
+
+/// The location of a class declaration's keyword (`class`, `interface`,
+/// `trait`, `enum`) in the file `uri` whose source is `content`.
+///
+/// Returns `None` for a class without a recorded keyword offset (a
+/// synthesized class) or when `uri` does not parse.
+pub(crate) fn class_keyword_location(
+    class: &ClassInfo,
+    uri: &str,
+    content: &str,
+) -> Option<Location> {
+    if class.keyword_offset == 0 {
+        return None;
+    }
+    let position = crate::text_position::offset_to_position(content, class.keyword_offset as usize);
+    Some(point_location(crate::util::parse_url(uri)?, position))
 }

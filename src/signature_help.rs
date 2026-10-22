@@ -427,7 +427,7 @@ impl Backend {
         //
         // This check runs once, before both detection paths, so it
         // covers the AST-based path and the text-based fallback alike.
-        let symbol_map = self.symbol_maps.read().get(uri).cloned();
+        let symbol_map = self.symbol_map_for(uri);
         if let Some(ref sm) = symbol_map
             && let Some(call) = sm.find_enclosing_call_site(cursor_offset)
             && sm.is_inside_nested_scope_of_call(cursor_offset, call)

@@ -27,10 +27,13 @@ impl Backend {
         // last returned AND the full cache is still present (not
         // invalidated by schedule_diagnostics), the diagnostics have not
         // changed and we can return Unchanged immediately.
-        let cache_present = self.diag.last_full.lock().contains_key(&uri_str);
-        if cache_present && let Some(prev_id) = &params.previous_result_id {
+        // Read both under the `last_full` guard: delivery swaps the set
+        // and bumps the id under that same guard.
+        if let Some(prev_id) = &params.previous_result_id {
+            let cache = self.diag.last_full.lock();
             let ids = self.diag.result_ids.lock();
-            if let Some(&current_id) = ids.get(&uri_str)
+            if cache.contains_key(&uri_str)
+                && let Some(&current_id) = ids.get(&uri_str)
                 && prev_id == &current_id.to_string()
             {
                 return Ok(DocumentDiagnosticReportResult::Report(
@@ -113,20 +116,22 @@ impl Backend {
         let mut items = Vec::new();
 
         for uri_str in &open_uris {
-            // Read the current resultId for this file.
-            let current_id = {
-                let ids = self.diag.result_ids.lock();
-                ids.get(uri_str.as_str()).copied().unwrap_or(0)
-            };
-
             // Check if the client already has up-to-date diagnostics.
             // The resultId must match AND the full cache must be present.
             // When `schedule_diagnostics` invalidates the cache (removing
             // diag_last_full), the resultId is intentionally kept so it
             // doesn't reset to 0.  But we must not return "unchanged"
             // when the cache is missing — that means fresh computation
-            // is needed.
-            let cache_present = self.diag.last_full.lock().contains_key(uri_str.as_str());
+            // is needed.  Both are read under the `last_full` guard,
+            // which delivery holds while it swaps the set and bumps the id.
+            let (cache_present, current_id) = {
+                let cache = self.diag.last_full.lock();
+                let ids = self.diag.result_ids.lock();
+                (
+                    cache.contains_key(uri_str.as_str()),
+                    ids.get(uri_str.as_str()).copied().unwrap_or(0),
+                )
+            };
             if cache_present
                 && let Some(prev_id) = previous.get(uri_str.as_str())
                 && *prev_id == current_id.to_string()
@@ -157,15 +162,13 @@ impl Backend {
                 self.trigger_diagnostics_for_pull(uri_str);
             }
 
-            let diagnostics = {
+            let (diagnostics, current_id) = {
                 let cache = self.diag.last_full.lock();
-                cache.get(uri_str.as_str()).cloned().unwrap_or_default()
-            };
-
-            // Re-read the resultId after potential computation.
-            let current_id = {
                 let ids = self.diag.result_ids.lock();
-                ids.get(uri_str.as_str()).copied().unwrap_or(0)
+                (
+                    cache.get(uri_str.as_str()).cloned().unwrap_or_default(),
+                    ids.get(uri_str.as_str()).copied().unwrap_or(0),
+                )
             };
 
             let uri = match uri_str.parse::<Url>() {

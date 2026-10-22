@@ -1,7 +1,8 @@
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::Fqn;
 use crate::test_fixtures::{make_class, make_method, make_method_with_params, make_param};
-use crate::types::{ParameterInfo, Visibility};
+use crate::types::{ClassInfo, ParameterInfo, Visibility};
 use crate::virtual_members::laravel::ELOQUENT_MODEL_FQN;
 use std::sync::Arc;
 
@@ -429,7 +430,8 @@ fn builder_scope_returns_empty_when_model_not_found() {
 
 #[test]
 fn builder_scope_returns_empty_for_non_model() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Services\\Foo" {
             Some(Arc::new(make_class("App\\Services\\Foo")))
         } else {
@@ -443,7 +445,8 @@ fn builder_scope_returns_empty_for_non_model() {
 #[test]
 fn builder_scope_extracts_scope_methods_as_instance() {
     let model_name = "App\\Models\\Brand";
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Brand" {
             let mut m = make_class("Brand");
             m.file_namespace = Some(atom("App\\Models"));
@@ -470,7 +473,8 @@ fn builder_scope_extracts_scope_methods_as_instance() {
 #[test]
 fn builder_scope_substitutes_static_in_return_type() {
     let model_name = "App\\Models\\Brand";
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Brand" {
             let mut m = make_class("Brand");
             m.file_namespace = Some(atom("App\\Models"));
@@ -500,7 +504,8 @@ fn builder_scope_substitutes_static_in_return_type() {
 #[test]
 fn builder_scope_strips_query_parameter() {
     let model_name = "App\\Models\\Brand";
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Brand" {
             let mut m = make_class("Brand");
             m.file_namespace = Some(atom("App\\Models"));
@@ -530,7 +535,8 @@ fn builder_scope_strips_query_parameter() {
 #[test]
 fn builder_scope_with_custom_return_type() {
     let model_name = "App\\Models\\Brand";
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Brand" {
             let mut m = make_class("Brand");
             m.file_namespace = Some(atom("App\\Models"));
@@ -559,7 +565,8 @@ fn builder_scope_with_custom_return_type() {
 #[test]
 fn builder_scope_preserves_deprecated() {
     let model_name = "App\\Models\\Brand";
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Brand" {
             let mut m = make_class("Brand");
             m.file_namespace = Some(atom("App\\Models"));
@@ -585,7 +592,8 @@ fn builder_scope_preserves_deprecated() {
 #[test]
 fn builder_scope_attribute_extracts_scope_methods_as_instance() {
     let model_name = "App\\Models\\Brand";
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Brand" {
             let mut m = make_class("Brand");
             m.file_namespace = Some(atom("App\\Models"));
@@ -612,7 +620,8 @@ fn builder_scope_attribute_extracts_scope_methods_as_instance() {
 #[test]
 fn builder_scope_attribute_strips_query_parameter() {
     let model_name = "App\\Models\\Brand";
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Brand" {
             let mut m = make_class("Brand");
             m.file_namespace = Some(atom("App\\Models"));
@@ -642,7 +651,8 @@ fn builder_scope_attribute_strips_query_parameter() {
 #[test]
 fn builder_scope_attribute_substitutes_static_in_return_type() {
     let model_name = "App\\Models\\Brand";
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Brand" {
             let mut m = make_class("Brand");
             m.file_namespace = Some(atom("App\\Models"));

@@ -5,6 +5,7 @@
 //! cost on the editor hot path.
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 
 impl Backend {
     /// Pre-resolve Laravel's shared builder classes so the first
@@ -15,7 +16,7 @@ impl Backend {
     /// generic specialisations like `Builder<User>` still depend on the
     /// concrete model and are resolved on demand.
     pub(crate) fn warm_laravel_completion_cache(&self) -> usize {
-        let loader = |name: &str| self.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let mut warmed = 0usize;
 
         for fqn in [

@@ -1,5 +1,7 @@
 use super::*;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::test_fixtures::{make_class, no_loader};
+use crate::type_engine::resolver::FileCtx;
 use std::cell::Cell;
 
 const FACTORY_BASE_FQN: &str = "Illuminate\\Database\\Eloquent\\Factories\\Factory";
@@ -28,23 +30,17 @@ fn count_ast_of(receiver: &str) -> FactoryCount {
     })
 }
 
-fn resolution_ctx(class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> ResolutionCtx<'_> {
-    ResolutionCtx {
-        current_class: None,
-        all_classes: &[],
-        content: "",
-        cursor_offset: 0,
-        class_loader,
-        source_class_loader: class_loader,
-        source_imports: None,
-        backend: None,
-        laravel_macro_this_resolver: None,
-        resolved_class_cache: None,
-        function_loader: None,
-        scope_var_resolver: None,
-        is_in_static_method: false,
-        preserve_static: false,
-    }
+fn resolution_ctx<'a>(class_loader: &'a ResolvedClassLoader<'a>) -> ResolutionCtx<'a> {
+    ResolutionCtx::new(
+        FileCtx::new(
+            "",
+            &[],
+            class_loader,
+            crate::test_fixtures::fqn_source_loader(class_loader),
+        ),
+        None,
+        0,
+    )
 }
 
 fn eloquent_factory_result(name: &str) -> ResolvedType {
@@ -557,7 +553,8 @@ fn model_type_falls_back_to_the_naming_convention() {
     factory.file_namespace = Some(atom("Database\\Factories"));
 
     let model = Arc::new(make_class("User"));
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         (name == "App\\Models\\User").then(|| Arc::clone(&model))
     };
 
@@ -601,7 +598,8 @@ fn model_type_prefers_declared_property_over_convention() {
     let mut factory_base = make_class(FACTORY_BASE_FQN);
     factory_base.template_params = vec![atom("TModel")];
     let conventional_model = make_class("App\\Models\\Draft");
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             FACTORY_BASE_FQN => Some(Arc::new(factory_base.clone())),
             "App\\Models\\Draft" => Some(Arc::new(conventional_model.clone())),
@@ -635,7 +633,8 @@ fn model_type_prefers_forwarded_generic_over_declared_property() {
     let mut factory_base = make_class(FACTORY_BASE_FQN);
     factory_base.template_params = vec![atom("TModel")];
 
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Database\\Factories\\DocumentFactory" => Some(Arc::new(document_factory.clone())),
             FACTORY_BASE_FQN => Some(Arc::new(factory_base.clone())),

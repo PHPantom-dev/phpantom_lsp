@@ -20,6 +20,7 @@ use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::*;
 
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN;
@@ -59,7 +60,7 @@ impl ClosureThisGuard {
     /// alive for the whole nested call tree, so their addresses cannot
     /// alias.
     fn enter(ctx: &ResolutionCtx<'_>) -> Option<Self> {
-        let key = (ctx.content.as_ptr() as usize, ctx.cursor_offset);
+        let key = (ctx.file.content.as_ptr() as usize, ctx.cursor_offset);
         CLOSURE_THIS_IN_PROGRESS.with(|stack| {
             let mut stack = stack.borrow_mut();
             if stack.contains(&key) {
@@ -112,14 +113,18 @@ pub(crate) fn find_closure_this_override(ctx: &ResolutionCtx<'_>) -> Option<Arc<
 pub(crate) fn find_closure_this_types(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>> {
     let _guard = ClosureThisGuard::enter(ctx)?;
 
-    with_parsed_program(ctx.content, "find_closure_this_override", |program, _| {
-        for stmt in program.statements.iter() {
-            if let Some(result) = walk_stmt_for_closure_this(stmt, ctx) {
-                return Some(result);
+    with_parsed_program(
+        ctx.file.content,
+        "find_closure_this_override",
+        |program, _| {
+            for stmt in program.statements.iter() {
+                if let Some(result) = walk_stmt_for_closure_this(stmt, ctx) {
+                    return Some(result);
+                }
             }
-        }
-        None
-    })
+            None
+        },
+    )
 }
 
 /// Recursively walk a statement looking for a closure argument that
@@ -488,25 +493,15 @@ pub(in crate::type_engine) fn resolve_receiver_types(
     let current_class = match ctx.current_class {
         Some(class) => class,
         None => {
-            placeholder = crate::class_lookup::class_context_placeholder(ctx.content, at);
+            placeholder = crate::class_lookup::class_context_placeholder(ctx.file.content, at);
             &placeholder
         }
     };
     let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
-        source_imports: ctx.source_imports,
-        backend: ctx.backend,
         loaders: crate::type_engine::resolver::Loaders::with_function(ctx.function_loader),
         resolved_class_cache: ctx.resolved_class_cache,
         scope_var_resolver: ctx.scope_var_resolver,
-        ..crate::type_engine::resolver::VarResolutionCtx::new(
-            "",
-            current_class,
-            ctx.all_classes,
-            ctx.content,
-            at,
-            ctx.class_loader,
-            ctx.source_class_loader,
-        )
+        ..crate::type_engine::resolver::VarResolutionCtx::new("", ctx.file, current_class, at)
     };
     super::rhs_resolution::resolve_rhs_expression(object, &var_ctx)
 }
@@ -516,13 +511,13 @@ pub(in crate::type_engine) fn resolve_receiver_types(
 pub(in crate::type_engine) fn find_owner_by_name(
     fqn: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<Arc<ClassInfo>> {
     all_classes
         .iter()
         .find(|c| c.fqn().eq_ignore_ascii_case(fqn))
         .map(Arc::clone)
-        .or_else(|| class_loader(fqn))
+        .or_else(|| class_loader(Fqn::new(fqn)))
 }
 
 /// Every class the class expression of a static call or `new` names.
@@ -538,7 +533,7 @@ pub(in crate::type_engine) fn resolve_static_receiver_classes(
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<Arc<ClassInfo>> {
     if let Some(name) = ctx.written_names().static_receiver_class_name(class_expr) {
-        return find_owner_by_name(&name, ctx.all_classes, ctx.class_loader)
+        return find_owner_by_name(&name, ctx.file.all_classes, ctx.file.class_loader)
             .into_iter()
             .collect();
     }
@@ -551,8 +546,8 @@ pub(in crate::type_engine) fn resolve_static_receiver_classes(
             super::class_string_resolution::classes_named_by_type(
                 &rt.type_string,
                 &owning_class,
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             ),
         );
     }
@@ -575,7 +570,7 @@ fn closure_this_from_receiver(
     for cls in &receiver_classes {
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             cls,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         if let Some(method) = resolved.get_method(method_name)
@@ -607,14 +602,14 @@ fn closure_this_from_static_receiver(
                 return Some(vec![ResolvedType::from_arc(
                     crate::virtual_members::resolve_class_fully_maybe_cached(
                         &bound,
-                        ctx.class_loader,
+                        ctx.file.class_loader,
                         ctx.resolved_class_cache,
                     ),
                 )]);
             }
             let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
                 owner,
-                ctx.class_loader,
+                ctx.file.class_loader,
                 ctx.resolved_class_cache,
             );
             let method = resolved.get_method(method_name)?;
@@ -675,6 +670,7 @@ fn resolve_closure_this_class(
 
     // Try local classes first, then the cross-file loader.
     if let Some(cls) = ctx
+        .file
         .all_classes
         .iter()
         .find(|c| c.fqn().eq_ignore_ascii_case(type_str))
@@ -682,10 +678,10 @@ fn resolve_closure_this_class(
         return Some(Arc::clone(cls));
     }
 
-    let resolved = (ctx.class_loader)(type_str)?;
+    let resolved = (ctx.file.class_loader)(Fqn::new(type_str))?;
     Some(crate::virtual_members::resolve_class_fully_maybe_cached(
         &resolved,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     ))
 }
@@ -710,7 +706,7 @@ fn resolve_closure_this_class(
 pub(in crate::type_engine) fn inferred_type_is_more_specific(
     explicit_hint: &PhpType,
     inferred: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     if let TypeKind::Union(parts) = inferred.kind() {
         return parts
@@ -742,7 +738,7 @@ pub(in crate::type_engine) fn inferred_type_is_more_specific(
 
     let explicit_base = explicit_base.trim_start_matches('\\');
     explicit_base.eq_ignore_ascii_case(inferred_base.trim_start_matches('\\'))
-        || class_loader(explicit_base).is_some_and(|explicit| {
+        || class_loader(Fqn::new(explicit_base)).is_some_and(|explicit| {
             crate::class_lookup::is_subtype_of_typed(
                 inferred,
                 &PhpType::named(explicit.fqn()),
@@ -789,7 +785,7 @@ fn describes_elements(ty: &PhpType, allow_iterable: bool) -> bool {
 /// not bare `Builder`.
 pub(in crate::type_engine) fn build_receiver_self_type(
     receiver: &ClassInfo,
-    _class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    _class_loader: &ResolvedClassLoader<'_>,
 ) -> PhpType {
     let fqn = receiver.fqn();
 

@@ -16,7 +16,10 @@ function example(array $convert): void
 			$val = strtoupper($val); // https://github.com/phpstan/phpstan/issues/14083
 		}
 	}
-	assertType('array<string, list<string>>', $convert);
+	// More precise than upstream, which reports `array<string, list<string>>`:
+	// every element was overwritten through the reference with an
+	// upper-cased string.
+	assertType('array<string, list<uppercase-string>>', $convert);
 }
 
 /**

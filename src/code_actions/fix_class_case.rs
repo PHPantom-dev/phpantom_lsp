@@ -20,9 +20,8 @@ impl Backend {
         if mismatches.is_empty() {
             return;
         }
-        let parsed_uri = match Url::parse(uri) {
-            Ok(u) => u,
-            Err(_) => return,
+        let Some(parsed_uri) = crate::util::parse_url(uri) else {
+            return;
         };
 
         for m in mismatches {

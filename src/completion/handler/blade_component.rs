@@ -22,6 +22,7 @@ use crate::Backend;
 use crate::blade::component_names::view_names_for_component_tag;
 use crate::blade::component_tags::{TagContext, TagCursor, TagKind, kebab_case, tag_context_at};
 use crate::blade::signature;
+use crate::class_lookup::Fqn;
 use crate::text_position::{offset_to_position, position_to_byte_offset};
 use crate::types::Visibility;
 
@@ -197,7 +198,7 @@ impl Backend {
         let Some(class) = self.find_or_load_class(fqn.trim_matches('\\')) else {
             return Vec::new();
         };
-        let loader = |name: &str| self.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             &class,
             &loader,
@@ -293,7 +294,7 @@ impl Backend {
         // reading one is the template declaring an attribute implicitly
         // (see [`crate::blade::implicit_props`]).
         let implicit = {
-            let directives = self.blade_directives.read();
+            let directives = self.blade.directives.read();
             crate::blade::implicit_props::implicit_props(&source, &directives)
         };
         if implicit.is_empty() {

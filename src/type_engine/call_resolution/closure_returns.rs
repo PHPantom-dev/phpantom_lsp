@@ -12,7 +12,7 @@ use crate::atom::atom;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::{Loaders, ResolutionCtx, with_isolated_chain_cache};
 use crate::type_engine::variable::forward_walk::{
-    ForwardWalkCtx, ScopeState, suspend_diagnostic_scope, suspend_return_edges, walk_body_forward,
+    ForwardWalkCtx, ScopeState, WalkFlow, suspend_diagnostic_scope, walk_body_forward,
 };
 use crate::types::*;
 
@@ -163,7 +163,7 @@ impl Backend {
         // spelling has to be canonicalised before it is bound.
         let declared = ctx.written_names().resolve_hint(&declared);
         let narrowed = body_type().filter(|body| {
-            crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
+            crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.file.class_loader)
         });
         Some(narrowed.unwrap_or(declared))
     }
@@ -236,7 +236,7 @@ impl Backend {
                             if crate::class_lookup::is_subtype_of_typed(
                                 seed,
                                 &declared,
-                                ctx.class_loader,
+                                ctx.file.class_loader,
                             ) =>
                         {
                             seed.clone()
@@ -249,8 +249,9 @@ impl Backend {
                 .collect();
         let is_arrow = crate::completion::source::helpers::closure_literal_parts(closure_text)
             .is_some_and(|(is_arrow, _)| is_arrow);
-        if is_arrow && typed_params.is_empty() {
-            return Self::resolve_arg_text_to_type(first_body, ctx);
+        let untyped_arrow = is_arrow && typed_params.is_empty();
+        if untyped_arrow && let Some(ty) = Self::resolve_arg_text_to_type(first_body, ctx) {
+            return Some(ty);
         }
 
         // Pre-resolve each typed parameter to its classes so the
@@ -261,8 +262,8 @@ impl Backend {
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &ty,
                 owning_class_name,
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
             if classes.is_empty() {
                 vec![ResolvedType::from_type_string(ty)]
@@ -300,7 +301,7 @@ impl Backend {
         };
 
         let outer_resolver = ctx.scope_var_resolver;
-        let param_aware_resolver = move |name: &str| -> Vec<ResolvedType> {
+        let param_aware_resolver = |name: &str| -> Vec<ResolvedType> {
             // A full closure body may reassign a parameter before
             // returning it (`$result['a'] = (string) $result['a']; return
             // $result;`), so the walked locals — the forward walker's own
@@ -329,27 +330,70 @@ impl Backend {
         };
 
         let param_ctx = ResolutionCtx {
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            cursor_offset: ctx.cursor_offset,
-            class_loader: ctx.class_loader,
-            source_class_loader: ctx.source_class_loader,
-            source_imports: ctx.source_imports,
-            backend: ctx.backend,
             laravel_macro_this_resolver: ctx.laravel_macro_this_resolver,
             resolved_class_cache: ctx.resolved_class_cache,
             function_loader: ctx.function_loader,
             scope_var_resolver: Some(&param_aware_resolver),
             is_in_static_method: ctx.is_in_static_method,
             preserve_static: ctx.preserve_static,
+            ..ResolutionCtx::new(ctx.file, ctx.current_class, ctx.cursor_offset)
+        };
+        let returns: Vec<&str> = returns
+            .iter()
+            .map(Option::as_deref)
+            .collect::<Option<_>>()?;
+        // The untyped arrow function's body was just tried with nothing
+        // else to seed it, so asking again would get the same answer.
+        if !untyped_arrow
+            && let Some(members) = returns
+                .iter()
+                .map(|ret| Self::resolve_arg_text_to_type(ret, &param_ctx))
+                .collect::<Option<Vec<_>>>()
+        {
+            return Some(PhpType::union(members));
+        }
+        // The text resolver only knows the expression shapes it has a rule
+        // for, so a body like `$carry && $item > 0` leaves it empty-handed.
+        // The shared expression pipeline answers for the rest.
+        resolve_closure_returns_in_ast(closure_text, &param_types, &param_aware_resolver, ctx)
+    }
+}
+
+/// Resolve every `return` a closure literal reaches (its body expression,
+/// for an arrow function) through the shared expression pipeline, with
+/// the body walked as [`walk_closure_body_locals`] walks it.
+///
+/// A variable the body does not define is answered by `outer`. Returns
+/// `None` when a `return` is bare or resolves to nothing.
+fn resolve_closure_returns_in_ast(
+    closure_text: &str,
+    param_types: &HashMap<String, Vec<ResolvedType>>,
+    outer: &dyn Fn(&str) -> Vec<ResolvedType>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    with_walked_closure(closure_text, param_types, ctx, |scope, returns, fw_ctx| {
+        let resolver = |name: &str| match scope.locals.get(&atom(name)) {
+            Some(types) if !types.is_empty() => types.clone(),
+            _ => outer(name),
         };
         let mut members = Vec::with_capacity(returns.len());
-        for ret in &returns {
-            members.push(Self::resolve_arg_text_to_type(ret.as_deref()?, &param_ctx)?);
+        for ret in returns {
+            let expr = (*ret)?;
+            let var_ctx = fw_ctx.var_ctx_for_with_scope(
+                "$__return",
+                expr.span().start.offset,
+                &resolver,
+                Some(scope.proofs()),
+            );
+            members.push(
+                crate::type_engine::variable::iterable_elements::resolve_expression_type(
+                    expr, &var_ctx,
+                )?,
+            );
         }
         Some(PhpType::union(members))
-    }
+    })
+    .flatten()
 }
 
 /// Walk a full closure literal's own body with the shared forward walker,
@@ -366,9 +410,9 @@ impl Backend {
 /// body actually leaves behind, the same as any other consumer of the
 /// forward walker.
 ///
-/// Returns `None` when `closure_text` is not a full (`function`) closure
-/// literal — an arrow function's body is a single expression with nothing
-/// to walk, so the caller's raw-seed resolver already answers correctly.
+/// Only a full (`function`) closure is worth walking: an arrow function's
+/// body is a single expression with nothing to walk, so the caller's
+/// raw-seed resolver already answers for it.
 fn walk_closure_body_locals(
     closure_text: &str,
     param_types: &HashMap<String, Vec<ResolvedType>>,
@@ -377,6 +421,34 @@ fn walk_closure_body_locals(
     crate::type_engine::variable::forward_walk::Locals,
     Vec<Option<String>>,
 )> {
+    with_walked_closure(closure_text, param_types, ctx, |scope, returns, fw_ctx| {
+        let content = fw_ctx.file.content;
+        let returns = returns
+            .iter()
+            .map(|expr| {
+                expr.map(|e| {
+                    let span = e.span();
+                    content[span.start.offset as usize..span.end.offset as usize].to_owned()
+                })
+            })
+            .collect();
+        (scope.locals, returns)
+    })
+}
+
+/// Parse a closure or arrow function literal in isolation, walk a closure's
+/// body with the parameters seeded from `param_types`, and hand `f` the
+/// resulting scope together with every `return` expression the body
+/// reaches (`None` for a bare `return;`). An arrow function has nothing to
+/// walk and returns its body expression.
+///
+/// Returns `None` when `closure_text` is neither.
+fn with_walked_closure<R>(
+    closure_text: &str,
+    param_types: &HashMap<String, Vec<ResolvedType>>,
+    ctx: &ResolutionCtx<'_>,
+    f: impl FnOnce(ScopeState, &[Option<&Expression<'_>>], &ForwardWalkCtx<'_>) -> R,
+) -> Option<R> {
     let trimmed = closure_text.trim().trim_end_matches(';');
     let wrapped = format!("<?php $__closure = {trimmed};");
 
@@ -388,23 +460,22 @@ fn walk_closure_body_locals(
     // `out_param::read_out_type`, which walks another file's body for the
     // same reason.
     let _isolated = (suspend_diagnostic_scope(), with_isolated_chain_cache());
-    let _barrier = suspend_return_edges();
 
     crate::parser::with_parsed_program(
         &wrapped,
         "closure_body_return_narrowing",
         |program, content| {
-            let closure = program.statements.iter().find_map(|stmt| {
+            let function = program.statements.iter().find_map(|stmt| {
                 let Statement::Expression(expr_stmt) = stmt else {
                     return None;
                 };
                 let Expression::Assignment(assignment) = expr_stmt.expression else {
                     return None;
                 };
-                let Expression::Closure(closure) = assignment.rhs else {
-                    return None;
-                };
-                Some(closure)
+                match assignment.rhs {
+                    Expression::Closure(_) | Expression::ArrowFunction(_) => Some(assignment.rhs),
+                    _ => None,
+                }
             })?;
 
             let dummy_class;
@@ -416,22 +487,16 @@ fn walk_closure_body_locals(
                 }
             };
 
+            let flow = WalkFlow::default();
             let fw_ctx = ForwardWalkCtx {
-                current_class,
-                all_classes: ctx.all_classes,
-                content,
-                cursor_offset: u32::MAX,
-                class_loader: ctx.class_loader,
-                source_class_loader: ctx.source_class_loader,
-                source_imports: ctx.source_imports,
-                backend: ctx.backend,
                 loaders: Loaders::with_function(ctx.function_loader),
                 resolved_class_cache: ctx.resolved_class_cache,
-                enclosing_return_type: None,
-                top_level_scope: None,
-                in_loop: false,
-                template_markers: None,
-                cursor_scope: None,
+                ..ForwardWalkCtx::new(
+                    ctx.file.with_source(content, ctx.file.all_classes),
+                    current_class,
+                    u32::MAX,
+                    &flow,
+                )
             };
 
             let mut scope = ScopeState::new();
@@ -439,21 +504,21 @@ fn walk_closure_body_locals(
                 scope.seed(name, types.clone());
             }
 
-            walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
+            let returns: Vec<Option<&Expression<'_>>> = match function {
+                Expression::Closure(closure) => {
+                    walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
+                    let mut found = Vec::new();
+                    crate::return_collection::collect_returns(
+                        closure.body.statements.iter(),
+                        &mut found,
+                    );
+                    found.into_iter().map(|(expr, ..)| expr).collect()
+                }
+                Expression::ArrowFunction(arrow) => vec![Some(arrow.expression)],
+                _ => return None,
+            };
 
-            let mut found = Vec::new();
-            crate::return_collection::collect_returns(closure.body.statements.iter(), &mut found);
-            let returns = found
-                .into_iter()
-                .map(|(expr, ..)| {
-                    expr.map(|e| {
-                        let span = e.span();
-                        content[span.start.offset as usize..span.end.offset as usize].to_owned()
-                    })
-                })
-                .collect();
-
-            Some((scope.locals, returns))
+            Some(f(scope, &returns, &fw_ctx))
         },
     )
 }

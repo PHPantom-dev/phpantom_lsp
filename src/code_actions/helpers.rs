@@ -1,6 +1,7 @@
 //! Helpers every code action shares: the `WorkspaceEdit` builders, the
-//! indentation probes, the opaque `data` payload of a deferred action, and
-//! the occurrence search the extract actions use.
+//! indentation probes, the opaque `data` payload of a deferred action, the
+//! test for which symbol-map spans a request covers, and the occurrence
+//! search the extract actions use.
 
 use std::collections::HashMap;
 
@@ -9,6 +10,8 @@ use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::sequence::Sequence;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::*;
+
+use crate::symbol_map::SymbolSpan;
 
 // ─── Shared edit builders ─────────────────────────────────────────────────────
 
@@ -53,10 +56,7 @@ pub(crate) fn occurrence_replacement_edit(
         return None;
     }
     Some(TextEdit {
-        range: Range {
-            start: crate::text_position::offset_to_position(content, offset),
-            end: crate::text_position::offset_to_position(content, end),
-        },
+        range: crate::text_position::byte_range_to_lsp_range(content, offset, end),
         new_text: replacement.to_string(),
     })
 }
@@ -144,18 +144,100 @@ pub(crate) fn create_file_edit(
     document_changes_edit([create], content_edit.into_iter().chain(edits))
 }
 
+// ─── Walking an existing edit ─────────────────────────────────────────────────
+
+/// One file's text edits inside a [`WorkspaceEdit`], in whichever of the two
+/// shapes carries them.
+pub(crate) enum FileTextEdits<'a> {
+    /// The edits of a `changes` entry.
+    Plain(&'a mut Vec<TextEdit>),
+    /// The edits of a `TextDocumentEdit`, each plain or annotated.
+    Document(&'a mut Vec<OneOf<TextEdit, AnnotatedTextEdit>>),
+}
+
+impl FileTextEdits<'_> {
+    /// Keep only the edits `keep` returns `true` for, handing it each edit's
+    /// plain [`TextEdit`] (an annotated edit's inner one) to inspect or
+    /// rewrite.
+    pub(crate) fn retain_mut(&mut self, mut keep: impl FnMut(&mut TextEdit) -> bool) {
+        match self {
+            Self::Plain(edits) => edits.retain_mut(keep),
+            Self::Document(edits) => edits.retain_mut(|edit| keep(plain_text_edit(edit))),
+        }
+    }
+
+    /// Run `f` on every edit's plain [`TextEdit`].
+    pub(crate) fn for_each_mut(&mut self, mut f: impl FnMut(&mut TextEdit)) {
+        match self {
+            Self::Plain(edits) => edits.iter_mut().for_each(f),
+            Self::Document(edits) => edits.iter_mut().for_each(|edit| f(plain_text_edit(edit))),
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self::Plain(edits) => edits.is_empty(),
+            Self::Document(edits) => edits.is_empty(),
+        }
+    }
+}
+
+fn plain_text_edit(edit: &mut OneOf<TextEdit, AnnotatedTextEdit>) -> &mut TextEdit {
+    match edit {
+        OneOf::Left(edit) => edit,
+        OneOf::Right(edit) => &mut edit.text_edit,
+    }
+}
+
+/// Call `visit` with every file's text edits in `edit` and the file they go
+/// into, whether `changes` or `document_changes` carries them.
+///
+/// Returns whether `edit` also holds a resource operation (a file
+/// creation, rename, or deletion), which carries no text edits to visit.
+pub(crate) fn visit_file_text_edits(
+    edit: &mut WorkspaceEdit,
+    mut visit: impl FnMut(&Url, FileTextEdits<'_>),
+) -> bool {
+    if let Some(changes) = edit.changes.as_mut() {
+        for (uri, edits) in changes.iter_mut() {
+            visit(uri, FileTextEdits::Plain(edits));
+        }
+    }
+    let mut has_resource_op = false;
+    match edit.document_changes.as_mut() {
+        Some(DocumentChanges::Edits(documents)) => {
+            for document in documents {
+                visit(
+                    &document.text_document.uri,
+                    FileTextEdits::Document(&mut document.edits),
+                );
+            }
+        }
+        Some(DocumentChanges::Operations(operations)) => {
+            for operation in operations {
+                match operation {
+                    DocumentChangeOperation::Edit(document) => visit(
+                        &document.text_document.uri,
+                        FileTextEdits::Document(&mut document.edits),
+                    ),
+                    DocumentChangeOperation::Op(_) => has_resource_op = true,
+                }
+            }
+        }
+        None => {}
+    }
+    has_resource_op
+}
+
 // ─── Indentation helpers ──────────────────────────────────────────────────────
 
 /// Return the leading whitespace of the line containing `offset`.
 ///
 /// This is the raw indentation of that line, without adding an extra level.
-pub(crate) fn indent_of_line_at(content: &str, offset: usize) -> String {
-    let before = &content[..offset.min(content.len())];
-    let line_start = before.rfind('\n').map_or(0, |p| p + 1);
-    content[line_start..offset.min(content.len())]
-        .chars()
-        .take_while(|c| c.is_whitespace())
-        .collect()
+pub(crate) fn indent_of_line_at(content: &str, offset: usize) -> &str {
+    let offset = offset.min(content.len());
+    let line = &content[crate::text_position::find_line_start(content, offset)..offset];
+    &line[..line.len() - line.trim_start_matches([' ', '\t']).len()]
 }
 
 /// Detect the file's indentation unit (a tab, two spaces, or four spaces).
@@ -191,7 +273,7 @@ pub(crate) fn detect_indent_from_members<'a>(
     if let Some(first) = members.first() {
         let indent = indent_of_line_at(content, first.span().start.offset as usize);
         if !indent.is_empty() {
-            return indent;
+            return indent.to_string();
         }
     }
 
@@ -238,6 +320,49 @@ pub(crate) fn make_code_action_data(
         extra,
     })
     .unwrap_or_default()
+}
+
+/// A deferred `quickfix` for `diagnostics`: no edit, and a `data` payload
+/// the resolve recomputes the edit from.  The payload carries `extra`'s
+/// own fields plus the first diagnostic's message, line and code, as
+/// `diagnostic_message`, `diagnostic_line` and `diagnostic_code`.
+pub(crate) fn deferred_quickfix(
+    title: String,
+    action_kind: &str,
+    uri: &str,
+    range: &Range,
+    diagnostics: Vec<Diagnostic>,
+    is_preferred: bool,
+    extra: serde_json::Value,
+) -> CodeActionOrCommand {
+    let mut extra = match extra {
+        serde_json::Value::Object(fields) => fields,
+        _ => serde_json::Map::new(),
+    };
+    if let Some(diag) = diagnostics.first() {
+        let code = match &diag.code {
+            Some(NumberOrString::String(code)) => code.as_str(),
+            _ => "",
+        };
+        extra.insert("diagnostic_message".into(), diag.message.clone().into());
+        extra.insert("diagnostic_line".into(), diag.range.start.line.into());
+        extra.insert("diagnostic_code".into(), code.into());
+    }
+    CodeActionOrCommand::CodeAction(CodeAction {
+        title,
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: Some(diagnostics),
+        edit: None,
+        command: None,
+        is_preferred: Some(is_preferred),
+        disabled: None,
+        data: Some(make_code_action_data(
+            action_kind,
+            uri,
+            range,
+            serde_json::Value::Object(extra),
+        )),
+    })
 }
 
 /// A `refactor.rewrite` action that replaces the bytes `[start, end)` of
@@ -337,6 +462,23 @@ pub(crate) fn selected_byte_range(content: &str, range: Range) -> Option<(usize,
     (start < end && end <= content.len()).then_some((start, end))
 }
 
+/// Whether a code action requested over the byte range
+/// `[request_start, request_end)` is about `span`: a bare cursor anywhere
+/// from its first character up to its end, or a selection that intersects
+/// it.
+pub(crate) fn span_overlaps_request(
+    span: &SymbolSpan,
+    request_start: usize,
+    request_end: usize,
+) -> bool {
+    let (start, end) = (span.start as usize, span.end as usize);
+    if request_start == request_end {
+        start <= request_start && request_start < end
+    } else {
+        start < request_end && end > request_start
+    }
+}
+
 /// The selection `[start, end)` and every textually identical expression
 /// within `[scope_start, scope_end)`, in source order.
 ///
@@ -371,10 +513,7 @@ pub(crate) fn replace_spans_edits<'a>(
     replacement: &'a str,
 ) -> impl Iterator<Item = TextEdit> + 'a {
     spans.iter().map(move |&(start, end)| TextEdit {
-        range: Range {
-            start: crate::text_position::offset_to_position(content, start),
-            end: crate::text_position::offset_to_position(content, end),
-        },
+        range: crate::text_position::byte_range_to_lsp_range(content, start, end),
         new_text: replacement.to_string(),
     })
 }

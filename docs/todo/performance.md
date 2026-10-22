@@ -20,7 +20,42 @@ against that bar.
 
 ---
 
-No outstanding items.
+## P84. Class lookups re-apply the Laravel patches on every call
+
+**Impact: Medium-High · Complexity: Medium**
+
+`find_or_load_class_typed` (`resolution/classes.rs`) memoises the indexed
+class but runs the auth, storage, macro and pivot refinements after the
+memo, on every lookup. When one applies, it copies the whole `ClassInfo`
+into a new `Arc`, which also defeats the pointer-identity shortcut in
+`forward_walk/scope_state/merge.rs`.
+
+Measured on the large Laravel app (debug `analyze`, 2026-10-19): 8.4M
+lookups, 400k of them copying, spend 47.7 s of the run's 371 CPU-seconds
+in the refinements (12.9%), 32.7 s of it in the copies alone. Memoise the
+refined class keyed on the indexed class and a generation that moves with
+the auth model, storage driver, macro and pivot registries, so a repeat
+lookup hands back the same `Arc`.
+
+## P85. One keystroke parses the open file three times
+
+**Impact: Medium · Complexity: Medium-High**
+
+`update_ast` (`parser/ast_update.rs`) parses the buffer and discards the
+tree, then the fast diagnostics (`diagnostics/collect.rs`) and the slow
+pass (`diagnostics/incremental/mod.rs`) each parse it again under their
+own parse cache. A probe counted three parses per edit in every file it
+tried.
+
+Measured on the large Laravel app (debug, an edit inside one method, the
+slow pass running partial): a parse costs 3.5 to 5 ms on 1,300 to
+1,900-line services, where the whole edit cycle takes 95 to 185 ms, and
+0.2 to 0.6 ms on service providers whose cycle takes 7 to 22 ms. Parsing
+once would save 4 to 11% of the cycle. The Laravel refreshers `update_ast`
+calls add at most one more parse on the providers tried (about 2.5% of the
+cycle), not worth a change of their own. Keeping the parsed tree alive
+between `didChange` and the diagnostic pass costs its parse memory, about
+22 MB for a 73 KB file, for as long as the file is open.
 
 ---
 

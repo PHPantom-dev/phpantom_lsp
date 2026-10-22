@@ -1,3 +1,4 @@
+use crate::common::{goto_definition_at, hover_response, open_php, references_response};
 use std::fs;
 
 use phpantom_lsp::Backend;
@@ -68,16 +69,7 @@ async fn castor_workspace(include: &[&str]) -> (Backend, tempfile::TempDir) {
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(root.join("castor.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri,
-                language_id: "php".into(),
-                version: 1,
-                text: CASTOR_TASKS.into(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, CASTOR_TASKS).await;
 
     (backend, dir)
 }
@@ -87,17 +79,7 @@ fn tasks_uri(dir: &tempfile::TempDir) -> Url {
 }
 
 async fn goto(backend: &Backend, uri: &Url, line: u32, character: u32) -> Option<Location> {
-    let response = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    let response = goto_definition_at(backend, uri, line, character).await;
 
     match response {
         Some(GotoDefinitionResponse::Scalar(location)) => Some(location),
@@ -182,19 +164,8 @@ async fn include_feeds_hover() {
     let uri = tasks_uri(&dir);
 
     // `io();` on line 8.
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 8,
-                    character: 5,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
+    let hover = hover_response(&backend, &uri, 8, 5)
         .await
-        .unwrap()
         .expect("hover should resolve a function from the included stub");
 
     let text = match hover.contents {
@@ -233,23 +204,8 @@ async fn include_feeds_find_references_from_function_only_files() {
     .unwrap();
 
     let uri = tasks_uri(&dir);
-    let locations = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 5,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-        })
+    let locations = references_response(&backend, &uri, Position::new(10, 5), false)
         .await
-        .unwrap()
         .unwrap_or_default();
 
     let caller_uri = Url::from_file_path(&caller).unwrap();

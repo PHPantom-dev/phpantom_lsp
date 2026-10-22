@@ -317,6 +317,36 @@ class Foo {
     );
 }
 
+/// The summary mentioning "function" and holding a `{` must not be taken
+/// for the declaration the body is inferred from.
+#[test]
+fn infers_return_when_summary_mentions_function() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {
+    /**
+     * Builds the function map. {@see Bar}
+     */
+    public function ids(): array {
+        return [1, 2];
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    let actions = get_code_actions_at(&backend, uri, content, 3, 10);
+    let action = find_action_containing(&actions, "Update docblock")
+        .expect("should offer Update docblock action");
+
+    let new_text = extract_edit_text(action);
+    assert!(
+        new_text.contains("@return array{1, 2}"),
+        "should add the inferred return type: {}",
+        new_text
+    );
+}
+
 // ── No docblock ─────────────────────────────────────────────────────────────
 
 #[test]

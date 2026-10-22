@@ -1,5 +1,6 @@
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::Fqn;
 use crate::test_fixtures::{make_class, make_method};
 use crate::types::Visibility;
 
@@ -11,9 +12,10 @@ fn make_facade(name: &str, concrete: &str) -> ClassInfo {
     facade
 }
 
-fn loader_for(classes: Vec<ClassInfo>) -> impl Fn(&str) -> Option<Arc<ClassInfo>> {
+fn loader_for(classes: Vec<ClassInfo>) -> impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> {
     let classes: Vec<Arc<ClassInfo>> = classes.into_iter().map(Arc::new).collect();
-    move |name: &str| {
+    move |name: Fqn<'_>| {
+        let name = name.as_str();
         classes
             .iter()
             .find(|c| c.fqn().as_str() == name.trim_start_matches('\\'))
@@ -140,7 +142,7 @@ fn cache_binding(key: &str, concrete: &str) -> crate::virtual_members::ResolvedC
     slot.publish_for_test(Arc::new(aliases));
 
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_laravel_aliases(slot);
+    cache.write().laravel_mut().set_aliases(slot);
     cache
 }
 

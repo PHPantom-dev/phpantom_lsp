@@ -34,8 +34,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::text_position::{line_start_byte_offset, offset_to_position};
+use crate::code_actions::{CodeActionData, deferred_quickfix};
+use crate::text_position::{byte_range_to_lsp_range, line_start_byte_offset};
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
 
@@ -69,27 +69,17 @@ impl Backend {
             if phpstan_identifier(&diag) != Some(UNREACHABLE_ID) {
                 continue;
             }
-            let diag_line = diag.range.start.line as usize;
+            let _diag_line = diag.range.start.line as usize;
 
-            let extra = serde_json::json!({
-                "diagnostic_line": diag_line,
-            });
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: "Remove unreachable code".to_string(),
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diag]),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(make_code_action_data(
-                    ACTION_KIND,
-                    uri,
-                    &params.range,
-                    extra,
-                )),
-            }));
+            out.push(deferred_quickfix(
+                "Remove unreachable code".to_string(),
+                ACTION_KIND,
+                uri,
+                &params.range,
+                vec![diag],
+                true,
+                serde_json::Value::Null,
+            ));
         }
     }
 
@@ -166,10 +156,7 @@ fn build_remove_unreachable_block_edit(content: &str, diag_line: usize) -> Optio
     };
 
     Some(TextEdit {
-        range: Range {
-            start: offset_to_position(content, start),
-            end: offset_to_position(content, end),
-        },
+        range: byte_range_to_lsp_range(content, start, end),
         new_text: String::new(),
     })
 }

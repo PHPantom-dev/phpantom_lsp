@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::SymbolMap;
 use crate::symbol_map::VarDefKind;
-use crate::text_position::position_to_byte_offset;
+use crate::text_position::{position_to_byte_offset, utf16_col_to_char_index};
 
 impl Backend {
     /// PHP superglobal variable names (always available in any scope).
@@ -60,7 +60,7 @@ impl Backend {
             (last, last.chars().count())
         } else {
             let l = lines[position.line as usize];
-            (l, (position.character as usize).min(l.chars().count()))
+            (l, utf16_col_to_char_index(l, position.character))
         };
 
         let chars: Vec<char> = line.chars().collect();
@@ -132,11 +132,11 @@ impl Backend {
         // to the cursor position.  Using `text_edit` with an explicit range
         // prevents the double-dollar problem in editors (Helix, Neovim)
         // that don't consider `$` part of a word boundary.
-        let prefix_char_len = prefix.chars().count() as u32;
+        let prefix_utf16_len = prefix.encode_utf16().count() as u32;
         let replace_range = Range {
             start: Position {
                 line: position.line,
-                character: position.character.saturating_sub(prefix_char_len),
+                character: position.character.saturating_sub(prefix_utf16_len),
             },
             end: position,
         };

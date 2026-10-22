@@ -14,6 +14,7 @@ use crate::Backend;
 use crate::ParseErrorEntry;
 use crate::atom::Atom;
 use crate::ci_map::CiMap;
+use crate::class_lookup::Fqn;
 use crate::names::OwnedResolvedNames;
 use crate::symbol_map::{LaravelStringDependency, SymbolMap};
 use crate::types::{ClassInfo, DefineInfo, FunctionInfo, NamespaceSpan};
@@ -167,10 +168,11 @@ impl Backend {
         excluded_uris: &HashSet<&str>,
     ) -> Vec<(String, Arc<SymbolMap>)> {
         let candidates: Vec<(String, Arc<SymbolMap>)> = self
-            .symbol_maps
+            .files
             .read()
             .iter()
             .filter(|(uri, _)| !excluded_uris.contains(uri.as_str()))
+            .filter_map(|(uri, state)| Some((uri, state.symbol_map.as_ref()?)))
             .filter(|(_, map)| map.has_conditional_laravel_dependency(affected))
             .map(|(uri, map)| (uri.clone(), Arc::clone(map)))
             .collect();
@@ -209,11 +211,7 @@ impl Backend {
                 .iter()
                 .map(|(uri, map)| (uri.as_str(), map.as_ref())),
         );
-        let mut symbol_maps = self.symbol_maps.write();
-        for (uri, map) in refreshed {
-            symbol_maps.insert(uri, map);
-        }
-        drop(symbol_maps);
+        self.publish_symbol_maps(refreshed);
         // The refreshed maps decide which string keys those files check.
         self.diag.epoch.note_change();
         true
@@ -300,7 +298,7 @@ impl Backend {
                 .filter(|class| !class.name.starts_with("__anonymous@"))
                 .map(|class| class_info_fqn(class))
                 .collect();
-            let classes: Vec<Arc<ClassInfo>> = update.classes.into_iter().map(Arc::new).collect();
+            let classes: Vec<Arc<ClassInfo>> = crate::types::into_arcs(update.classes);
             let new_fqns: Vec<String> = classes
                 .iter()
                 .filter(|class| !class.name.starts_with("__anonymous@"))
@@ -344,13 +342,6 @@ impl Backend {
         all_old_fqns.dedup();
         all_new_fqns.sort();
         all_new_fqns.dedup();
-
-        {
-            let mut parse_errors = self.parse_errors.write();
-            for update in &mut prepared {
-                parse_errors.insert(update.uri.clone(), std::mem::take(&mut update.parse_errors));
-            }
-        }
 
         // Names this batch took over from a file that previously won them.
         // Their entries in the fqn-keyed derived indexes below belong to the
@@ -469,33 +460,18 @@ impl Backend {
             }
         }
 
-        {
-            let mut imports = self.file_imports.write();
-            let mut symbol_imports = self.file_symbol_imports.write();
-            let mut resolved_names = self.resolved_names.write();
-            let mut pest_uses = self.file_pest_uses.write();
-            let mut namespaces = self.file_namespaces.write();
-            for update in &mut prepared {
-                imports.insert(update.uri.clone(), std::mem::take(&mut update.use_map));
-                if update.symbol_imports.is_empty() {
-                    symbol_imports.remove(&update.uri);
-                } else {
-                    symbol_imports.insert(
-                        update.uri.clone(),
-                        std::mem::take(&mut update.symbol_imports),
-                    );
-                }
-                resolved_names.insert(update.uri.clone(), Arc::clone(&update.resolved_names));
-                match update.pest_uses.take() {
-                    Some(uses) => pest_uses.insert(update.uri.clone(), uses),
-                    None => pest_uses.remove(&update.uri),
-                };
-                namespaces.insert(
-                    update.uri.clone(),
-                    std::mem::take(&mut update.namespace_spans),
-                );
-            }
-        }
+        // The batch's own symbol maps have their prospective Laravel spans
+        // activated against the declarations published above before they
+        // go out with the rest of each file's state.
+        let refreshed_existing =
+            self.refresh_batch_laravel_candidates(&mut prepared, &all_old_fqns, &all_new_fqns);
+        let reference_items: Vec<(String, Arc<SymbolMap>)> = prepared
+            .iter()
+            .map(|update| (update.uri.clone(), Arc::clone(&update.symbol_map)))
+            .chain(refreshed_existing.iter().cloned())
+            .collect();
+        self.publish_file_states(&mut prepared);
+        self.publish_symbol_maps(refreshed_existing.iter().cloned());
 
         self.repopulate_resolved_classes(&evicted_fqns);
 
@@ -509,15 +485,8 @@ impl Backend {
             }
         }
 
-        let refreshed_existing =
-            self.refresh_batch_laravel_candidates(&mut prepared, &all_old_fqns, &all_new_fqns);
         let changed = structural_changed || !refreshed_existing.is_empty();
 
-        let mut reference_items: Vec<(String, Arc<SymbolMap>)> = prepared
-            .iter()
-            .map(|update| (update.uri.clone(), Arc::clone(&update.symbol_map)))
-            .collect();
-        reference_items.extend(refreshed_existing.iter().cloned());
         self.reindex_references_for_symbol_maps_batch(reference_items);
 
         // Runtime writes follow every published map, including unedited
@@ -533,32 +502,74 @@ impl Backend {
                 ),
         );
 
-        // A template's lowering and its symbol map go out under one hold of
-        // the publish lock, so that of two parses of the same template racing
-        // each other, one publishes all three maps before the other starts.
-        let has_blade = prepared.iter().any(|update| update.blade.is_some());
-        let _blade_publish_guard = has_blade.then(|| self.blade_publish_lock.lock());
-        if has_blade {
-            let mut virtual_content = self.blade_virtual_content.write();
-            let mut source_maps = self.blade_source_maps.write();
-            for update in &mut prepared {
-                if let Some(blade) = update.blade.take() {
-                    virtual_content.insert(update.uri.clone(), blade.virtual_php);
-                    source_maps.insert(update.uri.clone(), blade.source_map);
-                }
-            }
-        }
-        {
-            let mut symbol_maps = self.symbol_maps.write();
-            for (uri, map) in refreshed_existing {
-                symbol_maps.insert(uri, map);
-            }
-            for update in prepared {
-                symbol_maps.insert(update.uri, update.symbol_map);
-            }
-        }
-
         changed
+    }
+
+    /// Replace each batch file's [`FileState`](crate::file_state::FileState)
+    /// with what its parse produced, all of it at once.
+    ///
+    /// A parse that lowered no template keeps the lowering the file already
+    /// had.
+    fn publish_file_states(&self, prepared: &mut [PreparedAstIndexUpdate]) {
+        let mut files = self.files.write();
+        for update in prepared {
+            let blade = match update.blade.take() {
+                Some(blade) => Some(crate::file_state::BladeFileState {
+                    virtual_php: blade.virtual_php,
+                    source_map: Arc::new(blade.source_map),
+                }),
+                None => files.get(&update.uri).and_then(|old| old.blade.clone()),
+            };
+            let state = crate::file_state::FileState {
+                symbol_map: Some(Arc::clone(&update.symbol_map)),
+                parse_errors: std::mem::take(&mut update.parse_errors),
+                use_map: std::mem::take(&mut update.use_map),
+                symbol_imports: std::mem::take(&mut update.symbol_imports),
+                resolved_names: Some(Arc::clone(&update.resolved_names)),
+                namespaces: std::mem::take(&mut update.namespace_spans),
+                pest_uses: update.pest_uses.take(),
+                blade,
+            };
+            files.insert(update.uri.clone(), Arc::new(state));
+        }
+    }
+
+    /// Swap refreshed symbol maps into the states of files that were not
+    /// re-parsed, leaving the rest of each state as it was.
+    pub(crate) fn publish_symbol_maps(
+        &self,
+        maps: impl IntoIterator<Item = (String, Arc<SymbolMap>)>,
+    ) {
+        let mut files = self.files.write();
+        for (uri, map) in maps {
+            let state = match files.get(&uri) {
+                Some(state) => state.with_symbol_map(map),
+                None => crate::file_state::FileState {
+                    symbol_map: Some(map),
+                    ..Default::default()
+                },
+            };
+            files.insert(uri, Arc::new(state));
+        }
+    }
+
+    /// Record a parse that failed before it produced anything but `errors`.
+    ///
+    /// Whatever an earlier parse of the file published stays, so features
+    /// keep answering from it until a parse succeeds.
+    pub(crate) fn publish_parse_failure(&self, uri: &str, errors: Vec<ParseErrorEntry>) {
+        let mut files = self.files.write();
+        let state = match files.get(uri) {
+            Some(old) => crate::file_state::FileState {
+                parse_errors: errors,
+                ..old.as_ref().clone()
+            },
+            None => crate::file_state::FileState {
+                parse_errors: errors,
+                ..Default::default()
+            },
+        };
+        files.insert(uri.to_string(), Arc::new(state));
     }
 
     /// Publish a batch's standalone functions and `define()` constants, and
@@ -862,7 +873,8 @@ impl Backend {
             crate::toposort::toposort_classes(iter)
         };
 
-        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let class_loader =
+            |name: Fqn<'_>| -> Option<Arc<ClassInfo>> { self.find_or_load_class(&name) };
         crate::virtual_members::populate_from_sorted(
             &sorted,
             &self.resolved_class_cache,
@@ -890,8 +902,8 @@ impl Backend {
         // A receiver's type is settled against the classes of the whole
         // workspace, so a signature change anywhere can turn a call that
         // was not a render into one, or the other way round.
-        self.typed_receiver_view_spans_cache.write().clear();
-        self.morph_column_spans_cache.write().clear();
+        self.blade.typed_receiver_view_spans_cache.write().clear();
+        self.laravel.morph_column_spans_cache.write().clear();
     }
 
     /// Activate a batch's prospective Laravel spans against the declarations

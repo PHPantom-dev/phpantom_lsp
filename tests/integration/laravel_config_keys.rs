@@ -7,7 +7,7 @@
 //! names, so a later read of that key is as valid as a read of one declared
 //! on disk.
 
-use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace};
+use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -94,16 +94,7 @@ async fn config_diagnostics_for(
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join(consumer_path)).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), consumer, &mut diags);

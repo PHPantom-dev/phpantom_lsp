@@ -6,7 +6,7 @@
 //! resolving, and a key two providers bind ends up with whichever of them the
 //! container would let win once the edit has landed.
 
-use crate::common::{APP_HELPERS_PHP, consumer_class, create_psr4_workspace};
+use crate::common::{APP_HELPERS_PHP, consumer_class, create_psr4_workspace, open_php};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -127,16 +127,7 @@ async fn start(extra: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
 /// Edit a file the way an editor does: open it, then replace its contents.
 async fn edit(backend: &Backend, path: std::path::PathBuf, before: &str, after: &str) {
     let uri = Url::from_file_path(&path).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: before.to_string(),
-            },
-        })
-        .await;
+    open_php(backend, &uri, before).await;
     backend
         .did_change(DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier { uri, version: 2 },
@@ -155,16 +146,7 @@ async fn hover_key(backend: &Backend, dir: &tempfile::TempDir, key: &str) -> Str
     let path = dir.path().join("src/Consumer.php");
     std::fs::write(&path, &text).unwrap();
     let uri = Url::from_file_path(&path).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.clone(),
-            },
-        })
-        .await;
+    open_php(backend, &uri, &text).await;
 
     let idx = text.rfind("$x;").expect("consumer should use $x");
     let prefix = &text[..idx + 1];

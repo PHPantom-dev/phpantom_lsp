@@ -16,6 +16,7 @@ use tower_lsp::lsp_types::{
     InsertTextFormat, Position, Range, TextEdit,
 };
 
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::signature_render::{
     format_params, format_return_type, native_hint_expresses_return_type, native_param_hint,
@@ -55,7 +56,7 @@ const TRAIT_CONST_MIN: PhpVersion = PhpVersion::new(8, 2);
 pub(crate) fn collect_overridable_methods(
     class: &ClassInfo,
     partial: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<(MethodInfo, String, bool)> {
     let mut collector = OverrideCollector::<MethodInfo>::new(class, partial, class_loader);
 
@@ -177,7 +178,7 @@ impl OverridableMember for ConstantInfo {
 /// class can still declare itself.
 struct OverrideCollector<'a, M: OverridableMember> {
     partial: &'a str,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
     /// Lowercased names the editing class already declares.
     own_names: HashSet<String>,
     /// Lowercased names already collected, so the nearest ancestor's
@@ -200,11 +201,7 @@ struct OverrideCollector<'a, M: OverridableMember> {
 }
 
 impl<'a, M: OverridableMember> OverrideCollector<'a, M> {
-    fn new(
-        class: &ClassInfo,
-        partial: &'a str,
-        class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> Self {
+    fn new(class: &ClassInfo, partial: &'a str, class_loader: &'a ResolvedClassLoader<'a>) -> Self {
         Self {
             partial,
             class_loader,
@@ -253,7 +250,7 @@ impl<'a, M: OverridableMember> OverrideCollector<'a, M> {
         if !self.walk_interfaces || !self.visited.insert(iface_name.to_string()) {
             return;
         }
-        let Some(iface) = (self.class_loader)(iface_name) else {
+        let Some(iface) = (self.class_loader)(Fqn::new(iface_name)) else {
             return;
         };
         self.push_from_class(&iface);
@@ -507,7 +504,7 @@ fn trait_override_docblock_edit(
 pub(crate) fn collect_overridable_properties(
     class: &ClassInfo,
     partial: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<(PropertyInfo, String, bool)> {
     let mut collector = OverrideCollector::<PropertyInfo>::new(class, partial, class_loader);
     // Interfaces cannot declare properties.
@@ -531,7 +528,7 @@ pub(crate) fn collect_overridable_constants(
     class: &ClassInfo,
     partial: &str,
     php_version: PhpVersion,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<(ConstantInfo, String)> {
     let mut collector = OverrideCollector::<ConstantInfo>::new(class, partial, class_loader);
     collector.walk_traits = php_version >= TRAIT_CONST_MIN;
@@ -812,7 +809,8 @@ mod tests {
         let mut child = make_class("Child");
         child.parent_class = Some(atom("Base"));
 
-        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+            let name = name.as_str();
             if name == "Base" {
                 Some(Arc::new(base.clone()))
             } else {

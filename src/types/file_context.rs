@@ -9,17 +9,18 @@ use super::*;
 /// [`Backend::file_context`](crate::Backend) to replace the repeated
 /// lock-and-unwrap boilerplate that was duplicated across completion,
 /// definition, and implementation handlers.
+#[derive(Default)]
 pub(crate) struct FileContext {
     /// Classes extracted from the file's AST (from `uri_classes_index`).
     pub classes: Vec<Arc<ClassInfo>>,
     /// Class import table mapping short names to fully-qualified names
-    /// (from `file_imports`).
+    /// (from the file's `FileState`).
     pub use_map: HashMap<String, String>,
-    /// The file's function and constant imports (from
-    /// `file_symbol_imports`).  Like `use_map`, every block's imports;
+    /// The file's function and constant imports.  Like `use_map`, every
+    /// block's imports;
     /// see [`symbol_imports_at`](Self::symbol_imports_at).
     pub symbol_imports: SymbolImports,
-    /// The file's declared namespace, if any (from `file_namespaces`).
+    /// The file's declared namespace, if any.
     ///
     /// This is the *first* `namespace` block's name. A file may declare
     /// several, so consumers that know the byte offset they are resolving
@@ -47,7 +48,12 @@ pub(crate) struct FileContext {
 /// A class loader per `namespace` block of a file (see
 /// [`Backend::class_loaders`](crate::Backend::class_loaders)), as trait
 /// objects so it can be handed through non-generic walkers.
-pub type BlockClassLoaders<'a> = PerBlock<'a, &'a (dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a)>;
+pub type BlockClassLoaders<'a> = PerBlock<'a, &'a crate::class_lookup::SourceClassLoader<'a>>;
+
+/// [`BlockClassLoaders`] for already-resolved names (see
+/// [`Backend::resolved_class_loaders`](crate::Backend::resolved_class_loaders)).
+pub type BlockResolvedClassLoaders<'a> =
+    PerBlock<'a, &'a crate::class_lookup::ResolvedClassLoader<'a>>;
 
 /// The `use` imports of each `namespace` block of a file, built by
 /// [`FileContext::block_imports`].
@@ -99,7 +105,14 @@ impl<'a, T> PerBlock<'a, T> {
 impl<L: Fn(&str) -> Option<Arc<ClassInfo>>> PerBlock<'_, L> {
     /// These loaders as trait objects.
     pub fn as_dyn(&self) -> BlockClassLoaders<'_> {
-        self.map(|loader| loader as &dyn Fn(&str) -> Option<Arc<ClassInfo>>)
+        self.map(|loader| loader as &crate::class_lookup::SourceClassLoader<'_>)
+    }
+}
+
+impl<L: Fn(crate::class_lookup::Fqn<'_>) -> Option<Arc<ClassInfo>>> PerBlock<'_, L> {
+    /// These resolved-name loaders as trait objects.
+    pub fn as_dyn_resolved(&self) -> BlockResolvedClassLoaders<'_> {
+        self.map(|loader| loader as &crate::class_lookup::ResolvedClassLoader<'_>)
     }
 }
 
@@ -255,8 +268,8 @@ pub struct NamespaceSpan {
     ///
     /// PHP scopes an import to the block that declares it, so a file with
     /// several blocks needs one table per block.  Left empty when the file
-    /// has a single block, whose imports are the file-wide `file_imports`
-    /// table, so the common case stores them once.
+    /// has a single block, whose imports are the file-wide import table, so
+    /// the common case stores them once.
     pub use_map: HashMap<String, String>,
     /// The `use function` and `use const` imports declared inside this
     /// block, stored the same way as [`use_map`](Self::use_map).

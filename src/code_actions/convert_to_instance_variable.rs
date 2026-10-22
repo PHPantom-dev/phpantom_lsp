@@ -42,7 +42,7 @@ use crate::parser::with_parsed_program;
 use crate::scope_collector::{
     AccessRole, ClosureUseList, Frame, FrameKind, ScopeMap, collect_function_scope,
 };
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::text_position::{byte_range_to_lsp_range, offset_to_position, position_to_byte_offset};
 use crate::types::{ClassInfo, Visibility};
 use crate::virtual_members::resolve_class_fully_cached;
 
@@ -189,11 +189,11 @@ fn plan_conversion(content: &str, cursor_offset: u32) -> Option<Conversion> {
             // the method assigns a variable of that function, not of the
             // method.
             let owner = find_enclosing_function(
-                &program.statements,
+                program,
                 assignment.variable.span().start.offset,
                 FunctionKinds::All,
             )?;
-            if owner.span != method.span() {
+            if owner.span() != method.span() {
                 return None;
             }
             let var_name = bytes_to_str(assignment.variable.name).to_string();
@@ -460,10 +460,7 @@ impl Backend {
                     }
                 }
                 Rewrite::Delete(start, end) => edits.push(TextEdit {
-                    range: Range {
-                        start: offset_to_position(content, start as usize),
-                        end: offset_to_position(content, end as usize),
-                    },
+                    range: byte_range_to_lsp_range(content, start as usize, end as usize),
                     new_text: String::new(),
                 }),
             }

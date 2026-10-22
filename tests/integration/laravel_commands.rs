@@ -8,7 +8,7 @@
 
 use crate::common::{
     LARAVEL_SRC_COMPOSER, complete_labels_at_opened, create_initialized_psr4_workspace,
-    create_psr4_workspace, open_php_str, position_after,
+    create_psr4_workspace, goto_definition_at, hover_response, open_php_str, position_after,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -112,19 +112,13 @@ class Runner {
 
     // Cursor on `app:sync` inside the string.
     let position = position_after(consumer, "Artisan::call('app");
-    let result = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(&uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    let result = goto_definition_at(
+        &backend,
+        &Url::parse(&uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await;
 
     let target = match result.expect("app:sync should resolve") {
         GotoDefinitionResponse::Scalar(loc) => loc.uri,
@@ -665,18 +659,13 @@ async fn hover_in_typed_command(
     needle: &str,
 ) -> String {
     let position = position_after(TYPED_COMMAND, needle);
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap();
+    let hover = hover_response(
+        backend,
+        &Url::parse(uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await;
     match hover.map(|h| h.contents) {
         Some(HoverContents::Markup(markup)) => markup.value,
         Some(HoverContents::Scalar(MarkedString::String(s))) => s,
@@ -741,18 +730,13 @@ async fn an_attribute_declared_signature_types_the_accessors_too() {
     let uri = uri.to_string();
 
     let position = position_after(ATTRIBUTE_TYPED_COMMAND, "$days");
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(&uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap();
+    let hover = hover_response(
+        &backend,
+        &Url::parse(&uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await;
     let text = match hover.map(|h| h.contents) {
         Some(HoverContents::Markup(markup)) => markup.value,
         _ => String::new(),
@@ -794,18 +778,13 @@ class OverridingCommand extends Command
     open_php_str(&backend, &uri, OVERRIDING_COMMAND).await;
 
     let position = position_after(OVERRIDING_COMMAND, "$flag");
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(&uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap();
+    let hover = hover_response(
+        &backend,
+        &Url::parse(&uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await;
     let text = match hover.map(|h| h.contents) {
         Some(HoverContents::Markup(markup)) => markup.value,
         _ => String::new(),
@@ -847,18 +826,13 @@ class GuardedCommand extends Command
     let uri = uri.to_string();
 
     let position = position_after(GUARDED_COMMAND, "        if ($markets");
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(&uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap();
+    let hover = hover_response(
+        &backend,
+        &Url::parse(&uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await;
     let text = match hover.map(|h| h.contents) {
         Some(HoverContents::Markup(markup)) => markup.value,
         _ => String::new(),

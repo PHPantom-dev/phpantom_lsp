@@ -2,7 +2,7 @@
 //! call that changes the type the walker tracks for its receiver, the way
 //! an assignment changes a variable's type.
 
-use crate::common::{create_test_backend, hover_at, hover_text};
+use crate::common::{create_test_backend, hover_at, hover_last, hover_text};
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -191,18 +191,6 @@ final class Builder {
 }
 "#;
 
-/// Hover on the last occurrence of `needle` in `content`.
-fn hover_last(content: &str, needle: &str) -> String {
-    let backend = create_test_backend();
-    let offset = content.rfind(needle).expect("needle present");
-    let before = &content[..offset];
-    let line = before.matches('\n').count() as u32;
-    let character = (offset - before.rfind('\n').map_or(0, |i| i + 1)) as u32;
-    let hover =
-        hover_at(&backend, "file:///test.php", content, line, character).expect("expected hover");
-    hover_text(&hover).to_string()
-}
-
 /// A conditional return keyed on `$this` is decided against the receiver's
 /// template arguments as a preceding `@phpstan-self-out` left them.
 #[test]
@@ -218,7 +206,7 @@ function f(): void {{
 }}
 "#
     );
-    let text = hover_last(&content, "$r;");
+    let text = hover_last(&create_test_backend(), &content, "$r;");
     assert!(
         text.contains("int") && !text.contains("string"),
         "expected result() to read as int once ready() bound TReady to true, got: {text}"
@@ -239,7 +227,7 @@ function f(): void {{
 }}
 "#
     );
-    let text = hover_last(&content, "$r;");
+    let text = hover_last(&create_test_backend(), &content, "$r;");
     assert!(
         text.contains("string") && !text.contains("int"),
         "expected result() to read as string while TReady is still false, got: {text}"
@@ -276,7 +264,7 @@ function f(Slot $box): void {{
 }}
 "#
         );
-        let text = hover_last(&content, "$box;");
+        let text = hover_last(&create_test_backend(), &content, "$box;");
         assert!(
             text.contains("Slot<string>"),
             "`{statement}`: expected $box to read as Slot<string> after the call, got: {text}"

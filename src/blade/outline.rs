@@ -46,7 +46,7 @@ impl Backend {
     /// block, so the components and directives written inside one nest
     /// under it once the caller builds the tree.
     pub(crate) fn blade_outline(&self, content: &str) -> Vec<OutlineEntry> {
-        let mut entries = named_block_entries(content, &self.blade_directives.read());
+        let mut entries = named_block_entries(content, &self.blade.directives.read());
         entries.extend(self.component_tag_entries(content));
         entries.sort_by(|a, b| {
             a.span

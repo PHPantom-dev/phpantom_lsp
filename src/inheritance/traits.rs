@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::atom::{Atom, atom};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MAX_TRAIT_DEPTH};
 use crate::virtual_members::laravel::{
@@ -42,7 +43,7 @@ pub(crate) fn merge_traits_into(
     merged: &mut ClassInfo,
     trait_names: &[Atom],
     ctx: &TraitContext<'_>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     depth: u32,
     dedup: &mut MergeDedup,
     self_class_name: &str,
@@ -52,7 +53,7 @@ pub(crate) fn merge_traits_into(
     }
 
     for trait_name in trait_names {
-        let trait_info = if let Some(t) = class_loader(trait_name) {
+        let trait_info = if let Some(t) = class_loader(Fqn::new(trait_name)) {
             t
         } else {
             continue;
@@ -80,7 +81,7 @@ pub(crate) fn merge_traits_into(
                 .and_then(|ty| ty.base_name())
                 .map(str::to_owned)
                 .unwrap_or_else(|| model_to_factory_fqn(&model_fqn));
-            if class_loader(&factory_fqn).is_some() {
+            if class_loader(Fqn::new(&factory_fqn)).is_some() {
                 for param in &trait_info.template_params {
                     trait_subs.insert(param.to_string(), PhpType::named(atom(&factory_fqn)));
                 }

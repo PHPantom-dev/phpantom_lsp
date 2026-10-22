@@ -13,7 +13,6 @@
 // whole shared import surface in with a single `use super::*;`.
 pub(crate) use mago_span::HasSpan;
 pub(crate) use mago_syntax::cst::*;
-pub(crate) use std::sync::Arc;
 pub(crate) use tower_lsp::lsp_types::*;
 
 pub(crate) use crate::Backend;
@@ -29,9 +28,8 @@ pub(crate) use crate::code_actions::{
 pub(crate) use crate::completion::phpdoc::generation::enrichment_plain;
 pub(crate) use crate::php_type::PhpType;
 pub(crate) use crate::scope_collector::ScopeMap;
-use crate::text_position::offset_to_position;
+use crate::text_position::{find_line_end, find_line_start, offset_to_position};
 pub(crate) use crate::type_engine::resolver::Loaders;
-pub(crate) use crate::types::ClassInfo;
 
 mod codegen;
 mod context;
@@ -242,7 +240,7 @@ impl Backend {
         let call_indent = indent_of_line_at(content, start);
         let (member_indent, body_indent) = match enclosing.target {
             ExtractionTarget::Method => {
-                let member = indent_of_line_at(content, enclosing.body_start);
+                let member = indent_of_line_at(content, enclosing.body_start).to_string();
                 let unit = indent_unit(content);
                 let body = format!("{}{}", member, unit);
                 (member, body)
@@ -315,7 +313,7 @@ impl Backend {
 
         // ── Build edits ─────────────────────────────────────────────
         let definition = build_extracted_definition(&info);
-        let call_site = build_call_site(&info, &call_indent);
+        let call_site = build_call_site(&info, call_indent);
 
         let doc_uri: Url = uri.parse().ok()?;
 

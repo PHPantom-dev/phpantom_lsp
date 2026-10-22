@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::atom::{Atom, AtomSet};
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, Visibility};
 use crate::virtual_members::laravel::{
@@ -116,7 +117,7 @@ impl MergeDedup {
 /// A depth limit of 20 prevents infinite loops from circular inheritance.
 pub(crate) fn resolve_class_with_inheritance(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> ClassInfo {
     let mut merged = class.clone();
 
@@ -167,7 +168,7 @@ fn merge_parent_chain(
     class: &ClassInfo,
     merged: &mut ClassInfo,
     dedup: &mut MergeDedup,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) {
     // `current` holds a reference to the class whose `parent_class`,
     // `extends_generics`, `used_traits`, etc. we read at each level.
@@ -249,7 +250,7 @@ fn level_substitutions(
     parent: &ClassInfo,
     parent_name: &str,
     active_subs: &HashMap<String, PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> HashMap<String, PhpType> {
     // Look through current's `extends_generics` for an entry
     // whose class name matches this parent, and zip its type
@@ -339,7 +340,7 @@ fn merge_parent_members(
     dedup: &mut MergeDedup,
     parent: &ClassInfo,
     level_subs: &HashMap<String, PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) {
     // Merge traits used by the parent class as well, so that
     // grandparent-level trait members are visible.
@@ -409,7 +410,7 @@ fn merge_parent_methods(
     dedup: &mut MergeDedup,
     parent: &ClassInfo,
     transform: &LevelTransform,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) {
     for method in &parent.methods {
         if method.visibility == Visibility::Private {
@@ -539,7 +540,7 @@ fn merge_parent_properties(
 fn enrich_from_interfaces(
     class: &ClassInfo,
     merged: &mut ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) {
     let class_fqn = class.fqn();
     for iface_name in &class.interfaces {

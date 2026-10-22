@@ -1,4 +1,5 @@
 use super::*;
+use crate::class_lookup::Fqn;
 use crate::test_fixtures::make_class;
 use crate::types::ClassLikeKind;
 use crate::virtual_members::laravel::validation_rules::rules_from_array_text;
@@ -7,7 +8,8 @@ use crate::virtual_members::laravel::validation_rules::rules_from_array_text;
 ///
 /// Names are the ones written in the rules arrays below, which are parsed
 /// standalone and so keep their short form.
-fn test_enum(name: &str) -> Option<Arc<ClassInfo>> {
+fn test_enum(name: Fqn<'_>) -> Option<Arc<ClassInfo>> {
+    let name = name.as_str();
     let backed = match name {
         "Role" | "JamFlavor" => Some(BackedEnumType::String),
         "Level" | "BatchSize" => Some(BackedEnumType::Int),

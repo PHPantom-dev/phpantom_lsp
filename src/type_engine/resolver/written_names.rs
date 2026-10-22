@@ -5,6 +5,7 @@ use std::sync::Arc;
 use mago_syntax::cst::Expression;
 
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader, SourceClassLoader};
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 
@@ -12,7 +13,7 @@ use super::SourceImports;
 
 /// What a class name written in a file is read against: the class the code
 /// is in, the namespace and `use` imports in force, the file's own classes,
-/// and the loader for names as written.
+/// and the loaders for names as written and for the names they resolve to.
 ///
 /// Every resolution context carries these and hands out a copy through
 /// its `written_names()`, so the rule lives here once.
@@ -33,7 +34,8 @@ pub(in crate::type_engine) struct WrittenNames<'a> {
     all_classes: &'a [Arc<ClassInfo>],
     content: &'a str,
     cursor_offset: u32,
-    source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    source_class_loader: &'a SourceClassLoader<'a>,
+    class_loader: &'a ResolvedClassLoader<'a>,
 }
 
 impl<'a> WrittenNames<'a> {
@@ -45,7 +47,8 @@ impl<'a> WrittenNames<'a> {
         content: &'a str,
         cursor_offset: u32,
         imports: SourceImports<'a>,
-        source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        source_class_loader: &'a SourceClassLoader<'a>,
+        class_loader: &'a ResolvedClassLoader<'a>,
     ) -> Self {
         let namespace = match current_class {
             Some(cls) => cls.file_namespace.as_deref(),
@@ -59,6 +62,7 @@ impl<'a> WrittenNames<'a> {
             content,
             cursor_offset,
             source_class_loader,
+            class_loader,
         }
     }
 
@@ -66,6 +70,9 @@ impl<'a> WrittenNames<'a> {
     #[cfg(test)]
     pub(in crate::type_engine) fn verbatim() -> WrittenNames<'static> {
         fn no_class(_: &str) -> Option<Arc<ClassInfo>> {
+            None
+        }
+        fn no_resolved_class(_: Fqn<'_>) -> Option<Arc<ClassInfo>> {
             None
         }
         WrittenNames {
@@ -76,6 +83,7 @@ impl<'a> WrittenNames<'a> {
             content: "",
             cursor_offset: 0,
             source_class_loader: &no_class,
+            class_loader: &no_resolved_class,
         }
     }
 
@@ -83,7 +91,7 @@ impl<'a> WrittenNames<'a> {
     /// read inside a body); see
     /// [`resolve_source_php_type_names`](crate::names::resolve_source_php_type_names).
     pub(in crate::type_engine) fn resolve_type(&self, ty: &PhpType) -> PhpType {
-        crate::names::resolve_source_php_type_names(
+        let resolved = crate::names::resolve_source_php_type_names(
             ty,
             self.namespace,
             self.imports,
@@ -91,19 +99,21 @@ impl<'a> WrittenNames<'a> {
             crate::names::written_name_region(self.content, self.current_class, self.cursor_offset),
             self.all_classes,
             self.source_class_loader,
-        )
+        );
+        crate::names::fill_generic_type_defaults(&resolved, self.class_loader)
     }
 
     /// Qualify the class names of a native type hint written in this file;
     /// see [`resolve_code_php_type_names`](crate::names::resolve_code_php_type_names).
     pub(in crate::type_engine) fn resolve_hint(&self, ty: &PhpType) -> PhpType {
-        crate::names::resolve_code_php_type_names(
+        let resolved = crate::names::resolve_code_php_type_names(
             ty,
             self.namespace,
             self.imports,
             self.all_classes,
             self.source_class_loader,
-        )
+        );
+        crate::names::fill_generic_type_defaults(&resolved, self.class_loader)
     }
 
     /// Resolve a class name written in this file to its FQN; see
@@ -157,12 +167,11 @@ impl<'a> WrittenNames<'a> {
     }
 
     /// The class [`Self::static_receiver_class_name`] names, loaded by
-    /// its FQN through `class_loader`.
+    /// its FQN.
     pub(in crate::type_engine) fn static_receiver_class(
         &self,
         class_expr: &Expression<'_>,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<Arc<ClassInfo>> {
-        class_loader(&self.static_receiver_class_name(class_expr)?)
+        (self.class_loader)(Fqn::new(&self.static_receiver_class_name(class_expr)?))
     }
 }

@@ -38,6 +38,7 @@ use mago_syntax::parser::parse_file_content;
 use super::file_contributions::{Contribution, FileContributions};
 use super::helpers::string_literal_at;
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::names::OwnedResolvedNames;
 use crate::types::{ClassInfo, MethodInfo};
 
@@ -493,7 +494,8 @@ pub(crate) fn policy_class_for_model(
     let model_fqn = model_fqn.trim_start_matches('\\');
 
     let registered = backend
-        .laravel_gates
+        .laravel
+        .gates
         .read()
         .policy_for(model_fqn)
         .map(str::to_string);
@@ -524,7 +526,7 @@ fn load_policy(backend: &crate::Backend, fqn: &str) -> Option<Arc<ClassInfo>> {
 
 /// Merge a policy's parent chain and traits into it.
 fn resolve_policy(backend: &crate::Backend, class: &ClassInfo) -> Arc<ClassInfo> {
-    let class_loader = |name: &str| backend.find_or_load_class(name);
+    let class_loader = |name: Fqn<'_>| backend.find_or_load_class(&name);
     crate::virtual_members::resolve_class_fully_cached(
         class,
         &class_loader,
@@ -611,7 +613,7 @@ pub(crate) fn model_policy_abilities(
 /// offers and what the unknown-ability diagnostic judges an ability against
 /// when the call names no model.
 pub(crate) fn enumerate_gate_abilities(backend: &crate::Backend) -> Vec<String> {
-    let mut names = backend.laravel_gates.read().definition_names();
+    let mut names = backend.laravel.gates.read().definition_names();
 
     for policy in project_policy_classes(backend) {
         names.extend(
@@ -719,7 +721,7 @@ fn declaring_policy_class(
 /// not the application's, and loading every `*Policy` in `vendor/` would cost
 /// far more than the abilities are worth.
 fn policy_class_fqns(backend: &crate::Backend) -> Vec<String> {
-    let mut fqns = backend.laravel_gates.read().registered_policy_fqns();
+    let mut fqns = backend.laravel.gates.read().registered_policy_fqns();
     {
         let index = backend.symbols.fqn_uri_index.read();
         for (fqn, uri) in index.iter() {

@@ -1,0 +1,10 @@
+// test: a declared `string` callback parameter narrows to the array's `non-empty-string` elements
+// feature: hover
+// expect: non-empty-string
+---
+<?php
+
+/** @param list<non-empty-string> $classes */
+function f(array $classes): void {
+    array_map(static fn (string $c) => $<>c, $classes);
+}

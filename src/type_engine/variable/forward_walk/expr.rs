@@ -37,7 +37,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::unary::{UnaryPostfixOperator, UnaryPrefixOperator};
 
 use crate::atom::bytes_to_str;
-use crate::type_engine::types::narrowing;
+use crate::type_engine::type_ops::condition_facts;
 use crate::types::ResolvedType;
 
 /// The types of sub-expressions recorded where they were evaluated, keyed
@@ -690,7 +690,7 @@ impl<'b> ExprWalk<'b> {
         if match_expr.expression.is_true() {
             return subject.or(self.match_true_arms(expr, match_expr, scope, ctx));
         }
-        let class_subject = narrowing::match_class_subject_var(match_expr.expression);
+        let class_subject = condition_facts::match_class_subject_var(match_expr.expression);
         let mut wrote = false;
         let mut arms = Vec::with_capacity(match_expr.arms.len());
         for arm in match_expr.arms.iter() {

@@ -58,11 +58,11 @@ pub struct PropertyInfo {
     pub deprecated_replacement: Option<String>,
     /// Symbol and URL references from `@see` tags in the property's docblock.
     ///
-    /// Each entry is the raw text after `@see`, which may be a symbol
+    /// Each entry's `text` is what follows `@see`, which may be a symbol
     /// reference (e.g. `"NewProp"`, `"MyClass::$newProp"`) or a URL
     /// (e.g. `"https://example.com/docs"`).  Rendered in hover below
     /// `@link` entries, and appended to deprecation diagnostics.
-    pub see_refs: Vec<String>,
+    pub see_refs: Vec<SeeRef>,
     /// Whether this property is a virtual (synthesized) member.
     ///
     /// Virtual properties come from `@property` / `@property-read` /

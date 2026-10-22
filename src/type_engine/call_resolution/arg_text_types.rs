@@ -139,7 +139,7 @@ impl Backend {
                 .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
             && !is_self_or_static(trimmed)
             && !trimmed.eq_ignore_ascii_case("parent")
-            && let Some(backend) = ctx.backend
+            && let Some(backend) = ctx.file.backend
             && let Some(ty) = match backend.lookup_global_constant(trimmed) {
                 None => None,
                 Some(Some(value)) => {
@@ -148,9 +148,7 @@ impl Backend {
                     )
                     .or_else(|| super::folded_global_constant_type(trimmed, &value, ctx))
                 }
-                Some(None) => {
-                    crate::hover::constants::unversioned_php_version_constant_type(trimmed)
-                }
+                Some(None) => crate::resolution::unversioned_php_version_constant_type(trimmed),
             }
         {
             return Some(ty);

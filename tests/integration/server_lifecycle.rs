@@ -1,4 +1,4 @@
-use crate::common::create_test_backend;
+use crate::common::{completion_response, create_test_backend, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -36,16 +36,7 @@ async fn test_did_open_stores_file() {
     let uri = Url::parse("file:///test.php").unwrap();
     let text = "<?php\nclass Stored { function m() {} }\n".to_string();
 
-    let params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.clone(),
-        },
-    };
-
-    backend.did_open(params).await;
+    open_php(&backend, &uri, &text).await;
 
     // Verify the file was stored by checking the AST map has an entry
     let classes = backend.get_classes_for_uri(uri.as_ref());
@@ -63,30 +54,9 @@ async fn test_completion_returns_none_when_nothing_matches() {
     let uri = Url::parse("file:///test.php").unwrap();
     let text = "<?php\n$x = 1;\n".to_string();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text,
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, &text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 1,
-                character: 0,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 1, 0, None).await;
     assert!(
         result.is_none(),
         "Completion should return None when nothing matches"
@@ -107,15 +77,7 @@ async fn test_did_change_updates_content() {
     let uri = Url::parse("file:///test.php").unwrap();
     let initial_text = "<?php\nclass A { function first() {} }\n".to_string();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: initial_text,
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, &initial_text).await;
 
     let classes = backend.get_classes_for_uri(uri.as_ref()).unwrap();
     assert_eq!(classes[0].methods.len(), 1);
@@ -150,15 +112,7 @@ async fn test_did_close_removes_file() {
     let uri = Url::parse("file:///test.php").unwrap();
     let text = "<?php\nclass Z { function z() {} }\n".to_string();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text,
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, &text).await;
 
     assert!(backend.get_classes_for_uri(uri.as_ref()).is_some());
 
@@ -188,15 +142,7 @@ async fn test_did_open_populates_ast_map() {
     let text =
         "<?php\nclass User {\n    function login() {}\n    function logout() {}\n}\n".to_string();
 
-    let params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text,
-        },
-    };
-    backend.did_open(params).await;
+    open_php(&backend, &uri, &text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_ref())
@@ -217,15 +163,12 @@ async fn test_did_change_reparses_ast() {
     let uri = Url::parse("file:///changing.php").unwrap();
 
     // Open with initial content: one class with one method
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: "<?php\nclass A {\n    function first() {}\n}\n".to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(
+        &backend,
+        &uri,
+        "<?php\nclass A {\n    function first() {}\n}\n",
+    )
+    .await;
 
     let classes = backend.get_classes_for_uri(uri.as_ref()).unwrap();
     assert_eq!(classes[0].methods.len(), 1);
@@ -269,15 +212,7 @@ async fn test_did_close_cleans_up_ast_map() {
     let text = "<?php\nclass X {\n    function y() {}\n}\n".to_string();
 
     // Open
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text,
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, &text).await;
 
     // Verify ast_map is populated
     assert!(backend.get_classes_for_uri(uri.as_ref()).is_some());
@@ -303,15 +238,7 @@ async fn test_did_change_incremental_sync() {
     //                     0123456789...
     let initial = "<?php\nclass A {\n    function first() {}\n}\n".to_string();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: initial,
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, &initial).await;
 
     let classes = backend.get_classes_for_uri(uri.as_ref()).unwrap();
     assert_eq!(classes[0].methods.len(), 1);
@@ -354,15 +281,7 @@ async fn test_did_change_incremental_multiple_edits() {
     let uri = Url::parse("file:///multi_edit.php").unwrap();
     let initial = "<?php\nclass B {\n    function alpha() {}\n}\n".to_string();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: initial,
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, &initial).await;
 
     // Two incremental edits in one event: rename "alpha" to "beta" and add a method.
     // "alpha" starts at line 2, char 13, ends at char 18.

@@ -42,6 +42,9 @@ pub(super) fn subject_text_of(expr: &Expression<'_>, content: &str) -> SubjectTe
 /// callee that reads a member therefore keeps its parentheses, which is how
 /// the callable resolver tells an invoked value apart from a method name.
 pub(super) fn invoked_callee_text(callee: &Expression<'_>) -> String {
+    if is_closure_literal(callee) {
+        return String::new();
+    }
     match expr_to_subject_expr(callee) {
         Some(value @ (SubjectExpr::PropertyChain { .. } | SubjectExpr::StaticAccess { .. })) => {
             format!("({})", value.to_subject_text())
@@ -49,6 +52,16 @@ pub(super) fn invoked_callee_text(callee: &Expression<'_>) -> String {
         Some(other) => other.to_subject_text(),
         None => String::new(),
     }
+}
+
+/// Whether `expr` is a closure or arrow-function literal, possibly in
+/// parentheses.  Invoking one immediately yields what its body returns,
+/// not a `Closure`, so a call on it has no name-based subject.
+fn is_closure_literal(expr: &Expression<'_>) -> bool {
+    matches!(
+        crate::parser::unwrap_parens(expr),
+        Expression::Closure(_) | Expression::ArrowFunction(_)
+    )
 }
 
 /// One link of a receiver spine: `->property` or `->method(args)`.
@@ -166,6 +179,9 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
             })
         }
         Expression::Call(Call::Function(fc)) => {
+            if is_closure_literal(fc.function) {
+                return None;
+            }
             let callee = expr_to_subject_expr(fc.function)?;
             let args_text = format_all_call_args(&fc.argument_list.arguments);
             // `SubjectExpr::to_subject_text` wraps callees that are not
@@ -184,6 +200,12 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
         Expression::Instantiation(inst) => expr_to_subject_expr(inst.class),
 
         Expression::Parenthesized(paren) => expr_to_subject_expr(paren.expression),
+
+        // A closure literal used as a subject (`(fn() => …)->call($o)`) is
+        // a `Closure` instance.
+        Expression::Closure(_) | Expression::ArrowFunction(_) => {
+            Some(SubjectExpr::ClassName("\\Closure".to_string()))
+        }
 
         // An assignment used as a value (`($x = $map[$key])->m()`,
         // `($c ??= $map[$key])->m()`) evaluates to whatever its target
@@ -295,7 +317,7 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
                         .unwrap_or_else(|| bytes_to_str(i.raw).to_string());
                     BracketSegment::IntKey(n)
                 }
-                other => crate::type_engine::types::narrowing::array_index_key(other)
+                other => crate::type_engine::type_ops::condition_facts::array_index_key(other)
                     .filter(|index| index.contains('$'))
                     .map_or(BracketSegment::ElementAccess, BracketSegment::ComputedIndex),
             };

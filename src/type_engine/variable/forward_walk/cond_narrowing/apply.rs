@@ -28,7 +28,7 @@ pub(crate) fn apply_class_match_arm_narrowing<'b>(
     let Some(classes) = expr_arm
         .conditions
         .iter()
-        .map(|c| narrowing::class_match_condition_class(c, &names))
+        .map(|c| condition_facts::class_match_condition_class(c, &names))
         .collect::<Option<Vec<PhpType>>>()
     else {
         return;
@@ -39,7 +39,7 @@ pub(crate) fn apply_class_match_arm_narrowing<'b>(
 
     let scope_resolver = scope.snapshot_resolver();
     let var_ctx = build_var_ctx(subject_var, ctx, &scope_resolver);
-    let union = narrowing::resolve_class_names_to_union(&classes, &var_ctx);
+    let union = condition_facts::resolve_class_names_to_union(&classes, &var_ctx);
     if union.is_empty() {
         return;
     }
@@ -293,7 +293,8 @@ fn apply_condition_narrowing_inverse_single<'b>(
         // is one of the classes it lists.
         if let Some(alias) = alias_or {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-            let union = narrowing::resolve_class_names_to_union(&alias_classes(alias), &var_ctx);
+            let union =
+                condition_facts::resolve_class_names_to_union(&alias_classes(alias), &var_ctx);
             if !union.is_empty() {
                 commit_instanceof_narrowing(
                     var_name,
@@ -308,7 +309,7 @@ fn apply_condition_narrowing_inverse_single<'b>(
         }
 
         if let Some(classes) =
-            narrowing::try_extract_compound_or_instanceof(condition, var_name, &names)
+            condition_facts::try_extract_compound_or_instanceof(condition, var_name, &names)
             && !classes.is_empty()
         {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
@@ -318,7 +319,8 @@ fn apply_condition_narrowing_inverse_single<'b>(
 
         // `if (!$x instanceof $stmtClass) { continue; }` — the
         // fall-through proves the dynamic check held.
-        if let Some((rhs, negated)) = narrowing::try_extract_dynamic_instanceof(condition, var_name)
+        if let Some((rhs, negated)) =
+            condition_facts::try_extract_dynamic_instanceof(condition, var_name)
         {
             let targets = dynamic_instanceof_targets(rhs, scope, ctx);
             if !targets.is_empty() {
@@ -328,7 +330,9 @@ fn apply_condition_narrowing_inverse_single<'b>(
                     for target in &targets {
                         let mut single = Vec::new();
                         ResolvedType::apply_narrowing(&mut single, |classes| {
-                            narrowing::apply_instanceof_inclusion(target, false, &var_ctx, classes)
+                            condition_facts::apply_instanceof_inclusion(
+                                target, false, &var_ctx, classes,
+                            )
                         });
                         ResolvedType::extend_unique(&mut narrowed, single);
                     }
@@ -352,15 +356,15 @@ fn apply_condition_narrowing_inverse_single<'b>(
             }
         }
 
-        if let Some(extraction) = narrowing::try_extract_instanceof_with_negation(
-            condition, var_name, &names,
-        )
-        .or_else(|| {
-            alias_extractions
-                .iter()
-                .find(|a| a.subject == *var_name)
-                .map(|a| a.extraction.clone())
-        }) {
+        if let Some(extraction) =
+            condition_facts::try_extract_instanceof_with_negation(condition, var_name, &names)
+                .or_else(|| {
+                    alias_extractions
+                        .iter()
+                        .find(|a| a.subject == *var_name)
+                        .map(|a| a.extraction.clone())
+                })
+        {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
             if extraction.negated {
                 // Inverse of negated instanceof → positive instanceof,
@@ -370,7 +374,7 @@ fn apply_condition_narrowing_inverse_single<'b>(
                 // existing union is *filtered* down to them rather than
                 // extended with them.
                 let mut narrowed = Vec::new();
-                narrowing::include_instance_of(
+                condition_facts::include_instance_of(
                     &extraction.class_type,
                     extraction.exact,
                     &var_ctx,
@@ -581,7 +585,8 @@ pub(crate) fn condition_arm_narrowing<'b>(
     }
 
     let seeded = scope.locals.clone();
-    let walk_ctx = ForwardWalkCtx::from_var_ctx(ctx);
+    let flow = WalkFlow::default();
+    let walk_ctx = ForwardWalkCtx::from_var_ctx(ctx, &flow);
     if truthy {
         apply_condition_narrowing(condition, &mut scope, &walk_ctx);
     } else {
@@ -673,21 +678,11 @@ pub(crate) fn build_var_ctx<'a>(
     scope_resolver: &'a dyn Fn(&str) -> Vec<ResolvedType>,
 ) -> VarResolutionCtx<'a> {
     VarResolutionCtx {
-        source_imports: ctx.source_imports,
-        backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
         enclosing_return_type: ctx.enclosing_return_type.clone(),
         top_level_scope: ctx.top_level_scope.clone(),
         scope_var_resolver: Some(scope_resolver),
-        ..VarResolutionCtx::new(
-            var_name,
-            ctx.current_class,
-            ctx.all_classes,
-            ctx.content,
-            ctx.cursor_offset,
-            ctx.class_loader,
-            ctx.source_class_loader,
-        )
+        ..VarResolutionCtx::new(var_name, ctx.file, ctx.current_class, ctx.cursor_offset)
     }
 }

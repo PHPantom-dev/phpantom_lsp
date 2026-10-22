@@ -5,23 +5,10 @@
 //! `@depends`).
 
 use crate::common::{
-    create_psr4_workspace, create_test_backend, goto_definition_at, line_char_of, open_php,
+    assert_location, create_psr4_workspace, create_test_backend, goto_definition_at, line_char_of,
+    open_php,
 };
 use tower_lsp::lsp_types::*;
-
-fn assert_location(response: Option<GotoDefinitionResponse>, uri: &Url, expected_line: u32) {
-    match response {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
-            assert_eq!(&location.uri, uri, "jumped to the wrong file");
-            assert_eq!(
-                location.range.start.line, expected_line,
-                "expected line {}, got {}",
-                expected_line, location.range.start.line
-            );
-        }
-        other => panic!("expected a single location, got: {:?}", other),
-    }
-}
 
 /// Go to definition on the first occurrence of `needle` in `source`,
 /// `offset` characters into it.
@@ -59,7 +46,7 @@ final class PlaceholdersTest
     open_php(&backend, &uri, source).await;
 
     let response = definition_of(&backend, &uri, source, "'fitting'", 3).await;
-    assert_location(response, &uri, 10);
+    assert_location(response.expect("expected a definition"), &uri, 10);
 }
 
 #[tokio::test]
@@ -78,7 +65,7 @@ final class FqnTest
     open_php(&backend, &uri, source).await;
 
     let response = definition_of(&backend, &uri, source, "'cases'", 2).await;
-    assert_location(response, &uri, 6);
+    assert_location(response.expect("expected a definition"), &uri, 6);
 }
 
 /// A same-named attribute of the project's own is not PHPUnit's.
@@ -137,7 +124,7 @@ final class ChildTest extends TestCase
     open_php(&backend, &uri, source).await;
 
     let response = definition_of(&backend, &uri, source, "'sharedCases'", 3).await;
-    assert_location(response, &base_uri, 5);
+    assert_location(response.expect("expected a definition"), &base_uri, 5);
 }
 
 #[tokio::test]
@@ -176,7 +163,7 @@ final class AmountTest
     open_php(&backend, &uri, source).await;
 
     let response = definition_of(&backend, &uri, source, "'positive'", 3).await;
-    assert_location(response, &provider_uri, 5);
+    assert_location(response.expect("expected a definition"), &provider_uri, 5);
 
     // The string spelling names the class by its fully-qualified name, which
     // must not be read relative to the test's own namespace.
@@ -188,7 +175,7 @@ final class AmountTest
         .rfind("positive")
         .unwrap();
     let response = goto_definition_at(&backend, &uri, line, character as u32 + 1).await;
-    assert_location(response, &provider_uri, 5);
+    assert_location(response.expect("expected a definition"), &provider_uri, 5);
 }
 
 #[tokio::test]
@@ -213,10 +200,10 @@ final class StackTest
     open_php(&backend, &uri, source).await;
 
     let response = definition_of(&backend, &uri, source, "'testEmpty'", 3).await;
-    assert_location(response, &uri, 6);
+    assert_location(response.expect("expected a definition"), &uri, 6);
 
     let response = definition_of(&backend, &uri, source, "'testPush'", 3).await;
-    assert_location(response, &uri, 9);
+    assert_location(response.expect("expected a definition"), &uri, 9);
 }
 
 #[tokio::test]
@@ -247,10 +234,10 @@ final class AnnotatedTest
     open_php(&backend, &uri, source).await;
 
     let response = definition_of(&backend, &uri, source, "@dataProvider additions", 16).await;
-    assert_location(response, &uri, 18);
+    assert_location(response.expect("expected a definition"), &uri, 18);
 
     let response = definition_of(&backend, &uri, source, "Amounts::negative", 11).await;
-    assert_location(response, &uri, 3);
+    assert_location(response.expect("expected a definition"), &uri, 3);
 }
 
 #[tokio::test]
@@ -271,5 +258,5 @@ final class DependsTest
     open_php(&backend, &uri, source).await;
 
     let response = definition_of(&backend, &uri, source, "clone testProducer", 8).await;
-    assert_location(response, &uri, 3);
+    assert_location(response.expect("expected a definition"), &uri, 3);
 }

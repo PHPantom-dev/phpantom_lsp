@@ -9,6 +9,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::definition::implementation::member_implementation_providers;
 use crate::definition::member::MemberKind;
 use crate::inheritance::find_declaring_ancestor;
@@ -74,7 +75,7 @@ impl Backend {
             let map = self.symbols.uri_classes_index.read();
             map.get(uri).cloned().unwrap_or_default()
         };
-        let symbol_map = self.symbol_maps.read().get(uri).cloned();
+        let symbol_map = self.symbol_map_for(uri);
 
         // One line table for the whole request: every lens converts at
         // least one offset from this content, and `offset_to_position` is
@@ -82,7 +83,7 @@ impl Backend {
         let index = LineIndex::new(content);
 
         let mut lenses = Vec::new();
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
 
         for class in &classes {
             let class_fqn = class.fqn();
@@ -268,7 +269,7 @@ impl Backend {
         }
 
         let candidate_count = self.indexed_reference_count(key)?;
-        let origin_url = Url::parse(origin_uri).ok()?;
+        let origin_url = crate::util::parse_url(origin_uri)?;
         let position = index.position(declaration_offset as usize);
         let range = Range::new(
             Position::new(position.line, 0),
@@ -316,7 +317,7 @@ impl Backend {
         {
             candidate_count += self.indexed_member_reference_count(&magic.use_name)?;
         }
-        let origin_url = Url::parse(origin_uri).ok()?;
+        let origin_url = crate::util::parse_url(origin_uri)?;
         let position = index.position(declaration_offset as usize);
         let range = Range::new(
             Position::new(position.line, 0),
@@ -334,9 +335,7 @@ impl Backend {
             });
         }
 
-        let supports_refresh = self
-            .supports_code_lens_refresh
-            .load(std::sync::atomic::Ordering::Acquire);
+        let supports_refresh = self.caps().code_lens_refresh;
         let cached_locations = if supports_refresh {
             self.member_ref_locations_cached(
                 origin_uri,
@@ -453,12 +452,13 @@ impl Backend {
     fn implementation_lens_descendants(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<Vec<Arc<ClassInfo>>> {
         if !(class.kind == ClassLikeKind::Interface || class.is_abstract)
             || class.keyword_offset == 0
             || !self
-                .workspace_indexed
+                .workspace_index
+                .indexed
                 .load(std::sync::atomic::Ordering::Acquire)
         {
             return None;
@@ -493,7 +493,7 @@ impl Backend {
             return Some(CodeLens {
                 range,
                 command: Some(Self::implementation_lens_command(
-                    Url::parse(origin_uri).ok()?,
+                    crate::util::parse_url(origin_uri)?,
                     position,
                     Vec::new(),
                 )),
@@ -523,8 +523,8 @@ impl Backend {
         class_fqn: &str,
         member: Option<&str>,
     ) -> Option<Vec<Location>> {
-        let class_loader = |name: &str| self.find_or_load_class(name);
-        let class = class_loader(class_fqn)?;
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
+        let class = class_loader(Fqn::new(class_fqn))?;
         let descendants = self.implementation_descendants(&class, class_fqn, &class_loader, true);
         Some(match member {
             None => self.class_implementation_locations(uri, content, &class, &descendants),
@@ -600,7 +600,7 @@ impl Backend {
         let Some(locations) = locations.flatten() else {
             return lens;
         };
-        let Ok(origin_uri) = Url::parse(uri) else {
+        let Some(origin_uri) = crate::util::parse_url(uri) else {
             return lens;
         };
 
@@ -724,7 +724,7 @@ impl Backend {
         current_uri: &str,
         current_content: &str,
     ) -> Option<Prototype> {
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let declares = |candidate: &ClassInfo| {
             candidate
                 .methods
@@ -762,10 +762,7 @@ impl Backend {
         uri: Url,
         position: Position,
     ) -> Command {
-        if self
-            .supports_show_document
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if self.caps().show_document {
             return Command {
                 title,
                 command: "phpantom.navigateToPrototype".to_string(),

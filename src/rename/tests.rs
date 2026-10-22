@@ -9,7 +9,6 @@
 use crate::Backend;
 use crate::text_position::apply_text_edits as apply_edits;
 use crate::virtual_members::laravel::extract_macro_registrations;
-use std::sync::atomic::Ordering;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -64,15 +63,13 @@ async fn rename_result(
 }
 
 fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
-    let mut index = backend.laravel_macros.write();
+    let mut index = backend.laravel.macros.write();
     index.files.set_file(
         uri.to_string(),
         extract_macro_registrations(text, Some(*backend.workspace.php_version.lock())),
     );
     index.rebuild();
-    backend
-        .laravel_has_macros
-        .store(!index.is_empty(), Ordering::Relaxed);
+    backend.laravel.macros.set_has_any(!index.is_empty());
 }
 
 fn line_char_of(haystack: &str, needle: &str) -> (u32, u32) {

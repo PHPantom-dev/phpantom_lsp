@@ -54,7 +54,9 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
     //  - Parameterised types (`array<int>`, `int<0, max>`) — these
     //    carry type information the native hint doesn't have.
     //  - Shapes, callables, slices — these also carry extra info.
-    if doc_inner.is_bare_primitive_scalar() {
+    // `true` and `false` are the exception: each is one half of a native
+    // `bool`, so `@param true` on `bool $flag` is a refinement like any other.
+    if doc_inner.is_bare_primitive_scalar() && !doc_inner.is_true() && !doc_inner.is_false() {
         return false;
     }
 

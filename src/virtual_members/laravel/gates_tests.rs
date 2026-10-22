@@ -611,7 +611,7 @@ fn backend_with(files: &[(&str, &str)], provider: Option<(&str, &str)>) -> crate
     }
     if let Some((uri, content)) = provider {
         backend.update_ast(uri, content);
-        let mut index = backend.laravel_gates.write();
+        let mut index = backend.laravel.gates.write();
         index.files.set_file(uri.to_string(), scan(content));
         index.rebuild();
     }

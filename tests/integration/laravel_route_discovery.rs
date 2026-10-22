@@ -9,9 +9,8 @@
 
 use crate::common::{
     LARAVEL_SRC_COMPOSER, create_initialized_psr4_workspace, create_psr4_workspace,
-    open_initialized_php,
+    goto_definition_at, open_initialized_php,
 };
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 const PROVIDERS_PHP: &str =
@@ -162,20 +161,8 @@ async fn goto_definition_reaches_a_route_outside_the_routes_directory() {
     let uri = open_initialized_php(&backend, "src/Services/Service.php").await;
 
     // Cursor inside 'kiosk.register' on line 4.
-    let result = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 4,
-                    character: 20,
-                },
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        })
+    let result = goto_definition_at(&backend, &uri, 4, 20)
         .await
-        .expect("goto_definition should not error")
         .expect("route('kiosk.register') should resolve to its ->name('register')");
 
     let target = match result {

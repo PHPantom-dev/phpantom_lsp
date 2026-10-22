@@ -3,7 +3,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::diagnostics::helpers::make_diagnostic;
 use crate::diagnostics::namespace_mismatch::psr4_expectation;
-use crate::text_position::offset_to_position;
+use crate::text_position::byte_range_to_lsp_range;
 use crate::types::ClassInfo;
 
 impl Backend {
@@ -68,10 +68,7 @@ pub(crate) fn class_name_range(content: &str, class: &ClassInfo) -> Option<Range
                 Some((name.start.offset as usize, name.end.offset as usize))
             })
         })?;
-    Some(Range {
-        start: offset_to_position(content, name_start),
-        end: offset_to_position(content, name_end),
-    })
+    Some(byte_range_to_lsp_range(content, name_start, name_end))
 }
 
 #[cfg(test)]

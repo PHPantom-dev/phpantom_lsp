@@ -26,6 +26,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, FacadeAccessor, MethodInfo, Visibility};
 use crate::virtual_members::{ResolvedClassCache, VirtualMemberProvider, VirtualMembers};
@@ -42,11 +43,7 @@ const FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Facade";
 pub struct LaravelFacadeProvider;
 
 impl VirtualMemberProvider for LaravelFacadeProvider {
-    fn applies_to(
-        &self,
-        class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> bool {
+    fn applies_to(&self, class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
         // The accessor check comes first: it is a field read, and it is
         // `None` for every class in the project bar the facades, so the
         // parent-chain walk below only runs for those.
@@ -56,7 +53,7 @@ impl VirtualMemberProvider for LaravelFacadeProvider {
     fn provide(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         cache: Option<&ResolvedClassCache>,
     ) -> VirtualMembers {
         VirtualMembers {
@@ -95,7 +92,12 @@ fn accessor_class(
     match class.laravel()?.facade_accessor? {
         FacadeAccessor::Class(fqn) => Some(Cow::Borrowed(fqn.as_str())),
         FacadeAccessor::Alias(key) => cache
-            .and_then(|cache| cache.read().container_alias_concrete_fqn(key.as_str()))
+            .and_then(|cache| {
+                cache
+                    .read()
+                    .laravel()
+                    .container_alias_concrete_fqn(key.as_str())
+            })
             .map(Cow::Owned),
     }
 }
@@ -104,13 +106,13 @@ fn accessor_class(
 /// is not a facade or its accessor names nothing we can load.
 pub(crate) fn facade_concrete_class(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> Option<Arc<ClassInfo>> {
     if !LaravelFacadeProvider.applies_to(class, class_loader) {
         return None;
     }
-    let concrete = class_loader(&accessor_class(class, cache)?)?;
+    let concrete = class_loader(Fqn::new(&accessor_class(class, cache)?))?;
     // A facade that names itself has nothing to forward, and resolving it
     // would re-enter the provider.
     (concrete.fqn() != class.fqn()).then_some(concrete)
@@ -120,13 +122,13 @@ pub(crate) fn facade_concrete_class(
 /// methods on the facade.
 fn build_forwarded_methods(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> Vec<Arc<MethodInfo>> {
     let Some(concrete_fqn) = accessor_class(class, cache) else {
         return Vec::new();
     };
-    let Some(concrete) = class_loader(&concrete_fqn) else {
+    let Some(concrete) = class_loader(Fqn::new(&concrete_fqn)) else {
         return Vec::new();
     };
     // A facade that names itself has nothing to forward, and resolving it

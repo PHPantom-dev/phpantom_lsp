@@ -4,28 +4,8 @@
 //! clicking on a property access like `$profile->name` should jump to the
 //! property key inside the docblock annotation that defines the shape.
 
-use crate::common::{create_test_backend, goto_definition_at, open_php};
+use crate::common::{assert_location, create_test_backend, goto_definition_at, open_php};
 use tower_lsp::lsp_types::*;
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-fn assert_location(response: GotoDefinitionResponse, expected_uri: &Url, expected_line: u32) {
-    match response {
-        GotoDefinitionResponse::Scalar(location) => {
-            assert_eq!(
-                &location.uri, expected_uri,
-                "Expected URI {:?}, got {:?}",
-                expected_uri, location.uri
-            );
-            assert_eq!(
-                location.range.start.line, expected_line,
-                "Expected line {}, got {}",
-                expected_line, location.range.start.line
-            );
-        }
-        other => panic!("Expected Scalar location, got: {:?}", other),
-    }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // §1  Object shape from @return annotation
@@ -116,6 +96,31 @@ async fn test_gtd_object_shape_inline_var_annotation() {
         "Should resolve object shape property 'score' from inline @var"
     );
     assert_location(result.unwrap(), &uri, 3);
+}
+
+/// The target column counts UTF-16 units, so a non-ASCII key earlier on
+/// the line does not push it to the right.
+#[tokio::test]
+async fn test_gtd_object_shape_key_after_non_ascii_key() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                  // 0
+        "function demo(): void {\n",                                // 1
+        "    /** @var object{größe: int, name: string} $item */\n", // 2
+        "    $item = getUnknownValue();\n",                         // 3
+        "    $item->name;\n",                                       // 4
+        "}\n",                                                      // 5
+        "function getUnknownValue(): mixed { return null; }\n",     // 6
+    );
+    open_php(&backend, &uri, text).await;
+
+    let Some(GotoDefinitionResponse::Scalar(location)) =
+        goto_definition_at(&backend, &uri, 4, 12).await
+    else {
+        panic!("Should resolve object shape property 'name'");
+    };
+    assert_eq!(location.range.start, Position::new(2, 32));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

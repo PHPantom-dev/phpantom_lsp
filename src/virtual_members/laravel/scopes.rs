@@ -7,10 +7,11 @@
 //! and the first `$query` parameter removed.
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use std::sync::Arc;
 
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::{ClassInfo, MethodExtras, MethodInfo};
+use crate::types::{MethodExtras, MethodInfo};
 use crate::util::short_name;
 
 use super::ELOQUENT_BUILDER_FQN;
@@ -157,9 +158,9 @@ pub(super) fn build_scope_methods(method: &MethodInfo) -> [MethodInfo; 2] {
 /// keeping the chain on the Builder rather than jumping to the model.
 pub fn build_scope_methods_for_builder(
     model_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<Arc<MethodInfo>> {
-    let model_class = match class_loader(model_name) {
+    let model_class = match class_loader(Fqn::new(model_name)) {
         Some(c) => c,
         None => {
             return Vec::new();

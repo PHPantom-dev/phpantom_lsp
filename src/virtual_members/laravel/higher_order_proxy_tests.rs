@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::test_fixtures::{make_class, make_method, make_property, no_loader};
 use crate::types::{ClassInfo, ELOQUENT_COLLECTION_FQN, Visibility};
@@ -154,7 +155,7 @@ fn result_type(method: &str, member: &str) -> String {
 fn context<'a>(
     collection_fqn: &str,
     method: &str,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
 ) -> ProxyContext<'a> {
     static KEY: std::sync::LazyLock<PhpType> = std::sync::LazyLock::new(PhpType::int);
     ProxyContext::new(
@@ -295,7 +296,8 @@ fn an_unrecognised_method_resolves_to_mixed() {
 
 // ─── Eloquent collection degradation ────────────────────────────────────────
 
-fn eloquent_loader(name: &str) -> Option<Arc<ClassInfo>> {
+fn eloquent_loader(name: Fqn<'_>) -> Option<Arc<ClassInfo>> {
+    let name = name.as_str();
     let class = match name {
         ELOQUENT_COLLECTION_FQN => make_class(ELOQUENT_COLLECTION_FQN),
         ELOQUENT_MODEL => make_class(ELOQUENT_MODEL),
@@ -349,7 +351,8 @@ fn filtering_an_eloquent_collection_keeps_it() {
 
 // ─── Member injection ───────────────────────────────────────────────────────
 
-fn proxy_loader(name: &str) -> Option<Arc<ClassInfo>> {
+fn proxy_loader(name: Fqn<'_>) -> Option<Arc<ClassInfo>> {
+    let name = name.as_str();
     if name != USER {
         return None;
     }
@@ -428,7 +431,8 @@ fn injection_skips_non_public_static_and_magic_members() {
 /// methods of the same name.
 #[test]
 fn a_grafted_member_replaces_a_same_named_static() {
-    fn maker_loader(name: &str) -> Option<Arc<ClassInfo>> {
+    fn maker_loader(name: Fqn<'_>) -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name != USER {
             return None;
         }
@@ -518,7 +522,8 @@ fn injection_is_a_no_op_for_a_malformed_tag() {
 /// type rather than the template parameter's name.
 #[test]
 fn injection_applies_the_value_types_generic_arguments() {
-    fn box_loader(name: &str) -> Option<Arc<ClassInfo>> {
+    fn box_loader(name: Fqn<'_>) -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name != "App\\Box" {
             return None;
         }

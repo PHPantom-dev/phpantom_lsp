@@ -59,6 +59,7 @@ impl Backend {
         // a complete docblock skeleton as a single snippet item.
         // Must run before the docblock-interior checks below.
         let class_loader = self.class_loader(ctx);
+        let resolved_class_loader = self.resolved_class_loader(ctx);
         let function_loader = self.function_loader(ctx);
         if let Some(response) = crate::completion::phpdoc::generation::try_generate_docblock(
             content,
@@ -67,6 +68,7 @@ impl Backend {
             &ctx.namespace,
             &ctx.classes,
             &class_loader,
+            &resolved_class_loader,
             Some(self),
             Some(&function_loader),
             uri,
@@ -147,6 +149,7 @@ impl Backend {
     ) -> CompletionResponse {
         let context = crate::completion::phpdoc::detect_context(content, position);
         let class_loader = self.class_loader(ctx);
+        let resolved_class_loader = self.resolved_class_loader(ctx);
         let function_loader = self.function_loader(ctx);
 
         // For inline variable assignments, try to infer the type from
@@ -156,11 +159,15 @@ impl Backend {
                 let sym = crate::completion::phpdoc::extract_symbol_info(content, position);
                 crate::completion::phpdoc::generation::infer_inline_variable_type(
                     &sym,
-                    content,
                     position,
-                    ctx,
-                    &class_loader,
-                    Some(self),
+                    crate::type_engine::resolver::FileCtx::new(
+                        content,
+                        &ctx.classes,
+                        &resolved_class_loader,
+                        &class_loader,
+                    )
+                    .with_imports(Some(&ctx.use_map))
+                    .with_backend(Some(self)),
                     Some(
                         &function_loader
                             as &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
@@ -173,6 +180,7 @@ impl Backend {
         let smart = crate::completion::phpdoc::SmartContext {
             inferred_inline_var_type: inferred_var_type,
             class_loader: Some(&class_loader),
+            resolved_class_loader: Some(&resolved_class_loader),
             function_loader: Some(&function_loader),
             import_target: Some((self, uri)),
             local_classes: &ctx.classes,

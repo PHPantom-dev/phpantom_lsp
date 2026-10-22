@@ -640,12 +640,12 @@ impl Backend {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
-        let backend = self.clone_for_diagnostic_worker();
+        let backend = self.clone_for_blocking();
         runtime.spawn(async move {
             // The same gating the index tail applies: a pull client's
             // results are only deliverable through workspace pulls, so a
             // client that has never pulled does not pay for the scan.
-            if backend.supports_pull_diagnostics.load(Ordering::Acquire) {
+            if backend.caps().pull_diagnostics {
                 backend.wait_for_first_workspace_pull().await;
                 if backend.shutdown_flag.load(Ordering::Acquire) {
                     return;
@@ -684,7 +684,7 @@ impl Backend {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
-        let backend = self.clone_for_diagnostic_worker();
+        let backend = self.clone_for_blocking();
         runtime.spawn(async move {
             backend.clear_workspace_diagnostics().await;
         });
@@ -706,7 +706,7 @@ impl Backend {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
-        let backend = self.clone_for_diagnostic_worker();
+        let backend = self.clone_for_blocking();
         runtime.spawn(async move {
             backend.flush_workspace_diag_updates(changed).await;
         });
@@ -737,8 +737,8 @@ impl Backend {
             // background index to have finished.  While that is still
             // running, its own tail re-reads the setting and starts the
             // pass itself.
-            && self.workspace_indexed.load(Ordering::Acquire)
-            && !self.full_index_in_progress.load(Ordering::Acquire)
+            && self.workspace_index.indexed.load(Ordering::Acquire)
+            && !self.workspace_index.full_in_progress.load(Ordering::Acquire)
     }
 
     /// Whether the running workspace pass has been told to stop, either
@@ -1058,16 +1058,13 @@ impl Backend {
     fn workspace_diagnostic_target_uris(&self) -> Vec<String> {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
         let open_uris: HashSet<String> = self.open_files.read().keys().cloned().collect();
-        let maps = self.symbol_maps.read();
-        maps.keys()
-            .filter(|uri| {
-                !open_uris.contains(uri.as_str())
-                    && !uri.starts_with("phpantom-stub://")
-                    && !uri.starts_with("phpantom-stub-fn://")
-                    && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
-            })
-            .cloned()
-            .collect()
+        let mut uris = self.uris_with_symbol_maps();
+        uris.retain(|uri| {
+            !open_uris.contains(uri.as_str())
+                && !crate::stubs::is_stub_uri(uri)
+                && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
+        });
+        uris
     }
 
     /// Compute the full native diagnostic set for one file from disk.
@@ -1113,11 +1110,7 @@ impl Backend {
     /// matching `[[diagnostics.ignore]]` path globs and for naming a file in
     /// hover text.
     pub(crate) fn workspace_relative_path(&self, uri: &str) -> Option<String> {
-        let path = uri
-            .parse::<tower_lsp::lsp_types::Url>()
-            .ok()?
-            .to_file_path()
-            .ok()?;
+        let path = crate::util::uri_to_path(uri)?;
         let root = self.workspace.workspace_root.read().clone()?;
         Some(
             path.strip_prefix(&root)
@@ -1141,10 +1134,7 @@ impl Backend {
             return;
         };
 
-        if self
-            .supports_pull_diagnostics
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if self.caps().pull_diagnostics {
             self.request_diagnostic_refresh().await;
             return;
         }
@@ -1176,7 +1166,7 @@ impl Backend {
         }
         // Only user files participate in workspace diagnostics.
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
-        if uri.starts_with("phpantom-stub")
+        if crate::stubs::is_stub_uri(uri)
             || vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
         {
             return;
@@ -1889,7 +1879,10 @@ mod tests {
         let config = dir.path().join(crate::config::CONFIG_FILE_NAME);
         let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
         // Stand in for a finished full background index.
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         std::fs::write(&config, "[diagnostics]\nworkspace = false\n").expect("write config");
         backend.reload_config(dir.path());
@@ -1905,11 +1898,13 @@ mod tests {
         // An index that is still running starts the pass from its own
         // tail, so a reload must not start a second one.
         backend
-            .full_index_in_progress
+            .workspace_index
+            .full_in_progress
             .store(true, Ordering::Release);
         assert!(!backend.workspace_diagnostics_due_after_reload());
         backend
-            .full_index_in_progress
+            .workspace_index
+            .full_in_progress
             .store(false, Ordering::Release);
 
         // Nor may a pass that has already run be run again.

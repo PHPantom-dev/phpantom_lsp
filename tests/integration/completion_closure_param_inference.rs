@@ -1,7 +1,7 @@
 use crate::common::{
-    complete_at, create_psr4_workspace, create_test_backend, method_names, property_names,
+    complete_at, completion_response, create_psr4_workspace, create_test_backend, method_names,
+    open_php, property_names,
 };
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Arrow function: callable param inference from generic collection ───────
@@ -1869,30 +1869,9 @@ async fn test_cross_file_closure_param_inference_with_namespace() {
 
     let uri = Url::from_file_path(dir.path().join("src/Script/run.php")).unwrap();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: script_file.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, script_file).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 5,
-                character: 8,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let items = match backend.completion(completion_params).await.unwrap() {
+    let items = match completion_response(&backend, &uri, 5, 8, None).await {
         Some(CompletionResponse::Array(items)) => items,
         Some(CompletionResponse::List(list)) => list.items,
         None => vec![],
@@ -1968,30 +1947,9 @@ async fn test_cross_file_closure_param_inference_without_namespace() {
 
     let uri = Url::from_file_path(dir.path().join("src/Script/run.php")).unwrap();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: script_file.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, script_file).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 4,
-                character: 8,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let items = match backend.completion(completion_params).await.unwrap() {
+    let items = match completion_response(&backend, &uri, 4, 8, None).await {
         Some(CompletionResponse::Array(items)) => items,
         Some(CompletionResponse::List(list)) => list.items,
         None => vec![],
@@ -2143,30 +2101,9 @@ async fn test_cross_file_laravel_eloquent_builder_closure_param_inference() {
 
     let uri = Url::from_file_path(dir.path().join("src/Http/Controllers/script.php")).unwrap();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: script_file.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, script_file).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 5,
-                character: 8,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let items = match backend.completion(completion_params).await.unwrap() {
+    let items = match completion_response(&backend, &uri, 5, 8, None).await {
         Some(CompletionResponse::Array(items)) => items,
         Some(CompletionResponse::List(list)) => list.items,
         None => vec![],

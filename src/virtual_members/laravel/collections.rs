@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::inheritance::ancestors;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ELOQUENT_COLLECTION_FQN};
@@ -42,7 +43,7 @@ pub(crate) fn try_swap_custom_collection(
     base_fqn: &str,
     generic_args: &[PhpType],
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Arc<ClassInfo> {
     if base_fqn != crate::types::ELOQUENT_COLLECTION_FQN || generic_args.is_empty() {
         return cls;
@@ -55,7 +56,7 @@ pub(crate) fn try_swap_custom_collection(
     };
     let model_class = crate::class_lookup::find_class_by_name(all_classes, &model_name)
         .map(Arc::clone)
-        .or_else(|| class_loader(&model_name));
+        .or_else(|| class_loader(Fqn::new(&model_name)));
 
     if let Some(ref mc) = model_class
         && let Some(coll_type) = mc.laravel().and_then(|l| l.custom_collection.as_ref())
@@ -63,7 +64,7 @@ pub(crate) fn try_swap_custom_collection(
         let coll_name = coll_type.to_string();
         crate::class_lookup::find_class_by_name(all_classes, &coll_name)
             .map(Arc::clone)
-            .or_else(|| class_loader(&coll_name))
+            .or_else(|| class_loader(Fqn::new(&coll_name)))
             .unwrap_or(cls)
     } else {
         cls
@@ -100,7 +101,7 @@ pub(crate) fn try_swap_custom_collection(
 /// keep their existing type without allocating a copy.
 pub(crate) fn replace_eloquent_collections_in_type(
     ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     if !mentions_eloquent_collection(ty) {
         return None;
@@ -117,7 +118,7 @@ pub(crate) fn replace_eloquent_collections_in_type(
 /// `chunk(100, fn (CustomerCollection $c) => …)`.
 pub(crate) fn replace_eloquent_collections_in_param_type(
     ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     if !mentions_eloquent_collection(ty) {
         return None;
@@ -163,7 +164,7 @@ fn is_eloquent_collection_name(name: &str) -> bool {
 fn rewrite_eloquent_collections(
     ty: &PhpType,
     produced: bool,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     match ty.kind() {
         TypeKind::Generic(g) if is_eloquent_collection_name(&g.name) => {
@@ -225,7 +226,7 @@ fn rewrite_eloquent_collections(
 fn rewrite_members(
     members: &[PhpType],
     produced: bool,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<Vec<PhpType>> {
     let mut changed = false;
     let rewritten: Vec<PhpType> = members
@@ -251,7 +252,7 @@ fn rewrite_members(
 /// so a shared base model can set the collection for a whole hierarchy.
 pub(super) fn custom_collection_for_model(
     model: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<String> {
     let declared = |candidate: &ClassInfo| {
         candidate
@@ -260,7 +261,7 @@ pub(super) fn custom_collection_for_model(
             .and_then(|collection| collection.base_name())
             .map(str::to_owned)
     };
-    let model_class = class_loader(model)?;
+    let model_class = class_loader(Fqn::new(model))?;
     declared(&model_class)
         .or_else(|| ancestors(&model_class, class_loader).find_map(|(_, parent)| declared(&parent)))
 }
@@ -270,9 +271,9 @@ pub(super) fn custom_collection_for_model(
 pub(super) fn collection_type_for(
     collection: &str,
     base_args: &[PhpType],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> PhpType {
-    let arity = class_loader(collection).map_or(0, |c| c.template_params.len());
+    let arity = class_loader(Fqn::new(collection)).map_or(0, |c| c.template_params.len());
     match arity {
         0 => PhpType::named(atom(collection)),
         1 => PhpType::generic(

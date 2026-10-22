@@ -1,5 +1,6 @@
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::test_fixtures::{
     make_class, make_method, make_method_with_params, make_param, no_loader,
@@ -30,7 +31,10 @@ fn model_query_factories_preserve_declaration_metadata() {
     original.name_offset = 42;
     original.native_return_type = original.return_type.clone();
     model.methods.push(Arc::new(original));
-    let loader = |name: &str| (name == ELOQUENT_BUILDER_FQN).then(|| Arc::clone(&builder));
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        (name == ELOQUENT_BUILDER_FQN).then(|| Arc::clone(&builder))
+    };
     let methods = build_builder_forwarded_methods(&model, &loader, None);
     let factory = methods
         .iter()
@@ -73,7 +77,8 @@ fn builder_forwarding_converts_instance_to_static() {
 
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -93,7 +98,8 @@ fn builder_forwarding_maps_static_to_builder_self_type() {
     let builder = make_builder(vec![make_method("where", Some("static"))]);
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -115,7 +121,8 @@ fn builder_forwarding_maps_this_to_builder_self_type() {
     let builder = make_builder(vec![make_method("orderBy", Some("$this"))]);
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -137,7 +144,8 @@ fn builder_forwarding_maps_self_to_builder_self_type() {
     let builder = make_builder(vec![make_method("limit", Some("self"))]);
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -159,7 +167,8 @@ fn builder_forwarding_maps_tmodel_to_concrete_class() {
     let builder = make_builder(vec![make_method("first", Some("TModel|null"))]);
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -185,7 +194,8 @@ fn builder_forwarding_maps_tmodel_to_fqn_when_name_is_short() {
     let mut channel = make_class("Channel");
     channel.file_namespace = Some(atom("App\\Models"));
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -217,7 +227,8 @@ fn custom_builder_forwarding_maps_parent_tmodel_to_concrete_class() {
         ..Default::default()
     }));
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\UserBuilder" {
             Some(Arc::new(custom_builder.clone()))
         } else if name == ELOQUENT_BUILDER_FQN {
@@ -247,7 +258,8 @@ fn builder_forwarding_maps_generic_collection_return() {
     )]);
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -269,7 +281,8 @@ fn builder_forwarding_maps_static_in_union() {
     let builder = make_builder(vec![make_method("whereNull", Some("static|null"))]);
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -295,7 +308,8 @@ fn builder_forwarding_skips_magic_methods() {
     ]);
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -321,7 +335,8 @@ fn builder_forwarding_skips_non_public_methods() {
     Arc::make_mut(&mut builder.methods.make_mut()[1]).visibility = Visibility::Protected;
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -346,7 +361,8 @@ fn builder_forwarding_skips_methods_already_on_model() {
     existing.is_static = true;
     user.methods.push(Arc::new(existing));
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -374,7 +390,8 @@ fn builder_forwarding_does_not_skip_instance_method_with_same_name() {
     existing.is_static = false;
     user.methods.push(Arc::new(existing));
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -400,7 +417,8 @@ fn builder_forwarding_maps_parameter_types() {
     )]);
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -433,7 +451,8 @@ fn builder_forwarding_preserves_method_metadata() {
 
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -465,7 +484,8 @@ fn builder_forwarding_multiple_methods() {
     ]);
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -495,7 +515,8 @@ fn custom_builder_chain_terminates_on_cyclic_parents() {
     let mut my_builder = make_class("App\\MyBuilder");
     my_builder.parent_class = Some(atom("App\\A"));
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "App\\A" => Some(Arc::new(a.clone())),
             "App\\B" => Some(Arc::new(b.clone())),
@@ -522,7 +543,8 @@ fn custom_builder_chain_finds_method_through_cyclic_parents() {
     let mut my_builder = make_class("App\\MyBuilder");
     my_builder.parent_class = Some(atom("App\\A"));
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "App\\A" => Some(Arc::new(a.clone())),
             "App\\B" => Some(Arc::new(b.clone())),
@@ -542,7 +564,8 @@ fn builder_forwarding_with_no_return_type() {
     let builder = make_builder(vec![make_method("doSomething", None)]);
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {
@@ -566,7 +589,8 @@ fn builder_forwarding_preserves_non_template_return_types() {
     ]);
     let user = make_class("App\\Models\\User");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == ELOQUENT_BUILDER_FQN {
             Some(Arc::new(builder.clone()))
         } else {

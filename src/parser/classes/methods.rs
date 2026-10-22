@@ -149,7 +149,7 @@ pub(super) fn extract_method<'a>(
                 .map(docblock::extract_link_urls_from_info)
                 .unwrap_or_default(),
             see_refs: info
-                .map(docblock::extract_see_references_from_info)
+                .map(docblock::extract_see_refs_from_info)
                 .unwrap_or_default(),
             conditional_return,
             deprecation_message: depr_info.message,

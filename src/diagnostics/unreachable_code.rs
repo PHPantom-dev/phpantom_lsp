@@ -59,7 +59,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::parser::with_parsed_program;
-use crate::type_engine::types::narrowing::{contains_entry_label, statement_leaves_block};
+use crate::type_engine::type_ops::condition_facts::{contains_entry_label, statement_leaves_block};
 
 use super::helpers::make_diagnostic;
 

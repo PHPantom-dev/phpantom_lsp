@@ -17,8 +17,8 @@
 //!   expression parsing, array access segment walking).
 //! - [`super::variable::resolution`]: Variable type resolution via
 //!   assignment scanning and parameter type hints.
-//! - [`super::types::narrowing`]: instanceof / assert / custom type guard
-//!   narrowing.
+//! - [`super::type_ops::condition_facts`]: what instanceof / assert / custom
+//!   type guard conditions say about a variable.
 //! - [`super::variable::closure_resolution`]: Closure and arrow-function
 //!   parameter resolution.
 //! - [`crate::inheritance`]: Class inheritance merging (traits, mixins,
@@ -35,7 +35,7 @@
 //! classification of a subject that resolved to no class in
 //! [`subject_outcome`].
 
-mod array_access;
+mod array_access_subject;
 mod chain_keys;
 mod context;
 mod subject_outcome;
@@ -44,9 +44,9 @@ mod written_names;
 
 pub(crate) use chain_keys::is_narrowable_call;
 pub(crate) use context::{
-    CtxLoaders, FunctionLoaderFn, LendsLoaders, Loaders, OwnedLoaders, ResolutionCtx,
-    ScopeVarResolverFn, SourceImports, VarResolutionCtx, with_chain_resolution_cache,
-    with_isolated_chain_cache,
+    ChainCacheGuard, CtxLoaders, FileCtx, FunctionLoaderFn, LendsLoaders, Loaders, OwnedLoaders,
+    ResolutionCtx, ScopeVarResolverFn, SourceImports, VarResolutionCtx,
+    with_chain_resolution_cache, with_isolated_chain_cache,
 };
 pub(crate) use subject_outcome::{SubjectOutcome, resolve_subject_outcome};
 pub(crate) use variable_subjects::resolve_dynamic_member_name;
@@ -55,7 +55,7 @@ pub(in crate::type_engine) use written_names::WrittenNames;
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::class_lookup::{find_class_by_name, is_self_or_static, resolve_class_keyword};
+use crate::class_lookup::{Fqn, find_class_by_name, is_self_or_static, resolve_class_keyword};
 use crate::inheritance::resolve_property_type_hint;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
@@ -213,8 +213,8 @@ fn resolve_target_classes_expr_inner(
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     let current_class = ctx.current_class;
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
 
     match expr {
         // ── Keywords that always mean "current class" ────────────
@@ -267,7 +267,7 @@ fn resolve_target_classes_expr_inner(
             // Both are source-level references: PHP resolves an
             // unqualified name through the imports, else the current
             // namespace, never a global class of the same short name.
-            class_loader(&ctx.written_names().resolve_class(name))
+            class_loader(Fqn::new(&ctx.written_names().resolve_class(name)))
                 .map(ResolvedType::from_arc)
                 .into_iter()
                 .collect()
@@ -285,7 +285,13 @@ fn resolve_target_classes_expr_inner(
 
         // ── Array access on variable or call expression ─────────
         SubjectExpr::ArrayAccess { base, segments } => {
-            array_access::resolve_array_access_subject(expr, base, segments, access_kind, ctx)
+            array_access_subject::resolve_array_access_subject(
+                expr,
+                base,
+                segments,
+                access_kind,
+                ctx,
+            )
         }
 
         // ── Bare variable ───────────────────────────────────────
@@ -302,7 +308,7 @@ fn resolve_target_classes_expr_inner(
             if let Some(cls) = find_class_by_name(all_classes, &text) {
                 return vec![ResolvedType::from_arc(Arc::clone(cls))];
             }
-            class_loader(&text)
+            class_loader(Fqn::new(&text))
                 .map(ResolvedType::from_arc)
                 .into_iter()
                 .collect()
@@ -318,8 +324,8 @@ fn resolve_static_access_subject(
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     let current_class = ctx.current_class;
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
 
     // Handle self/static/parent keywords — SubjectExpr::parse
     // produces StaticAccess for "self::MONTH", "static::FOO",
@@ -337,7 +343,7 @@ fn resolve_static_access_subject(
         // `Foo::` is a source-level reference: PHP resolves an
         // unqualified name through the imports, else the current
         // namespace, never a global class of the same short name.
-        class_loader(&ctx.written_names().resolve_class(class))
+        class_loader(Fqn::new(&ctx.written_names().resolve_class(class)))
             .into_iter()
             .collect()
     };
@@ -475,8 +481,8 @@ fn resolve_property_chain_subject(
     receiver: Option<Vec<ResolvedType>>,
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
 
     // A type the forward walker narrowed this exact property path
     // to has already been consulted by the spine walk in
@@ -563,7 +569,8 @@ fn resolve_self_static_class(ctx: &ResolutionCtx<'_>) -> Option<Arc<ClassInfo>> 
         // The enclosing class is normally one of the file's own, already
         // behind an `Arc`.
         Some(
-            ctx.all_classes
+            ctx.file
+                .all_classes
                 .iter()
                 .find(|cls| std::ptr::eq(cls.as_ref(), current))
                 .cloned()
@@ -585,10 +592,10 @@ pub(in crate::type_engine) fn resolve_static_owner_class(
         resolve_self_static_class(rctx)
     } else if let Some(resolved_name) = resolve_class_keyword(class, rctx.current_class) {
         // parent — load via class_loader so we get the full parent ClassInfo
-        (rctx.class_loader)(&resolved_name)
+        (rctx.file.class_loader)(Fqn::new(&resolved_name))
     } else {
         let fqn = rctx.written_names().resolve_class(class);
-        (rctx.class_loader)(&fqn).or_else(|| {
+        (rctx.file.class_loader)(Fqn::new(&fqn)).or_else(|| {
             resolved_to_arcs(resolve_target_classes(
                 class,
                 crate::AccessKind::DoubleColon,

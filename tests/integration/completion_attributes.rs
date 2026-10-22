@@ -1,7 +1,8 @@
-use crate::common::{class_items, complete_at, create_test_backend, labels, open_php_str};
+use crate::common::{
+    class_items, complete_at, create_test_backend, labels, open_php, open_php_str,
+};
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 static BUILTIN_ATTRIBUTE_STUB: &str = r#"<?php
@@ -1181,24 +1182,19 @@ async fn attribute_cross_file_constructor_snippet() {
 
     // File 1: attribute class with constructor.
     let attr_uri = Url::parse("file:///attr_def.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: attr_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: concat!(
-                    "<?php\n",
-                    "namespace App\\Attributes;\n",
-                    "#[\\Attribute(\\Attribute::TARGET_METHOD)]\n",
-                    "class Route {\n",
-                    "    public function __construct(string $path, string $method = 'GET') {}\n",
-                    "}\n",
-                )
-                .to_string(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &attr_uri,
+        concat!(
+            "<?php\n",
+            "namespace App\\Attributes;\n",
+            "#[\\Attribute(\\Attribute::TARGET_METHOD)]\n",
+            "class Route {\n",
+            "    public function __construct(string $path, string $method = 'GET') {}\n",
+            "}\n",
+        ),
+    )
+    .await;
 
     // File 2: uses the attribute.
     let uri = Url::parse("file:///test_cross.php").unwrap();

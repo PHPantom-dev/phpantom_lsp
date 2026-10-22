@@ -33,6 +33,7 @@
 use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, ShapeEntry};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::type_engine::subject_expr::SubjectExpr;
@@ -45,7 +46,7 @@ use super::validation_rules::{
 
 /// Resolves a class name to its `ClassInfo`, the loader every shape lookup
 /// that has to read an enum's backing type is handed.
-type ClassLoader<'a> = &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>;
+type ClassLoader<'a> = &'a ResolvedClassLoader<'a>;
 
 /// The type of an uploaded file in a validated array.
 const UPLOADED_FILE_FQN: &str = "\\Illuminate\\Http\\UploadedFile";
@@ -206,7 +207,7 @@ pub(crate) fn resolve_shape_at_call(
     safe_source: &dyn Fn() -> Option<Arc<ClassInfo>>,
     content: &str,
     offset: u32,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&Backend>,
 ) -> Option<PhpType> {
     match call {
@@ -252,7 +253,7 @@ pub(crate) fn resolve_shape_at_call(
 /// recognised too.  Both halves are needed for the same reason
 /// [`is_request_like`] needs both: the name check does not require the
 /// contract's own file to be indexed, and the subtype walk covers subclasses.
-fn is_validator(class: &ClassInfo, class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> bool {
+fn is_validator(class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
     let fqn = class.fqn();
     fqn == VALIDATOR_FQN
         || fqn == VALIDATOR_CONTRACT_FQN
@@ -293,7 +294,7 @@ pub(crate) fn safe_source_class(
         // back to the request variable, then resolve that.
         SubjectExpr::Variable(name) => {
             let request = super::validation_rules::safe_source_variable(
-                ctx.content,
+                ctx.file.content,
                 ctx.cursor_offset as usize,
                 name,
             )?;
@@ -430,7 +431,7 @@ impl RuleSpec {
 /// value: all of these return `None` and leave the field `mixed`, rather than
 /// guessing `string` and mistyping every `int`-backed enum.
 fn enum_backing_type(fqn: &str, class_loader: ClassLoader<'_>) -> Option<PhpType> {
-    let class = class_loader(fqn)?;
+    let class = class_loader(Fqn::new(fqn))?;
     if class.kind != ClassLikeKind::Enum {
         return None;
     }

@@ -12,7 +12,7 @@
 //! surfaces them and unknown-member diagnostics are suppressed.
 
 use crate::common::create_psr4_workspace;
-use tower_lsp::LanguageServer;
+use crate::common::{completion_response, open_php};
 use tower_lsp::lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
@@ -68,32 +68,9 @@ class Renderer {
     );
 
     let uri = Url::parse("file:///src/Renderer.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 5,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 5, 15, None).await;
 
     let items = match result.expect("completion should return results") {
         CompletionResponse::Array(items) => items,

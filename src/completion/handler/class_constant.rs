@@ -338,8 +338,8 @@ impl Backend {
     ///
     /// For example, `file:///home/user/Test.php` returns `Some("Test")`.
     fn filename_class_name(uri: &str) -> Option<String> {
-        let url = Url::parse(uri).ok()?;
-        let file_path = url.to_file_path().ok()?;
+        let url = crate::util::parse_url(uri)?;
+        let file_path = crate::util::url_to_path(&url)?;
         let stem = file_path.file_stem()?;
         let name = stem.to_string_lossy();
         if name.is_empty() {
@@ -388,13 +388,12 @@ impl Backend {
         let class_ctx = detect_class_name_context(content, position);
         let keyword_ctx = {
             let cursor_offset = position_to_offset(content, position);
-            let maps = self.symbol_maps.read();
-            let map = maps.get(current_uri);
+            let map = self.symbol_map_for(current_uri);
             crate::completion::keyword_completion::build_keyword_context(
                 content,
                 position,
                 cursor_offset,
-                map.map(|m| m.as_ref()),
+                map.as_deref(),
                 &ctx.classes,
             )
         };

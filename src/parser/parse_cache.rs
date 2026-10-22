@@ -15,9 +15,9 @@
 //! declared elsewhere walks that method's body, and every resolution inside
 //! the walk parses the declaring file.  A nested [`with_parse_cache`] for a
 //! different file therefore registers it alongside the pass's own file, so
-//! all of those parses share one AST until the pass ends.  Only the most
-//! recently registered few are kept, which bounds what a pass that reaches
-//! into many files holds at once.
+//! all of those parses share one AST until the pass ends.  Only the few
+//! most recently used are kept, which bounds what a pass that reaches into
+//! many files holds at once.
 //!
 //! The cache is activated by the outermost [`with_parse_cache`], which sets
 //! it up at the start of a block and tears it down (via `Drop`) when the
@@ -93,9 +93,7 @@ impl CachedFile {
     fn program(&self) -> &Program<'_> {
         let (_, program_ptr) = self.parsed.get_or_init(|| {
             let arena = mago_allocator::LocalArena::new();
-            let file_id = mago_database::file::FileId::new(b"input.php");
-            let program =
-                mago_syntax::parser::parse_file_content(&arena, file_id, self.content.as_bytes());
+            let program = super::recovery::parse_program(&arena, &self.content);
             // The arena's chunks are heap-allocated and do not move when
             // the arena itself does, so the pointer outlives this move.
             let program_ptr: *const () = (program as *const Program<'_>).cast();
@@ -109,14 +107,23 @@ impl CachedFile {
 }
 
 /// The files of the active pass: its own file first, then the other files
-/// it registered, least recently registered first.
+/// it registered, least recently used first.
 struct ParseCache {
     files: Vec<Rc<CachedFile>>,
 }
 
 impl ParseCache {
-    fn find(&self, content: &str) -> Option<Rc<CachedFile>> {
-        self.files.iter().find(|file| file.holds(content)).cloned()
+    /// The cached file holding `content`.  A hit on another file also marks
+    /// it as the most recently used, so eviction drops the file the pass has
+    /// gone longest without reading rather than the one registered first.
+    fn find(&mut self, content: &str) -> Option<Rc<CachedFile>> {
+        let index = self.files.iter().position(|file| file.holds(content))?;
+        if index == 0 {
+            return Some(Rc::clone(&self.files[0]));
+        }
+        let file = self.files.remove(index);
+        self.files.push(Rc::clone(&file));
+        Some(file)
     }
 
     /// Make `content` available to the pass, evicting the oldest other
@@ -143,6 +150,11 @@ impl ParseCache {
 
 thread_local! {
     static PARSE_CACHE: RefCell<Option<ParseCache>> = const { RefCell::new(None) };
+}
+
+/// The active cache's file holding `content`, if any.
+fn cached_file(content: &str) -> Option<Rc<CachedFile>> {
+    PARSE_CACHE.with(|cell| cell.borrow_mut().as_mut()?.find(content))
 }
 
 /// RAII guard that clears the thread-local parse cache on drop.
@@ -248,6 +260,9 @@ fn install_parse_cache<'a>(
 /// Parse `content` with the mago-syntax parser and pass the resulting
 /// `Program` (plus the content string) to `f`.
 ///
+/// A braced `namespace` block the parser would drop whole is kept (see
+/// [`parse_program`](super::recovery::parse_program)).
+///
 /// Handles the boilerplate that every parse entry-point needs:
 /// allocating a `LocalArena` arena, creating a `FileId`, calling
 /// `parse_file_content`, and wrapping the whole thing in
@@ -266,7 +281,7 @@ pub(crate) fn with_parsed_program<T: Default>(
     // ── Fast path: check the thread-local cache ─────────────────
     // The borrow ends before `f` runs, so `f` is free to register more
     // files or parse others through the cache.
-    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    let cached = cached_file(content);
 
     if let Some(file) = cached {
         return with_cached_file(file, method_name, |file| {
@@ -278,9 +293,7 @@ pub(crate) fn with_parsed_program<T: Default>(
     let content_owned = content.to_string();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let arena = mago_allocator::LocalArena::new();
-        let file_id = mago_database::file::FileId::new(b"input.php");
-        let program =
-            mago_syntax::parser::parse_file_content(&arena, file_id, content_owned.as_bytes());
+        let program = super::recovery::parse_program(&arena, &content_owned);
         f(program, &content_owned)
     }));
 
@@ -327,7 +340,7 @@ fn with_cached_file<T: Default>(
 /// not rescan the text up to each one.  Other text falls back to
 /// [`text_scan::namespace_at_offset`](crate::text_scan::namespace_at_offset).
 pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> {
-    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    let cached = cached_file(content);
     match cached {
         Some(file) => file
             .namespaces
@@ -341,7 +354,7 @@ pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> 
 /// `offset` in `content`, which tells the file's blocks apart, or `None`
 /// before the first one.  Answered the way [`namespace_at_offset`] is.
 pub(crate) fn namespace_decl_at(content: &str, offset: usize) -> Option<usize> {
-    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    let cached = cached_file(content);
     match cached {
         Some(file) => file
             .namespaces
@@ -359,7 +372,7 @@ pub(crate) fn namespace_decl_at(content: &str, offset: usize) -> Option<usize> {
 /// not rescan the file for each.  Other text is searched for `name` first
 /// and parsed for scopes only when some docblock declares it.
 pub(crate) fn declares_docblock_type_name(content: &str, name: &str, region: (u32, u32)) -> bool {
-    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    let cached = cached_file(content);
     match cached {
         Some(file) => file
             .docblock_type_names
@@ -382,7 +395,7 @@ pub(crate) fn with_fcc_assignments<T: Default>(
     content: &str,
     f: impl FnOnce(&[crate::signature_help::FccAssignment]) -> T,
 ) -> T {
-    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    let cached = cached_file(content);
     match cached {
         Some(file) => with_cached_file(file, "with_fcc_assignments", |file| {
             let assignments = file.fcc_assignments.get_or_init(|| {
@@ -448,7 +461,7 @@ fn collect_comments(program: &Program<'_>) -> Vec<CommentSpan> {
 /// forward walker can look up the docblock above every statement it visits
 /// without scanning the text before it.  Other text is parsed per call.
 pub(crate) fn with_comments<T: Default>(content: &str, f: impl FnOnce(&[CommentSpan]) -> T) -> T {
-    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    let cached = cached_file(content);
     match cached {
         Some(file) => with_cached_file(file, "with_comments", |file| {
             f(file
@@ -600,10 +613,38 @@ mod with_parsed_program_tests {
             super::PARSE_CACHE.with(|cell| {
                 cell.borrow()
                     .as_ref()
-                    .is_some_and(|cache| cache.find(content).is_some())
+                    .is_some_and(|cache| cache.files.iter().any(|file| file.holds(content)))
             })
         };
         assert!(!cached(&others[0]), "the oldest other file was evicted");
         assert!(others[1..].iter().all(|other| cached(other)));
+    }
+
+    #[test]
+    fn reading_an_other_file_keeps_it_from_eviction() {
+        let own = "<?php class Own {}";
+        let _guard = with_parse_cache(own);
+
+        let others: Vec<String> = (0..=super::MAX_CACHED_OTHER_FILES)
+            .map(|i| format!("<?php class Other{i} {{}}"))
+            .collect();
+        let (last, first) = others.split_last().unwrap();
+        for other in first {
+            let _nested = super::with_parse_cache(other);
+        }
+        let first_program = program_address(&first[0]);
+        let _nested = super::with_parse_cache(last);
+
+        assert_eq!(
+            program_address(&first[0]),
+            first_program,
+            "the file read most recently survives"
+        );
+        let evicted = super::PARSE_CACHE.with(|cell| {
+            cell.borrow()
+                .as_ref()
+                .is_some_and(|cache| !cache.files.iter().any(|file| file.holds(&first[1])))
+        });
+        assert!(evicted, "the least recently used file went instead");
     }
 }

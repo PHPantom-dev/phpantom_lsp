@@ -30,7 +30,7 @@ use mago_syntax::cst::unary::UnaryPrefixOperator;
 
 use crate::atom::atom;
 use crate::parser::unwrap_parens;
-use crate::type_engine::types::narrowing;
+use crate::type_engine::type_ops::condition_facts;
 
 /// What evaluating a condition proved, for each of its outcomes.
 pub(crate) struct Condition<'b> {
@@ -93,7 +93,7 @@ pub(crate) enum Split<'b> {
 /// would change which commit path it takes.
 pub(crate) fn split_condition<'b>(expr: &'b Expression<'b>) -> Split<'b> {
     // `!(!$x)` says exactly what `$x` says.
-    let expr = unwrap_parens(narrowing::fold_negation_pairs(expr));
+    let expr = unwrap_parens(condition_facts::fold_negation_pairs(expr));
     if let Expression::UnaryPrefix(prefix) = expr
         && matches!(
             prefix.operator,

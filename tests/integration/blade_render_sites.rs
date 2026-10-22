@@ -9,7 +9,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_psr4_workspace, open_document};
+    use crate::common::{create_psr4_workspace, goto_definition_at, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -113,17 +113,7 @@ mod tests {
         let uri = Url::from_file_path(&path).unwrap();
         open_document(backend, &uri, language_id, &text).await;
 
-        let response = backend
-            .goto_definition(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
-            .await
-            .unwrap()?;
+        let response = goto_definition_at(backend, &uri, line, character).await?;
         let target = match &response {
             GotoDefinitionResponse::Scalar(location) => location.uri.clone(),
             GotoDefinitionResponse::Array(locations) => locations.first()?.uri.clone(),

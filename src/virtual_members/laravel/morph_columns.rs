@@ -1,9 +1,7 @@
 //! Lookup of morph discriminator columns through model and trait inheritance.
 
-use std::sync::Arc;
-
 use crate::atom::Atom;
-use crate::class_lookup::load_ancestor;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, load_ancestor};
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
 
 #[derive(Clone, Copy)]
@@ -40,9 +38,9 @@ impl MorphColumn {
 pub(crate) fn is_morph_type_column(
     class: &ClassInfo,
     column: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
-    let raw = class_loader(&class.fqn());
+    let raw = class_loader(Fqn::new(&class.fqn()));
     let class = raw.as_deref().unwrap_or(class);
     has_column(class, class, column, class_loader, 0)
 }
@@ -51,7 +49,7 @@ fn has_column(
     class: &ClassInfo,
     receiver: &ClassInfo,
     column: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     depth: u32,
 ) -> bool {
     if depth > MAX_INHERITANCE_DEPTH {
@@ -83,7 +81,7 @@ fn has_column(
         return true;
     }
     for name in &class.used_traits {
-        if let Some(trait_info) = class_loader(name)
+        if let Some(trait_info) = class_loader(Fqn::new(name))
             && has_column(&trait_info, receiver, column, class_loader, depth + 1)
         {
             return true;
@@ -100,7 +98,7 @@ fn has_column(
 fn method_column(
     class: &ClassInfo,
     method: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     depth: u32,
 ) -> Option<Option<MorphColumn>> {
     if depth > MAX_INHERITANCE_DEPTH {
@@ -128,7 +126,7 @@ fn method_column(
             if alias.trait_name.is_some_and(|source| source != *name) {
                 continue;
             }
-            if let Some(trait_info) = class_loader(name)
+            if let Some(trait_info) = class_loader(Fqn::new(name))
                 && let Some(column) =
                     method_column(&trait_info, &alias.method_name, class_loader, depth + 1)
             {
@@ -146,7 +144,7 @@ fn method_column(
         }) {
             continue;
         }
-        if let Some(trait_info) = class_loader(name)
+        if let Some(trait_info) = class_loader(Fqn::new(name))
             && let Some(column) = method_column(&trait_info, method, class_loader, depth + 1)
         {
             return Some(column);

@@ -19,8 +19,8 @@ use crate::Backend;
 impl Backend {
     /// Collect syntax-error diagnostics for a single file.
     ///
-    /// Reads cached parse errors from `self.parse_errors` (populated
-    /// during `update_ast`) and converts them to LSP diagnostics.
+    /// Reads the parse errors `update_ast` recorded in the file's state and
+    /// converts them to LSP diagnostics.
     /// Appends to `out`; the caller is responsible for publishing or
     /// returning them.
     pub fn collect_syntax_error_diagnostics(
@@ -29,15 +29,12 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let errors = {
-            let map = self.parse_errors.read();
-            match map.get(uri) {
-                Some(errs) => errs.clone(),
-                None => return,
-            }
+        let Some(state) = self.file_state(uri) else {
+            return;
         };
+        let errors = &state.parse_errors;
 
-        for (message, start_byte, end_byte) in &errors {
+        for (message, start_byte, end_byte) in errors {
             let range = if *start_byte == 0 && *end_byte == 0 {
                 // Fallback range (e.g. parser panic) — use line 0, col 0.
                 Range {
@@ -94,17 +91,14 @@ mod tests {
 
     #[test]
     fn parser_panic_produces_fallback_diagnostic() {
-        // Simulate a parser panic by inserting a known entry into parse_errors.
+        // Simulate a parser panic by recording the error it leaves.
         let backend = Backend::new_test();
         let uri = "file:///test.php";
         let content = "<?php\n";
-        {
-            let mut errors = backend.parse_errors.write();
-            errors.insert(
-                uri.to_string(),
-                vec![("Parse failed (internal error)".to_string(), 0, 0)],
-            );
-        }
+        backend.publish_parse_failure(
+            uri,
+            vec![("Parse failed (internal error)".to_string(), 0, 0)],
+        );
         let mut out = Vec::new();
         backend.collect_syntax_error_diagnostics(uri, content, &mut out);
         assert_eq!(out.len(), 1);
@@ -122,13 +116,15 @@ mod tests {
         let uri = "file:///test.php";
         backend.update_ast(uri, &Arc::new("<?php\n$x = \"unclosed\n".to_string()));
         assert!(
-            backend.parse_errors.read().contains_key(uri),
+            backend
+                .file_state(uri)
+                .is_some_and(|state| !state.parse_errors.is_empty()),
             "parse errors should be recorded after update_ast"
         );
 
         backend.clear_file_maps(uri);
         assert!(
-            !backend.parse_errors.read().contains_key(uri),
+            backend.file_state(uri).is_none(),
             "clear_file_maps should remove the file's parse-error entry"
         );
     }

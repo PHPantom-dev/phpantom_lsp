@@ -68,7 +68,7 @@ impl TranslationCatalog {
         namespace: &str,
         group: Option<&str>,
     ) {
-        let Ok(uri) = Url::from_file_path(path) else {
+        let Some(uri) = crate::util::path_to_url(path) else {
             return;
         };
         let Some(content) = backend.get_file_content(uri.as_str()) else {
@@ -197,10 +197,10 @@ impl TranslationCatalog {
         if self.files.iter().any(|file| file.uri.as_str() == uri) {
             return;
         }
-        let Ok(parsed_uri) = Url::parse(uri) else {
+        let Some(parsed_uri) = crate::util::parse_url(uri) else {
             return;
         };
-        let Ok(path) = parsed_uri.to_file_path() else {
+        let Some(path) = crate::util::url_to_path(&parsed_uri) else {
             return;
         };
         self.locales.insert(locale.to_string());
@@ -212,7 +212,7 @@ impl Backend {
     /// Read the shared translation catalog, building it only on a cache miss.
     pub(crate) fn cached_translations(&self) -> Arc<TranslationCatalog> {
         self.cached_laravel_enumeration(
-            &self.laravel_string_key_build_locks.translations,
+            &self.laravel.string_key_build_locks.translations,
             |cache| cache.translations.clone(),
             |cache, translations| cache.translations = Some(translations),
             || Arc::new(self.build_translation_catalog()),
@@ -220,7 +220,7 @@ impl Backend {
     }
 
     fn build_translation_catalog(&self) -> TranslationCatalog {
-        let mut roots = self.laravel_provider_resources.read().trans_dirs.clone();
+        let mut roots = self.laravel.provider_resources.read().trans_dirs.clone();
         let workspace_root = self.workspace.workspace_root.read().clone();
         if let Some(root) = &workspace_root {
             let overrides: Vec<_> = roots
@@ -253,7 +253,7 @@ impl Backend {
         roots.dedup();
         let mut catalog = TranslationCatalog::default();
         for root in roots {
-            if let Ok(uri) = Url::from_directory_path(&root.path) {
+            if let Some(uri) = crate::util::dir_path_to_url(&root.path) {
                 catalog.roots.push(uri.to_string());
             }
             let Ok(entries) = std::fs::read_dir(&root.path) else {

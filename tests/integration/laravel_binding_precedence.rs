@@ -8,7 +8,7 @@
 //! registration, and a provider loses to one that extends it, regardless of
 //! which of them is scanned first.
 
-use crate::common::{APP_HELPERS_PHP, consumer_class, create_psr4_workspace};
+use crate::common::{APP_HELPERS_PHP, consumer_class, create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -197,16 +197,7 @@ async fn hover_over_x(providers: &'static str, consumer: &str) -> String {
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, consumer).await;
 
     let idx = consumer.rfind("$x;").expect("consumer should use $x");
     let prefix = &consumer[..idx + 1];

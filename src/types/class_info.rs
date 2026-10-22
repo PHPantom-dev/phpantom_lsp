@@ -210,7 +210,7 @@ impl DocblockMembers {
             return None;
         }
         Some(Arc::new(Self {
-            methods: methods.into_iter().map(Arc::new).collect(),
+            methods: crate::types::into_arcs(methods),
             properties,
         }))
     }
@@ -388,11 +388,11 @@ pub struct ClassInfo {
     pub links: Vec<String>,
     /// Symbol and URL references from `@see` tags in the class-level docblock.
     ///
-    /// Each entry is the raw text after `@see`, which may be a symbol
+    /// Each entry's `text` is what follows `@see`, which may be a symbol
     /// reference (e.g. `"UnsetDemo"`, `"MyClass::method()"`) or a URL
     /// (e.g. `"https://example.com/docs"`).  Rendered in hover below
     /// `@link` entries.
-    pub see_refs: Vec<String>,
+    pub see_refs: Vec<SeeRef>,
     /// Template parameter names declared via `@template` / `@template-covariant`
     /// / `@template-contravariant` tags in the class-level docblock.
     ///

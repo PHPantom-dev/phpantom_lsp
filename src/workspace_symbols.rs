@@ -555,7 +555,7 @@ fn make_symbol(
         tags,
         deprecated: None,
         location: Location {
-            uri: Url::parse(file_uri).unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
+            uri: crate::util::parse_url(file_uri).unwrap_or_else(crate::util::unknown_url),
             range: Range::new(pos, pos),
         },
         container_name,

@@ -6,12 +6,11 @@
 use crate::common::{
     BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
     blade_undefined_variables, complete_at_opened_with_trigger,
-    complete_labels_at_opened_with_trigger, create_psr4_workspace, create_test_backend,
-    definition_locations, goto_definition_at, hover_text_at, labels, open_document, open_php,
-    position_after, position_of, workspace_uri,
+    complete_labels_at_opened_with_trigger, completion_response, create_psr4_workspace,
+    create_test_backend, definition_locations, goto_definition_at, hover_text_at, labels,
+    open_document, open_php, position_after, position_of, workspace_uri,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 const CLASSES_URI: &str = "file:///Classes.php";
@@ -690,19 +689,18 @@ async fn attributes_offered(template: &str) -> Vec<CompletionItem> {
     let (backend, _dir, uri) = component_workspace(template);
     open_document(&backend, &uri, "blade", template).await;
     let at = position_after(template, template);
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: at,
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: Some(CompletionContext {
+    match completion_response(
+        &backend,
+        &uri,
+        at.line,
+        at.character,
+        Some(CompletionContext {
             trigger_kind: CompletionTriggerKind::INVOKED,
             trigger_character: None,
         }),
-    };
-    match backend.completion(params).await.unwrap() {
+    )
+    .await
+    {
         Some(CompletionResponse::Array(items)) => items,
         Some(CompletionResponse::List(list)) => list.items,
         None => Vec::new(),

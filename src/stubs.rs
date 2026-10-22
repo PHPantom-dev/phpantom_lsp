@@ -20,11 +20,12 @@
 //!    [`build_stub_function_index`] convert the static arrays into
 //!    `HashMap`s for O(1) lookup.
 //!
-//! 3. `find_or_load_class` (in `util.rs`) consults the class index as a
-//!    final fallback (Phase 3) after the `uri_classes_index` and PSR-4 resolution.
-//!    The stub PHP source is parsed lazily on first access and cached in
-//!    the `uri_classes_index` under a `phpantom-stub://` URI so subsequent lookups
-//!    are free.
+//! 3. `find_or_load_class` (in `resolution/classes.rs`) consults the class
+//!    index for built-in names ahead of the classmap, and for everything
+//!    else as a final fallback after the `uri_classes_index` and PSR-4
+//!    resolution.  The stub PHP source is parsed lazily on first access and
+//!    cached in the `uri_classes_index` under a [`STUB_URI_PREFIX`] URI so
+//!    subsequent lookups are free.
 //!
 //! ## Updating stubs
 //!
@@ -43,6 +44,30 @@ include!(concat!(env!("OUT_DIR"), "/stub_map_generated.rs"));
 /// tag (e.g. `"v2025.3"`), `"unknown"` when stubs were present but the
 /// version file was missing, or `"none"` when stubs could not be fetched.
 pub const STUBS_VERSION: &str = env!("PHPANTOM_STUBS_VERSION");
+
+/// URI prefix an embedded class or constant stub is cached under, as in
+/// `phpantom-stub://PDO` or `phpantom-stub://const/PHP_EOL`.
+pub(crate) const STUB_URI_PREFIX: &str = "phpantom-stub://";
+
+/// URI prefix the functions and classes of an embedded function stub file
+/// are cached under, as in `phpantom-stub-fn://array_map`.
+pub(crate) const STUB_FUNCTION_URI_PREFIX: &str = "phpantom-stub-fn://";
+
+/// Whether `uri` names a stub embedded in the binary rather than a file.
+///
+/// These are the declarations [`crate::stub_patches`] corrects.
+pub(crate) fn is_embedded_stub_uri(uri: &str) -> bool {
+    uri.starts_with(STUB_URI_PREFIX) || uri.starts_with(STUB_FUNCTION_URI_PREFIX)
+}
+
+/// Whether `uri` names a stub, from whichever source, rather than project
+/// or library code.
+///
+/// A stub describes declarations nobody runs, so it is never analysed,
+/// searched for references, or edited.
+pub(crate) fn is_stub_uri(uri: &str) -> bool {
+    is_embedded_stub_uri(uri)
+}
 
 /// Build a lookup table mapping class/interface/trait short names to their
 /// embedded PHP source code.

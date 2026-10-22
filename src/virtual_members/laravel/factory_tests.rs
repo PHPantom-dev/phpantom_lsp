@@ -1,5 +1,6 @@
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::Fqn;
 use crate::inheritance::resolve_class_with_inheritance;
 use crate::php_type::PhpType;
 use crate::test_fixtures::{make_class, make_method, no_loader};
@@ -107,7 +108,8 @@ fn extends_factory_indirect() {
     let mut base = make_class("BaseFactory");
     base.parent_class = Some(atom(FACTORY_FQN));
 
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         let name = name.strip_prefix('\\').unwrap_or(name);
         if name == "BaseFactory" {
             Some(Arc::new(base.clone()))
@@ -182,7 +184,8 @@ fn unbound_factory_generic_yields_to_declared_model() {
     factory.laravel_mut().factory_model = Some(PhpType::named(atom("App\\Models\\Draft")));
 
     let (document_factory, factory_base) = generic_document_factory_classes();
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "Database\\Factories\\DocumentFactory" => Some(Arc::new(document_factory.clone())),
@@ -220,7 +223,8 @@ fn explicit_base_model_binding_remains_authoritative() {
     factory.laravel_mut().factory_model = Some(PhpType::named(atom("App\\Models\\Draft")));
 
     let (document_factory, factory_base) = generic_document_factory_classes();
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "Database\\Factories\\DocumentFactory" => Some(Arc::new(document_factory.clone())),
@@ -267,7 +271,8 @@ fn direct_unbound_factory_generic_falls_back_to_convention() {
     factory.extends_generics = vec![(atom(FACTORY_FQN), vec![PhpType::named(atom("TModel"))])];
 
     let model = make_class("App\\Models\\Draft");
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         (name == "App\\Models\\Draft").then(|| Arc::new(model.clone()))
     };
 
@@ -290,7 +295,8 @@ fn inherited_concrete_factory_generic_outranks_leaf_model_property() {
         atom(FACTORY_FQN),
         vec![PhpType::named(atom("App\\Domain\\PublishedDraft"))],
     )];
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         (name == "Database\\Factories\\BaseFactory").then(|| Arc::new(base.clone()))
     };
 
@@ -306,7 +312,8 @@ fn nearest_declared_factory_model_wins() {
     base.file_namespace = Some(atom("Database\\Factories"));
     base.parent_class = Some(atom(FACTORY_FQN));
     base.laravel_mut().factory_model = Some(PhpType::named(atom("App\\Models\\BaseDocument")));
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         (name == "Database\\Factories\\BaseFactory").then(|| Arc::new(base.clone()))
     };
 
@@ -356,7 +363,8 @@ fn forwarded_unbound_generic_falls_back_to_conventional_model() {
 
     let (document_factory, _) = generic_document_factory_classes();
     let model = make_class("App\\Models\\Draft");
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Database\\Factories\\DocumentFactory" => Some(Arc::new(document_factory.clone())),
             "App\\Models\\Draft" => Some(Arc::new(model.clone())),
@@ -380,7 +388,8 @@ fn convention_can_use_an_intermediate_factory_name() {
     article_factory.file_namespace = Some(atom("Database\\Factories"));
     article_factory.parent_class = Some(atom(FACTORY_FQN));
     let model = make_class("App\\Models\\Article");
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Database\\Factories\\ArticleFactory" => Some(Arc::new(article_factory.clone())),
             "App\\Models\\Article" => Some(Arc::new(model.clone())),
@@ -405,7 +414,8 @@ fn convention_prefers_the_leaf_factory_name() {
     article_factory.parent_class = Some(atom(FACTORY_FQN));
     let special = make_class("App\\Models\\SpecialArticle");
     let article = make_class("App\\Models\\Article");
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Database\\Factories\\ArticleFactory" => Some(Arc::new(article_factory.clone())),
             "App\\Models\\SpecialArticle" => Some(Arc::new(special.clone())),
@@ -433,7 +443,8 @@ fn factory_model_lookup_stops_on_a_cyclic_parent_chain() {
     let mut factory = make_class("LoopBase");
     factory.parent_class = Some(atom("LoopBase"));
     let loaded = factory.clone();
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         (name == "LoopBase").then(|| Arc::new(loaded.clone()))
     };
 
@@ -448,7 +459,8 @@ fn build_factory_model_methods_synthesizes_create_and_make() {
     factory.parent_class = Some(atom(FACTORY_FQN));
 
     let model = make_class("App\\Models\\User");
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\User" {
             Some(Arc::new(model.clone()))
         } else {
@@ -500,7 +512,8 @@ fn factory_provider_applies_to_factory_subclass() {
     let mut factory = make_class("Database\\Factories\\UserFactory");
     factory.parent_class = Some(atom(FACTORY_FQN));
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == FACTORY_FQN {
             Some(Arc::new(make_class(FACTORY_FQN)))
         } else {
@@ -541,7 +554,8 @@ fn factory_provider_synthesizes_create_and_make() {
     factory.parent_class = Some(atom(FACTORY_FQN));
 
     let model = make_class("App\\Models\\User");
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\User" {
             Some(Arc::new(model.clone()))
         } else {
@@ -579,7 +593,8 @@ fn factory_provider_reuses_model_type_between_member_builders() {
         Some("HasMany<App\\Models\\Post, $this>"),
     )));
     let base_loads = Cell::new(0);
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Database\\Factories\\BaseFactory" => {
                 base_loads.set(base_loads.get() + 1);
@@ -616,7 +631,8 @@ fn factory_provider_empty_when_model_not_found() {
 
 #[test]
 fn relationship_builder_skips_without_a_model_type() {
-    let loader = |_name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |_name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let _name = _name.as_str();
         panic!("a missing model type must not touch the class loader")
     };
 
@@ -626,7 +642,8 @@ fn relationship_builder_skips_without_a_model_type() {
 #[test]
 fn relationship_builder_skips_a_non_class_model_type() {
     let model_type = PhpType::parse("App\\Models\\Article|App\\Models\\Post");
-    let loader = |_name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |_name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let _name = _name.as_str();
         panic!("a union has no single model class to load")
     };
 
@@ -637,7 +654,8 @@ fn relationship_builder_skips_a_non_class_model_type() {
 fn relationship_builder_stops_when_the_model_class_is_unloadable() {
     let model_type = PhpType::named(atom("App\\Models\\Article"));
     let loads = Cell::new(0);
-    let loader = |_name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |_name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let _name = _name.as_str();
         loads.set(loads.get() + 1);
         None
     };
@@ -661,7 +679,8 @@ fn factory_provider_synthesizes_has_and_for_relationship_methods() {
         Some("BelongsTo<User, $this>"),
     )));
 
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\User" {
             Some(Arc::new(model.clone()))
         } else {
@@ -713,7 +732,8 @@ fn factory_provider_synthesizes_relationship_methods_but_not_create_and_make_whe
         .methods
         .push(Arc::new(make_method("posts", Some("HasMany<Post, $this>"))));
 
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\User" {
             Some(Arc::new(model.clone()))
         } else {
@@ -745,7 +765,8 @@ fn factory_provider_uses_declared_model_for_relationship_methods() {
         Some("HasMany<App\\Models\\BlogPost, $this>"),
     )));
 
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         (name == "App\\Models\\BlogAuthor").then(|| Arc::new(model.clone()))
     };
 
@@ -775,7 +796,8 @@ fn factory_provider_ignores_non_relationship_methods() {
         .methods
         .push(Arc::new(make_method("getName", Some("string"))));
 
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\User" {
             Some(Arc::new(model.clone()))
         } else {
@@ -797,7 +819,8 @@ fn factory_provider_synthesizes_trashed_for_soft_deletes_model() {
     let mut model = make_class("App\\Models\\User");
     model.used_traits = vec![atom("Illuminate\\Database\\Eloquent\\SoftDeletes")];
 
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\User" {
             Some(Arc::new(model.clone()))
         } else {
@@ -821,7 +844,8 @@ fn factory_provider_synthesizes_trashed_for_short_trait_name() {
     let mut model = make_class("App\\Models\\User");
     model.used_traits = vec![atom("SoftDeletes")];
 
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\User" {
             Some(Arc::new(model.clone()))
         } else {
@@ -840,7 +864,8 @@ fn factory_provider_no_trashed_without_soft_deletes() {
     factory.parent_class = Some(atom(FACTORY_FQN));
 
     let model = make_class("App\\Models\\User");
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\User" {
             Some(Arc::new(model.clone()))
         } else {
@@ -864,7 +889,8 @@ fn factory_provider_trashed_from_soft_deletes_on_parent() {
     let mut base = make_class("App\\Models\\BaseModel");
     base.used_traits = vec![atom("Illuminate\\Database\\Eloquent\\SoftDeletes")];
 
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "App\\Models\\User" => Some(Arc::new(model.clone())),
             "App\\Models\\BaseModel" => Some(Arc::new(base.clone())),
@@ -883,7 +909,8 @@ fn factory_provider_subdirectory_convention() {
     factory.parent_class = Some(atom(FACTORY_FQN));
 
     let model = make_class("App\\Models\\Admin\\SuperUser");
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Admin\\SuperUser" {
             Some(Arc::new(model.clone()))
         } else {

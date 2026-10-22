@@ -4,7 +4,6 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::PartialArgument;
@@ -16,21 +15,22 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::{
+    Fqn, ResolvedClassLoader, first_rejected_callable_param, missing_required_shape_keys,
+    shape_breaks_list_order,
+};
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::resolution::FileLoaders;
 use crate::symbol_map::CallSite;
-use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
-use crate::types::{ClassInfo, FileContext, ParameterInfo, ResolvedCallableTarget};
+use crate::type_engine::variable::iterable_elements::resolve_expression_type;
+use crate::types::{FileContext, ParameterInfo, ResolvedCallableTarget};
 
 use super::super::helpers::{
-    CallTargetCache, is_position_independent_call_expression, make_diagnostic,
+    CallTargetCache, FileDiagnosticContext, is_position_independent_call_expression,
+    make_diagnostic,
 };
-use super::compatibility::{
-    first_rejected_callable_param, is_type_compatible, missing_required_shape_keys,
-    shape_breaks_list_order,
-};
-use super::{TYPE_MISMATCH_ARGUMENT_CODE, has_strict_types};
+use super::{TYPE_MISMATCH_ARGUMENT_CODE, has_strict_types, is_type_compatible};
 
 // ── Resolved argument info ──────────────────────────────────────────────────
 
@@ -267,16 +267,21 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        // ── Gather context under locks ──────────────────────────────
-        let symbol_map = {
-            let maps = self.symbol_maps.read();
-            match maps.get(uri) {
-                Some(sm) => sm.clone(),
-                None => return,
-            }
-        };
+        let ctx = FileDiagnosticContext::gather(self, uri);
+        self.collect_argument_type_diagnostics_with_context(&ctx, uri, content, out);
+    }
 
-        let file_ctx = self.file_context(uri);
+    /// [`Self::collect_argument_type_diagnostics`] over an already-gathered
+    /// [`FileDiagnosticContext`].
+    pub(crate) fn collect_argument_type_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let symbol_map = &ctx.symbol_map;
+        let file_ctx = &ctx.file;
 
         // Activate the thread-local parse cache so that every call to
         // `with_parsed_program(content, …)` in the resolution pipeline
@@ -296,9 +301,9 @@ impl Backend {
             return;
         }
 
-        let loaders = self.file_loaders(&file_ctx);
+        let loaders = self.file_loaders(file_ctx);
         let (resolved_map, strict_types) =
-            self.resolve_call_arguments(content, &call_site_starts, &file_ctx, &loaders);
+            self.resolve_call_arguments(content, &call_site_starts, file_ctx, &loaders);
         let check = ArgumentCheck {
             backend: self,
             uri,
@@ -329,7 +334,7 @@ impl Backend {
         // (`array_map`) are safe to cache.
         // One per `namespace` block: the same text can name a different
         // target under another block's imports.
-        let call_targets = CallTargetCache::new(&file_ctx);
+        let call_targets = CallTargetCache::new(file_ctx);
 
         // ── Walk every call site ────────────────────────────────────
         for call_site in &symbol_map.call_sites {
@@ -340,7 +345,7 @@ impl Backend {
                 continue;
             };
             let Some(target) =
-                self.resolve_call_site_target(&call_site, content, &file_ctx, &call_targets)
+                self.resolve_call_site_target(&call_site, content, file_ctx, &call_targets)
             else {
                 continue;
             };
@@ -424,7 +429,7 @@ impl Backend {
                         if name.contains("__anonymous@") {
                             return name.to_string();
                         }
-                        if let Some(cls) = resolved_class_loader(name) {
+                        if let Some(cls) = resolved_class_loader(Fqn::new(name)) {
                             cls.fqn().to_string()
                         } else {
                             name.to_string()
@@ -433,7 +438,7 @@ impl Backend {
                     // Expand @phpstan-type / @psalm-type aliases so
                     // that e.g. `Payload` becomes `array{name: string,
                     // phone: string}` before the compatibility check.
-                    let ty = crate::type_engine::types::aliases::resolve_type_alias_typed(
+                    let ty = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
                         &ty,
                         &current_class_info.fqn(),
                         &file_ctx.classes,
@@ -536,7 +541,7 @@ struct ArgumentCheck<'a> {
     backend: &'a Backend,
     uri: &'a str,
     content: &'a str,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
     strict_types: bool,
     downgrade_nullable_mismatch: bool,
 }
@@ -560,11 +565,12 @@ impl<'a> CheckedCall<'a> {
     fn new(
         target: &'a ResolvedCallableTarget,
         args: &'a ResolvedCallArgs,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Self {
         let context_class = target.owner_class.map(|fqn| fqn.to_string());
         let context_parent = context_class.as_ref().and_then(|fqn| {
-            class_loader(fqn).and_then(|cls| cls.parent_class.as_ref().map(|p| p.to_string()))
+            class_loader(Fqn::new(fqn))
+                .and_then(|cls| cls.parent_class.as_ref().map(|p| p.to_string()))
         });
         Self {
             target,
@@ -798,7 +804,7 @@ impl ArgumentCheck<'_> {
         let Some(model_fqn) = extract_model_property_from_array_type(param_type) else {
             return;
         };
-        let Some(cls) = (self.class_loader)(&model_fqn) else {
+        let Some(cls) = (self.class_loader)(Fqn::new(&model_fqn)) else {
             return;
         };
         let resolved = crate::virtual_members::resolve_class_fully_cached(
@@ -816,7 +822,7 @@ impl ArgumentCheck<'_> {
                     format!(
                         "'{}' is not a known property of {}",
                         lit,
-                        model_fqn.rsplit('\\').next().unwrap_or(&model_fqn),
+                        crate::util::short_name(&model_fqn),
                     ),
                 ));
             }

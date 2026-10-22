@@ -149,9 +149,9 @@ impl Backend {
             }
             LaravelStringKind::View => self.cached_view_names(),
             LaravelStringKind::Trans => self.cached_trans_keys(),
-            LaravelStringKind::Command => self.laravel_commands.read().all_names().into(),
+            LaravelStringKind::Command => self.laravel.commands.read().all_names().into(),
             LaravelStringKind::MorphAlias => {
-                let mut aliases = self.laravel_morph_map.read().all_aliases();
+                let mut aliases = self.laravel.morph_map.read().all_aliases();
                 aliases.sort();
                 aliases.into()
             }

@@ -28,6 +28,7 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "DOMNamedNodeMap" => patch_dom_named_node_map(class),
         "DOMNode" => patch_dom_node(class),
         "DOMElement" => patch_dom_element(class),
+        "Number" if class.fqn() == "BcMath\\Number" => patch_numeric_to_string(class),
         _ => {}
     }
     mark_benevolent_methods(class);
@@ -382,6 +383,14 @@ fn patch_dom_node(class: &mut ClassInfo) {
                 negated: true,
                 is_equality: true,
             });
+    });
+}
+
+/// `BcMath\Number` prints the number it holds, so `(string)` on one is a
+/// `numeric-string`; the stub declares `__toString(): string`.
+fn patch_numeric_to_string(class: &mut ClassInfo) {
+    with_method_mut(class, "__toString", |method| {
+        method.return_type = Some(PhpType::numeric_string());
     });
 }
 

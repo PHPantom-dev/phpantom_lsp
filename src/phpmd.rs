@@ -46,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use tower_lsp::lsp_types::{CodeDescription, Diagnostic, DiagnosticSeverity, NumberOrString, Url};
+use tower_lsp::lsp_types::{CodeDescription, Diagnostic, DiagnosticSeverity, NumberOrString};
 
 use crate::config::PhpmdConfig;
 
@@ -329,7 +329,7 @@ fn parse_phpmd_violation(violation: &serde_json::Value) -> Option<Diagnostic> {
     let code_description = violation
         .get("externalInfoUrl")
         .and_then(|u| u.as_str())
-        .and_then(|u| Url::parse(u).ok())
+        .and_then(crate::util::parse_url)
         .map(|href| CodeDescription { href });
 
     // A violation spans `beginLine..endLine`, which for a method- or

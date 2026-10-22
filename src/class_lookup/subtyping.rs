@@ -2,13 +2,10 @@
 //! a class's parents and interfaces, and the structural rules for unions,
 //! generics, shapes and callables built on it.
 
-use std::sync::Arc;
-
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::TypeKind;
 use crate::types::{ClassInfo, ClassLikeKind};
-
-use super::load_resolved_name;
 
 /// Check whether `child` is a subclass (direct or transitive) of
 /// `parent`, including implemented interfaces.
@@ -21,12 +18,12 @@ use super::load_resolved_name;
 pub(crate) fn is_subclass_of(
     child: &str,
     parent: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     if child.eq_ignore_ascii_case(parent) {
         return false; // same class, not a subclass
     }
-    match class_loader(child) {
+    match class_loader(Fqn::new(child)) {
         Some(child_class) => is_subtype_of(&child_class, parent, class_loader),
         None => false,
     }
@@ -45,22 +42,14 @@ pub(crate) fn is_subclass_of(
 pub(crate) fn is_subtype_of(
     class: &ClassInfo,
     ancestor_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     // Every name handled by this function — the ancestor plus each
     // `interfaces`/`parent_class` entry pulled from a loaded class — is a
     // canonical FQN, not a user-typed reference.  A backslash-free name
     // (e.g. `Iterator`, `Traversable`, `Exception`) is therefore a
-    // root-namespace class and must resolve in the global namespace.
-    //
-    // The raw `class_loader` applies the consuming file's use-map to
-    // unqualified names.  That is correct for user-typed references but
-    // wrong here: when a calling file has `use App\Iterator;`, loading the
-    // global `\Iterator` interface node inside an SPL class's hierarchy
-    // would return `App\Iterator` and break the walk (so subtype checks
-    // against `Iterator`/`Traversable` spuriously fail).  So every name
-    // is loaded as the resolved name it is.
-    let load_fqn = |name: &str| load_resolved_name(name, class_loader);
+    // root-namespace class.
+    let load_fqn = |name: &str| class_loader(Fqn::new(name));
 
     // Resolve the ancestor to its FQN so that all comparisons below are
     // FQN-vs-FQN.  When `ancestor_name` is already a FQN (contains `\`)
@@ -204,7 +193,7 @@ pub(crate) fn is_subtype_of(
 pub(crate) fn is_subtype_of_names(
     subtype_name: &str,
     supertype_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     use crate::php_type::PhpType;
     is_subtype_of_typed(
@@ -220,7 +209,7 @@ pub(crate) fn is_subtype_of_names(
 pub(crate) fn is_subtype_of_named(
     subtype: &crate::php_type::PhpType,
     supertype_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     use crate::php_type::PhpType;
     is_subtype_of_typed(subtype, &PhpType::named(atom(supertype_name)), class_loader)
@@ -246,7 +235,7 @@ pub(crate) fn is_subtype_of_named(
 pub(crate) fn is_subtype_of_typed(
     subtype: &crate::php_type::PhpType,
     supertype: &crate::php_type::PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     use crate::php_type::PhpType;
 
@@ -502,7 +491,7 @@ pub(crate) fn is_subtype_of_typed(
         return sub_inner
             .as_ref()
             .and_then(|inner| inner.base_name())
-            .and_then(class_loader)
+            .and_then(|name| class_loader(Fqn::new(name)))
             .is_none_or(|cls| cls.kind == ClassLikeKind::Interface);
     }
 
@@ -534,7 +523,7 @@ pub(crate) fn is_subtype_of_typed(
     {
         let prop_name = lit.string_content().unwrap();
         if let Some(model_name) = g.args[0].base_name()
-            && let Some(cls) = class_loader(model_name)
+            && let Some(cls) = class_loader(Fqn::new(model_name))
         {
             let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
                 &cls,
@@ -571,7 +560,7 @@ pub(crate) fn is_subtype_of_typed(
         let Some(class_name) = lit.string_content() else {
             return true;
         };
-        let Some(cls) = class_loader(&class_name) else {
+        let Some(cls) = class_loader(Fqn::new(&class_name)) else {
             return true;
         };
         if matches!(supertype.kind(), TypeKind::InterfaceString(_))
@@ -606,7 +595,8 @@ pub(crate) fn is_subtype_of_typed(
             return true;
         }
         if sup.eq_ignore_ascii_case("iterable")
-            && class_loader(sub).is_some_and(|cls| is_subtype_of(&cls, "Traversable", class_loader))
+            && class_loader(Fqn::new(sub))
+                .is_some_and(|cls| is_subtype_of(&cls, "Traversable", class_loader))
         {
             return true;
         }
@@ -619,7 +609,7 @@ pub(crate) fn is_subtype_of_typed(
 
     if let (Some(sub), Some(sup)) = (sub_name, sup_name) {
         // Try to load the subtype class and walk its hierarchy.
-        if let Some(cls) = class_loader(sub) {
+        if let Some(cls) = class_loader(Fqn::new(sub)) {
             return is_subtype_of(&cls, sup, class_loader);
         }
     }
@@ -635,10 +625,10 @@ pub(crate) fn is_subtype_of_typed(
 /// such literal, which stays the `array-key` its spelling says.
 pub(crate) fn evaluate_constant_shape_key(
     key: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<String> {
     let (class_name, constant_name) = crate::php_type::class_constant_key(key)?;
-    let cls = class_loader(class_name)?;
+    let cls = class_loader(Fqn::new(class_name))?;
     let value = match cls.constants.iter().find(|c| c.name == constant_name) {
         Some(constant) => constant.value.clone(),
         // An inherited constant is only on the merged class.
@@ -669,7 +659,7 @@ pub(crate) fn evaluate_constant_shape_key(
 /// `None` when `ty` is not a shape or none of its keys can be evaluated.
 fn shape_with_constant_keys_evaluated(
     ty: &crate::php_type::PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<crate::php_type::PhpType> {
     use crate::php_type::{PhpType, ShapeEntry};
 

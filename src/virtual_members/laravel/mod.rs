@@ -107,6 +107,7 @@ pub(crate) mod array_file;
 mod auth;
 mod builder;
 mod builder_injection;
+mod cache_state;
 mod cast_literals;
 mod casts;
 mod collections;
@@ -129,6 +130,7 @@ mod higher_order_proxy;
 mod inflector;
 mod macros;
 mod magic_uses;
+mod method_refinement;
 mod model_extraction;
 mod model_provider;
 mod model_type;
@@ -159,7 +161,10 @@ mod view_names;
 pub(crate) mod where_property;
 
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
-pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
+pub(crate) use auth::{
+    AUTH_FACADE_FQN, GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type,
+};
+pub(crate) use cache_state::LaravelCacheState;
 pub(crate) use collections::{
     mentions_eloquent_collection, replace_eloquent_collections_in_param_type,
     replace_eloquent_collections_in_type, try_swap_custom_collection,

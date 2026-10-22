@@ -1,7 +1,7 @@
 use crate::common::{
-    complete_at, create_psr4_workspace, create_test_backend, method_names, property_names,
+    complete_at, completion_response, create_psr4_workspace, create_test_backend, method_names,
+    open_php, property_names,
 };
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Closure literal with native return type hint ───────────────────────────
@@ -397,31 +397,10 @@ async fn test_callable_invocation_cross_file() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$factory()->` on line 4
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 4,
-                character: 20,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 4, 20, None).await;
     assert!(result.is_some(), "Completion should resolve $factory()->");
 
     match result.unwrap() {

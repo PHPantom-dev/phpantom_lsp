@@ -1,5 +1,6 @@
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::test_fixtures::{make_class, make_method, make_property};
 use crate::types::{ClassLikeKind, ConstantInfo, Visibility};
@@ -781,7 +782,8 @@ fn trait_property_tag_beats_schema_column_end_to_end() {
     let publishes_arc = Arc::new(publishes);
     let model_arc = Arc::new(make_class("Illuminate\\Database\\Eloquent\\Model"));
     let carbon_arc = Arc::new(make_class("Illuminate\\Support\\Carbon"));
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "App\\Models\\Concerns\\Publishes" => Some(Arc::clone(&publishes_arc)),
@@ -799,7 +801,7 @@ fn trait_property_tag_beats_schema_column_end_to_end() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let resolved =
         crate::virtual_members::resolve_class_fully_cached(&event, &class_loader, &cache);
@@ -847,18 +849,14 @@ struct TestProvider {
 }
 
 impl VirtualMemberProvider for TestProvider {
-    fn applies_to(
-        &self,
-        _class: &ClassInfo,
-        _class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> bool {
+    fn applies_to(&self, _class: &ClassInfo, _class_loader: &ResolvedClassLoader<'_>) -> bool {
         true
     }
 
     fn provide(
         &self,
         _class: &ClassInfo,
-        _class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        _class_loader: &ResolvedClassLoader<'_>,
         _cache: Option<&ResolvedClassCache>,
     ) -> VirtualMembers {
         VirtualMembers {
@@ -873,18 +871,14 @@ impl VirtualMemberProvider for TestProvider {
 struct NeverProvider;
 
 impl VirtualMemberProvider for NeverProvider {
-    fn applies_to(
-        &self,
-        _class: &ClassInfo,
-        _class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> bool {
+    fn applies_to(&self, _class: &ClassInfo, _class_loader: &ResolvedClassLoader<'_>) -> bool {
         false
     }
 
     fn provide(
         &self,
         _class: &ClassInfo,
-        _class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        _class_loader: &ResolvedClassLoader<'_>,
         _cache: Option<&ResolvedClassCache>,
     ) -> VirtualMembers {
         panic!("provide should not be called when applies_to returns false")
@@ -912,7 +906,7 @@ fn apply_providers_in_priority_order() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![high_priority, low_priority];
-    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+    let class_loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -934,7 +928,7 @@ fn apply_providers_skips_non_applicable() {
     let mut class = make_class("Foo");
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![Box::new(NeverProvider)];
-    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+    let class_loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -955,7 +949,7 @@ fn apply_providers_real_members_beat_virtual() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![provider];
-    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+    let class_loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -985,7 +979,7 @@ fn apply_providers_property_priority() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![high_priority, low_priority];
-    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+    let class_loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -1023,7 +1017,7 @@ fn apply_providers_low_priority_overrides_mixed_from_high_priority() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![high_priority, low_priority];
-    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+    let class_loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -1055,7 +1049,7 @@ fn apply_providers_low_priority_cannot_override_specific_from_high_priority() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![high_priority, low_priority];
-    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+    let class_loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -1095,7 +1089,7 @@ fn apply_providers_generic_from_low_priority_beats_bare_from_high_priority() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![high_priority, low_priority];
-    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+    let class_loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -1127,7 +1121,7 @@ fn apply_providers_same_specificity_preserves_high_priority() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![high_priority, low_priority];
-    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+    let class_loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -1179,7 +1173,8 @@ fn resolve_class_fully_returns_same_as_base_when_no_providers() {
         .methods
         .push(Arc::new(make_method("parentMethod", Some("string"))));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Parent" {
             Some(Arc::new(parent.clone()))
         } else {
@@ -1334,7 +1329,10 @@ fn specialisations_share_members_their_arguments_do_not_reach() {
 
     let cache = new_resolved_class_cache();
     let _guard = with_active_resolved_class_cache(&cache);
-    let class_loader = |_name: &str| None;
+    let class_loader = |_name: Fqn<'_>| {
+        let _name = _name.as_str();
+        None
+    };
     let resolve = |value: &str| {
         let args = [PhpType::parse("int"), PhpType::parse(value)];
         resolve_class_fully_with_type_args(&collection, &class_loader, Some(&cache), &args)
@@ -1458,7 +1456,10 @@ fn resolve_class_fully_with_type_args_caches_specialisation() {
         .push(Arc::new(make_method("first", Some("TValue"))));
 
     let cache = new_resolved_class_cache();
-    let class_loader = |_name: &str| None;
+    let class_loader = |_name: Fqn<'_>| {
+        let _name = _name.as_str();
+        None
+    };
     let args = vec![PhpType::parse("User")];
 
     let first = resolve_class_fully_with_type_args(&collection, &class_loader, Some(&cache), &args);
@@ -1507,7 +1508,8 @@ fn base_resolution_shared_across_distinct_specialisations() {
     let base_arc = Arc::new(base);
     let collection_arc = Arc::new(collection);
     let base_loads = std::cell::Cell::new(0u32);
-    let class_loader = |name: &str| -> Option<Arc<crate::types::ClassInfo>> {
+    let class_loader = |name: Fqn<'_>| -> Option<Arc<crate::types::ClassInfo>> {
+        let name = name.as_str();
         let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "Base" => {
@@ -1894,7 +1896,8 @@ fn resolve_class_fully_merges_transitive_interface_constants() {
     let mut carbon = make_class("Carbon");
     carbon.interfaces = vec![atom("CarbonInterface")];
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "CarbonInterface" => Some(Arc::new(carbon_iface.clone())),
@@ -1960,7 +1963,8 @@ fn interface_merge_matches_with_and_without_a_warm_cache() {
         let contract_arc = Arc::clone(&contract_arc);
         let concrete_arc = Arc::clone(&concrete_arc);
         let view_arc = Arc::clone(&view_arc);
-        move |name: &str| -> Option<Arc<ClassInfo>> {
+        move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+            let name = name.as_str();
             let name = name.strip_prefix('\\').unwrap_or(name);
             match name {
                 "Illuminate\\Contracts\\View\\View" => Some(Arc::clone(&contract_arc)),
@@ -2028,7 +2032,8 @@ fn concurrent_first_resolution_of_the_same_class_is_single_flighted() {
         let gate_armed = Arc::clone(&gate_armed);
         let release = Arc::clone(&release);
         let reached_tx = reached_tx.clone();
-        move |name: &str| -> Option<Arc<ClassInfo>> {
+        move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+            let name = name.as_str();
             let name = name.strip_prefix('\\').unwrap_or(name);
             match name {
                 "Vendor\\Analyser\\ScopeImpl" => Some(Arc::clone(&target_arc)),

@@ -1,8 +1,7 @@
 use crate::common::{
-    assert_assigned_types, complete_at, create_psr4_workspace, create_test_backend,
-    create_test_backend_with_full_stubs,
+    assert_assigned_types, complete_at, completion_response, create_psr4_workspace,
+    create_test_backend, create_test_backend_with_full_stubs, open_php,
 };
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Foreach over collection class assigned via `new` ───────────────────────
@@ -314,30 +313,9 @@ async fn test_foreach_collection_cross_file() {
     let uri = Url::from_file_path(&service_path).unwrap();
     let text = std::fs::read_to_string(&service_path).unwrap();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text,
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, &text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 7,
-                character: 19,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 7, 19, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for foreach over cross-file collection"

@@ -6,7 +6,7 @@
 //! container-binding string (`'view'`), which is looked up in the core
 //! container alias table to find the concrete class. No application booting.
 
-use crate::common::{create_psr4_workspace, open_php_str, position_after};
+use crate::common::{completion_response, create_psr4_workspace, open_php_str, position_after};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -137,23 +137,14 @@ class Consumer {
     .await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Url::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        12,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
         CompletionResponse::Array(items) => items,

@@ -19,7 +19,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{CodeActionData, deferred_quickfix};
 use crate::text_position::byte_offset_to_utf16_col;
 
 /// PHPStan identifier prefix for unmatched ignore errors.
@@ -89,21 +89,15 @@ impl Backend {
                 "line": line,
             });
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("Ignore PHPStan error ({})", identifier),
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(diags.clone()),
-                edit: None,
-                command: None,
-                is_preferred: Some(false),
-                disabled: None,
-                data: Some(make_code_action_data(
-                    "phpstan.addIgnore",
-                    uri,
-                    &params.range,
-                    extra,
-                )),
-            }));
+            out.push(deferred_quickfix(
+                format!("Ignore PHPStan error ({})", identifier),
+                "phpstan.addIgnore",
+                uri,
+                &params.range,
+                diags.clone(),
+                false,
+                extra,
+            ));
         }
 
         // ── Remove unnecessary @phpstan-ignore ──────────────────────────
@@ -121,30 +115,18 @@ impl Backend {
             // PHPStan message format:
             //   "No error with identifier <id> is reported on line <N>."
             let ignore_id = parse_unmatched_identifier(&diag.message);
-            let extra = serde_json::json!({
-                "diagnostic_message": diag.message,
-                "diagnostic_line": diag.range.start.line,
-                "diagnostic_code": identifier,
-            });
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: match ignore_id {
+            out.push(deferred_quickfix(
+                match ignore_id {
                     Some(ref id) => format!("Remove unnecessary @phpstan-ignore ({})", id),
                     None => "Remove unnecessary @phpstan-ignore".to_string(),
                 },
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diag.clone()]),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(make_code_action_data(
-                    "phpstan.removeIgnore",
-                    uri,
-                    &params.range,
-                    extra,
-                )),
-            }));
+                "phpstan.removeIgnore",
+                uri,
+                &params.range,
+                vec![diag.clone()],
+                true,
+                serde_json::Value::Null,
+            ));
         }
     }
 
@@ -195,71 +177,52 @@ impl Backend {
 /// appended to the existing comma-separated list.  Otherwise, a
 /// `// @phpstan-ignore <id>` comment is inserted at the end of the line.
 fn build_add_ignore_edit(content: &str, line: u32, line_text: &str, identifier: &str) -> TextEdit {
-    if let Some(ignore_pos) = line_text.find("@phpstan-ignore") {
-        let after_tag = &line_text[ignore_pos + "@phpstan-ignore".len()..];
+    // A `@phpstan-ignore-line` or `@phpstan-ignore-next-line` is left
+    // alone, and a new comment is added instead.
+    let Some(comment) =
+        crate::phpstan_ignore::parse_ignore_comment(line_text).filter(|c| !c.blanket)
+    else {
+        return build_eol_comment(content, line, line_text, identifier);
+    };
 
-        // If it's `@phpstan-ignore-line` or `@phpstan-ignore-next-line`,
-        // we don't touch it — add a new comment instead.
-        if after_tag.starts_with("-line") || after_tag.starts_with("-next-line") {
-            return build_eol_comment(content, line, line_text, identifier);
-        }
-
-        // Find the end of the existing identifier list.
-        // The identifiers are everything after `@phpstan-ignore ` up to
-        // a closing comment delimiter, parenthesis, or end of line.
-        let ids_start = ignore_pos + "@phpstan-ignore".len();
-        let ids_text = &line_text[ids_start..];
-        let ids_trimmed = ids_text.trim_start();
-        let ids_offset = ids_text.len() - ids_trimmed.len();
-
-        // Find where the identifier list ends: at `*/`, `)`, or EOL.
-        let ids_end = ids_trimmed
-            .find("*/")
-            .or_else(|| {
-                // For `// @phpstan-ignore id (reason)`, stop at the
-                // opening paren of the reason.  But only if the paren
-                // is preceded by whitespace (not part of an identifier).
-                ids_trimmed.find(" (")
-            })
-            .unwrap_or(ids_trimmed.len());
-
-        let existing_ids = ids_trimmed[..ids_end].trim();
-
-        if existing_ids.split(',').any(|id| id.trim() == identifier) {
-            // Already ignored — return a no-op edit.
-            return TextEdit {
-                range: Range {
-                    start: Position { line, character: 0 },
-                    end: Position { line, character: 0 },
-                },
-                new_text: String::new(),
-            };
-        }
-
-        // Insert the new identifier after the existing ones. The accumulated
-        // offset is in bytes; LSP positions are UTF-16 code units, so convert
-        // before emitting the edit.
-        let insert_byte = ids_start + ids_offset + ids_end;
-        let insert_col = byte_offset_to_utf16_col(line_text, insert_byte);
-
-        let separator = if existing_ids.is_empty() { "" } else { ", " };
-
+    if comment.ids(line_text).any(|id| id == identifier) {
+        // Already ignored — return a no-op edit.
         return TextEdit {
             range: Range {
-                start: Position {
-                    line,
-                    character: insert_col,
-                },
-                end: Position {
-                    line,
-                    character: insert_col,
-                },
+                start: Position { line, character: 0 },
+                end: Position { line, character: 0 },
             },
-            new_text: format!("{}{}", separator, identifier),
+            new_text: String::new(),
         };
     }
 
-    build_eol_comment(content, line, line_text, identifier)
+    // Insert the new identifier after the last entry, past its reason,
+    // so an existing reason stays with the identifier it explains.  The
+    // offset is in bytes; LSP positions are UTF-16 code units, so convert
+    // before emitting the edit.
+    let insert_byte = comment.list.end;
+    let insert_col = byte_offset_to_utf16_col(line_text, insert_byte);
+    let separator = if !comment.list.is_empty() {
+        ", "
+    } else if line_text[..insert_byte].ends_with(char::is_whitespace) {
+        ""
+    } else {
+        " "
+    };
+
+    TextEdit {
+        range: Range {
+            start: Position {
+                line,
+                character: insert_col,
+            },
+            end: Position {
+                line,
+                character: insert_col,
+            },
+        },
+        new_text: format!("{}{}", separator, identifier),
+    }
 }
 
 /// Build a `TextEdit` that appends `// @phpstan-ignore <id>` at the end
@@ -318,23 +281,17 @@ fn build_remove_ignore_edit(
             None => continue,
         };
 
-        if let Some(ignore_pos) = line_text.find("@phpstan-ignore") {
-            let after_tag = &line_text[ignore_pos + "@phpstan-ignore".len()..];
-
+        if let Some(comment) = crate::phpstan_ignore::parse_ignore_comment(line_text) {
             // `-line` / `-next-line` variants have no identifier list to
-            // trim, so always remove the whole comment.
-            if after_tag.starts_with("-line") || after_tag.starts_with("-next-line") {
-                return build_remove_whole_ignore(content, check_line, line_text, ignore_pos);
-            }
-
-            // If we have a specific identifier to remove, try to remove
-            // just that one from the comma-separated list.
-            if let Some(id) = remove_id {
-                return build_remove_single_id(content, check_line, line_text, ignore_pos, id);
-            }
-
-            // No specific identifier — remove the whole comment.
-            return build_remove_whole_ignore(content, check_line, line_text, ignore_pos);
+            // trim, so always remove the whole comment.  With a specific
+            // identifier to remove, try to remove just that one from the
+            // list.
+            return match remove_id {
+                Some(id) if !comment.blanket => {
+                    build_remove_single_id(content, check_line, line_text, &comment, id)
+                }
+                _ => build_remove_whole_ignore(content, check_line, line_text, comment.tag_start),
+            };
         }
     }
 
@@ -454,56 +411,38 @@ fn build_remove_single_id(
     content: &str,
     line: u32,
     line_text: &str,
-    ignore_pos: usize,
+    comment: &crate::phpstan_ignore::IgnoreComment,
     remove_id: &str,
 ) -> Option<TextEdit> {
-    let ids_start = ignore_pos + "@phpstan-ignore".len();
-    let ids_text = &line_text[ids_start..];
-    let ids_trimmed = ids_text.trim_start();
-    let ids_offset = ids_text.len() - ids_trimmed.len();
-
-    // Find where the identifier list ends.
-    let ids_end = ids_trimmed
-        .find("*/")
-        .or_else(|| ids_trimmed.find(" ("))
-        .unwrap_or(ids_trimmed.len());
-
-    let ids_str = ids_trimmed[..ids_end].trim();
-    let ids: Vec<&str> = ids_str.split(',').map(|s| s.trim()).collect();
-
-    if ids.len() <= 1 || (ids.len() == 1 && ids[0] == remove_id) {
-        // Only one identifier (or it's the one we want to remove) —
-        // remove the whole comment.
-        return build_remove_whole_ignore(content, line, line_text, ignore_pos);
+    let ids: Vec<&str> = comment.ids(line_text).collect();
+    if ids.len() <= 1 || !ids.contains(&remove_id) {
+        // Only one identifier, or the one we are supposed to remove is
+        // not here: remove the whole comment.
+        return build_remove_whole_ignore(content, line, line_text, comment.tag_start);
     }
 
-    // Check if the identifier is actually in the list.
-    if !ids.contains(&remove_id) {
-        // The identifier we're supposed to remove isn't here.
-        // Fall back to removing the whole comment.
-        return build_remove_whole_ignore(content, line, line_text, ignore_pos);
-    }
-
-    // Remove just this identifier from the list.
-    let new_ids: Vec<&str> = ids.iter().filter(|&&id| id != remove_id).copied().collect();
-    let new_ids_str = new_ids.join(", ");
-
-    // Reconstruct: replace the identifier list portion.
-    let abs_ids_start = byte_offset_to_utf16_col(line_text, ids_start + ids_offset);
-    let abs_ids_end = byte_offset_to_utf16_col(line_text, ids_start + ids_offset + ids_end);
+    // Rewrite the list without this identifier, keeping every other
+    // entry's reason.
+    let new_list = comment
+        .entries
+        .iter()
+        .filter(|entry| !entry.span.is_empty() && line_text[entry.id.clone()] != *remove_id)
+        .map(|entry| &line_text[entry.span.clone()])
+        .collect::<Vec<_>>()
+        .join(", ");
 
     Some(TextEdit {
         range: Range {
             start: Position {
                 line,
-                character: abs_ids_start,
+                character: byte_offset_to_utf16_col(line_text, comment.list.start),
             },
             end: Position {
                 line,
-                character: abs_ids_end,
+                character: byte_offset_to_utf16_col(line_text, comment.list.end),
             },
         },
-        new_text: new_ids_str,
+        new_text: new_list,
     })
 }
 
@@ -679,14 +618,9 @@ mod tests {
         let line_text = "echo $x; // @phpstan-ignore variable.undefined (lazy)";
         let edit = build_add_ignore_edit(content, 1, line_text, "argument.type");
         assert_eq!(edit.new_text, ", argument.type");
-        // Should insert before the reason parentheses.
-        let insert_char = edit.range.start.character as usize;
-        assert!(
-            insert_char <= line_text.find(" (lazy)").unwrap(),
-            "Insert position {} should be before the reason at {}",
-            insert_char,
-            line_text.find(" (lazy)").unwrap()
-        );
+        // A reason belongs to the identifier before it, so the new one
+        // goes after it.
+        assert_eq!(edit.range.start.character, line_text.len() as u32);
     }
 
     // ── build_remove_ignore_edit ────────────────────────────────────
@@ -731,6 +665,32 @@ mod tests {
         let edit = build_remove_ignore_edit(content, 1, 1, Some("argument.type"));
         let edit = edit.unwrap();
         assert_eq!(edit.new_text, "variable.undefined");
+    }
+
+    #[test]
+    fn appends_after_a_reason_that_contains_a_comma() {
+        let line_text = "echo $x; // @phpstan-ignore argument.type (legacy, see #12)";
+        let content = format!("<?php\n{line_text}\n");
+        let edit = build_add_ignore_edit(&content, 1, line_text, "return.type");
+        assert_eq!(edit.new_text, ", return.type");
+        assert_eq!(edit.range.start.character, line_text.len() as u32);
+    }
+
+    #[test]
+    fn adds_a_space_after_a_bare_tag() {
+        let line_text = "echo $x; // @phpstan-ignore";
+        let content = format!("<?php\n{line_text}\n");
+        let edit = build_add_ignore_edit(&content, 1, line_text, "return.type");
+        assert_eq!(edit.new_text, " return.type");
+    }
+
+    #[test]
+    fn removing_an_id_keeps_the_other_entries_reasons() {
+        let content = "<?php\necho $x; // @phpstan-ignore argument.type (legacy, see #12), return.type (f(x))\n";
+        let edit = build_remove_ignore_edit(content, 1, 1, Some("return.type")).unwrap();
+        assert_eq!(edit.new_text, "argument.type (legacy, see #12)");
+        let edit = build_remove_ignore_edit(content, 1, 1, Some("argument.type")).unwrap();
+        assert_eq!(edit.new_text, "return.type (f(x))");
     }
 
     #[test]

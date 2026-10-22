@@ -35,7 +35,8 @@ fn translation_catalog_merges_roots_locales_groups_and_providers() {
         std::fs::write(dir.path().join(path), content).unwrap();
     }
     backend
-        .laravel_provider_resources
+        .laravel
+        .provider_resources
         .write()
         .trans_dirs
         .push(ProviderResource {
@@ -104,7 +105,8 @@ fn translation_catalog_resolves_relative_workspace_roots_and_absolute_providers(
         std::fs::write(dir.path().join(path), content).unwrap();
     }
     backend
-        .laravel_provider_resources
+        .laravel
+        .provider_resources
         .write()
         .trans_dirs
         .extend(["package", "lang"].map(|path| ProviderResource {
@@ -134,7 +136,11 @@ fn translation_catalog_resolves_relative_workspace_roots_and_absolute_providers(
 #[test]
 fn translation_catalog_refreshes_buffers_close_and_watched_files() {
     let backend = make_backend();
-    backend.resolved_class_cache.write().set_laravel(true);
+    backend
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(true);
     let dir = tempfile::tempdir().unwrap();
     *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
     std::fs::create_dir_all(dir.path().join("resources/lang/en")).unwrap();
@@ -143,7 +149,8 @@ fn translation_catalog_refreshes_buffers_close_and_watched_files() {
     std::fs::write(&path, "<?php return ['key'=>'disk'];").unwrap();
     let catalog = backend.cached_translations();
     backend
-        .laravel_string_key_cache
+        .laravel
+        .string_key_cache
         .write()
         .invalidate_for_uri("file:///project/other.php", "<?php");
     assert!(Arc::ptr_eq(&catalog, &backend.cached_translations()));
@@ -152,7 +159,8 @@ fn translation_catalog_refreshes_buffers_close_and_watched_files() {
         Arc::new("<?php return ['key'=>'buffer'];".to_string()),
     );
     backend
-        .laravel_string_key_cache
+        .laravel
+        .string_key_cache
         .write()
         .invalidate_for_uri(uri.as_str(), "");
     assert_eq!(
@@ -212,7 +220,7 @@ fn translation_catalog_handles_missing_and_unreadable_files() {
     std::fs::create_dir_all(dir.path().join("lang/en/bad.php")).unwrap();
     std::fs::write(dir.path().join("lang/en/invalid.php"), [0xff]).unwrap();
     *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
-    backend.laravel_string_key_cache.write().translations = None;
+    backend.laravel.string_key_cache.write().translations = None;
     assert!(backend.cached_translations().entries.is_empty());
 }
 

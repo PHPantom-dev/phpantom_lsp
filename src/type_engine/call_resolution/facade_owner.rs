@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::ClassInfo;
 use crate::virtual_members::ResolvedClassCache;
@@ -22,7 +23,7 @@ use crate::virtual_members::ResolvedClassCache;
 pub(crate) fn facade_concrete_owner(
     owner: &ClassInfo,
     method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
     backend: Option<&Backend>,
 ) -> Option<Arc<ClassInfo>> {
@@ -66,7 +67,7 @@ pub(crate) fn facade_concrete_owner(
 fn method_return_type(
     class_info: &ClassInfo,
     method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> Option<PhpType> {
     if let Some(method) = class_info.get_method_ci(method_name) {
@@ -101,7 +102,7 @@ fn refines_bare_return(facade: &PhpType, concrete: &PhpType) -> bool {
 fn class_has_method(
     class_info: &ClassInfo,
     method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> bool {
     if class_info.get_method_ci(method_name).is_some() {
@@ -122,7 +123,7 @@ fn class_has_method(
 fn method_return_is_call_dependent(
     class_info: &ClassInfo,
     method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> bool {
     if class_info
@@ -149,7 +150,7 @@ fn method_return_is_call_dependent(
         .iter()
         .chain(merged.mixins.iter())
         .any(|mixin| {
-            class_loader(mixin.as_str()).is_some_and(|mixin_class| {
+            class_loader(Fqn::new(mixin.as_str())).is_some_and(|mixin_class| {
                 mixin_class
                     .get_method_ci(method_name)
                     .is_some_and(call_dependent_return)
@@ -178,7 +179,7 @@ fn call_dependent_return(method: &crate::types::MethodInfo) -> bool {
 fn facade_accessor_concrete_owner(
     facade: &ClassInfo,
     method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
     backend: Option<&Backend>,
 ) -> Option<Arc<ClassInfo>> {
@@ -192,7 +193,7 @@ fn facade_accessor_concrete_owner(
         .laravel()
         .and_then(|l| l.facade_accessor)
         .and_then(|accessor| facade_accessor_to_class_name(accessor, backend))
-        .and_then(|name| class_loader(&name))
+        .and_then(|name| class_loader(Fqn::new(&name)))
         .filter(|class| class_has_method(class, method_name, class_loader, cache))
     {
         return Some(concrete);
@@ -211,7 +212,7 @@ fn facade_accessor_concrete_owner(
             &[],
         )
         && let Some(concrete_name) = facade_accessor_class_name(&inferred, Some(backend))
-        && let Some(concrete) = class_loader(&concrete_name)
+        && let Some(concrete) = class_loader(Fqn::new(&concrete_name))
         && class_has_method(&concrete, method_name, class_loader, cache)
     {
         return Some(concrete);
@@ -222,7 +223,7 @@ fn facade_accessor_concrete_owner(
         .iter()
         .chain(merged.mixins.iter())
         .find_map(|mixin| {
-            let class = class_loader(mixin.as_str())?;
+            let class = class_loader(Fqn::new(mixin.as_str()))?;
             class_has_method(&class, method_name, class_loader, cache).then_some(class)
         })
 }

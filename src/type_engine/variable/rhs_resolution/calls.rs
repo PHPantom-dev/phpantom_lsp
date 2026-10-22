@@ -141,9 +141,11 @@ pub(crate) fn resolve_arg_variable_raw_type(
                 ),
             );
             for cls in &base_classes {
-                if let Some(hint) =
-                    crate::inheritance::resolve_property_type_hint(cls, prop, rctx.class_loader)
-                {
+                if let Some(hint) = crate::inheritance::resolve_property_type_hint(
+                    cls,
+                    prop,
+                    rctx.file.class_loader,
+                ) {
                     return Some(hint);
                 }
             }
@@ -445,16 +447,16 @@ pub(super) fn resolve_return_type(ty: PhpType, ctx: &VarResolutionCtx<'_>) -> Ve
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &ty,
         &current_class_name,
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     if !classes.is_empty() {
         return ResolvedType::from_classes_with_hint(classes, ty);
     }
     vec![resolved_type_with_lookup(
         ty,
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     )]
 }
 
@@ -614,7 +616,7 @@ pub(crate) fn infer_closure_literal_type(
         // known signature).
         Some(declared) => {
             let narrowed = body_return().filter(|body| {
-                crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
+                crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.file.class_loader)
             });
             Some(narrowed.unwrap_or(declared))
         }
@@ -757,6 +759,7 @@ pub(crate) fn walker_arg_types<'b, 'c>(
             };
             let span = value.span();
             let written = ctx
+                .file
                 .content
                 .get(span.start.offset as usize..span.end.offset as usize)?;
             if written.trim() != wanted {

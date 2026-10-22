@@ -5,8 +5,9 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::indent_of_line_at;
 use crate::symbol_map::{LaravelStringKind, SymbolKind};
-use crate::text_position::{line_ending, offset_to_position, ranges_overlap};
+use crate::text_position::{byte_range_to_lsp_range, line_ending, ranges_overlap};
 
 impl Backend {
     /// Offer one insertion per existing locale file for an unknown translation.
@@ -24,7 +25,7 @@ impl Backend {
         if diagnostics.is_empty() {
             return;
         }
-        let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
             return;
         };
         let catalog = self.cached_translations();
@@ -42,10 +43,7 @@ impl Backend {
             else {
                 continue;
             };
-            let range = Range::new(
-                offset_to_position(content, span.start as usize),
-                offset_to_position(content, span.end as usize),
-            );
+            let range = byte_range_to_lsp_range(content, span.start as usize, span.end as usize);
             let Some(diagnostic) = diagnostics
                 .iter()
                 .find(|diagnostic| ranges_overlap(&range, &diagnostic.range))
@@ -146,10 +144,10 @@ fn insert_into_array(
         .all(|byte| byte == b' ' || byte == b'\t');
     let indent = elements
         .first()
-        .map(|element| indentation(content, element.span().start.offset as usize))
+        .map(|element| indent_of_line_at(content, element.span().start.offset as usize))
         .filter(|indent| !indent.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| format!("{}    ", indentation(content, close)));
+        .unwrap_or_else(|| format!("{}    ", indent_of_line_at(content, close)));
     let entry = nested_entry(path);
     let mut edits = Vec::new();
     let last_end = elements
@@ -159,10 +157,7 @@ fn insert_into_array(
         && !elements.has_trailing_token()
     {
         edits.push(TextEdit {
-            range: Range::new(
-                offset_to_position(content, last_end),
-                offset_to_position(content, last_end),
-            ),
+            range: byte_range_to_lsp_range(content, last_end, last_end),
             new_text: ",".to_string(),
         });
     }
@@ -173,7 +168,7 @@ fn insert_into_array(
             close,
             format!(
                 "{newline}{indent}{entry},{newline}{}",
-                indentation(content, open)
+                indent_of_line_at(content, open)
             ),
         )
     } else {
@@ -191,22 +186,10 @@ fn insert_into_array(
         )
     };
     edits.push(TextEdit {
-        range: Range::new(
-            offset_to_position(content, offset),
-            offset_to_position(content, offset),
-        ),
+        range: byte_range_to_lsp_range(content, offset, offset),
         new_text: text,
     });
     Some(edits)
-}
-
-fn indentation(content: &str, offset: usize) -> &str {
-    let start = content[..offset].rfind('\n').map_or(0, |index| index + 1);
-    let line = &content[start..offset];
-    &line[..line
-        .bytes()
-        .take_while(|byte| *byte == b' ' || *byte == b'\t')
-        .count()]
 }
 
 fn nested_entry(path: &[&str]) -> String {

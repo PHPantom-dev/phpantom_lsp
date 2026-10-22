@@ -652,7 +652,7 @@ resolution at all.
 **Where to look:** `receiver_is_user_like` in
 `symbol_map/extraction/laravel/gates.rs` and its completion-side twin (a
 local check in `completion/laravel_string_keys/context.rs`); `ViewReceiverSite` in
-`symbol_map/mod.rs` for the confirm-later shape.
+`symbol_map/laravel_spans.rs` for the confirm-later shape.
 
 #### L49. Unguarded Eloquent mass assignment diagnostic
 
@@ -672,7 +672,7 @@ resolution and column-source machinery L30 already needs (and the
 diagnostic's model-argument matching) share the same receiver-typing
 path, so build them together.
 
-**Where to look:** `virtual_members/laravel/model_extraction.rs` for
+**Where to look:** `virtual_members/laravel/model_extraction/` for
 existing `$fillable`/`$guarded` reads; `diagnostics/` for the
 call-site diagnostic pattern used by similarly-shaped checks.
 
@@ -680,7 +680,7 @@ call-site diagnostic pattern used by similarly-shaped checks.
 
 **Impact: Low-Medium · Complexity: Medium**
 
-The unknown-route-name diagnostic (fed by `route_names.rs`) has no
+The unknown-route-name diagnostic (fed by `route_names/`) has no
 accompanying fix today. Once the diagnostic fires, generate a
 `Route::get('{path}', [{Controller}::class, '{method}'])
 ->name('{name}');` stub appended to `routes/web.php` (or `api.php` if
@@ -690,7 +690,7 @@ where possible and otherwise leaving placeholders.
 
 **Where to look:** `code_actions/` for the code-action registration
 pattern used by other "declare the missing thing" fixes;
-`virtual_members/laravel/route_names.rs` for the existing scanner
+`virtual_members/laravel/route_names/` for the existing scanner
 this reuses for the diagnostic and the insertion point.
 
 #### L61. Resolve aliased facade imports during route discovery
@@ -707,5 +707,6 @@ Resolve the receiver through the source file's namespace and imports,
 including grouped imports, without treating unrelated classes named
 `Route` as the framework facade.
 
-**Where to look:** `virtual_members/laravel/route_names.rs`, particularly
+**Where to look:** `virtual_members/laravel/route_names/discovery.rs` and
+`virtual_members/laravel/route_names/traversal.rs`, particularly
 `GroupPrefix::chain_reaches_router()` and `is_facade()`.

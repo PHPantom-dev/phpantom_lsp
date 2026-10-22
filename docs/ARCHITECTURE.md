@@ -8,7 +8,7 @@ PHPantom is a language server for PHP projects. It provides completion, go-to-de
 
 1. **Parsing** PHP files into lightweight `ClassInfo` / `FunctionInfo` structures (not a full AST — just the information needed for IDE features).
 2. **Caching** parsed results in an in-memory `uri_classes_index` keyed by file URI.
-3. **Building** a precomputed symbol map (`symbol_maps`) during parsing for O(log n) go-to-definition lookups and call-site detection for signature help.
+3. **Building** a precomputed symbol map (part of each file's `FileState`) during parsing for O(log n) go-to-definition lookups and call-site detection for signature help.
 4. **Resolving** symbols on demand through a multi-phase lookup chain.
 5. **Merging** inherited members (from parent classes, traits, interfaces, and mixins) at resolution time.
 
@@ -48,7 +48,7 @@ src/
 ├── main.rs                 # Entry point (stdin/stdout LSP transport, CLI dispatch)
 ├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …), each delegating to its module
 ├── backend.rs, backend/    # Backend construction, file access, workspace startup (startup.rs), document lifecycle (documents.rs)
-├── config.rs               # .phpantom.toml / workspace configuration
+├── config/                 # .phpantom.toml / workspace configuration, one file per section group
 │
 │   # Data model
 ├── types/                  # Core structures (ClassInfo, MethodInfo, ResolvedType, SubjectExpr, …)
@@ -60,13 +60,13 @@ src/
 ├── symbol_map/             # Precomputed per-file symbol spans, definition sites, call sites
 ├── scope_collector/        # Variable scope-map construction
 ├── classmap_scanner/       # Byte-level PHP scanning for class discovery (no full parse)
-├── composer.rs             # composer.json / PSR-4 autoload parsing
+├── composer/               # composer.json, installed.json, the generated autoload maps, PSR-4 resolution
 ├── names/                  # Name resolution: written names via imports/namespace, docblock template/alias scoping, per-file resolved names
 ├── reference_index.rs      # Workspace-wide reference index for find-references / rename
 ├── reference_counts.rs     # Bounded exact member-reference cache for declaration hints and lenses
 │
 │   # Class & type resolution
-├── resolution/             # Multi-phase class/function lookup across files (find_or_load_class), lazy parsing, loader closures
+├── resolution/             # Multi-phase class/function/constant lookup across files (find_or_load_class), lazy parsing, loader closures
 ├── class_lookup.rs         # Class-lookup helpers; class_lookup/subtyping.rs holds the subtype checks (is_subtype_of_typed)
 ├── inheritance/            # Parent/trait/mixin member merging, generics substitution
 ├── virtual_members/        # Synthesized members: phpdoc.rs (@method/@property, phpdoc/mixins.rs for @mixin) + laravel/ (one file per Eloquent/framework feature)
@@ -137,7 +137,7 @@ tests/
 
 **The shared type engine lives under `type_engine/`.** `type_engine/resolver/`,
 `type_engine/variable/` (including the `forward_walk/` forward walker),
-`type_engine/call_resolution/`, `type_engine/types/`, and the subject
+`type_engine/call_resolution/`, `type_engine/type_ops/`, and the subject
 extraction/resolution files are the project's single type-resolution engine —
 they answer "what is the type of this expression here?" and are consumed by
 diagnostics, hover, go-to-definition, and signature help, not just completion
@@ -215,7 +215,7 @@ The definition subsystem uses a **three-tier** approach, from fastest to slowest
 
 ### Tier 1: Precomputed Symbol Map (primary)
 
-During `update_ast`, every navigable symbol occurrence in a file is recorded as a `SymbolSpan` in a sorted vec stored in `symbol_maps` (keyed by file URI). Each span records the byte range and a `SymbolKind` variant:
+During `update_ast`, every navigable symbol occurrence in a file is recorded as a `SymbolSpan` in a sorted vec stored in the file's `FileState` (`Backend::files`, keyed by file URI). Each span records the byte range and a `SymbolKind` variant:
 
 | `SymbolKind`        | What it captures                                                                                                                |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -384,8 +384,8 @@ two kinds, and each kind has one rule:
   `resolve_written_type`.
 - **Resolved names** (`ClassInfo::fqn()`, `parent_class`, stored member
   types, any type the engine produced) are exactly the FQN they spell, so a
-  bare `Redis` is the global class. Look them up with the resolved loader
-  or `class_lookup::load_resolved_name`.
+  bare `Redis` is the global class. Look them up with the resolved loader,
+  which only accepts a `class_lookup::Fqn`.
 
 A written name that no class answers to still has to come out as the FQN PHP
 reads it, or the resolved loader would later read the bare spelling as a
@@ -415,7 +415,7 @@ not: whether that class narrows the hint takes the class hierarchy. There it
 lets the docblock win and records the type with the hint qualified
 (`ClassInfo::unverified_doc_types`, `FunctionInfo::unverified_doc_types`).
 Loading the declaration puts the hint back unless the docblock class narrows
-it (`type_engine/types/docblock_narrowing.rs`): `Backend::link_loaded_class`
+it (`type_engine/type_ops/docblock_narrowing.rs`): `Backend::link_loaded_class`
 for every class the loader returns and the open file's own classes, and
 `Backend::verify_function_doc_types` for a function. The forward walker reads
 a parameter's docblock again inside the body, and checks it the same way.
@@ -428,18 +428,21 @@ The type engine contexts (`ResolutionCtx`, `VarResolutionCtx`,
   goes through the imports, else the name is qualified with the current
   namespace. Hand it only written names: a resolved global `Exception` read
   through it inside `namespace App` is `App\Exception`.
-- **`class_loader`** (`Backend::resolved_class_loader_with`) looks the
-  name up as an FQN, in the index and then among the caller's own classes
+- **`class_loader`** (`Backend::resolved_class_loader_with`) takes an
+  `Fqn` and looks the name up as exactly that FQN, in the index and then among the caller's own classes
   (a re-parse of patched content holds classes the index does not). A miss
   is final: it is never retried against a file's imports or namespace.
 - **`source_imports`** is the block's `use` table, which
   `resolve_code_class_name` qualifies a name no class answers to with. It is
   `None` only where no file context exists; a miss then keeps its spelling.
 
-`class_lookup::load_resolved_name` looks a resolved name up as the explicit
-`\Name` with whichever loader it is given, so a source loader cannot read it
-through the imports. Every loader, a test's plain map included, has to accept
-that leading `\`. `resolve_class_fully` wraps its loader this way.
+The two loaders have distinct types (`class_lookup::ResolvedClassLoader`
+and `class_lookup::SourceClassLoader`), so handing one where the other is
+expected does not compile. `Fqn::new` strips a leading `\` once, so a
+resolved loader never sees one and no caller strips it by hand. Wrapping a
+written name in `Fqn::new` is the one remaining way to mix the two up; the
+module doc of `src/class_lookup.rs` says which loader entry point to use
+when.
 
 Rules for code that touches names:
 
@@ -515,16 +518,15 @@ Every phase that successfully parses a file caches the result in `uri_classes_in
 ### Index Write Sites
 
 **`update_ast_inner`** (`didOpen`/`didChange`): writes all three class
-maps plus `file_imports`, `file_namespaces`, `resolved_names`,
-`symbol_maps`, `parse_errors`.
+maps plus the file's `FileState` (symbol map, imports, namespaces,
+resolved names, parse errors, a template's lowering), replaced as a whole.
 
 **`parse_and_cache_content_versioned`** (lazy loading): writes only
-`uri_classes_index`, `fqn_class_index`, `fqn_uri_index`. Editor-only
-maps (`file_imports`, `file_namespaces`, etc.) are skipped for lazily
-loaded files to reduce memory usage.
+`uri_classes_index`, `fqn_class_index`, `fqn_uri_index`. The editor-only
+`FileState` is skipped for lazily loaded files to reduce memory usage.
 
-**`clear_file_maps`** (`didClose`): removes `uri_classes_index`,
-`symbol_maps`, `file_imports`, `resolved_names`, `file_namespaces`.
+**`clear_file_maps`** (`didClose`): removes `uri_classes_index` and the
+file's `FileState`.
 Keeps `fqn_class_index` and `fqn_uri_index` so cross-file resolution
 survives file close.
 
@@ -834,7 +836,7 @@ At resolution time, `merge_traits_into` loads the `UnitEnum` or `BackedEnum` stu
 
 ### PSR-4 Autoloading
 
-`composer.rs` parses:
+`composer/` parses:
 
 - `composer.json` → `autoload.psr-4` and `autoload-dev.psr-4` mappings
 
@@ -869,19 +871,19 @@ The scan results are converted to URI strings and inserted into `fqn_uri_index`.
 
 ### Autoload Files
 
-`vendor/composer/autoload_files.php` lists files containing global function definitions and `define()` constants. During `initialized()`, these files are scanned with the lightweight `find_symbols` byte-level pass (not a full AST parse). This populates `autoload_function_index` (function FQN → file path), `autoload_constant_index` (constant name → file path), and `fqn_uri_index` (class FQN → file URI). Full parsing is deferred to the moment a symbol is first accessed via `find_or_load_function` (Phase 1.5), `resolve_constant_definition` (Phase 1.5), or `find_or_load_class` (through `fqn_uri_index`).
+`vendor/composer/autoload_files.php` lists files containing global function definitions and `define()` constants. During `initialized()`, these files are scanned with the lightweight `find_symbols` byte-level pass (not a full AST parse). This populates `autoload_function_index` (function FQN → file path), `autoload_constant_index` (constant name → file path), and `fqn_uri_index` (class FQN → file URI). Full parsing is deferred to the moment a symbol is first accessed via `find_or_load_function` (Phase 1.5), `find_or_load_define` (Phase 2), or `find_or_load_class` (through `fqn_uri_index`).
 
-The byte-level scanner only discovers top-level declarations. Functions wrapped in `if (! function_exists(...))` guards (common in Laravel helpers) are at brace depth > 0 and are missed. As a safety net, all visited autoload file paths are stored in `autoload_file_paths`. When a function or constant is not found in any index or stubs, `find_or_load_function` and `resolve_constant_definition` lazily parse each known autoload file via `update_ast` as a last resort (Phase 1.75). Each file is parsed at most once.
+The byte-level scanner only discovers top-level declarations. Functions wrapped in `if (! function_exists(...))` guards (common in Laravel helpers) are at brace depth > 0 and are missed. As a safety net, all visited autoload file paths are stored in `autoload_file_paths`. When a function or constant is not found in any index, `find_or_load_function` (Phase 1.75) and `find_or_load_define` (Phase 3) lazily parse each known autoload file via `update_ast` as a last resort. Each file is parsed at most once.
 
 ### Non-Composer Function and Constant Discovery
 
-In projects without `composer.json`, there is no `autoload_files.php` to consult. Instead, the full-scan (`find_symbols`) runs on all workspace files during initialization, populating three indices in a single pass: `fqn_uri_index` (classes), `autoload_function_index` (functions), and `autoload_constant_index` (constants). When a function or constant is first accessed, `find_or_load_function` or `resolve_constant_definition` lazily calls `update_ast` on the file, caching the result for subsequent lookups.
+In projects without `composer.json`, there is no `autoload_files.php` to consult. Instead, the full-scan (`find_symbols`) runs on all workspace files during initialization, populating three indices in a single pass: `fqn_uri_index` (classes), `autoload_function_index` (functions), and `autoload_constant_index` (constants). When a function or constant is first accessed, `find_or_load_function` or `find_or_load_define` lazily calls `update_ast` on the file, caching the result for subsequent lookups.
 
 ### Monorepo / Multi-Composer-Root Support
 
 When the workspace root has no `composer.json` but contains subdirectories that are independent Composer projects, PHPantom discovers and processes each subproject automatically. This is a best-effort mitigation for workspaces where the editor opens a monorepo root as a single folder. The monorepo path only activates when there is no root `composer.json`.
 
-**Discovery.** `discover_subproject_roots` in `composer.rs` walks the workspace using the `ignore` crate (`WalkBuilder`), respecting `.gitignore` at every level. Any directory containing a `composer.json` is recorded as a subproject root. Nested subprojects (a `composer.json` inside an already-accepted root) are filtered out. Each discovered `composer.json` is read to extract the `config.vendor-dir` setting.
+**Discovery.** `discover_subproject_roots` in `composer/mod.rs` walks the workspace using the `ignore` crate (`WalkBuilder`), respecting `.gitignore` at every level. Any directory containing a `composer.json` is recorded as a subproject root. Nested subprojects (a `composer.json` inside an already-accepted root) are filtered out. Each discovered `composer.json` is read to extract the `config.vendor-dir` setting.
 
 **Per-subproject processing.** For each discovered `(subproject_root, vendor_dir)`, the same Composer pipeline runs: PSR-4 mappings (with base paths resolved to absolute paths so `resolve_class_path` works regardless of workspace root), classmap parsing, vendor package scanning from `installed.json`, and autoload file indexing. Results are merged into the shared backend state with first-subproject-wins semantics for duplicate FQNs.
 
@@ -1286,7 +1288,7 @@ deduplicate differently. The server therefore treats push as a compatibility
 fallback for older clients rather than mixing both transports for the same
 native diagnostic set.
 
-Each worker is created during `initialized` via `clone_for_diagnostic_worker`, which builds a shallow clone of the `Backend`. All `Arc`-wrapped fields (maps, caches, the notify/pending slots) are shared by `Arc::clone`, so every worker sees all mutations the main `Backend` makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.
+Each worker is created during `initialized` via `clone_for_blocking`, which hands it a `Backend` sharing the main one's `BackendState`, so every worker sees all mutations the main `Backend` makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.
 
 Non-`Arc` fields are snapshotted at spawn time: `php_version`, `vendor_uri_prefixes`, and `vendor_dir_paths`. These fields are only written during `initialized` (before the workers are spawned) and never change afterwards. If a future feature adds runtime PHP version changes, the workers would need to be notified or re-cloned. This invariant ("init-time fields are write-once") should be verified before adding any post-init mutation to these fields.
 

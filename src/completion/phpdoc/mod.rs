@@ -46,7 +46,7 @@ use crate::types::ClassInfo;
 ///
 /// Used by [`SmartContext`] and other enrichment code to look up
 /// `@template` parameters and other class metadata.
-pub type ClassLoaderFn<'a> = &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>;
+pub type ClassLoaderFn<'a> = &'a crate::class_lookup::SourceClassLoader<'a>;
 
 /// Callback that resolves a function name to its [`FunctionInfo`].
 ///
@@ -196,6 +196,10 @@ pub struct SmartContext<'a> {
     /// to look up `@template` parameters for type enrichment.
     pub class_loader: Option<ClassLoaderFn<'a>>,
 
+    /// Loads a class by its already-resolved name, for the types the
+    /// `@throws` analysis works out.
+    pub resolved_class_loader: Option<&'a crate::class_lookup::ResolvedClassLoader<'a>>,
+
     /// Callback that resolves a function name to its [`FunctionInfo`],
     /// used for cross-file `@throws` propagation from standalone
     /// function calls.
@@ -216,6 +220,7 @@ impl SmartContext<'_> {
     pub const EMPTY: SmartContext<'static> = SmartContext {
         inferred_inline_var_type: None,
         class_loader: None,
+        resolved_class_loader: None,
         function_loader: None,
         import_target: None,
         local_classes: &[],

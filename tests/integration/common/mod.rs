@@ -52,7 +52,7 @@ pub async fn open_php_at(
 
 /// Send a `textDocument/completion` request for a document that is already
 /// open.  The one place these helpers build `CompletionParams`.
-async fn completion_response(
+pub async fn completion_response(
     backend: &Backend,
     uri: &Url,
     line: u32,
@@ -1022,6 +1022,30 @@ pub fn lsp_pos_to_offset(content: &str, pos: Position) -> usize {
     content.len()
 }
 
+/// Start a session rooted at `root`, with `initialization_options` as the
+/// client sends them in `initialize`, and run the `initialized` handshake,
+/// which indexes the workspace.
+///
+/// For the settings an editor forwards rather than `.phpantom.toml`
+/// declares, such as the file filters under `indexing`.
+pub async fn initialize_with_options(
+    backend: &Backend,
+    root: &std::path::Path,
+    initialization_options: Option<serde_json::Value>,
+) {
+    #[allow(deprecated)] // `root_uri` is what this generation of clients sends
+    let params = InitializeParams {
+        root_uri: Some(Url::from_file_path(root).unwrap()),
+        initialization_options,
+        ..Default::default()
+    };
+    backend
+        .initialize(params)
+        .await
+        .expect("initialize should succeed");
+    backend.initialized(InitializedParams {}).await;
+}
+
 // ── Shared rename test helpers ──────────────────────────────────────────────
 
 /// Tell the backend the client accepts `RenameFile` and `CreateFile`
@@ -1225,6 +1249,15 @@ pub fn position_of(content: &str, needle: &str) -> Position {
     offset_position(content, offset)
 }
 
+/// The position of the last occurrence of `needle` in `content`, in LSP
+/// coordinates.
+pub fn position_of_last(content: &str, needle: &str) -> Position {
+    let offset = content
+        .rfind(needle)
+        .unwrap_or_else(|| panic!("needle not found: {needle}"));
+    offset_position(content, offset)
+}
+
 fn offset_position(content: &str, offset: usize) -> Position {
     let before = &content[..offset];
     let line = before.matches('\n').count() as u32;
@@ -1260,6 +1293,41 @@ pub fn hover_text(hover: &Hover) -> &str {
     }
 }
 
+/// Parse `content` as `file:///test.php` and return the markdown of the
+/// hover at the last occurrence of `needle`, which must hover.
+pub fn hover_last(backend: &Backend, content: &str, needle: &str) -> String {
+    let position = position_of_last(content, needle);
+    let hover = hover_at(
+        backend,
+        "file:///test.php",
+        content,
+        position.line,
+        position.character,
+    )
+    .expect("expected hover");
+    hover_text(&hover).to_string()
+}
+
+/// Send a `textDocument/hover` request for a document that is already
+/// open.  The one place these helpers build `HoverParams`.
+pub async fn hover_response(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+) -> Option<Hover> {
+    backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+}
+
 /// Send a `textDocument/hover` request for a document that is already
 /// open and return its text, whichever content kind it came as.  `None`
 /// when nothing hovers.
@@ -1269,16 +1337,7 @@ pub async fn hover_text_at(
     line: u32,
     character: u32,
 ) -> Option<String> {
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap()?;
+    let hover = hover_response(backend, uri, line, character).await?;
     Some(match hover.contents {
         HoverContents::Markup(markup) => markup.value,
         HoverContents::Scalar(MarkedString::String(s)) => s,
@@ -1356,6 +1415,19 @@ pub async fn find_references(
     position: Position,
     include_declaration: bool,
 ) -> Vec<Location> {
+    references_response(backend, uri, position, include_declaration)
+        .await
+        .unwrap_or_default()
+}
+
+/// [`find_references`] that keeps "the server answered with nothing"
+/// (`None`) apart from an empty list.
+pub async fn references_response(
+    backend: &Backend,
+    uri: &Url,
+    position: Position,
+    include_declaration: bool,
+) -> Option<Vec<Location>> {
     backend
         .references(ReferenceParams {
             text_document_position: TextDocumentPositionParams {
@@ -1370,7 +1442,6 @@ pub async fn find_references(
         })
         .await
         .unwrap()
-        .unwrap_or_default()
 }
 
 /// The messages of the syntax, argument-count, and slow diagnostics
@@ -1452,6 +1523,18 @@ pub async fn definitions_at(
     definition_locations(
         goto_definition_at(backend, uri, position.line, position.character + 2).await,
     )
+}
+
+/// Assert that a go-to-definition response is a single location in `uri`
+/// starting on `line`.
+pub fn assert_location(response: GotoDefinitionResponse, uri: &Url, line: u32) {
+    match response {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(&location.uri, uri, "jumped to the wrong file");
+            assert_eq!(location.range.start.line, line, "jumped to the wrong line");
+        }
+        other => panic!("expected a single location, got: {other:?}"),
+    }
 }
 
 /// The URI of the first target of a go-to-definition response.

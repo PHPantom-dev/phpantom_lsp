@@ -6,14 +6,14 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::atom;
-use crate::class_lookup::{find_class_at_offset, resolve_class_keyword};
+use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset, resolve_class_keyword};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 
 use crate::text_position::position_to_offset;
 use crate::type_engine::conditional_resolution::TemplateContext;
-use crate::type_engine::resolver::{CtxLoaders, ResolutionCtx};
+use crate::type_engine::resolver::{CtxLoaders, FileCtx, ResolutionCtx};
 
 use tower_lsp::lsp_types::Position;
 
@@ -47,7 +47,7 @@ impl Backend {
             param.type_hint.as_ref().and_then(|hint| {
                 crate::virtual_members::laravel::replace_eloquent_collections_in_param_type(
                     hint,
-                    rctx.class_loader,
+                    rctx.file.class_loader,
                 )
             })
         };
@@ -102,17 +102,17 @@ impl Backend {
                 this_type: None,
             };
             let evaluated =
-                crate::type_engine::types::conditional::evaluate_nested_conditionals_text(
+                crate::type_engine::type_ops::conditional::evaluate_nested_conditionals_text(
                     ret,
                     &bound.parameters,
                     at,
                     None,
-                    crate::type_engine::types::conditional::ConditionalClassContext {
+                    crate::type_engine::type_ops::conditional::ConditionalClassContext {
                         calling: rctx.current_class.map(|c| c.fqn().as_str()),
                         declaring: Some(owner.fqn().as_str()),
                         written_class: Some(&|name: &str| rctx.written_names().resolve_class(name)),
                     },
-                    rctx.class_loader,
+                    rctx.file.class_loader,
                     &tpl,
                 );
             bound.return_type = Some(evaluated);
@@ -232,7 +232,7 @@ impl Backend {
             // re-substituting hundreds of virtual members each time.
             let effective = crate::virtual_members::resolve_class_fully_with_generics(
                 &owner,
-                rctx.class_loader,
+                rctx.file.class_loader,
                 rctx.resolved_class_cache,
                 &generic_arg_strings,
                 &generic_args,
@@ -330,14 +330,14 @@ impl Backend {
             let args = type_args.unwrap_or_else(|| crate::inheritance::default_type_args(&owner));
             crate::virtual_members::resolve_class_fully_with_type_args(
                 &owner,
-                rctx.class_loader,
+                rctx.file.class_loader,
                 rctx.resolved_class_cache,
                 &args,
             )
         } else {
             crate::virtual_members::resolve_class_fully_maybe_cached(
                 &owner,
-                rctx.class_loader,
+                rctx.file.class_loader,
                 rctx.resolved_class_cache,
             )
         };
@@ -438,12 +438,12 @@ impl Backend {
     /// `Gift` instead of the raw `T`.
     fn resolve_constructor_callable(
         class_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         cache: &crate::virtual_members::ResolvedClassCache,
         args_text: Option<&str>,
         rctx: &ResolutionCtx<'_>,
     ) -> Option<ResolvedCallableTarget> {
-        let ci = class_loader(class_name)?;
+        let ci = class_loader(Fqn::new(class_name))?;
         let merged = crate::virtual_members::resolve_class_fully_cached(&ci, class_loader, cache);
         let ctor = match merged.get_method("__construct") {
             Some(c) => c.clone(),
@@ -618,20 +618,19 @@ impl Backend {
             namespace,
         );
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&resolved_class_loader);
 
         let rctx = self.resolution_ctx_at(
-            current_class,
-            &file_ctx.classes,
-            content,
-            cursor_offset,
-            CtxLoaders::new(
+            FileCtx::new(
+                content,
+                &file_ctx.classes,
                 &resolved_class_loader,
                 &class_loader,
-                &function_loader_cl,
-                &laravel_macro_this_resolver,
             )
-            .with_imports(use_map),
+            .with_imports(Some(use_map)),
+            current_class,
+            cursor_offset,
+            CtxLoaders::new(&function_loader_cl, &laravel_macro_this_resolver),
         );
 
         // ── Invoked value: `($this->handler)(…)` ──────────────────
@@ -848,7 +847,7 @@ pub(crate) fn invoked_value_types(
             ),
         );
         types.extend(owners.iter().filter_map(|owner| {
-            crate::inheritance::resolve_property_type_hint(owner, property, ctx.class_loader)
+            crate::inheritance::resolve_property_type_hint(owner, property, ctx.file.class_loader)
         }));
     }
     types

@@ -14,18 +14,18 @@
 //! declaration) is also handled here, against the precomputed symbol map's
 //! variable-definition index.
 
-use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::symbol_map::VarDefKind;
 use tower_lsp::lsp_types::*;
 
 use super::member::{MemberAccessHint, MemberDefinitionCtx, MemberKind};
-use super::point_location;
+use super::{class_keyword_location, point_location};
 use crate::Backend;
 use crate::composer;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
-use crate::types::AccessKind;
+use crate::types::{AccessKind, ClassInfo};
 use crate::util::short_name;
 use crate::virtual_members::laravel;
 
@@ -52,7 +52,7 @@ impl Backend {
         }
 
         // Laravel config fallback: declaration sites in config/*.php
-        if self.resolved_class_cache.read().is_laravel()
+        if self.resolved_class_cache.read().laravel().is_enabled()
             && let Some(loc) =
                 laravel::resolve_config_key_definition_fallback(self, uri, content, position)
         {
@@ -81,7 +81,7 @@ impl Backend {
         uri: &str,
         offset: u32,
     ) -> Option<crate::symbol_map::SymbolSpan> {
-        let map = self.symbol_maps.read().get(uri).cloned()?;
+        let map = self.symbol_map_for(uri)?;
         if let Some(span) = map.lookup(offset) {
             return Some(span.clone());
         }
@@ -142,8 +142,7 @@ impl Backend {
         var_name: &str,
         cursor_offset: u32,
     ) -> Option<crate::symbol_map::VarDefSite> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         let scope_start = map.find_enclosing_scope(cursor_offset);
         map.find_var_definition(var_name, cursor_offset, scope_start)
             .cloned()
@@ -158,8 +157,7 @@ impl Backend {
         var_name: &str,
         cursor_offset: u32,
     ) -> Option<VarDefKind> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         map.var_def_kind_at(var_name, cursor_offset).cloned()
     }
 
@@ -196,8 +194,7 @@ impl Backend {
         var_name: &str,
         cursor_offset: u32,
     ) -> Option<u32> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         let def = map.var_def_at(var_name, cursor_offset)?;
         if matches!(
             def.kind,
@@ -242,11 +239,7 @@ impl Backend {
                         // The cursor is on a variable at its definition
                         // site.  Return the symbol's own location so
                         // editors can fall back to Find References.
-                        let parsed_uri = Url::parse(uri).ok()?;
-                        let start = crate::text_position::offset_to_position(
-                            content,
-                            cursor_offset as usize,
-                        );
+                        let parsed_uri = crate::util::parse_url(uri)?;
                         let end_offset = match kind {
                             SymbolKind::Variable { .. } => cursor_offset as usize + 1 + name.len(),
                             SymbolKind::CompactVariable { .. } => {
@@ -254,10 +247,13 @@ impl Backend {
                             }
                             _ => unreachable!(),
                         };
-                        let end = crate::text_position::offset_to_position(content, end_offset);
                         return Some(vec![Location {
                             uri: parsed_uri,
-                            range: Range { start, end },
+                            range: crate::text_position::byte_range_to_lsp_range(
+                                content,
+                                cursor_offset as usize,
+                                end_offset,
+                            ),
                         }]);
                     }
                 }
@@ -265,17 +261,14 @@ impl Backend {
                 if let Some(var_def) = self.lookup_var_definition(uri, name, cursor_offset) {
                     // Found a prior definition — jump there.
                     let token_end = var_def.offset + 1 + var_def.name.len() as u32;
-                    let target_uri = Url::parse(uri).ok()?;
-                    let start_pos =
-                        crate::text_position::offset_to_position(content, var_def.offset as usize);
-                    let end_pos =
-                        crate::text_position::offset_to_position(content, token_end as usize);
+                    let target_uri = crate::util::parse_url(uri)?;
                     return Some(vec![Location {
                         uri: target_uri,
-                        range: Range {
-                            start: start_pos,
-                            end: end_pos,
-                        },
+                        range: crate::text_position::byte_range_to_lsp_range(
+                            content,
+                            var_def.offset as usize,
+                            token_end as usize,
+                        ),
                     }]);
                 }
 
@@ -411,7 +404,7 @@ impl Backend {
             }
 
             SymbolKind::LaravelStringKey { kind, key, .. } => {
-                if !self.resolved_class_cache.read().is_laravel() {
+                if !self.resolved_class_cache.read().laravel().is_enabled() {
                     return None;
                 }
                 let locs = laravel::resolve_laravel_string_key(self, kind, key, uri);
@@ -419,7 +412,7 @@ impl Backend {
             }
 
             SymbolKind::LaravelMacroString { .. } => Some(vec![point_location(
-                Url::parse(uri).ok()?,
+                crate::util::parse_url(uri)?,
                 crate::text_position::offset_to_position(content, cursor_offset as usize),
             )]),
 
@@ -443,13 +436,14 @@ impl Backend {
         cursor_offset: u32,
         name: &str,
     ) -> Option<Vec<Location>> {
-        let parsed_uri = Url::parse(uri).ok()?;
-        let start = crate::text_position::offset_to_position(content, cursor_offset as usize);
-        let end =
-            crate::text_position::offset_to_position(content, cursor_offset as usize + name.len());
+        let parsed_uri = crate::util::parse_url(uri)?;
         Some(vec![Location {
             uri: parsed_uri,
-            range: Range { start, end },
+            range: crate::text_position::byte_range_to_lsp_range(
+                content,
+                cursor_offset as usize,
+                cursor_offset as usize + name.len(),
+            ),
         }])
     }
 
@@ -552,25 +546,11 @@ impl Backend {
         name: &str,
         cursor_offset: u32,
     ) -> Option<crate::symbol_map::TemplateParamDef> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         map.find_template_def(name, cursor_offset).cloned()
     }
 
     // ─── Word Extraction & FQN Resolution ───────────────────────────────────
-
-    /// Resolve a short or partially-qualified name to a fully-qualified name
-    /// using the file's `use` map and namespace context.
-    ///
-    /// This is a thin wrapper around [`crate::names::resolve_to_fqn`] kept
-    /// for API compatibility with callers that use `Self::resolve_to_fqn`.
-    pub fn resolve_to_fqn(
-        name: &str,
-        use_map: &HashMap<String, String>,
-        namespace: &Option<String>,
-    ) -> String {
-        crate::names::resolve_to_fqn(name, use_map, namespace)
-    }
 
     /// Resolve a class definition in a file on disk.
     ///
@@ -628,8 +608,6 @@ impl Backend {
         fqn: &str,
         target_uri: &str,
     ) -> Option<Location> {
-        let sn = short_name(fqn);
-
         // Look up classes from uri_classes_index first, then fall back
         // to fqn_class_index and disk.  Each lock is dropped before
         // calling parse_and_cache_file (which takes write locks).
@@ -648,25 +626,9 @@ impl Backend {
             },
         };
 
-        // Match by short name + namespace, same logic as
-        // `find_definition_in_uri_classes_index`.
-        let class_info = classes.iter().find(|c| {
-            if c.name != sn {
-                return false;
-            }
-            c.fqn() == fqn
-        })?;
-
+        let class_info = find_class_by_fqn(&classes, fqn)?;
         let content = self.get_file_content(target_uri)?;
-        let parsed_uri = Url::parse(target_uri).ok()?;
-
-        if class_info.keyword_offset == 0 {
-            return None;
-        }
-        let position =
-            crate::text_position::offset_to_position(&content, class_info.keyword_offset as usize);
-
-        Some(point_location(parsed_uri, position))
+        class_keyword_location(class_info, target_uri, &content)
     }
 
     /// Try to find the definition of a class in the current file by checking
@@ -677,34 +639,8 @@ impl Backend {
         content: &str,
         uri: &str,
     ) -> Option<Location> {
-        let short_name = short_name(fqn);
-
         let classes = self.symbols.uri_classes_index.read().get(uri).cloned()?;
-
-        let class_info = classes.iter().find(|c| {
-            if c.name != short_name {
-                return false;
-            }
-            // Build the FQN of this class in the current file and compare
-            // against the requested FQN to avoid false matches when two
-            // namespaces contain classes with the same short name.
-            let class_fqn = match &c.file_namespace {
-                Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, c.name),
-                _ => c.name.to_string(),
-            };
-            class_fqn == fqn
-        })?;
-
-        if class_info.keyword_offset == 0 {
-            return None;
-        }
-        let position =
-            crate::text_position::offset_to_position(content, class_info.keyword_offset as usize);
-
-        // Build a file URI from the current URI string.
-        let parsed_uri = Url::parse(uri).ok()?;
-
-        Some(point_location(parsed_uri, position))
+        class_keyword_location(find_class_by_fqn(&classes, fqn)?, uri, content)
     }
 
     /// Resolve `self`, `static`, or `parent` keywords to a class definition.
@@ -743,15 +679,7 @@ impl Backend {
             }
 
             // Jump to the enclosing class definition in the current file.
-            if current_class.keyword_offset == 0 {
-                return None;
-            }
-            let target_position = crate::text_position::offset_to_position(
-                content,
-                current_class.keyword_offset as usize,
-            );
-            let parsed_uri = Url::parse(uri).ok()?;
-            return Some(point_location(parsed_uri, target_position));
+            return class_keyword_location(&current_class, uri, content);
         }
 
         // The parser has already resolved `parent_class` to an FQN.
@@ -760,20 +688,32 @@ impl Backend {
     }
 }
 
+/// The class named `fqn` in a file's class list.
+///
+/// Matches on the full FQN so two namespaces declaring the same short
+/// name in one file never shadow each other.
+fn find_class_by_fqn<'a>(classes: &'a [Arc<ClassInfo>], fqn: &str) -> Option<&'a ClassInfo> {
+    let sn = short_name(fqn);
+    classes
+        .iter()
+        .find(|c| c.name == sn && c.fqn() == fqn)
+        .map(|c| &**c)
+}
+
 /// The location of a `@template` parameter's name in its declaring tag.
 fn template_def_location(
     uri: &str,
     content: &str,
     tpl_def: &crate::symbol_map::TemplateParamDef,
 ) -> Option<Location> {
-    let target_uri = Url::parse(uri).ok()?;
-    let start = crate::text_position::offset_to_position(content, tpl_def.name_offset as usize);
-    let end = crate::text_position::offset_to_position(
-        content,
-        (tpl_def.name_offset + tpl_def.name.len() as u32) as usize,
-    );
+    let target_uri = crate::util::parse_url(uri)?;
+    let start = tpl_def.name_offset as usize;
     Some(Location {
         uri: target_uri,
-        range: Range { start, end },
+        range: crate::text_position::byte_range_to_lsp_range(
+            content,
+            start,
+            start + tpl_def.name.len(),
+        ),
     })
 }

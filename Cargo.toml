@@ -19,15 +19,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # tokio is declared per-target below: "full" on native, a slim feature set on
 # wasm (which has no sockets, so "net" would pull in mio and fail to build).
-mago-syntax = "=1.57.0"
-mago-allocator = "=1.57.0"
-mago-database = "=1.57.0"
-mago-names = "=1.57.0"
-mago-phpdoc-syntax = "=1.57.0"
-mago-span = "=1.57.0"
-mago-formatter = { version = "=1.57.0", features = ["serde"] }
-mago-php-version = "=1.57.0"
-mago-composer = "=1.57.0"
+mago-syntax = "=1.58.2"
+mago-allocator = "=1.58.2"
+mago-database = "=1.58.2"
+mago-names = "=1.58.2"
+mago-phpdoc-syntax = "=1.58.2"
+mago-span = "=1.58.2"
+mago-formatter = { version = "=1.58.2", features = ["serde"] }
+mago-php-version = "=1.58.2"
+mago-composer = "=1.58.2"
 ignore = "0.4"
 globset = "0.4"
 regex = "1"

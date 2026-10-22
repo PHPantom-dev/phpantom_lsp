@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use tower_lsp::lsp_types::{FileChangeType, Url};
+use tower_lsp::lsp_types::FileChangeType;
 
 use crate::Backend;
 use crate::classmap_scanner::IndexFilters;
@@ -135,8 +135,8 @@ impl Backend {
         for path in self.symbols.autoload_constant_index.read().values() {
             note(&crate::util::path_to_uri(path), &mut filtered);
         }
-        for uri in self.symbol_maps.read().keys() {
-            note(uri, &mut filtered);
+        for uri in self.uris_with_symbol_maps() {
+            note(&uri, &mut filtered);
         }
         for uri in self.parsed_uris.read().iter() {
             note(uri, &mut filtered);
@@ -223,7 +223,17 @@ impl Backend {
             .as_ref()
             .map(|tok| self.spawn_progress_poller(tok.clone(), Arc::clone(&progress)));
 
-        let composer_package = crate::composer::read_composer_package(&root);
+        let composer_package = match crate::composer::try_read_composer_package(&root) {
+            Ok(package) => package,
+            Err(e) => {
+                self.log(
+                    tower_lsp::lsp_types::MessageType::WARNING,
+                    format!("{e}; PSR-4 mappings from it are ignored"),
+                )
+                .await;
+                None
+            }
+        };
         self.discover_workspace_symbols(
             &root,
             self.php_version(),
@@ -269,7 +279,7 @@ fn note_if_newly_filtered(
     if filtered.contains_key(uri) {
         return;
     }
-    let Some(path) = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok()) else {
+    let Some(path) = crate::util::uri_to_path(uri) else {
         return;
     };
     if is_out_of_scope(current, &path) && !is_out_of_scope(previous, &path) {

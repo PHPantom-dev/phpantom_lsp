@@ -1,7 +1,8 @@
 //! End-to-end coverage for Laravel storage disk names backed by config keys.
 
 use crate::common::{
-    complete_labels_at_opened, create_psr4_workspace, open_php_at, position_after,
+    complete_labels_at_opened, create_psr4_workspace, goto_definition_at, open_php_at,
+    position_after,
 };
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
@@ -183,17 +184,8 @@ class DiskConsumer {}
     ];
 
     for position in positions {
-        let response = backend
-            .goto_definition(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position,
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
+        let response = goto_definition_at(&backend, &uri, position.line, position.character)
             .await
-            .expect("definition request should succeed")
             .expect("configured disk should have a definition");
         let location = definition_location(response);
         assert!(location.uri.path().ends_with("/config/filesystems.php"));
@@ -265,17 +257,8 @@ class DiskConsumer {
             "group-imported alias at `{prefix}` should complete configured disks"
         );
 
-        let response = backend
-            .goto_definition(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position,
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
+        let response = goto_definition_at(&backend, &uri, position.line, position.character)
             .await
-            .expect("definition request should succeed")
             .unwrap_or_else(|| panic!("group-imported alias at `{prefix}` should navigate"));
         let location = definition_location(response);
         assert_eq!(location.uri, config_uri);
@@ -327,17 +310,8 @@ class DiskConsumer {
             "local homonym at `{prefix}` should not have disk references"
         );
         assert!(
-            backend
-                .goto_definition(GotoDefinitionParams {
-                    text_document_position_params: TextDocumentPositionParams {
-                        text_document: TextDocumentIdentifier { uri: uri.clone() },
-                        position,
-                    },
-                    work_done_progress_params: WorkDoneProgressParams::default(),
-                    partial_result_params: PartialResultParams::default(),
-                })
+            goto_definition_at(&backend, &uri, position.line, position.character)
                 .await
-                .expect("definition request should succeed")
                 .is_none(),
             "local homonym at `{prefix}` should not navigate to disk configuration"
         );

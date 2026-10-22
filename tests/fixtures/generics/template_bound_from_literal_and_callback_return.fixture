@@ -1,0 +1,12 @@
+// test: a template bound from a literal also takes what the callback returns
+// feature: hover
+// `TCarry` is bound by both the `true` initial value and the callback's
+// return, so it is what the two have in common rather than the literal.
+// expect: $r = bool
+---
+<?php
+
+function test(array $items): void {
+    $r = array_reduce($items, fn ($carry, $item) => $carry && $item > 0, true);
+    echo $<>r;
+}

@@ -91,7 +91,7 @@ impl Backend {
     pub(super) fn complete_blade_directive(&self, prefix: &str) -> CompletionResponse {
         let prefix_lower = prefix.to_lowercase();
         let matches_prefix = |name: &str| name.to_lowercase().starts_with(&prefix_lower);
-        let directives = self.blade_directives.read();
+        let directives = self.blade.directives.read();
 
         let mut items: Vec<CompletionItem> = DIRECTIVE_COMPLETIONS
             .iter()

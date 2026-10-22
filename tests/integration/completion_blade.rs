@@ -4,10 +4,9 @@
 
 use crate::common::{
     BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
-    complete_at_opened_with_trigger, create_psr4_workspace, create_test_backend, labels,
-    open_document, workspace_uri,
+    complete_at_opened_with_trigger, completion_response, create_psr4_workspace,
+    create_test_backend, labels, open_document, workspace_uri,
 };
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 #[tokio::test]
@@ -207,19 +206,18 @@ async fn complete_typed(
     line: u32,
     character: u32,
 ) -> Vec<CompletionItem> {
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: Some(CompletionContext {
+    match completion_response(
+        backend,
+        uri,
+        line,
+        character,
+        Some(CompletionContext {
             trigger_kind: CompletionTriggerKind::INVOKED,
             trigger_character: None,
         }),
-    };
-    match backend.completion(params).await.unwrap() {
+    )
+    .await
+    {
         Some(CompletionResponse::Array(items)) => items,
         Some(CompletionResponse::List(list)) => list.items,
         None => Vec::new(),

@@ -5,7 +5,10 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace, open_document};
+    use crate::common::{
+        LARAVEL_APP_COMPOSER, completion_response, create_psr4_workspace, goto_definition_at,
+        hover_response, open_document,
+    };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -55,17 +58,7 @@ mod tests {
         line: u32,
         character: u32,
     ) -> Vec<(String, u32, u32)> {
-        let response = backend
-            .goto_definition(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
-            .await
-            .unwrap();
+        let response = goto_definition_at(backend, uri, line, character).await;
         let locations = match response {
             Some(GotoDefinitionResponse::Scalar(location)) => vec![location],
             Some(GotoDefinitionResponse::Array(locations)) => locations,
@@ -103,18 +96,7 @@ mod tests {
         line: u32,
         character: u32,
     ) -> Vec<CompletionItem> {
-        let response = backend
-            .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: None,
-            })
-            .await
-            .unwrap();
+        let response = completion_response(backend, uri, line, character, None).await;
         match response {
             Some(CompletionResponse::Array(items)) => items,
             Some(CompletionResponse::List(list)) => list.items,
@@ -469,16 +451,7 @@ mod tests {
         let (backend, dir) = workspace(&[("resources/views/page.blade.php", PAGE)]).await;
         let uri = open(&backend, &dir, "resources/views/page.blade.php").await;
 
-        let hover = backend
-            .hover(HoverParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position::new(1, 12),
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .unwrap();
+        let hover = hover_response(&backend, &uri, 1, 12).await;
         let text = match hover {
             Some(Hover {
                 contents: HoverContents::Markup(markup),

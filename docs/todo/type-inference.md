@@ -485,7 +485,7 @@ reads as the unresolved `RedCar::DataArray`, so `TData` never gets the
 shape and completion sees only the untyped `array` declared return.
 
 Bare alias names in `extends_generics`/`implements_generics` are already
-substituted (`type_engine/types/aliases.rs`), but the match is an exact
+substituted (`type_engine/type_ops/aliases.rs`), but the match is an exact
 comparison against a `Named` type, so `self::DataArray` never matches it,
 and `qualify_self_constant` (`php_type/transform.rs`) reads it as a class
 constant instead.

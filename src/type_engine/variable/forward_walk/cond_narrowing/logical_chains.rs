@@ -14,7 +14,7 @@ use super::*;
 /// extractors recognise in place, and routing it through the opposite
 /// pass would change which commit path it takes.
 pub(crate) fn negated_logical_chain<'b>(expr: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(expr);
     let is_chain = matches!(
         inner,
         Expression::Binary(bin)
@@ -145,5 +145,5 @@ fn collect_chain_operands_inner<'b>(
             return;
         }
     }
-    out.push(narrowing::fold_negation_pairs(expr));
+    out.push(condition_facts::fold_negation_pairs(expr));
 }

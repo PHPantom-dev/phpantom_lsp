@@ -1,8 +1,9 @@
-use crate::common::{complete_at, create_test_backend, create_test_backend_with_function_stubs};
+use crate::common::{
+    complete_at, create_test_backend, create_test_backend_with_function_stubs, open_php,
+};
 use phpantom_lsp::Backend;
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 /// Verify that `find_or_load_function` can resolve a basic built-in PHP
@@ -418,15 +419,7 @@ async fn test_definition_resolver_uses_stub_functions() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // The `date_create` function should now be loadable via stubs for
     // return type resolution.
@@ -543,16 +536,7 @@ async fn test_completion_user_defined_constant() {
         "define('MY_APP_VERSION', '1.0.0');\n",
         "define('MY_APP_NAME', 'TestApp');\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: defs_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: defs_text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &defs_uri, defs_text).await;
 
     // Now open another file and type the partial constant name
     let uri = Url::parse("file:///use_const.php").unwrap();
@@ -819,16 +803,7 @@ async fn test_completion_user_defined_function() {
         "    return str_repeat($name, $count);\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: defs_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: defs_text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &defs_uri, defs_text).await;
 
     // Now complete in another file
     let uri = Url::parse("file:///use_fn.php").unwrap();

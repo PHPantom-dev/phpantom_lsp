@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::inheritance::{
     ClassRef, apply_substitution_to_method, apply_substitution_to_property, build_generic_subs,
     build_substitution_map, enrich_method_arc_from_ancestor, enrich_property_arc_from_ancestor,
@@ -162,7 +163,7 @@ fn wait_for_pending(
 pub fn populate_from_sorted(
     sorted_fqns: &[String],
     cache: &ResolvedClassCache,
-    class_loader: &(dyn Fn(&str) -> Option<Arc<ClassInfo>> + Sync),
+    class_loader: &(dyn Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> + Sync),
 ) {
     let cap = std::thread::available_parallelism()
         .map_or(1, |n| n.get())
@@ -209,7 +210,7 @@ const MAX_POPULATE_WORKERS: usize = 8;
 fn populate_one(
     fqn: &str,
     cache: &ResolvedClassCache,
-    class_loader: &(dyn Fn(&str) -> Option<Arc<ClassInfo>> + Sync),
+    class_loader: &(dyn Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> + Sync),
 ) {
     // Skip classes already in the cache (e.g. from a previous
     // incremental population run).
@@ -220,7 +221,7 @@ fn populate_one(
 
     // Load the raw (un-merged) class.  If the class_loader cannot find
     // it (e.g. it was removed between toposort and now), skip.
-    let Some(raw_class) = class_loader(fqn) else {
+    let Some(raw_class) = class_loader(Fqn::new(fqn)) else {
         return;
     };
 
@@ -252,7 +253,7 @@ fn populate_one(
 /// [`resolve_class_with_inheritance`] directly.
 pub fn resolve_class_fully(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Arc<ClassInfo> {
     resolve_class_fully_inner(class, class_loader, None)
 }
@@ -271,7 +272,7 @@ pub fn resolve_class_fully(
 /// transform to the returned value.
 pub fn resolve_class_fully_cached(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: &ResolvedClassCache,
 ) -> Arc<ClassInfo> {
     resolve_class_fully_inner(class, class_loader, Some(cache))
@@ -286,7 +287,7 @@ pub fn resolve_class_fully_cached(
 /// when `None`, behaves like [`resolve_class_fully`].
 pub fn resolve_class_fully_maybe_cached(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> Arc<ClassInfo> {
     let started = std::time::Instant::now();
@@ -318,7 +319,7 @@ pub fn resolve_class_fully_maybe_cached(
 pub fn property_write_is_magic(
     class: &ClassInfo,
     prop_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> bool {
     if class.has_property(prop_name) {
@@ -367,7 +368,7 @@ const BASE_RESOLUTION_MARKER: &str = "\0base";
 /// when no cache is active on this thread.
 pub(crate) fn resolve_class_base_cached(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Arc<ClassInfo> {
     let Some(cache) = active_resolved_class_cache() else {
         return Arc::new(resolve_class_with_inheritance(class, class_loader));
@@ -408,7 +409,7 @@ pub(crate) fn resolve_class_base_cached(
 /// [`resolve_class_fully_maybe_cached`].
 pub fn resolve_class_fully_with_generics(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
     generic_arg_strings: &[String],
     generic_args: &[crate::php_type::PhpType],
@@ -526,7 +527,7 @@ pub fn resolve_class_fully_with_generics(
 /// `(FQN, [])`.
 pub fn resolve_class_fully_with_type_args(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
     generic_args: &[crate::php_type::PhpType],
 ) -> Arc<ClassInfo> {
@@ -560,7 +561,7 @@ const TYPE_HINT_KEY_MARKER: &str = "\0type-hint";
 /// copied and re-injected at every resolution.
 pub fn resolve_class_for_type_hint(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     generic_arg_strings: &[String],
     generic_args: &[PhpType],
 ) -> Arc<ClassInfo> {
@@ -633,14 +634,9 @@ pub fn resolve_class_for_type_hint(
 /// (`Builder<User>`, `Builder<Order>`, …) are requested.
 fn resolve_class_fully_inner(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> Arc<ClassInfo> {
-    // Every name a class carries (ancestors, mixins, member types) is
-    // already resolved, and the class may come from any file, so none of
-    // them may go through the consuming file's imports and namespace.
-    let class_loader = &|name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
-
     // Cycle breaking needs somewhere to record in-flight resolutions,
     // so cache-less callers fall back to the thread's active cache
     // when one is live, and otherwise get a throwaway cache scoped to
@@ -693,8 +689,8 @@ fn resolve_class_fully_inner(
     // the import-aware `class_loader("Redis")` return the facade
     // instead.  Only accept the reload when it names the same class;
     // otherwise keep the already-resolved `class`.
-    let raw_class_arc =
-        class_loader(fqn.as_str()).filter(|raw| raw.fqn().eq_ignore_ascii_case(fqn.as_str()));
+    let raw_class_arc = class_loader(Fqn::new(fqn.as_str()))
+        .filter(|raw| raw.fqn().eq_ignore_ascii_case(fqn.as_str()));
     let effective_class: &ClassInfo = match &raw_class_arc {
         Some(raw) => raw,
         None => class,
@@ -782,7 +778,7 @@ fn resolve_class_fully_inner(
 fn apply_post_merge_stages(
     merged: &mut ClassInfo,
     effective_class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: &ResolvedClassCache,
 ) {
     let fqn = effective_class.fqn();
@@ -790,7 +786,7 @@ fn apply_post_merge_stages(
     // Whether Laravel-specific resolution should run.  A throwaway
     // cache defaults to `true`, so behaviour is unchanged for
     // cache-less code paths and tests.
-    let is_laravel = cache.read().is_laravel();
+    let is_laravel = cache.read().laravel().is_enabled();
 
     // ── Pre-provider patches ────────────────────────────────────────
     // Inject missing `@mixin` annotations before virtual member
@@ -876,7 +872,7 @@ fn apply_post_merge_stages(
             if depth > 20 {
                 break;
             }
-            if let Some(parent) = class_loader(parent_name) {
+            if let Some(parent) = class_loader(Fqn::new(parent_name)) {
                 // Build the substitution map for this parent level with the
                 // same builder the main inheritance merge uses, so a short
                 // `@extends`/`@implements` argument list right-aligns onto
@@ -923,7 +919,7 @@ fn apply_post_merge_stages(
         let iface_name = all_iface_names[iface_idx].clone();
         iface_idx += 1;
 
-        if let Some(iface) = class_loader(&iface_name) {
+        if let Some(iface) = class_loader(Fqn::new(&iface_name)) {
             // Collect interfaces that this interface itself extends.
             // For example, CarbonInterface extends DateTimeInterface,
             // JsonSerializable, UnitValue — all of those need to be
@@ -1055,7 +1051,7 @@ fn merge_interface_members_into(
     merged: &mut ClassInfo,
     mut resolved_iface: ClassInfo,
     iface_subs: &HashMap<String, PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) {
     // Apply @implements generic substitutions to the resolved
     // interface members before merging.  Only the members that actually

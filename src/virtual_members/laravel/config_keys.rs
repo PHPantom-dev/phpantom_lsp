@@ -22,7 +22,7 @@ pub(crate) struct ConfigKeyMatch {
 /// For example, `file:///path/to/project/config/app.php` returns `Some("app")`.
 /// Supports nested directories: `config/api/keys.php` returns `Some("api.keys")`.
 pub(crate) fn laravel_config_prefix_from_uri(uri: &str) -> Option<String> {
-    let parsed = Url::parse(uri).ok()?;
+    let parsed = crate::util::parse_url(uri)?;
     // Match the nearest `config` directory to the file path. This avoids
     // false negatives when an ancestor directory is also named `config`.
     let relative = parsed.path().rsplit_once("/config/")?.1;
@@ -112,15 +112,15 @@ impl Backend {
         &self,
         maps: impl IntoIterator<Item = (&'a str, &'a SymbolMap)>,
     ) {
-        if !self.resolved_class_cache.read().is_laravel() {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
             return;
         }
         for (uri, map) in maps {
             let keys = config_write_keys(map);
             if keys.is_empty() {
                 // Only take the write lock when there is something to forget.
-                if self.laravel_runtime_config_keys.read().contains_key(uri) {
-                    self.laravel_runtime_config_keys.write().remove(uri);
+                if self.laravel.runtime_config_keys.read().contains_key(uri) {
+                    self.laravel.runtime_config_keys.write().remove(uri);
                 }
                 continue;
             }
@@ -133,7 +133,7 @@ impl Backend {
             {
                 continue;
             }
-            let mut index = self.laravel_runtime_config_keys.write();
+            let mut index = self.laravel.runtime_config_keys.write();
             if index.get(uri) != Some(&keys) {
                 index.insert(uri.to_string(), keys);
             }
@@ -163,14 +163,16 @@ impl Backend {
                     .is_some_and(|rest| rest.starts_with('.'))
         };
         let written_by_project = self
-            .laravel_runtime_config_keys
+            .laravel
+            .runtime_config_keys
             .read()
             .values()
             .flatten()
             .any(covers);
         written_by_project
             || self
-                .laravel_provider_resources
+                .laravel
+                .provider_resources
                 .read()
                 .config_writes
                 .iter()
@@ -231,7 +233,9 @@ impl Backend {
             }
         }
 
-        for res in &self.laravel_provider_resources.read().config_files {
+        // Copied out so the lock is not held across the file reads.
+        let provider_config_files = self.laravel.provider_resources.read().config_files.clone();
+        for res in &provider_config_files {
             if let Ok(content) = std::fs::read_to_string(&res.path) {
                 visit(&res.namespace, ConfigSourceKind::Package, &content);
             }
@@ -367,7 +371,13 @@ fn resolve_config_key_declaration_inner(
             candidates.push((file_parts.join("."), path));
         }
     }
-    for res in &backend.laravel_provider_resources.read().config_files {
+    let provider_config_files = backend
+        .laravel
+        .provider_resources
+        .read()
+        .config_files
+        .clone();
+    for res in &provider_config_files {
         let covers = key
             .strip_prefix(res.namespace.as_str())
             .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'));
@@ -384,7 +394,7 @@ fn resolve_config_key_declaration_inner(
 
     let mut fallback = None;
     for (prefix, path) in candidates {
-        let Ok(target_uri) = Url::from_file_path(&path) else {
+        let Some(target_uri) = crate::util::path_to_url(&path) else {
             continue;
         };
         let Some(target_content) = backend.get_file_content_arc(target_uri.as_str()) else {
@@ -436,9 +446,8 @@ pub(crate) fn find_all_config_references(
 
     // Usages: walk pre-built symbol spans — no file re-parse needed.
     for (file_uri, symbol_map) in snapshot {
-        let parsed_uri = match Url::parse(file_uri) {
-            Ok(u) => u,
-            Err(_) => continue,
+        let Some(parsed_uri) = crate::util::parse_url(file_uri) else {
+            continue;
         };
         // Read only once a span matches, and convert every match through
         // one line table rather than rescanning the file per hit.
@@ -542,7 +551,7 @@ pub(crate) fn resolve_config_key_definition_fallback(
         .into_iter()
         .find(|d| cursor_offset >= d.start && cursor_offset <= d.end)?;
 
-    let target_uri = Url::parse(uri).ok()?;
+    let target_uri = crate::util::parse_url(uri)?;
     let pos = crate::text_position::offset_to_position(content, match_.start);
     Some(crate::definition::point_location(target_uri, pos))
 }
@@ -557,7 +566,11 @@ mod tests {
     #[test]
     fn a_runtime_write_lasts_exactly_as_long_as_the_call_that_makes_it() {
         let backend = Backend::new_test();
-        backend.resolved_class_cache.write().set_laravel(true);
+        backend
+            .resolved_class_cache
+            .write()
+            .laravel_mut()
+            .set_enabled(true);
         let uri = "file:///project/tests/FixtureTest.php";
 
         backend.update_ast(
@@ -587,7 +600,11 @@ mod tests {
     #[test]
     fn a_deleted_file_takes_its_runtime_writes_with_it() {
         let backend = Backend::new_test();
-        backend.resolved_class_cache.write().set_laravel(true);
+        backend
+            .resolved_class_cache
+            .write()
+            .laravel_mut()
+            .set_enabled(true);
         let uri = "file:///project/tests/FixtureTest.php";
 
         backend.update_ast(
@@ -606,7 +623,11 @@ mod tests {
     #[test]
     fn vendor_runtime_writes_do_not_hide_application_writes_in_the_same_batch() {
         let backend = Backend::new_test();
-        backend.resolved_class_cache.write().set_laravel(true);
+        backend
+            .resolved_class_cache
+            .write()
+            .laravel_mut()
+            .set_enabled(true);
         backend
             .workspace
             .vendor_uri_prefixes
@@ -623,14 +644,14 @@ mod tests {
 
         backend.apply_ast_index_parse_results_batch(vec![vendor, application]);
 
-        let maps = backend.symbol_maps.read();
+        let vendor_map = backend.symbol_map_for(vendor_uri).unwrap();
         assert_eq!(
-            config_write_keys(&maps[vendor_uri]),
+            config_write_keys(&vendor_map),
             ["filesystems.disks.vendor-only"],
             "the vendor write was parsed, but must not declare application configuration"
         );
         assert_eq!(
-            *backend.laravel_runtime_config_keys.read(),
+            *backend.laravel.runtime_config_keys.read(),
             std::collections::HashMap::from([(
                 app_uri.to_string(),
                 vec!["filesystems.disks.application-only".to_string()],
@@ -638,7 +659,8 @@ mod tests {
         );
         assert!(
             !backend
-                .laravel_runtime_config_keys
+                .laravel
+                .runtime_config_keys
                 .read()
                 .contains_key(vendor_uri)
         );
@@ -860,7 +882,8 @@ return array_merge([
 
         let backend = Backend::new_test();
         backend
-            .workspace_indexed
+            .workspace_index
+            .indexed
             .store(true, std::sync::atomic::Ordering::Release);
         let uri = "file:///project/src/Consumer.php";
         let content = "redis";
@@ -882,10 +905,7 @@ return array_merge([
             .open_files
             .write()
             .insert(uri.to_string(), Arc::new(content.to_string()));
-        backend
-            .symbol_maps
-            .write()
-            .insert(uri.to_string(), Arc::clone(&map));
+        backend.publish_symbol_maps([(uri.to_string(), Arc::clone(&map))]);
         backend.reindex_references_for_symbol_maps_batch(vec![(uri.to_string(), map)]);
 
         let locations = find_config_references(&backend, uri, content, Position::new(0, 1), false)
@@ -930,7 +950,8 @@ return array_merge([
         let backend = Backend::new_test();
         *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
         backend
-            .laravel_provider_resources
+            .laravel
+            .provider_resources
             .write()
             .config_files
             .extend([
@@ -994,7 +1015,8 @@ return array_merge([
         let backend = Backend::new_test();
         *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
         backend
-            .laravel_provider_resources
+            .laravel
+            .provider_resources
             .write()
             .config_files
             .push(crate::virtual_members::laravel::ProviderResource {

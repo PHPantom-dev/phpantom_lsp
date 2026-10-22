@@ -41,7 +41,7 @@ fn the_kinds_completed_elsewhere_offer_no_candidates() {
 #[test]
 fn configured_resource_candidates_include_database_roles_and_null_drivers() {
     let backend = crate::test_fixtures::make_backend();
-    backend.laravel_string_key_cache.write().config_keys = Some(Arc::from([
+    backend.laravel.string_key_cache.write().config_keys = Some(Arc::from([
         "cache.stores.redis".to_string(),
         "database.connections.mysql".to_string(),
         "queue.connections.sync".to_string(),
@@ -900,7 +900,7 @@ fn detects_every_forget_disk_array_value_and_spelling() {
 #[test]
 fn forget_disk_array_completion_filters_and_edits_the_current_value() {
     let backend = crate::Backend::new_test();
-    backend.laravel_string_key_cache.write().config_keys = Some(
+    backend.laravel.string_key_cache.write().config_keys = Some(
         vec![
             "cache.stores.archive".to_string(),
             "filesystems.disks.archive".to_string(),

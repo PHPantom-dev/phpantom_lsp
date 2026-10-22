@@ -129,7 +129,7 @@ pub(super) fn collect_diagnostics(pass: DiagnosticPass<'_>) -> Vec<(String, Vec<
                             crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                                 content,
                                 &file_ctx.classes,
-                                &class_loaders.as_dyn(),
+                                &class_loaders.as_dyn_resolved(),
                                 &source_class_loaders.as_dyn(),
                                 &file_ctx.block_imports(),
                                 Some(backend),

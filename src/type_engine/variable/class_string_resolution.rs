@@ -12,6 +12,7 @@
 
 use std::sync::Arc;
 
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -41,8 +42,8 @@ pub(in crate::type_engine) fn classes_named_by(
             classes_named_by_type(
                 &rt.type_string,
                 &owning_class,
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             ),
         );
     }
@@ -66,7 +67,7 @@ pub(in crate::type_engine) fn classes_named_by_type(
     ty: &PhpType,
     owning_class: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<Arc<ClassInfo>> {
     let mut results = Vec::new();
     collect_named_classes(ty, owning_class, all_classes, class_loader, &mut results);
@@ -77,7 +78,7 @@ fn collect_named_classes(
     ty: &PhpType,
     owning_class: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     results: &mut Vec<Arc<ClassInfo>>,
 ) {
     match ty.kind() {
@@ -108,7 +109,7 @@ fn collect_named_classes(
                 && name
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'\\' || b >= 0x80);
-            if is_class_name && let Some(cls) = class_loader(name) {
+            if is_class_name && let Some(cls) = class_loader(Fqn::new(name)) {
                 ClassInfo::extend_unique_arc(results, vec![cls]);
             }
         }

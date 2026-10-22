@@ -18,11 +18,11 @@
 //! since the generics system does not cover them.
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::inheritance::{ClassRef, build_substitution_map};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, MethodInfo, ParameterInfo};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use super::helpers::{snake_to_pascal, walks_parent_chain};
 use super::{classify_relationship_typed, is_soft_deletes_trait};
@@ -88,7 +88,7 @@ pub(crate) fn model_to_factory_fqn(model_fqn: &str) -> String {
 /// carries nothing at all.
 pub(crate) fn factory_for_model(
     model: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> PhpType {
     let declared = |candidate: &ClassInfo| {
         candidate
@@ -103,7 +103,7 @@ pub(crate) fn factory_for_model(
                 .find_map(|(_, parent)| declared(&parent))
         })
         .unwrap_or_else(|| model_to_factory_fqn(&model.fqn()));
-    if let Some(class) = class_loader(&factory)
+    if let Some(class) = class_loader(Fqn::new(&factory))
         && extends_eloquent_factory(&class, class_loader)
     {
         return PhpType::named(atom(&class.fqn()));
@@ -156,7 +156,7 @@ fn is_eloquent_factory(class_name: &str) -> bool {
 /// Returns `true` if the class itself is `Factory` or any ancestor is.
 pub(crate) fn extends_eloquent_factory(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     walks_parent_chain(class, class_loader, is_eloquent_factory)
 }
@@ -180,7 +180,7 @@ fn has_factory_extends_generic(class: &ClassInfo) -> bool {
 /// type.
 fn declared_factory_model_type(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     // Preserve the allocation-free direct path, and allow isolated test/stub
     // classes to carry a complete declaration without loading the parent. A
@@ -232,7 +232,7 @@ fn declared_factory_model_type(
             return generic_model.or(property_model);
         }
 
-        let Some(parent) = class_loader(&parent_name) else {
+        let Some(parent) = class_loader(Fqn::new(&parent_name)) else {
             return property_model;
         };
         let level_subs = build_substitution_map(&current, &parent, &active_subs);
@@ -248,13 +248,13 @@ fn declared_factory_model_type(
 /// Find the first loadable model implied by a factory name, from leaf to base.
 fn conventional_factory_model_type(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let mut current = ClassRef::Borrowed(class);
 
     for _ in 0..MAX_INHERITANCE_DEPTH {
         if let Some(model_fqn) = factory_to_model_fqn(&current.fqn())
-            && class_loader(&model_fqn).is_some()
+            && class_loader(Fqn::new(&model_fqn)).is_some()
         {
             return Some(PhpType::named(atom(&model_fqn)));
         }
@@ -263,7 +263,7 @@ fn conventional_factory_model_type(
         if is_factory_class(&parent_name) {
             return None;
         }
-        current = ClassRef::Owned(class_loader(&parent_name)?);
+        current = ClassRef::Owned(class_loader(Fqn::new(&parent_name))?);
     }
 
     None
@@ -279,7 +279,7 @@ fn conventional_factory_model_type(
 /// invent a model.
 pub(crate) fn factory_model_type(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     declared_factory_model_type(class, class_loader)
         .or_else(|| conventional_factory_model_type(class, class_loader))
@@ -329,10 +329,7 @@ fn class_uses_soft_deletes_trait(class: &ClassInfo) -> bool {
 ///
 /// Full resolution keeps only the leaf class's `used_traits`, so callers
 /// pass the *raw* model here and this walks the parent chain explicitly.
-fn model_uses_soft_deletes(
-    class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
+fn model_uses_soft_deletes(class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
     if class_uses_soft_deletes_trait(class) {
         return true;
     }
@@ -344,7 +341,7 @@ fn model_uses_soft_deletes(
         if depth > MAX_INHERITANCE_DEPTH {
             break;
         }
-        match class_loader(&parent_name) {
+        match class_loader(Fqn::new(&parent_name)) {
             Some(parent) => {
                 if class_uses_soft_deletes_trait(&parent) {
                     return true;
@@ -371,7 +368,7 @@ fn model_uses_soft_deletes(
 /// traits or parent classes are visible.
 fn build_factory_relationship_methods(
     model_type: Option<&PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> Vec<MethodInfo> {
     let model_type = match model_type {
@@ -382,7 +379,7 @@ fn build_factory_relationship_methods(
         return Vec::new();
     };
 
-    let model = match class_loader(model_fqn) {
+    let model = match class_loader(Fqn::new(model_fqn)) {
         Some(m) => m,
         None => return Vec::new(),
     };
@@ -470,11 +467,7 @@ impl VirtualMemberProvider for LaravelFactoryProvider {
     /// generics: the generics system resolves `create()`/`make()` in that
     /// case, but not the dynamic relationship methods `provide()` still
     /// needs to synthesize.
-    fn applies_to(
-        &self,
-        class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> bool {
+    fn applies_to(&self, class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
         !is_eloquent_factory(&class.name) && extends_eloquent_factory(class, class_loader)
     }
 
@@ -485,7 +478,7 @@ impl VirtualMemberProvider for LaravelFactoryProvider {
     fn provide(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         cache: Option<&crate::virtual_members::ResolvedClassCache>,
     ) -> VirtualMembers {
         let model_type = factory_model_type(class, class_loader);
@@ -500,7 +493,7 @@ impl VirtualMemberProvider for LaravelFactoryProvider {
             cache,
         ));
         VirtualMembers {
-            methods: methods.into_iter().map(Arc::new).collect(),
+            methods: crate::types::into_arcs(methods),
             properties: Vec::new(),
             constants: Vec::new(),
         }

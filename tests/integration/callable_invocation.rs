@@ -3,23 +3,7 @@
 //! by-reference capture is there once the call it was handed to returns,
 //! read from the callee wherever it is declared.
 
-use phpantom_lsp::Backend;
-
-use crate::common::{
-    create_test_backend, create_test_backend_with_full_stubs, hover_at, hover_text,
-};
-
-/// Hover on the last occurrence of `needle` in `content`, opened as
-/// `file:///test.php` alongside whatever `backend` has indexed already.
-fn hover_last(backend: &Backend, content: &str, needle: &str) -> String {
-    let offset = content.rfind(needle).expect("needle present");
-    let before = &content[..offset];
-    let line = before.matches('\n').count() as u32;
-    let character = (offset - before.rfind('\n').map_or(0, |i| i + 1)) as u32;
-    let hover =
-        hover_at(backend, "file:///test.php", content, line, character).expect("expected hover");
-    hover_text(&hover).to_string()
-}
+use crate::common::{create_test_backend, create_test_backend_with_full_stubs, hover_last};
 
 /// A function declared in another file that keeps its callback for later
 /// may not have run it by the time it returns, so the capture can still

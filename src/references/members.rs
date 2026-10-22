@@ -38,7 +38,7 @@ impl Backend {
         include_declaration: bool,
     ) -> Vec<Location> {
         let targets = {
-            let index = self.laravel_macros.read();
+            let index = self.laravel.macros.read();
             index.targets_at(uri, span_start, name)
         };
         if targets.is_empty() {
@@ -155,7 +155,7 @@ impl Backend {
         let Some(targets) = targets else {
             return;
         };
-        let index = self.laravel_macros.read();
+        let index = self.laravel.macros.read();
         for target in targets.indexed() {
             if !index.has_macro(target, name) {
                 continue;
@@ -166,7 +166,7 @@ impl Backend {
             let Some(content) = self.get_file_content_arc(uri) else {
                 continue;
             };
-            let Ok(parsed_uri) = Url::parse(uri) else {
+            let Some(parsed_uri) = crate::util::parse_url(uri) else {
                 continue;
             };
             let start = offset_to_position(&content, offset as usize + 1);
@@ -180,14 +180,14 @@ impl Backend {
         locations: &mut Vec<Location>,
         name: &str,
     ) {
-        let index = self.laravel_macros.read();
+        let index = self.laravel.macros.read();
         let Some((uri, offset)) = index.unique_definition_for_name(name) else {
             return;
         };
         let Some(content) = self.get_file_content_arc(uri) else {
             return;
         };
-        let Ok(parsed_uri) = Url::parse(uri) else {
+        let Some(parsed_uri) = crate::util::parse_url(uri) else {
             return;
         };
         let start = offset_to_position(&content, offset as usize + 1);

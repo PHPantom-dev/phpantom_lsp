@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::atom::{Atom, AtomSet};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::inheritance;
 use crate::inheritance::bind_template_args;
 use crate::php_type::{PhpType, TypeKind};
@@ -71,7 +72,7 @@ pub(super) struct MixinSubs<'a> {
 /// that declares `@mixin`.
 pub(super) fn uses_trait_with_mixins(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     let mut queue: Vec<Atom> = class.used_traits.to_vec();
     let mut visited = AtomSet::default();
@@ -79,7 +80,7 @@ pub(super) fn uses_trait_with_mixins(
         if !visited.insert(trait_name) {
             continue;
         }
-        let Some(trait_info) = class_loader(&trait_name) else {
+        let Some(trait_info) = class_loader(Fqn::new(&trait_name)) else {
             continue;
         };
         if !trait_info.mixins.is_empty() {
@@ -104,7 +105,7 @@ pub(super) fn uses_trait_with_mixins(
 pub(super) fn collect_class_mixin_members(
     class: &ClassInfo,
     ancestors: &[(Arc<ClassInfo>, HashMap<String, PhpType>)],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     collector: &mut MixinCollector,
     cache: Option<&super::super::ResolvedClassCache>,
 ) {
@@ -163,7 +164,7 @@ pub(super) fn collect_class_mixin_members(
 /// classes between it and `class`, accumulated level by level.
 pub(super) fn template_bound_ancestors(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<(Arc<ClassInfo>, HashMap<String, PhpType>)> {
     let unbound = HashMap::new();
     let mut levels: Vec<(Arc<ClassInfo>, HashMap<String, PhpType>)> = Vec::new();
@@ -206,7 +207,7 @@ fn substituted_mixin_generics(
 pub(super) fn collect_trait_mixin_members(
     owner: &ClassInfo,
     owner_subs: &HashMap<String, PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     collector: &mut MixinCollector,
     decorated_forward: bool,
     cache: Option<&super::super::ResolvedClassCache>,
@@ -224,7 +225,7 @@ pub(super) fn collect_trait_mixin_members(
                 if !visited.insert(*trait_name) {
                     continue;
                 }
-                if let Some(trait_info) = class_loader(trait_name) {
+                if let Some(trait_info) = class_loader(Fqn::new(trait_name)) {
                     let trait_subs = build_trait_substitution_map(consumer, &trait_info, subs);
                     queue.push((trait_info, trait_subs));
                 }
@@ -279,7 +280,7 @@ pub(super) fn collect_trait_mixin_members(
 pub(super) fn collect_mixin_members(
     mixin_names: &[Atom],
     mixin_generics: &[(Atom, Vec<PhpType>)],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     collector: &mut MixinCollector,
     subs: &MixinSubs<'_>,
     depth: u32,
@@ -321,7 +322,7 @@ pub(super) fn collect_mixin_members(
             mixin_name.to_string()
         };
 
-        let mixin_class = if let Some(c) = class_loader(&resolved_mixin_name) {
+        let mixin_class = if let Some(c) = class_loader(Fqn::new(&resolved_mixin_name)) {
             c
         } else {
             continue;
@@ -578,7 +579,7 @@ pub(super) fn collect_mixin_members(
 /// Whether `class` (or an ancestor) uses Laravel's `ForwardsCalls` trait.
 pub(in crate::virtual_members) fn uses_forwards_calls(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     let uses_it = |owner: &ClassInfo| {
         owner
@@ -736,7 +737,7 @@ fn return_type_is_mixin_self(
 pub fn resolve_template_param_mixins(
     original_class: &ClassInfo,
     template_subs: &HashMap<String, PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> super::super::VirtualMembers {
     if template_subs.is_empty() || original_class.mixins.is_empty() {
         return super::super::VirtualMembers {

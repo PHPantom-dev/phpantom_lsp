@@ -120,7 +120,7 @@ against its native hint on one axis only: whether the annotation admits a
 the native hint on any *other* axis (`@param int` on a `string`, `@return
 array` on a `: string`) stays silent. That is the check PHPStan's
 `IncompatiblePhpDocTypeRule` performs, and the one the existing
-`is_type_compatible` in `src/diagnostics/type_errors/compatibility.rs`
+`is_type_compatible` in `src/class_lookup/compatibility.rs`
 already has the machinery for.
 
 Covering it means resolving the documented type's bare names first, since a
@@ -150,7 +150,7 @@ function keep(array $values): array {
 }
 ```
 
-`is_type_compatible` in `src/diagnostics/type_errors/compatibility.rs`
+`is_type_compatible` in `src/class_lookup/compatibility.rs`
 carries an explicit MAYBE hatch for `array<int, X>` reaching a `list<X>`
 parameter or return type, on the grounds that PHP codebases spell the two
 interchangeably. The core `is_subtype_of` already rejects the direction

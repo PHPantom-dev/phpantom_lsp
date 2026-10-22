@@ -230,7 +230,7 @@ impl SpineKeys {
         // reason (see `variable/resolution.rs`).  Two ResolutionCtx built
         // from the same file share `content` and thus the pointer, so
         // within-file sharing (the cache's actual purpose) is unaffected.
-        let file_id = ctx.content.as_ptr() as usize;
+        let file_id = ctx.file.content.as_ptr() as usize;
 
         // Within one file the same text still means different things where
         // its names are read differently: `self::make()` in two classes,
@@ -357,10 +357,15 @@ fn scope_type_discriminator(vars: &[String], ctx: &ResolutionCtx<'_>) -> Option<
             forward_walk::lookup_diagnostic_scope(name, ctx.cursor_offset).unwrap_or_default()
         };
 
+        // The class alone does not say what a chain through the variable
+        // resolves to: `Box<User>` and `Box<Post>` are both `Box`, and a
+        // bare `Closure` is the same class as `Closure(): User`.  The type
+        // carries the generic arguments and the callable signature, and the
+        // FQN tells apart two classes the type may spell alike.
         let mut parts: Vec<String> = resolved
             .iter()
             .map(|rt| match &rt.class_info {
-                Some(ci) => ci.fqn().to_string(),
+                Some(ci) => format!("{}:{}", ci.fqn(), rt.type_string),
                 None => rt.type_string.to_string(),
             })
             .collect();

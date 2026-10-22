@@ -59,7 +59,7 @@ impl Backend {
         // on `resolved_class_cache` is dropped before calling
         // `try_laravel_string_key_completion`, which may trigger
         // `ensure_workspace_indexed` → `update_ast` → write lock.
-        let is_laravel = self.resolved_class_cache.read().is_laravel();
+        let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         if is_laravel
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =

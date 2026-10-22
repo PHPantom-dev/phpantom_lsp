@@ -9,7 +9,8 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        LARAVEL_APP_COMPOSER, create_psr4_workspace, open_document, open_php, template_diagnostics,
+        LARAVEL_APP_COMPOSER, completion_response, create_psr4_workspace, open_document, open_php,
+        template_diagnostics,
     };
     use phpantom_lsp::Backend;
     use tower_lsp::LanguageServer;
@@ -145,21 +146,8 @@ class Post
     #[tokio::test]
     async fn registered_directives_are_offered_as_completions() {
         let (backend, _dir, uri) = start("<div>\n@\n</div>\n").await;
-        let response = backend
-            .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri },
-                    position: Position {
-                        line: 1,
-                        character: 1,
-                    },
-                },
-                work_done_progress_params: Default::default(),
-                partial_result_params: Default::default(),
-                context: None,
-            })
+        let response = completion_response(&backend, &uri, 1, 1, None)
             .await
-            .unwrap()
             .expect("directive completion should answer");
         let items = match response {
             CompletionResponse::Array(items) => items,

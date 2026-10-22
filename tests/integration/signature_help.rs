@@ -1,4 +1,4 @@
-use crate::common::{create_test_backend, create_test_backend_with_function_stubs};
+use crate::common::{create_test_backend, create_test_backend_with_function_stubs, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -10,15 +10,7 @@ async fn sig_help_at(
     line: u32,
     character: u32,
 ) -> Option<SignatureHelp> {
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(backend, uri, text).await;
 
     let params = SignatureHelpParams {
         text_document_position_params: TextDocumentPositionParams {
@@ -100,6 +92,50 @@ async fn imported_function_shadows_a_global_one() {
     assert_eq!(sig_label(&sh), "(string $name): void");
 }
 
+/// Until its `)` is typed, a call swallows the `}` of the braced block it is
+/// in.  It still resolves against that block's imports, not the namespace
+/// of the block before it.
+#[tokio::test]
+async fn unclosed_call_resolves_through_its_braced_blocks_imports() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///sig_unclosed_braced_import.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Lib {\n",
+        "    function greet(string $name): void {}\n",
+        "}\n",
+        "namespace Other {\n",
+        "    function greet(int $count): void {}\n",
+        "}\n",
+        "namespace App {\n",
+        "    use function Lib\\greet;\n",
+        "    greet(\n",
+        "}\n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 9, 10).await.unwrap();
+    assert_eq!(sig_label(&sh), "(string $name): void");
+}
+
+#[tokio::test]
+async fn unclosed_call_to_a_function_its_braced_block_declares() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///sig_unclosed_braced_local.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Other {\n",
+        "    function greet(int $count): void {}\n",
+        "}\n",
+        "namespace App {\n",
+        "    function greet(string $name): void {}\n",
+        "    greet(\n",
+        "}\n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 6, 10).await.unwrap();
+    assert_eq!(sig_label(&sh), "(string $name): void");
+}
+
 #[tokio::test]
 async fn qualified_function_expands_through_a_class_import() {
     let backend = create_test_backend();
@@ -131,16 +167,7 @@ async fn qualified_function_from_another_file_through_a_class_import() {
         "namespace Lib\\Helpers;\n",
         "function greet(string $name, int $times): void {}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: lib_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: lib.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &lib_uri, lib).await;
 
     let uri = Url::parse("file:///sig_app_caller.php").unwrap();
     let text = concat!(
@@ -770,27 +797,9 @@ async fn cross_file_psr4_method() {
     let client_uri = Url::from_file_path(_dir.path().join("src/Client.php")).unwrap();
 
     // Open both files
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: service_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: service_php.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &service_uri, service_php).await;
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: client_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: client_php.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &client_uri, client_php).await;
 
     let params = SignatureHelpParams {
         text_document_position_params: TextDocumentPositionParams {
@@ -1667,15 +1676,7 @@ namespace App {
 "#;
 
     // Open the file (triggers update_ast + diagnostics, populating caches).
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: content.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, content).await;
 
     // ── Step 1: Signature help on get() on PlainModel to seed Builder cache ──
     // We trigger signature help on get() first so the Builder FQN is

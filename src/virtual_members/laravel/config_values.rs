@@ -578,7 +578,7 @@ impl Backend {
 
     pub(crate) fn cached_config_trees(&self) -> std::sync::Arc<Vec<(String, ConfigNode)>> {
         self.cached_laravel_enumeration(
-            &self.laravel_string_key_build_locks.config_trees,
+            &self.laravel.string_key_build_locks.config_trees,
             |cache| cache.config_trees.clone(),
             |cache, trees| cache.config_trees = Some(trees),
             || std::sync::Arc::new(self.enumerate_config_trees()),

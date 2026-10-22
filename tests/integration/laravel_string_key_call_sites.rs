@@ -8,8 +8,9 @@
 //! variable behind `Env::get()`.
 
 use crate::common::{
-    LARAVEL_APP_COMPOSER, create_initialized_psr4_workspace, create_psr4_workspace,
-    markup_hover_at, open_initialized_php, open_php,
+    LARAVEL_APP_COMPOSER, completion_response, create_initialized_psr4_workspace,
+    create_psr4_workspace, goto_definition_at, markup_hover_at, open_initialized_php, open_php,
+    references_response,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -28,17 +29,7 @@ async fn definitions(
     let uri = Url::from_file_path(&path).unwrap();
     open_php(backend, &uri, &text).await;
 
-    let response = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    let response = goto_definition_at(backend, &uri, line, character).await;
     match response {
         Some(GotoDefinitionResponse::Scalar(location)) => vec![location],
         Some(GotoDefinitionResponse::Array(locations)) => locations,
@@ -242,20 +233,8 @@ async fn find_references_gathers_every_read_of_an_environment_variable() {
     }
 
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    let found = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position::new(4, 24),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext {
-                include_declaration: true,
-            },
-        })
+    let found = references_response(&backend, &uri, Position::new(4, 24), true)
         .await
-        .unwrap()
         .expect("an env key should have references");
 
     for expected in ["/app/Demo.php", "/config/mail.php", "/.env"] {
@@ -326,19 +305,7 @@ async fn the_env_helper_completes_the_projects_variables() {
     )
     .await;
 
-    let items = match backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position::new(4, 13),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap()
-    {
+    let items = match completion_response(&backend, &uri, 4, 13, None).await {
         Some(CompletionResponse::Array(items)) => items,
         Some(CompletionResponse::List(list)) => list.items,
         None => Vec::new(),

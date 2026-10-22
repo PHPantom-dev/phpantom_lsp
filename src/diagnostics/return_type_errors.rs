@@ -19,15 +19,17 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, SourceClassLoader, find_class_at_offset};
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::return_collection::collect_returns;
-use crate::type_engine::resolver::{CtxLoaders, LendsLoaders, Loaders, VarResolutionCtx};
-use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
+use crate::type_engine::resolver::{CtxLoaders, FileCtx, LendsLoaders, Loaders, VarResolutionCtx};
+use crate::type_engine::variable::iterable_elements::resolve_expression_type;
 use crate::types::ClassInfo;
 
-use super::helpers::{collect_type_check, template_bounds, template_bounds_in_scope};
+use super::helpers::{
+    FileDiagnosticContext, collect_type_check, template_bounds, template_bounds_in_scope,
+};
 use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for return type mismatch diagnostics.
@@ -61,12 +63,25 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        collect_type_check(
+        let ctx = FileDiagnosticContext::gather(self, uri);
+        self.collect_return_type_diagnostics_with_context(&ctx, uri, content, out);
+    }
+
+    /// [`Self::collect_return_type_diagnostics`] over an already-gathered
+    /// [`FileDiagnosticContext`].
+    pub(crate) fn collect_return_type_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        out.extend(collect_type_check(
             self,
+            &ctx.file,
             uri,
             content,
             TYPE_MISMATCH_RETURN_CODE,
-            out,
             // Walk the AST, find return statements in method/function
             // bodies, resolve their types, and pair them with the
             // declared return type.
@@ -124,7 +139,7 @@ impl Backend {
                 };
                 Some(((ret.start, ret.end), message))
             },
-        );
+        ));
     }
 }
 
@@ -138,15 +153,14 @@ impl Backend {
 fn evaluate_declared_return(
     declared: PhpType,
     current_class: &ClassInfo,
-    content: &str,
-    all_classes: &[Arc<ClassInfo>],
+    file: FileCtx<'_>,
     loaders: CtxLoaders<'_>,
     backend: &Backend,
 ) -> PhpType {
     if !declared.contains_unevaluated_operator() {
         return declared;
     }
-    let ctx = backend.resolution_ctx_at(Some(current_class), all_classes, content, 0, loaders);
+    let ctx = backend.resolution_ctx_at(file, Some(current_class), 0, loaders);
     crate::type_engine::call_resolution::evaluate_constant_operands(&declared, &ctx)
         .unwrap_or(declared)
 }
@@ -168,8 +182,8 @@ fn resolve_return_and_push(
     current_class: &ClassInfo,
     content: &str,
     file_ctx: &crate::types::FileContext,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    resolved_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     loaders: Loaders<'_>,
     backend: &Backend,
     out: &mut Vec<ResolvedReturn>,
@@ -250,18 +264,20 @@ fn resolve_return_and_push(
             }
 
             let var_ctx = VarResolutionCtx {
-                source_imports: Some(file_ctx.use_map_at(start as u32)),
-                backend: Some(backend),
                 loaders,
                 resolved_class_cache: Some(&backend.resolved_class_cache),
                 ..VarResolutionCtx::new(
                     "",
+                    FileCtx::new(
+                        content,
+                        &file_ctx.classes,
+                        resolved_class_loader,
+                        class_loader,
+                    )
+                    .with_imports(Some(file_ctx.use_map_at(start as u32)))
+                    .with_backend(Some(backend)),
                     current_class,
-                    &file_ctx.classes,
-                    content,
                     start as u32,
-                    resolved_class_loader,
-                    class_loader,
                 )
             };
 
@@ -276,7 +292,7 @@ fn resolve_return_and_push(
             }
 
             // Resolve short class names to FQN.
-            let ty = resolve_class_names(ty, resolved_class_loader);
+            let ty = resolve_class_names(ty, &|name| resolved_class_loader(Fqn::new(name)));
 
             out.push(ResolvedReturn {
                 ty: Some(ty),
@@ -335,8 +351,8 @@ fn process_top_level_statement(
     uri: &str,
     content: &str,
     file_ctx: &crate::types::FileContext,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    resolved_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &Backend,
@@ -434,14 +450,14 @@ fn process_top_level_statement(
             let declared_return = evaluate_declared_return(
                 declared_return,
                 current_class,
-                content,
-                &file_ctx.classes,
-                CtxLoaders::without_macro_this(
+                FileCtx::new(
+                    content,
+                    &file_ctx.classes,
                     resolved_class_loader,
                     class_loader,
-                    function_loader,
                 )
-                .with_imports(file_ctx.use_map_at(func_offset)),
+                .with_imports(Some(file_ctx.use_map_at(func_offset))),
+                CtxLoaders::without_macro_this(function_loader),
                 backend,
             );
 
@@ -512,8 +528,8 @@ fn process_class_member(
     member: &mago_syntax::cst::class_like::member::ClassLikeMember<'_>,
     content: &str,
     file_ctx: &crate::types::FileContext,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    resolved_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &Backend,
@@ -590,7 +606,7 @@ fn process_class_member(
             if name.contains("__anonymous@") {
                 return name.to_string();
             }
-            if let Some(cls) = resolved_class_loader(name) {
+            if let Some(cls) = resolved_class_loader(Fqn::new(name)) {
                 cls.fqn().to_string()
             } else {
                 name.to_string()
@@ -600,10 +616,14 @@ fn process_class_member(
     let declared_return = evaluate_declared_return(
         declared_return,
         current_class,
-        content,
-        &file_ctx.classes,
-        CtxLoaders::without_macro_this(resolved_class_loader, class_loader, function_loader)
-            .with_imports(file_ctx.use_map_at(method_offset)),
+        FileCtx::new(
+            content,
+            &file_ctx.classes,
+            resolved_class_loader,
+            class_loader,
+        )
+        .with_imports(Some(file_ctx.use_map_at(method_offset))),
+        CtxLoaders::without_macro_this(function_loader),
         backend,
     );
     let declared_return =

@@ -687,10 +687,7 @@ class Registry {
 }
 
 #[test]
-fn does_not_yet_flag_wrong_type_to_static_property_self() {
-    // BUG: static property assignments via self:: are not type-checked
-    // against the declared type. This test documents the current
-    // (incorrect) behavior. When fixed, flip the assertion.
+fn flags_wrong_type_to_static_property_self() {
     let php = r#"<?php
 class Registry {
     public static int $count = 0;
@@ -702,8 +699,8 @@ class Registry {
 "#;
     let diags = collect(php);
     assert!(
-        !has_property_error(&diags),
-        "Known gap: static property assignment via self:: not yet type-checked, got: {diags:?}"
+        has_property_error(&diags),
+        "Expected property type error via self::, got: {diags:?}"
     );
 }
 
@@ -726,10 +723,7 @@ class Cache {
 }
 
 #[test]
-fn does_not_yet_flag_wrong_type_to_static_property_static() {
-    // BUG: static property assignments via static:: are not type-checked
-    // against the declared type. This test documents the current
-    // (incorrect) behavior. When fixed, flip the assertion.
+fn flags_wrong_type_to_static_property_static() {
     let php = r#"<?php
 class Cache {
     public static string $key = '';
@@ -741,8 +735,8 @@ class Cache {
 "#;
     let diags = collect(php);
     assert!(
-        !has_property_error(&diags),
-        "Known gap: static property assignment via static:: not yet type-checked, got: {diags:?}"
+        has_property_error(&diags),
+        "Expected property type error via static::, got: {diags:?}"
     );
 }
 
@@ -1677,12 +1671,11 @@ class DynAccess {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Edge case: non-$this property access — should be skipped
+// Non-$this property access
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
-fn no_diagnostic_for_non_this_property_access() {
-    // We only check $this->prop and self::$prop, not $other->prop
+fn flags_wrong_type_through_a_parameter_in_another_class() {
     let php = r#"<?php
 class Foo {
     public int $x;
@@ -1690,14 +1683,14 @@ class Foo {
 
 class Bar {
     public function set(Foo $foo): void {
-        $foo->x = "wrong but we skip non-$this";
+        $foo->x = "wrong";
     }
 }
 "#;
     let diags = collect(php);
     assert!(
-        !has_property_error(&diags),
-        "Should not flag assignment to non-$this property (not checked), got: {diags:?}"
+        has_property_error(&diags),
+        "Expected property type error through $foo, got: {diags:?}"
     );
 }
 
@@ -2703,5 +2696,126 @@ class Engine {
         !has_property_error(&diags),
         "`$filter` in setCodeFilter() is an ArtifactFilter, got: {:?}",
         property_error_messages(&diags)
+    );
+}
+
+// ─── Writes through other receivers ────────────────────────────────────────
+
+#[test]
+fn flags_write_through_another_object() {
+    let php = r#"<?php
+final class Holder { public int $n = 1; }
+
+function f(Holder $h): void { $h->n = 'no'; }
+function h(Holder $h): void { $h->n = 1; }
+"#;
+    let msgs = property_error_messages(&collect(php));
+    assert_eq!(
+        msgs.len(),
+        1,
+        "only the string write is wrong, got: {msgs:?}"
+    );
+    assert!(msgs[0].contains("$n"), "got: {msgs:?}");
+}
+
+#[test]
+fn flags_static_write_through_a_class_name() {
+    let php = r#"<?php
+namespace App;
+
+final class Holder { public static int $count = 1; }
+
+function g(): void { Holder::$count = 'no'; }
+function ok(): void { \App\Holder::$count = 2; }
+"#;
+    let msgs = property_error_messages(&collect(php));
+    assert_eq!(
+        msgs.len(),
+        1,
+        "only the string write is wrong, got: {msgs:?}"
+    );
+    assert!(msgs[0].contains("$count"), "got: {msgs:?}");
+}
+
+#[test]
+fn flags_static_write_through_a_class_string() {
+    let php = r#"<?php
+final class Holder { public static int $count = 1; }
+
+/** @param class-string<Holder> $c */
+function i(string $c): void { $c::$count = 'no'; }
+"#;
+    assert!(
+        has_property_error(&collect(php)),
+        "the class-string receiver is a Holder"
+    );
+}
+
+#[test]
+fn flags_write_to_an_inherited_property() {
+    let php = r#"<?php
+class Base { public int $n = 1; }
+final class Child extends Base {}
+
+function f(Child $c): void { $c->n = 'no'; }
+"#;
+    assert!(
+        has_property_error(&collect(php)),
+        "Child inherits the int property"
+    );
+}
+
+#[test]
+fn write_through_a_union_receiver_needs_every_branch_to_reject_it() {
+    let php = r#"<?php
+final class A { public int $v = 1; }
+final class B { public string $v = ''; }
+
+function f(A|B $x): void { $x->v = 'text'; }
+function g(A|B $x): void { $x->v = []; }
+"#;
+    let msgs = property_error_messages(&collect(php));
+    assert_eq!(
+        msgs.len(),
+        1,
+        "a string fits B, an array fits neither, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn write_to_a_generic_property_uses_the_receivers_substitution() {
+    let php = r#"<?php
+/** @template T */
+final class Box {
+    /** @var T */
+    public $value;
+}
+
+/** @param Box<int> $b */
+function f(Box $b): void { $b->value = 'no'; }
+/** @param Box<int> $b */
+function g(Box $b): void { $b->value = 3; }
+"#;
+    let msgs = property_error_messages(&collect(php));
+    assert_eq!(
+        msgs.len(),
+        1,
+        "only the string write is wrong, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_a_virtual_property_write() {
+    let php = r#"<?php
+/** @property int $n */
+final class Magic {
+    public function __set(string $name, mixed $value): void {}
+}
+
+function f(Magic $m): void { $m->n = 'converted by __set'; }
+"#;
+    assert!(
+        !has_property_error(&collect(php)),
+        "__set decides what a magic property accepts"
     );
 }

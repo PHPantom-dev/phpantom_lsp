@@ -38,7 +38,8 @@ pub(super) fn extract_nested_array_access_chain<'a, 'b>(
                 return Some((bytes_to_str(dv.name).to_string(), keys));
             }
             Expression::Access(Access::Property(_) | Access::StaticProperty(_)) => {
-                let base = crate::type_engine::types::narrowing::expr_to_subject_key(current)?;
+                let base =
+                    crate::type_engine::type_ops::condition_facts::expr_to_subject_key(current)?;
                 keys.reverse();
                 return Some((base, keys));
             }
@@ -525,9 +526,9 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
         let key_type = if let Some(class) = class_name_key(key) {
             PhpType::class_string(Some(PhpType::named(atom(class))))
         } else if is_decimal_int_array_key(key) {
-            PhpType::int()
+            PhpType::literal_int(key)
         } else {
-            PhpType::string()
+            PhpType::literal_string_value(key)
         };
         return merge_keyed_type_inner(base, &key_type, value_type, true);
     }
@@ -997,14 +998,23 @@ fn merge_keyed_type_inner(
     // through the benevolence marker, so the leniency decision below reads
     // the types as they arrived rather than as they normalize.
     let existing_key = base.iterable_key_type();
-    let normalized_key = normalize_array_key_type(key_type)
+    // A key domain spelled out as literals (`array<'a'|'b', V>`) is kept
+    // as literals, so a write under one of them leaves it as it was and one
+    // under a new literal adds just that key. Any other domain is already
+    // as wide as the literal's base type, which it absorbs anyway.
+    let keep_literals = existing_key.as_ref().is_some_and(|key| {
+        key.union_members()
+            .iter()
+            .any(|member| member.as_literal().is_some())
+    });
+    let normalized_key = normalize_key_type(key_type, keep_literals)
         .unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::string()]));
 
     // Collect existing key types from the base.
     let mut key_types: Vec<PhpType> = Vec::new();
     if let Some(normalized_existing) = existing_key
         .as_ref()
-        .and_then(normalize_array_key_type)
+        .and_then(|key| normalize_key_type(key, keep_literals))
         .filter(|key| !key.is_empty())
     {
         for member in normalized_existing.union_members() {
@@ -1135,8 +1145,11 @@ pub(super) fn merge_array_plus(lhs: &PhpType, rhs: &PhpType) -> PhpType {
 /// all-integer key domain to the full `array-key`.
 pub(super) fn infer_array_key_type(index: &Expression<'_>, resolved: &[ResolvedType]) -> PhpType {
     // Fast path: literal values.
-    if let Expression::Literal(Literal::Integer(_)) = index {
-        return PhpType::int();
+    if let Expression::Literal(Literal::Integer(int_lit)) = index {
+        return match int_lit.value {
+            Some(value) => PhpType::literal_int(value.to_string()),
+            None => PhpType::int(),
+        };
     }
 
     if !resolved.is_empty() {
@@ -1158,6 +1171,13 @@ pub(super) fn infer_array_key_type(index: &Expression<'_>, resolved: &[ResolvedT
 /// the empty string key. Literal and refined scalar types must not escape
 /// into `array<K, V>` payloads.
 pub(super) fn normalize_array_key_type(ty: &PhpType) -> Option<PhpType> {
+    normalize_key_type(ty, false)
+}
+
+/// [`normalize_array_key_type`], but with `keep_literals` an integer or
+/// string literal stays the literal key it names, a decimal-integer string
+/// becoming the integer PHP stores it as.
+fn normalize_key_type(ty: &PhpType, keep_literals: bool) -> Option<PhpType> {
     fn is_non_numeric_string_domain(ty: &PhpType) -> bool {
         match ty.kind() {
             TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => true,
@@ -1177,11 +1197,30 @@ pub(super) fn normalize_array_key_type(ty: &PhpType) -> Option<PhpType> {
         }
     }
 
-    fn collect(ty: &PhpType, normalized: &mut Vec<PhpType>) -> bool {
+    fn is_kept_key_refinement(ty: &PhpType) -> bool {
         match ty.kind() {
-            TypeKind::Union(members) => members.iter().all(|member| collect(member, normalized)),
+            TypeKind::Named(name) => matches!(
+                name.to_ascii_lowercase().as_str(),
+                "non-empty-string"
+                    | "non-falsy-string"
+                    | "truthy-string"
+                    | "lowercase-string"
+                    | "non-empty-lowercase-string"
+                    | "uppercase-string"
+                    | "non-empty-uppercase-string"
+            ),
+            TypeKind::Intersection(members) => members.iter().all(is_kept_key_refinement),
+            _ => false,
+        }
+    }
+
+    fn collect(ty: &PhpType, keep_literals: bool, normalized: &mut Vec<PhpType>) -> bool {
+        match ty.kind() {
+            TypeKind::Union(members) => members
+                .iter()
+                .all(|member| collect(member, keep_literals, normalized)),
             TypeKind::Nullable(inner) => {
-                if !collect(inner, normalized) {
+                if !collect(inner, keep_literals, normalized) {
                     return false;
                 }
                 // PHP converts the nullable branch to the empty string key.
@@ -1194,14 +1233,22 @@ pub(super) fn normalize_array_key_type(ty: &PhpType) -> Option<PhpType> {
             }
             TypeKind::Literal(value) if matches!(&**value, LiteralValue::String(_)) => {
                 let content = value.string_content().unwrap_or_default();
+                let decimal = is_decimal_int_array_key(&content);
                 push_unique(
                     normalized,
-                    if is_decimal_int_array_key(&content) {
-                        PhpType::int()
-                    } else {
-                        PhpType::string()
+                    match (keep_literals, decimal) {
+                        (true, true) => PhpType::literal_int(content.as_ref()),
+                        (true, false) => ty.clone(),
+                        (false, true) => PhpType::int(),
+                        (false, false) => PhpType::string(),
                     },
                 );
+                true
+            }
+            TypeKind::Literal(value)
+                if keep_literals && matches!(&**value, LiteralValue::Int(_)) =>
+            {
+                push_unique(normalized, ty.clone());
                 true
             }
             _ if ty.is_array_key() => {
@@ -1217,6 +1264,14 @@ pub(super) fn normalize_array_key_type(ty: &PhpType) -> Option<PhpType> {
             // integer, so PHP stores it as the string it is and the refined
             // type is already a valid key.
             _ if is_non_numeric_string_domain(ty) => {
+                push_unique(normalized, ty.clone());
+                true
+            }
+            // A string's case and emptiness survive its use as a key, so
+            // `$map[strtolower($name)]` keys a `lowercase-string` map.
+            // Like PHPStan, this sets aside the decimal-integer string
+            // (`"123"` is lower-case too) that PHP would store as an int.
+            _ if is_kept_key_refinement(ty) => {
                 push_unique(normalized, ty.clone());
                 true
             }
@@ -1239,7 +1294,7 @@ pub(super) fn normalize_array_key_type(ty: &PhpType) -> Option<PhpType> {
     }
 
     let mut normalized = Vec::new();
-    if !collect(ty, &mut normalized) || normalized.is_empty() {
+    if !collect(ty, keep_literals, &mut normalized) || normalized.is_empty() {
         return None;
     }
     match normalized.len() {

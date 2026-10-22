@@ -13,6 +13,7 @@ use super::arithmetic::{
     infer_modulo_result_type,
 };
 use super::resolve_rhs_expression;
+use super::scalar_fold::concat_result;
 
 /// Resolve an assignment expression used as a value, not just a
 /// statement: `$x = ($y = 1)`, `$x = $a ?? ($y = 1) ?? 1`.
@@ -112,7 +113,8 @@ pub(crate) fn coalesce_assign_value(
 /// side produces.
 ///
 /// The operand closures are only called for the operators that need them,
-/// so a `.=` never pays for resolving its right-hand side.
+/// so a `.=` onto a target that is already non-falsy never pays for
+/// resolving its right-hand side.
 ///
 /// `??=` and plain `=` return `None`: neither is decided by the operator
 /// alone, so each caller settles them for itself.
@@ -122,7 +124,7 @@ pub(crate) fn compound_assignment_result(
     rhs_types: impl FnOnce() -> Vec<ResolvedType>,
 ) -> Option<PhpType> {
     match operator {
-        AssignmentOperator::Concat(_) => Some(PhpType::string()),
+        AssignmentOperator::Concat(_) => Some(concat_result(&lhs_types(), rhs_types)),
         AssignmentOperator::Modulo(_) => Some(infer_modulo_result_type(&lhs_types(), &rhs_types())),
         AssignmentOperator::LeftShift(_)
         | AssignmentOperator::RightShift(_)

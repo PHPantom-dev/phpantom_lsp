@@ -33,7 +33,7 @@ use crate::blade::contract::{AcceptedNames, TemplateContract};
 use crate::symbol_map::{LaravelStringKind, SymbolKind};
 
 use super::helpers::make_diagnostic;
-use super::type_errors::compatibility::is_type_compatible;
+use super::type_errors::is_type_compatible;
 
 /// A declared variable the call site does not pass.
 const MISSING_CODE: &str = "missing_view_variable";
@@ -51,16 +51,15 @@ impl Backend {
     /// ranges translate back through the source map.
     pub(super) fn collect_blade_call_site_diagnostics(
         &self,
+        ctx: &super::helpers::FileDiagnosticContext,
         uri: &str,
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
         // The view name each recorded key sits at, so a call site found by
         // offset can be traced back to the template it names.
-        let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
-            return;
-        };
-        let extra = self.typed_receiver_view_spans_for(uri, &symbol_map);
+        let symbol_map = &ctx.symbol_map;
+        let extra = self.typed_receiver_view_spans_for(uri, symbol_map);
         let keys: HashMap<u32, String> = symbol_map
             .spans
             .iter()
@@ -98,8 +97,8 @@ impl Backend {
         // in for the file-wide answer without cloning it.
         let no_inherited = HashSet::new();
 
-        let file_ctx = self.file_context(uri);
-        let class_loader = self.resolved_class_loader(&file_ctx);
+        let file_ctx = &ctx.file;
+        let class_loader = self.resolved_class_loader(file_ctx);
 
         let mut contracts: HashMap<String, Option<TemplateContract>> = HashMap::new();
         let mut accepted: HashMap<String, AcceptedNames> = HashMap::new();
@@ -169,11 +168,8 @@ impl Backend {
             if let Some(inherited) = site_inherited {
                 // A component's `render()` hands its template every public
                 // member of the class, so those are not the call's to pass.
-                let from_class = self.component_render_scope(
-                    &file_ctx,
-                    site.name_range.0,
-                    &mut component_scopes,
-                );
+                let from_class =
+                    self.component_render_scope(file_ctx, site.name_range.0, &mut component_scopes);
                 for (name, ty) in &contract.vars {
                     if contract.supplied.contains(name)
                         || from_class.contains(name)
@@ -189,7 +185,7 @@ impl Backend {
                         self.check_inherited_var(
                             uri,
                             content,
-                            &file_ctx,
+                            file_ctx,
                             (view_name, site.name_range),
                             (name, ty),
                             out,

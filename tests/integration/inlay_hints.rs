@@ -1,20 +1,11 @@
 use crate::common::{
-    create_psr4_workspace, create_test_backend, create_test_backend_with_function_stubs,
+    create_psr4_workspace, create_test_backend, create_test_backend_with_function_stubs, open_php,
 };
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 /// Helper: open a file and request inlay hints for the entire file.
 async fn inlay_hints_for(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) -> Vec<InlayHint> {
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(backend, uri, text).await;
 
     let line_count = text.lines().count() as u32;
     let last_line_len = text.lines().last().map(|l| l.len() as u32).unwrap_or(0);
@@ -572,15 +563,7 @@ foo('line3');
 foo('line4');
 "#;
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Request only lines 2-3 (0-based), which covers `foo('line2')` and `foo('line3')`.
     let range = Range {
@@ -623,15 +606,7 @@ make(
 );
 "#;
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Exclude the first argument's line ('p') from the requested range; the
     // remaining arguments must still map to their own parameter, not the

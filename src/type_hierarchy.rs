@@ -10,6 +10,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::names::resolve_to_fqn;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind as MapSymbolKind};
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::{ClassInfo, ClassLikeKind};
@@ -103,7 +104,7 @@ impl Backend {
             let (resolved_fqn, super_info) = if let Some(info) = self.find_or_load_class(name) {
                 (name.to_string(), info)
             } else {
-                let fqn = Self::resolve_to_fqn(name, use_map, namespace);
+                let fqn = resolve_to_fqn(name, use_map, namespace);
                 match self.find_or_load_class(&fqn) {
                     Some(info) => (fqn, info),
                     None => continue,
@@ -161,26 +162,25 @@ impl Backend {
         // it searches all files in the uri_classes_index.  If that fails, fall
         // back to get_file_content for files that might be open or on
         // disk.
-        let (class_uri, class_content) = self
-            .find_class_file_content(fqn, "", "")
-            .or_else(|| self.find_class_file_content(&class_info.name, "", ""))
-            .unwrap_or_else(|| {
-                // Last resort: try to find the URI from the fqn_uri_index
-                // and read from disk / open_files.
-                let uri = self
-                    .symbols
-                    .fqn_uri_index
-                    .read()
-                    .get(fqn)
-                    .cloned()
-                    .unwrap_or_default();
-                let content = if !uri.is_empty() {
-                    self.get_file_content(&uri).unwrap_or_default()
-                } else {
-                    String::new()
-                };
-                (uri, content)
-            });
+        let (class_uri, class_content) =
+            self.find_class_file_content(fqn, "", "")
+                .unwrap_or_else(|| {
+                    // Last resort: try to find the URI from the fqn_uri_index
+                    // and read from disk / open_files.
+                    let uri = self
+                        .symbols
+                        .fqn_uri_index
+                        .read()
+                        .get(fqn)
+                        .cloned()
+                        .unwrap_or_default();
+                    let content = if !uri.is_empty() {
+                        self.get_file_content(&uri).unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    (uri, content)
+                });
 
         build_type_hierarchy_item(class_info, fqn, &class_uri, &class_content)
     }
@@ -197,7 +197,7 @@ fn build_type_hierarchy_item(
     uri: &str,
     content: &str,
 ) -> TypeHierarchyItem {
-    let parsed_uri = Url::parse(uri).unwrap_or_else(|_| Url::parse("file:///unknown").unwrap());
+    let parsed_uri = crate::util::parse_url(uri).unwrap_or_else(crate::util::unknown_url);
 
     let kind = class_like_kind_to_symbol_kind(class_info.kind);
 

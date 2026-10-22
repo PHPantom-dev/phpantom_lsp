@@ -64,7 +64,7 @@ pub(crate) fn psr4_expectation(
     }
 
     let workspace_root = backend.workspace_root().read().clone()?;
-    let file_path = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok())?;
+    let file_path = crate::util::uri_to_path(uri)?;
 
     let mappings = backend.psr4_mappings().read().clone();
     if mappings.is_empty() {

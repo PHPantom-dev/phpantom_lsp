@@ -60,7 +60,7 @@ pub(super) fn apply_null_order_narrowing<'b>(
     ctx: &ForwardWalkCtx<'_>,
     truthy: bool,
 ) {
-    let (inner, negated) = narrowing::unwrap_condition_negation(condition);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(condition);
     let Expression::Binary(bin) = inner else {
         return;
     };
@@ -404,7 +404,7 @@ fn recorded_narrows_current(
             wide.type_string.unwrap_nullable().class_name(),
         ) {
             (Some(child), Some(parent)) => {
-                crate::class_lookup::is_subclass_of(child, parent, ctx.class_loader)
+                crate::class_lookup::is_subclass_of(child, parent, ctx.file.class_loader)
             }
             _ => false,
         }

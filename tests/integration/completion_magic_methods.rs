@@ -1,5 +1,4 @@
-use crate::common::create_test_backend;
-use tower_lsp::LanguageServer;
+use crate::common::{completion_response, create_test_backend, open_php};
 use tower_lsp::lsp_types::*;
 
 /// The class under test declares several magic methods plus an ordinary
@@ -24,31 +23,12 @@ async fn test_magic_methods_offered_but_sorted_last() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///magic_sort.php").unwrap();
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: SOURCE.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, SOURCE).await;
 
     // Cursor after `$x->` on line 9.
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 9,
-                character: 4,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-    let result = backend.completion(params).await.unwrap().unwrap();
+    let result = completion_response(&backend, &uri, 9, 4, None)
+        .await
+        .unwrap();
 
     let items = match result {
         CompletionResponse::Array(items)

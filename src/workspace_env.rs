@@ -33,6 +33,13 @@ pub(crate) struct WorkspaceEnv {
     /// Canonical vendor package roots paired with completion provenance.
     pub(crate) vendor_package_origin_roots:
         Arc<RwLock<Vec<(PathBuf, ClassCompletionOrigin, String)>>>,
+    /// What each indexed Composer project (the workspace root, or each
+    /// subproject of a monorepo) contributed to `psr4_mappings` and
+    /// `vendor_package_origin_roots`, which are the union of these.
+    ///
+    /// Kept per project so a `composer update` in one subproject replaces
+    /// that subproject's share and leaves the others' alone.
+    pub(crate) composer_projects: Arc<RwLock<Vec<ComposerProjectPaths>>>,
     /// The target PHP version used for version-aware stub filtering.
     pub(crate) php_version: Mutex<PhpVersion>,
     /// Per-project configuration loaded from `.phpantom.toml`.
@@ -82,6 +89,16 @@ pub(crate) struct WorkspaceEnv {
     pub(crate) filter_rediscovery_generation: Arc<AtomicU64>,
 }
 
+/// The share of the workspace-wide autoload lists one Composer project
+/// contributed.
+#[derive(Default)]
+pub(crate) struct ComposerProjectPaths {
+    /// The directory holding the project's `composer.json`.
+    pub(crate) root: PathBuf,
+    pub(crate) psr4_mappings: Vec<composer::Psr4Mapping>,
+    pub(crate) package_roots: Vec<(PathBuf, ClassCompletionOrigin, String)>,
+}
+
 impl WorkspaceEnv {
     /// The environment a real session runs in: the global config layer
     /// comes from the platform config directory.
@@ -101,6 +118,7 @@ impl WorkspaceEnv {
             vendor_uri_prefixes: Mutex::new(Vec::new()),
             vendor_dir_paths: Mutex::new(Vec::new()),
             vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
+            composer_projects: Arc::new(RwLock::new(Vec::new())),
             php_version: Mutex::new(PhpVersion::default()),
             config: Arc::new(Mutex::new(config::Config::default())),
             global_config_path,
@@ -120,6 +138,7 @@ impl Clone for WorkspaceEnv {
             vendor_uri_prefixes: Mutex::new(self.vendor_uri_prefixes.lock().clone()),
             vendor_dir_paths: Mutex::new(self.vendor_dir_paths.lock().clone()),
             vendor_package_origin_roots: Arc::clone(&self.vendor_package_origin_roots),
+            composer_projects: Arc::clone(&self.composer_projects),
             php_version: Mutex::new(*self.php_version.lock()),
             config: Arc::clone(&self.config),
             global_config_path: self.global_config_path.clone(),
@@ -173,9 +192,9 @@ mod tests {
     fn clone_preserves_the_global_config_path() {
         let path = std::path::PathBuf::from("/tmp/global/.phpantom.toml");
         let mut backend = Backend::new_test();
-        backend.workspace.global_config_path = Some(path.clone());
+        backend.state_mut().workspace.global_config_path = Some(path.clone());
 
-        let clone = backend.clone_for_diagnostic_worker();
+        let clone = backend.clone_for_blocking();
 
         assert_eq!(clone.workspace.global_config_path.as_deref(), Some(&*path));
     }
@@ -310,7 +329,7 @@ mod tests {
     #[test]
     fn clone_shares_the_client_filter_layer() {
         let (backend, dir) = backend_with_config("");
-        let clone = backend.clone_for_diagnostic_worker();
+        let clone = backend.clone_for_blocking();
 
         clone.set_client_indexing_options(client_options(&["generated"], &[]));
 

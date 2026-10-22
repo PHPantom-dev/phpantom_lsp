@@ -1,9 +1,10 @@
 //! Import class code action.
 //!
-//! When the cursor is on an unresolved class name (a `ClassReference` in
-//! the symbol map that cannot be resolved via use-map, namespace, or
-//! local classes), offer code actions to add a `use` statement for each
-//! matching class found in the class index and stubs.
+//! When the cursor is on an unresolved class name (an unqualified class
+//! reference or static access subject that cannot be resolved via
+//! use-map, namespace, or local classes), offer code actions to add a
+//! `use` statement for each matching class found in the class index and
+//! stubs.
 //!
 //! The bulk "Import all missing classes" action lives in
 //! [`super::import_all_classes`].
@@ -13,25 +14,43 @@ use std::collections::{HashMap, HashSet};
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::backend::file_access::ImportBlock;
 use crate::completion::use_edit::{build_use_edit, use_import_conflicts};
 use crate::diagnostics::unknown_classes::UNKNOWN_CLASS_CODE;
 
 use crate::class_lookup::is_class_keyword;
-use crate::symbol_map::{ClassRefContext, SymbolKind};
+use crate::symbol_map::{ClassRefContext, MappedSource, SymbolKind, SymbolSpan};
 use crate::types::ClassLikeKind;
 use crate::util::short_name;
 
-fn span_matches_request(
-    span_start: usize,
-    span_end: usize,
-    request_start: usize,
-    request_end: usize,
-) -> bool {
-    if request_start == request_end {
-        span_start <= request_start && request_start < span_end
-    } else {
-        span_start < request_end && span_end > request_start
+use super::span_overlaps_request;
+
+/// The class name `span` writes when it is an unqualified one that may
+/// need an import, with the context it is written in.
+///
+/// That is a class reference that is not fully qualified, or the subject
+/// of a static member access (`Foo::bar()`, which the symbol map records
+/// as one member access rather than a class reference) that is not a
+/// variable, a qualified name, or a class keyword.
+pub(super) fn unqualified_class_name<'a>(
+    span: &'a SymbolSpan,
+    source: MappedSource<'a>,
+) -> Option<(&'a str, ClassRefContext)> {
+    match &span.kind {
+        SymbolKind::ClassReference {
+            name,
+            is_fqn: false,
+            context,
+        } if !name.contains('\\') => Some((name.as_str(), *context)),
+        SymbolKind::MemberAccess {
+            subject_text,
+            is_static: true,
+            ..
+        } => {
+            let subject = subject_text.as_str(source);
+            (!subject.starts_with('$') && !subject.contains('\\') && !is_class_keyword(subject))
+                .then_some((subject, ClassRefContext::Other))
+        }
+        _ => None,
     }
 }
 
@@ -120,10 +139,9 @@ impl Backend {
 
     /// Collect "Import class" code actions for the cursor position.
     ///
-    /// For each unresolved `ClassReference` that overlaps with the
-    /// request range, search the class index and stubs for
-    /// classes whose short name matches, and offer a code action per
-    /// candidate.
+    /// For the first unresolved class name under the request range,
+    /// search the class index and stubs for classes whose short name
+    /// matches, and offer a code action per candidate.
     pub(crate) fn collect_import_class_actions(
         &self,
         uri: &str,
@@ -141,39 +159,25 @@ impl Backend {
         let file_use_map = &block.use_map;
         let file_namespace = &block.namespace;
 
-        let symbol_map = match self.symbol_maps.read().get(uri) {
-            Some(sm) => sm.clone(),
-            None => return,
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
+            return;
+        };
+        let Some(source) = symbol_map.source(content) else {
+            return;
         };
 
         let local_classes = self.local_class_names(uri, file_namespace.as_deref());
 
-        // ── Find ClassReference spans overlapping the request range ─────
+        // ── Find unqualified class names overlapping the request range ──
         let affinity_table =
             crate::completion::class_completion::build_affinity_table(file_use_map, file_namespace);
         for span in &symbol_map.spans {
-            if !span_matches_request(
-                span.start as usize,
-                span.end as usize,
-                request_start,
-                request_end,
-            ) {
+            if !span_overlaps_request(span, request_start, request_end) {
                 continue;
             }
-
-            let (ref_name, is_fqn, ref_context) = match &span.kind {
-                SymbolKind::ClassReference {
-                    name,
-                    is_fqn,
-                    context,
-                } => (name.as_str(), *is_fqn, *context),
-                _ => continue,
+            let Some((ref_name, ref_context)) = unqualified_class_name(span, source) else {
+                continue;
             };
-
-            // Skip already-qualified names — they don't need importing.
-            if is_fqn || ref_name.contains('\\') {
-                continue;
-            }
 
             // Skip names that resolve without an import.
             if !self.class_name_needs_import(ref_name, file_use_map, &local_classes, file_namespace)
@@ -225,104 +229,6 @@ impl Backend {
             // Only process the first unresolved reference at the cursor.
             // Multiple overlapping references at the exact same position
             // are unlikely, and processing one keeps the action list tidy.
-            break;
-        }
-
-        // ── Also check MemberAccess spans for unresolved static subjects ─
-        // e.g. `Foo::bar()` where `Foo` is not imported — the symbol map
-        // records this as a MemberAccess with subject_text "Foo", not a
-        // ClassReference.  We handle this by looking for static member
-        // accesses whose subject is an unresolved short name.
-        self.collect_import_from_static_access(
-            uri,
-            content,
-            params,
-            request_start,
-            request_end,
-            &block,
-            &local_classes,
-            &symbol_map,
-            out,
-        );
-    }
-
-    /// Check static member access subjects for unresolved class names.
-    #[allow(clippy::too_many_arguments)]
-    fn collect_import_from_static_access(
-        &self,
-        uri: &str,
-        content: &str,
-        _params: &CodeActionParams,
-        request_start: usize,
-        request_end: usize,
-        block: &ImportBlock,
-        local_classes: &HashSet<String>,
-        symbol_map: &crate::symbol_map::SymbolMap,
-        out: &mut Vec<CodeActionOrCommand>,
-    ) {
-        let file_use_map = &block.use_map;
-        let file_namespace = &block.namespace;
-        let affinity_table =
-            crate::completion::class_completion::build_affinity_table(file_use_map, file_namespace);
-        let Some(source) = symbol_map.source(content) else {
-            return;
-        };
-        for span in &symbol_map.spans {
-            if !span_matches_request(
-                span.start as usize,
-                span.end as usize,
-                request_start,
-                request_end,
-            ) {
-                continue;
-            }
-
-            let subject = match &span.kind {
-                SymbolKind::MemberAccess {
-                    subject_text,
-                    is_static: true,
-                    ..
-                } => subject_text.as_str(source),
-                _ => continue,
-            };
-
-            // Only handle simple unqualified names (not $this, self, parent, etc.)
-            if subject.starts_with('$') || subject.contains('\\') || is_class_keyword(subject) {
-                continue;
-            }
-
-            if !self.class_name_needs_import(subject, file_use_map, local_classes, file_namespace) {
-                continue;
-            }
-
-            let mut candidates = self.find_import_candidates(subject, &affinity_table);
-            // Static access subjects are always in a "call or constant"
-            // context — no further kind filtering needed beyond what
-            // affinity sorting provides.
-            self.filter_candidates_by_context(&mut candidates, ClassRefContext::Other);
-            if candidates.is_empty() {
-                continue;
-            }
-
-            // The span covers the whole `Foo::bar` expression. We only
-            // want the subject part for the diagnostic range, but for
-            // the code action the span range is fine.
-            let use_block = self.use_block_for(uri, content, block.range);
-            let doc_uri: Url = match uri.parse() {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
-
-            self.push_import_actions(
-                out,
-                &doc_uri,
-                &candidates,
-                file_use_map,
-                &use_block,
-                file_namespace,
-                None,
-            );
-
             break;
         }
     }

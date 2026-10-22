@@ -10,8 +10,9 @@
 //! path (no `did_open` on the provider or migration, and no follow-up edit)
 //! to prove the macro-added column is present from the very first load.
 
-use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_initialized_php};
-use tower_lsp::LanguageServer;
+use crate::common::{
+    LARAVEL_SRC_COMPOSER, completion_response, create_psr4_workspace, open_initialized_php,
+};
 use tower_lsp::lsp_types::*;
 
 const PROVIDERS_PHP: &str = "\
@@ -107,18 +108,7 @@ async fn blueprint_macro_column_is_present_from_the_first_startup_load() {
         line: 5,
         character: 16,
     };
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, position.line, position.character, None).await;
 
     let items = match result.expect("completion should return results") {
         CompletionResponse::Array(items) => items,

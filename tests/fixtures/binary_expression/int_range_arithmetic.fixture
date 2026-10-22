@@ -1,0 +1,34 @@
+// test: arithmetic on integer ranges moves the bounds
+// feature: hover
+// Each alternative of a union operand is worked out on its own, the way
+// PHPStan's integerRangeMath() does.
+// expect_hover: $plusOne => int<1, 11>
+// expect_hover: $sum => int<-5, 15>
+// expect_hover: $difference => int<-5, 15>
+// expect_hover: $product => int<-50, 50>
+// expect_hover: $nextPositive => int<2, max>
+// expect_hover: $below => int<min, 1>
+// expect_hover: $pair => 2|3
+// expect_hover: $split => int<-19, -1>|int<2, 13>
+---
+<?php
+
+/**
+ * @param int<0, 10> $a
+ * @param int<-5, 5> $b
+ * @param positive-int $p
+ * @param 1|2 $c
+ * @param int<1, 10> $r
+ * @param int<-20, -11>|1|2|3 $z
+ */
+function test(int $a, int $b, int $p, int $c, int $r, int $z): void {
+    $plusOne = $a + 1;
+    $sum = $a + $b;
+    $difference = $a - $b;
+    $product = $a * $b;
+    $nextPositive = $p + 1;
+    $below = 2 - $p;
+    $pair = $c + 1;
+    $split = $r + $z;
+    $<>plusOne;
+}

@@ -20,6 +20,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::config::SemanticTokensMode;
 use crate::diagnostics::member_lookup::member_exists;
 use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
@@ -136,7 +137,7 @@ impl Backend {
         uri: &str,
         content: &str,
     ) -> Option<SemanticTokensResult> {
-        let symbol_map = self.symbol_maps.read().get(uri)?.clone();
+        let symbol_map = self.symbol_map_for(uri)?;
         let ctx = self.file_context(uri);
         let mode = self.config().semantic_tokens.mode();
 
@@ -212,7 +213,7 @@ impl Backend {
             {
                 tokens.extend(Self::collect_blade_tokens(
                     &blade_content,
-                    &self.blade_directives.read(),
+                    &self.blade.directives.read(),
                 ));
             }
 
@@ -638,7 +639,7 @@ impl Backend {
             return unverified;
         }
 
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let resolved = crate::virtual_members::resolve_class_fully_cached(
             &base,
             &class_loader,

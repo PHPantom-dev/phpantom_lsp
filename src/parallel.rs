@@ -78,8 +78,39 @@ where
     merged
 }
 
+/// Run `work` over each of `items` on the pool, `block` items to a claim,
+/// and return what it produced in input order.
+///
+/// Claiming a block at a time keeps the shared counter off the hot path
+/// for a long list of cheap items, such as the byte-level scans over a
+/// vendor tree, while blocks small enough still let the workers share out
+/// a tail of expensive ones.  A list that fits in one block runs on the
+/// calling thread, where a worker would cost more than the work.
+pub(crate) fn map_in_blocks<'a, T, R, F>(
+    thread_name: &'static str,
+    items: &'a [T],
+    block: usize,
+    work: F,
+) -> Vec<R>
+where
+    T: Sync,
+    R: Send,
+    F: Fn(&'a T) -> Option<R> + Sync,
+{
+    if items.len() <= block {
+        return items.iter().filter_map(&work).collect();
+    }
+    let blocks: Vec<&[T]> = items.chunks(block).collect();
+    let mut produced = map_indexed(thread_name, blocks.len(), |_, index| {
+        let out: Vec<R> = blocks[index].iter().filter_map(&work).collect();
+        (!out.is_empty()).then_some(out)
+    });
+    produced.sort_unstable_by_key(|(index, _)| *index);
+    produced.into_iter().flat_map(|(_, out)| out).collect()
+}
+
 /// How many workers a pool runs when the caller does not say.
-fn available_cores() -> usize {
+pub(crate) fn available_cores() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4)
@@ -208,6 +239,18 @@ pub(crate) fn for_each_layered<G, S, F>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blocks_come_back_in_input_order() {
+        let items: Vec<usize> = (0..1000).collect();
+        let kept = map_in_blocks("blocks-test", &items, 7, |&n| (n % 3 != 0).then_some(n * 2));
+        let expected: Vec<usize> = items
+            .iter()
+            .filter(|n| *n % 3 != 0)
+            .map(|n| n * 2)
+            .collect();
+        assert_eq!(kept, expected);
+    }
 
     #[test]
     fn layered_items_start_only_after_earlier_layers_finish() {

@@ -55,8 +55,8 @@ pub mod phpdoc;
 pub mod resolve;
 
 pub use cache::{
-    ResolvedClassCache, ResolvedClassCacheKey, active_resolved_class_cache, evict_fqn,
-    new_resolved_class_cache, with_active_resolved_class_cache,
+    ResolvedCacheGuard, ResolvedClassCache, ResolvedClassCacheKey, active_resolved_class_cache,
+    evict_fqn, new_resolved_class_cache, with_active_resolved_class_cache,
 };
 pub(crate) use cache::{
     TransformFingerprint, intern_transformed_method, intern_transformed_property,
@@ -71,6 +71,7 @@ pub use resolve::{
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ConstantInfo, MethodInfo, PropertyInfo, PropertySource};
 
@@ -117,11 +118,7 @@ pub trait VirtualMemberProvider {
     /// This is a cheap pre-check so the resolver can skip providers
     /// early without calling [`provide`](Self::provide).  Returning
     /// `false` means [`provide`](Self::provide) will not be called.
-    fn applies_to(
-        &self,
-        class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> bool;
+    fn applies_to(&self, class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool;
 
     /// Produce virtual members for this class.
     ///
@@ -137,7 +134,7 @@ pub trait VirtualMemberProvider {
     fn provide(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         cache: Option<&ResolvedClassCache>,
     ) -> VirtualMembers;
 }
@@ -321,7 +318,7 @@ fn property_type_specificity(property: &PropertyInfo) -> u8 {
 /// higher-priority providers' contributions shadow lower-priority ones.
 pub fn apply_virtual_members(
     class: &mut ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     providers: &[Box<dyn VirtualMemberProvider>],
     cache: Option<&ResolvedClassCache>,
 ) {

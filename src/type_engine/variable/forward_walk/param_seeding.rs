@@ -114,7 +114,7 @@ pub(crate) fn seed_params<'b>(
         // parameter type, losing the docblock refinement).
         if param.is_promoted_property() {
             let param_offset = param.span().start.offset as usize;
-            if let Some((var_type, _name)) = docblock_above(ctx.content, param_offset)
+            if let Some((var_type, _name)) = docblock_above(ctx.file.content, param_offset)
                 .and_then(crate::docblock::extract_var_type_with_name)
             {
                 let var_type = ctx.written_names().resolve_type(&var_type);
@@ -132,9 +132,9 @@ pub(crate) fn seed_params<'b>(
                                 written,
                                 method_span_start as usize,
                                 ctx.current_class,
-                                ctx.content,
-                                ctx.class_loader,
-                                ctx.source_class_loader,
+                                ctx.file.content,
+                                ctx.file.class_loader,
+                                ctx.file.source_class_loader,
                             ) =>
                     {
                         native
@@ -203,7 +203,11 @@ fn seed_from_call_site(
     if !declared.is_empty() {
         let declared_type = ResolvedType::types_joined(declared);
         if declared_type.equivalent(arg_type)
-            || !crate::class_lookup::is_subtype_of_typed(arg_type, &declared_type, ctx.class_loader)
+            || !crate::class_lookup::is_subtype_of_typed(
+                arg_type,
+                &declared_type,
+                ctx.file.class_loader,
+            )
         {
             return None;
         }
@@ -212,8 +216,8 @@ fn seed_from_call_site(
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         arg_type,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     Some(if classes.is_empty() {
         vec![ResolvedType::from_type_string(arg_type.clone())]
@@ -300,11 +304,11 @@ fn finish_constant_operands(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> Option<Ph
 /// actually has, and the declaration is judged a refinement of the native
 /// `string` hint rather than an operator nothing can compare.
 pub(crate) fn resolve_docblock_param_type(raw: &PhpType, ctx: &ForwardWalkCtx<'_>) -> PhpType {
-    let expanded = crate::type_engine::types::aliases::expand_nested_type_aliases(
+    let expanded = crate::type_engine::type_ops::aliases::expand_nested_type_aliases(
         raw,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     let raw = expanded.as_ref().unwrap_or(raw);
     let resolved = ctx.written_names().resolve_type(raw);
@@ -358,7 +362,7 @@ pub(crate) fn resolve_param_type(
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
     let docblock = super::super::resolution::declared_param_docblock_type(
-        ctx.content,
+        ctx.file.content,
         enclosing.span_start as usize,
         pname,
     );
@@ -439,7 +443,7 @@ pub(crate) fn declared_param_type(
                     mname,
                     has_scope_attr,
                     ctx.current_class,
-                    ctx.class_loader,
+                    ctx.file.class_loader,
                 )
             } else {
                 None
@@ -455,7 +459,7 @@ pub(crate) fn declared_param_type(
     let raw_docblock_type = unmarked_docblock_type.clone().map(|t| {
         super::super::resolution::substitute_template_param_bounds(
             t,
-            ctx.content,
+            ctx.file.content,
             method_span_start as usize,
             &ctx.written_names(),
         )
@@ -501,7 +505,7 @@ pub(crate) fn declared_param_type(
         && !doc_parsed.as_ref().is_some_and(|doc| {
             super::super::resolution::references_method_template(
                 doc,
-                ctx.content,
+                ctx.file.content,
                 method_span_start as usize,
             )
         });
@@ -525,9 +529,9 @@ pub(crate) fn declared_param_type(
                         written,
                         method_span_start as usize,
                         ctx.current_class,
-                        ctx.content,
-                        ctx.class_loader,
-                        ctx.source_class_loader,
+                        ctx.file.content,
+                        ctx.file.class_loader,
+                        ctx.file.source_class_loader,
                     )
                 }) =>
         {
@@ -540,7 +544,7 @@ pub(crate) fn declared_param_type(
     let effective_type = effective_type.map(|ty| {
         let ty = super::super::resolution::substitute_template_param_bounds(
             ty,
-            ctx.content,
+            ctx.file.content,
             method_span_start as usize,
             &ctx.written_names(),
         );
@@ -549,7 +553,7 @@ pub(crate) fn declared_param_type(
         // `class-string<Foo>`.
         super::super::resolution::substitute_class_string_template_bounds(
             ty,
-            ctx.content,
+            ctx.file.content,
             method_span_start as usize,
             &ctx.written_names(),
         )
@@ -561,8 +565,8 @@ pub(crate) fn declared_param_type(
             crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 ty,
                 &ctx.current_class.fqn(),
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             )
         })
         .unwrap_or_default();
@@ -579,8 +583,8 @@ pub(crate) fn declared_param_type(
         let inner_resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             inner,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
         if !inner_resolved.is_empty() {
             resolved_from_effective = inner_resolved;
@@ -614,8 +618,8 @@ pub(crate) fn declared_param_type(
         let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &parsed_docblock,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
         if !resolved.is_empty() {
             ResolvedType::from_classes_with_hint(resolved, parsed_docblock)
@@ -706,15 +710,15 @@ pub(crate) fn trait_prototype_method(
     }
     crate::type_engine::trait_context::trait_this_bounds(
         class,
-        ctx.all_classes,
-        ctx.class_loader,
-        ctx.backend,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
+        ctx.file.backend,
     )
     .iter()
     .find_map(|bound| {
         crate::virtual_members::resolve_class_fully_maybe_cached(
             bound,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         )
         .get_method(method_name)
@@ -773,7 +777,7 @@ fn inherited_param_refinement(
 
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         class,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
     let param = merged
@@ -812,7 +816,7 @@ pub(crate) fn try_resolve_from_merged_class(
 
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         ctx.current_class,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
 
@@ -824,11 +828,11 @@ pub(crate) fn try_resolve_from_merged_class(
     let declared = merged_param.type_hint.as_ref()?;
     // The merged declaration is as much a place a `key-of<CONSTANT>` is read
     // as the source docblock is, and for a method it is the one that wins.
-    let expanded = crate::type_engine::types::aliases::expand_nested_type_aliases(
+    let expanded = crate::type_engine::type_ops::aliases::expand_nested_type_aliases(
         declared,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     let declared = expanded.as_ref().unwrap_or(declared);
     let bound = bind_enclosing_self(declared, ctx);
@@ -839,8 +843,8 @@ pub(crate) fn try_resolve_from_merged_class(
     let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         hint,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
 
     if !resolved.is_empty() {
@@ -872,7 +876,7 @@ pub(crate) fn build_type_string_only_result(
     if let Some(mut parsed) = best_type {
         parsed = super::super::resolution::substitute_class_string_template_bounds(
             parsed,
-            ctx.content,
+            ctx.file.content,
             method_span_start,
             &ctx.written_names(),
         );

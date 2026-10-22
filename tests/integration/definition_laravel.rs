@@ -1,5 +1,4 @@
 use crate::common::{create_psr4_workspace, definition_uri, goto_definition_at, open_php};
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Shared stubs ───────────────────────────────────────────────────────────
@@ -1275,16 +1274,7 @@ class BrandTranslation extends Model {}
     // Open model file first so it's indexed
     let model_uri =
         Url::from_file_path(dir.path().join("src/Models/BrandTranslation.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: model_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: model_php.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &model_uri, model_php).await;
 
     let test_php = "\
 <?php
@@ -1340,16 +1330,7 @@ class BrandTranslation extends Model {}
 
     let model_uri =
         Url::from_file_path(dir.path().join("src/Models/BrandTranslation.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: model_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: model_php.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &model_uri, model_php).await;
 
     let test_php = "\
 <?php
@@ -2370,16 +2351,7 @@ async fn find_references_at(
     include_declaration: bool,
 ) -> Option<Vec<tower_lsp::lsp_types::Location>> {
     let uri = Url::from_file_path(dir.path().join(relative_path)).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(backend, &uri, content).await;
 
     backend.find_references(
         uri.as_str(),
@@ -2574,16 +2546,7 @@ return [
 
     // Open service.php so it is indexed before querying from config/app.php.
     let service_uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: service_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: service_php.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &service_uri, service_php).await;
 
     // Cursor on "name" key inside config/app.php — line 2, char 5.
     let results =
@@ -2626,16 +2589,7 @@ return [
 
     // Open service.php so it is indexed.
     let service_uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: service_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: service_php.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &service_uri, service_php).await;
 
     // Cursor on \"secret\" key inside config/api/keys.php — line 2, char 5.
     let results = find_references_at(
@@ -3534,16 +3488,7 @@ class Service {
     ]);
 
     let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: service_php.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, service_php).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), service_php, &mut diags);
@@ -3593,16 +3538,7 @@ class Service {
     ]);
 
     let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: service_php.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, service_php).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), service_php, &mut diags);

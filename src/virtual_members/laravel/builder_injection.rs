@@ -15,6 +15,7 @@
 //! engine to Laravel conventions.
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use std::sync::Arc;
 
 use crate::php_type::PhpType;
@@ -51,7 +52,7 @@ pub(crate) fn try_inject_builder_scopes(
     raw_cls: &ClassInfo,
     base_fqn: &str,
     generic_args: &[PhpType],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) {
     if !is_eloquent_builder_fqn(base_fqn, raw_cls, class_loader) || generic_args.is_empty() {
         return;
@@ -115,7 +116,7 @@ pub(crate) fn try_inject_mixin_builder_scopes(
     result: &mut ClassInfo,
     raw_cls: &ClassInfo,
     generic_args: &[PhpType],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) {
     use std::collections::HashMap;
 
@@ -180,7 +181,7 @@ pub(crate) fn try_inject_mixin_builder_scopes(
         if depth > MAX_INHERITANCE_DEPTH {
             break;
         }
-        let parent = match class_loader(&parent_name) {
+        let parent = match class_loader(Fqn::new(&parent_name)) {
             Some(p) => p,
             None => break,
         };
@@ -223,7 +224,7 @@ fn find_builder_mixin_model(
     class: &ClassInfo,
     active_subs: &std::collections::HashMap<String, crate::php_type::PhpType>,
     root_cls: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<String> {
     use crate::util::short_name;
 
@@ -233,7 +234,7 @@ fn find_builder_mixin_model(
         }
         // Verify it's actually the Eloquent Builder (not some other
         // class named Builder).  If we can't load it, trust the FQN.
-        if let Some(ref mixin_cls) = class_loader(mixin_name) {
+        if let Some(ref mixin_cls) = class_loader(Fqn::new(mixin_name)) {
             let fqn = mixin_cls.fqn();
             if fqn != ELOQUENT_BUILDER_FQN && mixin_cls.name != ELOQUENT_BUILDER_FQN {
                 continue;
@@ -267,7 +268,7 @@ fn find_builder_mixin_model(
 fn inject_scopes_and_model_methods(
     result: &mut ClassInfo,
     model_arg: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
     forwarded: Option<&ForwardedSelf>,
 ) {
@@ -297,7 +298,7 @@ fn inject_scopes_and_model_methods(
     // 3. Inject where{PropertyName}() dynamic methods from the model's
     //    known columns.  These are instance methods on the Builder so
     //    that `$query->whereBrandId(42)` resolves.
-    if let Some(model_class) = class_loader(model_arg) {
+    if let Some(model_class) = class_loader(Fqn::new(model_arg)) {
         // Base resolution carries the column lists the model inherits
         // without re-entering the virtual-member providers.
         let model_class = resolve_class_base_cached(&model_class, class_loader);
@@ -332,15 +333,15 @@ fn inject_scopes_and_model_methods(
 fn inject_custom_builder_methods(
     result: &mut ClassInfo,
     model_arg: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
     forwarded: &ForwardedSelf,
 ) {
-    let Some(model) = class_loader(model_arg) else {
+    let Some(model) = class_loader(Fqn::new(model_arg)) else {
         return;
     };
-    let Some(builder) =
-        super::custom_builder_fqn(&model, class_loader).and_then(|fqn| class_loader(&fqn))
+    let Some(builder) = super::custom_builder_fqn(&model, class_loader)
+        .and_then(|fqn| class_loader(Fqn::new(&fqn)))
     else {
         return;
     };
@@ -378,7 +379,7 @@ fn inject_custom_builder_methods(
 fn forward_builder_return(
     method: &Arc<MethodInfo>,
     forwarded: Option<&ForwardedSelf>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Arc<MethodInfo> {
     forward_return(method, forwarded, false, class_loader)
 }
@@ -389,7 +390,7 @@ fn forward_return(
     method: &Arc<MethodInfo>,
     forwarded: Option<&ForwardedSelf>,
     rewrite_self: bool,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Arc<MethodInfo> {
     let Some(forwarded) = forwarded else {
         return Arc::clone(method);
@@ -430,7 +431,7 @@ fn forwarded_builder_return(
     ret: &PhpType,
     self_ty: &PhpType,
     rewrite_self: bool,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     use crate::php_type::TypeKind;
 
@@ -472,15 +473,12 @@ fn forwarded_builder_return(
 /// Covers the Eloquent Builder itself and any subclass of it, which is
 /// what a model with a custom builder (`newEloquentBuilder()`) returns
 /// from its scopes.
-fn forwards_as_builder(
-    class_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
+fn forwards_as_builder(class_name: &str, class_loader: &ResolvedClassLoader<'_>) -> bool {
     let stripped = class_name.strip_prefix('\\').unwrap_or(class_name);
     if stripped == ELOQUENT_BUILDER_FQN {
         return true;
     }
-    class_loader(stripped).is_some_and(|cls| extends_eloquent_builder(&cls, class_loader))
+    class_loader(Fqn::new(stripped)).is_some_and(|cls| extends_eloquent_builder(&cls, class_loader))
 }
 
 /// Inject `@method`-declared virtual methods from a model onto a Builder.
@@ -505,11 +503,11 @@ fn forwards_as_builder(
 fn inject_model_virtual_methods(
     builder: &mut ClassInfo,
     model_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
     forwarded: Option<&ForwardedSelf>,
 ) {
-    let model_class = match class_loader(model_name) {
+    let model_class = match class_loader(Fqn::new(model_name)) {
         Some(c) => c,
         None => return,
     };
@@ -588,7 +586,7 @@ fn inject_model_virtual_methods(
 fn is_eloquent_builder_fqn(
     base_fqn: &str,
     cls: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     base_fqn == ELOQUENT_BUILDER_FQN
         || cls.name == ELOQUENT_BUILDER_FQN

@@ -1,6 +1,9 @@
 //! Morph-map aliases used as values of a model's actual polymorphic type columns.
 
-use crate::common::{create_psr4_workspace, open_php, position_after};
+use crate::common::{
+    completion_response, create_psr4_workspace, goto_definition_at, hover_response, open_php,
+    position_after, references_response,
+};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -146,18 +149,7 @@ class ColdConsumer {
 }
 
 async fn labels(backend: &Backend, uri: &Url, position: Position) -> Vec<String> {
-    let response = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let response = completion_response(backend, uri, position.line, position.character, None).await;
     match response {
         Some(CompletionResponse::Array(items)) => {
             items.into_iter().map(|item| item.label).collect()
@@ -170,16 +162,7 @@ async fn labels(backend: &Backend, uri: &Url, position: Position) -> Vec<String>
 }
 
 async fn hover(backend: &Backend, uri: &Url, position: Position) -> Option<String> {
-    let result = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap()?;
+    let result = hover_response(backend, uri, position.line, position.character).await?;
     match result.contents {
         HoverContents::Markup(markup) => Some(markup.value),
         contents => Some(format!("{contents:?}")),
@@ -384,17 +367,8 @@ async fn alias_navigation_links_model_registration_and_cold_cross_file_usages() 
     let source = consumer("Comment::where('commentable_type', 'post');");
     let (backend, dir, uri) = workspace(&source, false).await;
     let position = position_after(&source, "'commentable_type', 'po");
-    let response = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
+    let response = goto_definition_at(&backend, &uri, position.line, position.character)
         .await
-        .unwrap()
         .expect("alias definition");
     let destinations: Vec<Url> = match response {
         GotoDefinitionResponse::Scalar(location) => vec![location.uri],
@@ -416,20 +390,8 @@ async fn alias_navigation_links_model_registration_and_cold_cross_file_usages() 
     let registration_uri =
         Url::from_file_path(dir.path().join("app/Providers/AppServiceProvider.php")).unwrap();
     let cold_uri = Url::from_file_path(dir.path().join("app/ColdConsumer.php")).unwrap();
-    let references = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext {
-                include_declaration: true,
-            },
-        })
+    let references = references_response(&backend, &uri, position, true)
         .await
-        .unwrap()
         .unwrap_or_default();
     assert_eq!(
         references

@@ -4,8 +4,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::Url;
-
 use crate::Backend;
 use crate::types::{ClassInfo, PhpVersion};
 use crate::util::short_name;
@@ -32,29 +30,32 @@ impl Backend {
             return Some(cls);
         }
 
-        // Look up in the in-memory stub index.
-        let stub_idx = self.stub_index.read();
-        let stub_lookup = if class_name.contains('\\') {
-            // Namespaced lookup (e.g. "BcMath\\Number").
-            stub_idx.get_key_value(class_name)
+        // Look up in the in-memory stub index: a namespaced name (e.g.
+        // "BcMath\\Number") by its FQN, a global one (e.g. "PDO") by its
+        // short name, so `Demo\PDO` never matches the global `PDO` stub.
+        // The stub URI is keyed by the index's spelling so that
+        // differently-cased lookups share one cache entry, and the guard
+        // is released before the parse instead of being held across it.
+        let key = if class_name.contains('\\') {
+            class_name
         } else {
-            // Global-namespace lookup (e.g. "PDO").
-            stub_idx.get_key_value(last_segment)
+            last_segment
+        };
+        let (stub_uri, content) = {
+            let stub_idx = self.stub_index.read();
+            let (canonical_name, &content) = stub_idx.get_key_value(key)?;
+            (
+                format!("{}{}", crate::stubs::STUB_URI_PREFIX, canonical_name),
+                content,
+            )
         };
 
-        if let Some((canonical_name, &content)) = stub_lookup {
-            let stub_uri = format!("phpantom-stub://{}", canonical_name);
-            let ver = Some(self.php_version());
-            if let Some(classes) = self.parse_and_cache_stub(content, &stub_uri, ver)
-                && let Some(cls) = classes
-                    .iter()
-                    .find(|c| c.name.eq_ignore_ascii_case(last_segment))
-            {
-                return Some(Arc::clone(cls));
-            }
-        }
-
-        None
+        let ver = Some(self.php_version());
+        let classes = self.parse_and_cache_stub(content, &stub_uri, ver)?;
+        classes
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(last_segment))
+            .map(Arc::clone)
     }
 
     /// Parse the file a `fqn_uri_index` URI names, cache the results, and
@@ -68,7 +69,7 @@ impl Backend {
         if uri.starts_with("phar://") {
             return self.parse_and_cache_phar_entry(uri);
         }
-        let file_path = Url::parse(uri).ok()?.to_file_path().ok()?;
+        let file_path = crate::util::uri_to_path(uri)?;
         self.parse_and_cache_file(&file_path)
     }
 
@@ -116,7 +117,7 @@ impl Backend {
             inflight: &self.parse_inflight,
             uri: uri.clone(),
         };
-        let content = std::fs::read_to_string(file_path).ok();
+        let content = crate::util::read_php_source(file_path);
         content.and_then(|c| self.parse_and_cache_content(&c, &uri))
     }
 
@@ -279,7 +280,7 @@ impl Backend {
         // (e.g. ArrayIterator missing @template parameters).
         // Only patch classes loaded from stub URIs to avoid touching
         // user code.
-        if uri.starts_with("phpantom-stub://") || uri.starts_with("phpantom-stub-fn://") {
+        if crate::stubs::is_embedded_stub_uri(uri) {
             for class in &mut classes {
                 crate::stub_patches::apply_class_stub_patches(class);
             }
@@ -292,7 +293,7 @@ impl Backend {
             }
         }
 
-        let arc_classes: Vec<Arc<ClassInfo>> = classes.into_iter().map(Arc::new).collect();
+        let arc_classes: Vec<Arc<ClassInfo>> = crate::types::into_arcs(classes);
 
         // Used below to decide whether resolved-class cache eviction
         // is needed (only on re-parse, not first load).

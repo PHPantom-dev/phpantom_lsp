@@ -1,5 +1,5 @@
 use crate::common::create_psr4_workspace;
-use tower_lsp::LanguageServer;
+use crate::common::{completion_response, goto_definition_at, open_php};
 use tower_lsp::lsp_types::*;
 
 #[tokio::test]
@@ -54,42 +54,22 @@ class User extends Model {}
         "src/Models/User.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::act";
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
     // Test static call: User::active()
-    let req = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier::new(uri.clone()),
-            position: Position::new(2, 9),
-        },
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-        context: None,
-    };
-    let items = backend.completion(req).await.unwrap().unwrap();
+    let items = completion_response(&backend, &uri, 2, 9, None)
+        .await
+        .unwrap();
     let labels: Vec<_> = match items {
         CompletionResponse::Array(arr) => arr.into_iter().map(|i| i.label).collect(),
         _ => panic!("Expected array"),
@@ -103,27 +83,11 @@ class User extends Model {}
     // Test query() return type
     let uri2 = Url::from_file_path(dir.path().join("test2.php")).unwrap();
     let content2 = "<?php\nuse App\\Models\\User;\nUser::query()->act";
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri2.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content2.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri2, content2).await;
 
-    let req = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier::new(uri2.clone()),
-            position: Position::new(2, 18),
-        },
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-        context: None,
-    };
-    let items = backend.completion(req).await.unwrap().unwrap();
+    let items = completion_response(&backend, &uri2, 2, 18, None)
+        .await
+        .unwrap();
     let custom_items = match items {
         CompletionResponse::Array(arr) => arr,
         _ => panic!("Expected array"),
@@ -163,27 +127,11 @@ class User extends Model {}
     // Test orWhereBetween on model (forwarded from base Builder via custom builder)
     let uri3 = Url::from_file_path(dir.path().join("test3.php")).unwrap();
     let content3 = "<?php\nuse App\\Models\\User;\nUser::orWhereBet";
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri3.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content3.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri3, content3).await;
 
-    let req = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier::new(uri3.clone()),
-            position: Position::new(2, 16),
-        },
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-        context: None,
-    };
-    let items = backend.completion(req).await.unwrap().unwrap();
+    let items = completion_response(&backend, &uri3, 2, 16, None)
+        .await
+        .unwrap();
     let labels: Vec<_> = match items {
         CompletionResponse::Array(arr) => arr.into_iter().map(|i| i.label).collect(),
         _ => panic!("Expected array"),
@@ -230,41 +178,21 @@ class User extends Model {}
         "src/Models/User.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::query()->whe";
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
-    let req = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier::new(uri),
-            position: Position::new(2, 18),
-        },
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-        context: None,
-    };
-    let items = backend.completion(req).await.unwrap().unwrap();
+    let items = completion_response(&backend, &uri, 2, 18, None)
+        .await
+        .unwrap();
     let items = match items {
         CompletionResponse::Array(arr) => arr,
         _ => panic!("Expected array"),
@@ -318,41 +246,21 @@ class User extends Model {}
         "src/Models/User.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::orWhereBetween('id', [1, 2]);";
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
     // Test GTD on orWhereBetween
-    let req = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier::new(uri),
-            position: Position::new(2, 10), // On 'orWhereBetween'
-        },
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-    };
-    let resp = backend.goto_definition(req).await.unwrap();
+    // On 'orWhereBetween'
+    let resp = goto_definition_at(&backend, &uri, 2, 10).await;
     let locs = match resp {
         Some(GotoDefinitionResponse::Scalar(l)) => vec![l],
         Some(GotoDefinitionResponse::Array(a)) => a,
@@ -423,42 +331,20 @@ class User extends Model {}
         "src/Models/User.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::active();";
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
-    let resp = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier::new(uri),
-                position: Position::new(2, 8), // On 'active'
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        })
-        .await
-        .unwrap();
+    // On 'active'
+    let resp = goto_definition_at(&backend, &uri, 2, 8).await;
     let locs = match resp {
         Some(GotoDefinitionResponse::Scalar(l)) => vec![l],
         Some(GotoDefinitionResponse::Array(a)) => a,
@@ -541,30 +427,17 @@ class Controller {
         "src/Models/Controller.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let uri = Url::from_file_path(dir.path().join("src/Models/Controller.php")).unwrap();
-    let resp = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier::new(uri),
-                position: Position::new(4, 18), // On 'active' in Member::active();
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        })
-        .await
-        .unwrap();
+    // On 'active' in Member::active();
+    let resp = goto_definition_at(&backend, &uri, 4, 18).await;
     let locs = match resp {
         Some(GotoDefinitionResponse::Scalar(l)) => vec![l],
         Some(GotoDefinitionResponse::Array(a)) => a,
@@ -642,43 +515,20 @@ class User extends Model {}
         "src/Models/User.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::query()->whe";
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
-    let items = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier::new(uri.clone()),
-                position: Position::new(2, 18),
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-            context: None,
-        })
+    let items = completion_response(&backend, &uri, 2, 18, None)
         .await
-        .unwrap()
         .unwrap();
     let items = match items {
         CompletionResponse::Array(arr) => arr,
@@ -699,28 +549,9 @@ class User extends Model {}
 
     let uri2 = Url::from_file_path(dir.path().join("test2.php")).unwrap();
     let content2 = "<?php\nuse App\\Models\\User;\nUser::query()->where('id', 1);";
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri2.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content2.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri2, content2).await;
 
-    let resp = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier::new(uri2),
-                position: Position::new(2, 17),
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        })
-        .await
-        .unwrap();
+    let resp = goto_definition_at(&backend, &uri2, 2, 17).await;
     let locs = match resp {
         Some(GotoDefinitionResponse::Scalar(l)) => vec![l],
         Some(GotoDefinitionResponse::Array(a)) => a,
@@ -792,43 +623,20 @@ class User extends Model {
         "src/Models/User.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::query()->first()->full";
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
-    let items = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier::new(uri),
-                position: Position::new(2, 27),
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-            context: None,
-        })
+    let items = completion_response(&backend, &uri, 2, 27, None)
         .await
-        .unwrap()
         .unwrap();
     let labels: Vec<_> = match items {
         CompletionResponse::Array(arr) => arr.into_iter().map(|i| i.label).collect(),
@@ -879,43 +687,20 @@ class User extends Model {}
         "src/Models/User.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::query()->whe";
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
-    let items = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier::new(uri),
-                position: Position::new(2, 18),
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-            context: None,
-        })
+    let items = completion_response(&backend, &uri, 2, 18, None)
         .await
-        .unwrap()
         .unwrap();
     let labels: Vec<_> = match items {
         CompletionResponse::Array(arr) => arr.into_iter().map(|i| i.label).collect(),
@@ -985,42 +770,20 @@ class Member extends BaseModel {}
         "src/Models/Member.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\Member;\nMember::active();";
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
-    let resp = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier::new(uri),
-                position: Position::new(2, 8), // On 'active'
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        })
-        .await
-        .unwrap();
+    // On 'active'
+    let resp = goto_definition_at(&backend, &uri, 2, 8).await;
     let locs = match resp {
         Some(GotoDefinitionResponse::Scalar(l)) => vec![l],
         Some(GotoDefinitionResponse::Array(a)) => a,
@@ -1097,43 +860,19 @@ class Member extends BaseModel {}
         "src/Models/Member.php",
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
-                },
-            })
-            .await;
+        open_php(
+            &backend,
+            &uri,
+            &std::fs::read_to_string(dir.path().join(path)).unwrap(),
+        )
+        .await;
     }
 
     let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\Member;\nMember::";
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
-    let resp = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier::new(uri),
-                position: Position::new(2, 8),
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let resp = completion_response(&backend, &uri, 2, 8, None).await;
     let items = match resp {
         Some(CompletionResponse::List(l)) => l.items,
         Some(CompletionResponse::Array(a)) => a,

@@ -885,6 +885,86 @@ pub(crate) fn absorb_non_empty_refinements(types: &mut Vec<PhpType>) -> bool {
     changed
 }
 
+/// Merge the integer ranges of a union with the ranges, integer literals and
+/// `int` they overlap or touch: `0|int<1, max>` is `int<0, max>`, the way
+/// PHPStan's `TypeCombinator` joins them. A union of literals alone is left
+/// as it is, since `1|2` says more than `int<1, 2>` to a reader.
+///
+/// The merged ranges take the place of the first integer member, so a
+/// union with nothing to merge keeps its order. Returns whether anything
+/// changed.
+pub(crate) fn absorb_int_ranges(types: &mut Vec<PhpType>) -> bool {
+    if types.len() < 2
+        || !types
+            .iter()
+            .any(|ty| matches!(ty.kind(), TypeKind::IntRange(..)))
+    {
+        return false;
+    }
+
+    // `None` bounds are unbounded; `i128` keeps `max + 1` from overflowing.
+    let interval = |ty: &PhpType| -> Option<(Option<i128>, Option<i128>)> {
+        match ty.kind() {
+            TypeKind::IntRange(min, max) => Some((
+                (!min.eq_ignore_ascii_case("min")).then(|| parse_range_bound(min).into()),
+                (!max.eq_ignore_ascii_case("max")).then(|| parse_range_bound(max).into()),
+            )),
+            TypeKind::Literal(literal) if matches!(**literal, LiteralValue::Int(_)) => {
+                let value = i128::from(literal.parse_i64()?);
+                Some((Some(value), Some(value)))
+            }
+            TypeKind::Named(_) if ty.is_int() => Some((None, None)),
+            _ => None,
+        }
+    };
+
+    let mut intervals: Vec<(Option<i128>, Option<i128>)> =
+        types.iter().filter_map(interval).collect();
+    let count = intervals.len();
+    intervals.sort_by(|a, b| match (a.0, b.0) {
+        (None, None) => std::cmp::Ordering::Equal,
+        (None, Some(_)) => std::cmp::Ordering::Less,
+        (Some(_), None) => std::cmp::Ordering::Greater,
+        (Some(x), Some(y)) => x.cmp(&y),
+    });
+    let mut merged: Vec<(Option<i128>, Option<i128>)> = Vec::with_capacity(count);
+    for (min, max) in intervals {
+        if let Some(last) = merged.last_mut() {
+            let touches = match (last.1, min) {
+                (None, _) | (_, None) => true,
+                (Some(last_max), Some(min)) => min <= last_max + 1,
+            };
+            if touches {
+                last.1 = match (last.1, max) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    _ => None,
+                };
+                continue;
+            }
+        }
+        merged.push((min, max));
+    }
+    if merged.len() == count {
+        return false;
+    }
+
+    let to_type = |(min, max): (Option<i128>, Option<i128>)| match (min, max) {
+        (None, None) => PhpType::int(),
+        (Some(min), Some(max)) if min == max => PhpType::literal_int(min.to_string()),
+        (min, max) => PhpType::int_range(
+            min.map_or_else(|| "min".to_string(), |v| v.to_string()),
+            max.map_or_else(|| "max".to_string(), |v| v.to_string()),
+        ),
+    };
+    let first = types
+        .iter()
+        .position(|ty| interval(ty).is_some())
+        .unwrap_or(0);
+    types.retain(|ty| interval(ty).is_none());
+    types.splice(first..first, merged.into_iter().map(to_type));
+    true
+}
+
 /// Widen `array{} | non-empty-array<K, V>` back to `array<K, V>`.
 ///
 /// The empty shape supplies the one value the refinement rules out, so
@@ -1229,7 +1309,7 @@ pub(crate) fn absorb_scalar_refinements(types: &mut Vec<PhpType>) {
         types.iter().enumerate().any(|(index, ty)| {
             keep[index]
                 && matches!(ty.kind(), TypeKind::Named(name)
-                    if names.contains(&keyword_lowercase(name).as_str()))
+                    if with_keyword_lowercase(name, |lower| names.contains(&lower)))
         })
     };
     let has_int = has_kept_name(&["int", "integer"]);

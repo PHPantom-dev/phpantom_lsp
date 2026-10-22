@@ -13,6 +13,7 @@ use std::cell::OnceCell;
 use tower_lsp::lsp_types::Location;
 
 use crate::atom::Atom;
+use crate::class_lookup::Fqn;
 use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind};
 use crate::types::ClassInfo;
 use crate::util::build_fqn;
@@ -280,9 +281,10 @@ impl Backend {
     /// spelling, because the GTI index is keyed by the name each child
     /// writes in its `extends`/`implements` clause.
     fn collect_constructor_hierarchy(&self, owner_fqns: &[String]) -> HashSet<String> {
-        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let class_loader =
+            |name: Fqn<'_>| -> Option<Arc<ClassInfo>> { self.find_or_load_class(&name) };
         let declares_ctor = |fqn: &str| -> bool {
-            class_loader(fqn)
+            class_loader(Fqn::new(fqn))
                 .map(|c| c.methods.iter().any(|m| is_constructor_name(&m.name)))
                 .unwrap_or(false)
         };

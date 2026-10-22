@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::config::Config;
 use crate::types::ClassInfo;
 
@@ -87,7 +88,7 @@ pub(super) struct IndexedProject {
 /// the diagnostic pass starts from a fully populated index.
 ///
 /// Parsing first means `fqn_class_index`, `uri_classes_index`,
-/// `symbol_maps`, `file_imports`, `file_namespaces` and `fqn_uri_index`
+/// every file's `FileState` (symbol map, imports, namespaces) and `fqn_uri_index`
 /// cover the whole project before a single diagnostic runs, so a
 /// cross-file reference resolves through an O(1) hash lookup instead of
 /// falling through to `fqn_uri_index` / PSR-4 lazy loading (which takes
@@ -128,7 +129,8 @@ pub(super) fn index_project(
     };
     // `populate_from_sorted` fans the list out over its own large-stack
     // workers, so this needs no wrapper thread of its own.
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { backend.find_or_load_class(name) };
+    let class_loader =
+        |name: Fqn<'_>| -> Option<Arc<ClassInfo>> { backend.find_or_load_class(&name) };
     crate::virtual_members::populate_from_sorted(
         &sorted_fqns,
         &backend.resolved_class_cache,
@@ -147,7 +149,7 @@ pub(super) fn index_project(
     // diagnosing them.  Settling it here does that refresh once, after
     // the resource files are indexed, the way the editor does.  On a
     // full run the files are already parsed, so this only adds the walk.
-    if backend.resolved_class_cache.read().is_laravel() {
+    if backend.resolved_class_cache.read().laravel().is_enabled() {
         backend.ensure_workspace_index_ready_with_progress(None);
     } else {
         backend.refresh_blade_injected_vars();
@@ -240,10 +242,10 @@ mod tests {
 
         let backend = index_selected(dir.path(), "app/Helper.php").await;
 
-        assert!(backend.workspace_indexed.load(Ordering::Acquire));
+        assert!(backend.workspace_index.indexed.load(Ordering::Acquire));
         let routes_uri = crate::util::path_to_uri(&dir.path().join("routes/web.php"));
         assert!(
-            backend.symbol_maps.read().contains_key(&routes_uri),
+            backend.symbol_map_for(&routes_uri).is_some(),
             "files outside the selection should be indexed"
         );
     }
@@ -257,6 +259,6 @@ mod tests {
 
         let backend = index_selected(dir.path(), "app/Helper.php").await;
 
-        assert!(!backend.workspace_indexed.load(Ordering::Acquire));
+        assert!(!backend.workspace_index.indexed.load(Ordering::Acquire));
     }
 }

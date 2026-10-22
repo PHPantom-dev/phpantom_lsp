@@ -8,7 +8,7 @@
 //! the symbol under the cursor.
 //!
 //! **Cross-file references** iterate every `SymbolMap` stored in
-//! `self.symbol_maps` (one per opened / parsed file).  For files that
+//! `self.files` (one per opened / parsed file).  For files that
 //! are in the workspace but have not been opened yet, we lazily parse
 //! them on demand (via the fqn_uri_index, PSR-4, and workspace scan).
 //!
@@ -46,6 +46,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::Backend;
+use crate::names::resolve_to_fqn;
 use crate::reference_index::ReferenceIndexKey;
 use crate::symbol_map::SymbolMap;
 use crate::util::strip_fqn_prefix;
@@ -114,12 +115,12 @@ impl Backend {
     ) -> Vec<(String, Arc<SymbolMap>)> {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
 
-        let maps = self.symbol_maps.read();
+        let maps = self.files.read();
         maps.iter()
+            .filter_map(|(uri, state)| Some((uri, state.symbol_map.as_ref()?)))
             .filter(|(uri, _)| {
                 candidate_uris.is_none_or(|uris| uris.contains(uri.as_str()))
-                    && !uri.starts_with("phpantom-stub://")
-                    && !uri.starts_with("phpantom-stub-fn://")
+                    && !crate::stubs::is_stub_uri(uri)
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
             })
             .map(|(uri, map)| (uri.clone(), Arc::clone(map)))
@@ -248,7 +249,9 @@ impl<'a> SpanFqnResolver<'a> {
             backend,
             file_uri,
             spans: backend.namespace_spans_for_uri(file_uri),
-            resolved_names: backend.resolved_names.read().get(file_uri).cloned(),
+            resolved_names: backend
+                .file_state(file_uri)
+                .and_then(|state| state.resolved_names.clone()),
             use_map: std::cell::OnceCell::new(),
         }
     }
@@ -281,17 +284,12 @@ impl<'a> SpanFqnResolver<'a> {
         if self.spans.len() > 1
             && let Some(span) = crate::types::NamespaceSpan::containing(&self.spans, span_start)
         {
-            return Backend::resolve_to_fqn(name, &span.use_map, &span.namespace);
+            return resolve_to_fqn(name, &span.use_map, &span.namespace);
         }
-        let use_map = self.use_map.get_or_init(|| {
-            self.backend
-                .file_imports
-                .read()
-                .get(self.file_uri)
-                .cloned()
-                .unwrap_or_default()
-        });
-        Backend::resolve_to_fqn(name, use_map, self.namespace_at(span_start))
+        let use_map = self
+            .use_map
+            .get_or_init(|| self.backend.file_use_map(self.file_uri));
+        resolve_to_fqn(name, use_map, self.namespace_at(span_start))
     }
 }
 
@@ -486,7 +484,9 @@ impl<'a> CandidateFile<'a> {
     /// The file's URI as a location carries it, or `None` when it does not
     /// parse.
     pub(super) fn url(&self) -> Option<Url> {
-        self.url.get_or_init(|| Url::parse(self.uri).ok()).clone()
+        self.url
+            .get_or_init(|| crate::util::parse_url(self.uri))
+            .clone()
     }
 
     /// The location between two byte offsets in [`Self::content`], or

@@ -81,7 +81,7 @@ impl Backend {
             return;
         };
 
-        let imbalances = balance::check(&source, &self.blade_directives.read());
+        let imbalances = balance::check(&source, &self.blade.directives.read());
         report_block_imbalances(&source, imbalances, out);
     }
 }

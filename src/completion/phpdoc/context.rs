@@ -18,6 +18,7 @@ use tower_lsp::lsp_types::Position;
 use super::helpers::{find_keyword_pos, find_matching_paren, split_params};
 use crate::completion::source::comment_position::{is_inside_docblock, position_to_byte_offset};
 use crate::php_type::PhpType;
+use crate::text_position::utf16_col_to_char_index;
 
 // ─── Context Detection ─────────────────────────────────────────────────────
 
@@ -354,7 +355,7 @@ pub fn extract_phpdoc_prefix(content: &str, position: Position) -> Option<String
 
     let line = lines[line_idx];
     let chars: Vec<char> = line.chars().collect();
-    let col = (position.character as usize).min(chars.len());
+    let col = utf16_col_to_char_index(line, position.character);
 
     // Walk backwards from cursor to find `@`
     let mut i = col;

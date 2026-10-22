@@ -8,6 +8,7 @@
 //! annotation is present.
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use std::sync::Arc;
 
 use crate::php_type::{PhpType, TypeKind};
@@ -540,7 +541,7 @@ fn string_literal_argument(fragment: &str) -> Option<&str> {
 pub(crate) fn resolve_relation_chain(
     model: &ClassInfo,
     chain: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&super::super::ResolvedClassCache>,
 ) -> Option<String> {
     walk_relation_chain(model, chain, class_loader, cache, |ty, declaring| {
@@ -564,7 +565,7 @@ pub(crate) fn resolve_relation_chain(
 pub(crate) fn resolve_relation_type(
     model: &ClassInfo,
     chain: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&super::super::ResolvedClassCache>,
 ) -> Option<PhpType> {
     let relations = walk_relation_chain(model, chain, class_loader, cache, |ty, declaring| {
@@ -588,15 +589,15 @@ pub(crate) struct ResolvedRelation {
 pub(crate) fn resolve_relation_chain_details(
     model: &ClassInfo,
     chain: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&super::super::ResolvedClassCache>,
 ) -> Option<ResolvedRelation> {
     let found = walk_relation_chain(model, chain, class_loader, cache, |ty, declaring| {
         // Eager loading builds the relation on a fresh instance of the
         // declaring model, so `$this`/`static` name it exactly.
         let relation_type = ty.replace_self_bound(&declaring.fqn(), None);
-        let related = related_model_type(&relation_type, &|name| {
-            resolve_related_fqn(name, declaring, class_loader)
+        let related = related_model_type(&relation_type, &|name: Fqn<'_>| {
+            resolve_related_fqn(&name, declaring, class_loader)
         })?;
         let mut models = Vec::new();
         collect_related_classes(&related, declaring, class_loader, cache, &mut models)
@@ -634,7 +635,7 @@ pub(crate) fn resolve_relation_chain_details(
 fn walk_relation_chain<T>(
     model: &ClassInfo,
     chain: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&super::super::ResolvedClassCache>,
     mut finalise: impl FnMut(&PhpType, &ClassInfo) -> Option<T>,
 ) -> Option<Vec<T>> {
@@ -691,7 +692,7 @@ fn walk_relation_chain<T>(
 fn for_each_relation(
     return_type: &PhpType,
     declaring_class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     visit: &mut dyn FnMut(&PhpType),
 ) {
     if let TypeKind::Union(parts) = return_type.kind() {
@@ -712,11 +713,11 @@ fn for_each_relation(
 fn chain_related_model_type(
     relation: &PhpType,
     declaring_class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let relation = relation.replace_self_bound(&declaring_class.fqn(), None);
-    related_model_type(&relation, &|name| {
-        resolve_related_fqn(name, declaring_class, class_loader)
+    related_model_type(&relation, &|name: Fqn<'_>| {
+        resolve_related_fqn(&name, declaring_class, class_loader)
     })
 }
 
@@ -739,7 +740,7 @@ fn first_model_name(related: &PhpType) -> Option<&str> {
 /// first argument, supply the binding.
 pub(crate) fn related_model_type(
     relation: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     if classify_relationship_typed(relation).is_some() {
         return extract_related_type_typed(relation).cloned();
@@ -752,7 +753,7 @@ pub(crate) fn related_model_type(
     ) {
         return Some(related);
     }
-    let class = class_loader(relation.base_name()?)?;
+    let class = class_loader(Fqn::new(relation.base_name()?))?;
     let (ancestor, _) = crate::inheritance::ancestors(&class, class_loader)
         .find(|(name, _)| classify_relationship_typed(&PhpType::named(*name)).is_some())?;
     crate::inheritance::extract_generic_arg_from_ancestor(relation, &ancestor, 0, class_loader)
@@ -765,7 +766,7 @@ pub(crate) fn related_model_type(
 fn collect_related_classes(
     related: &PhpType,
     declaring: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&super::super::ResolvedClassCache>,
     models: &mut Vec<Arc<ClassInfo>>,
 ) -> bool {
@@ -811,7 +812,7 @@ fn collect_related_classes(
 fn returns_relation_subclass(
     return_type: &PhpType,
     declaring_class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     let Some(name) = return_type.base_name() else {
         return false;
@@ -829,7 +830,7 @@ fn returns_relation_subclass(
 /// relationship methods from traits and parent classes are visible.
 fn resolve_class_with_inheritance(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&super::super::ResolvedClassCache>,
 ) -> Arc<ClassInfo> {
     crate::virtual_members::resolve_class_fully_maybe_cached(class, class_loader, cache)
@@ -844,9 +845,9 @@ fn resolve_class_with_inheritance(
 pub(crate) fn resolve_related_fqn(
     related_type: &str,
     declaring_class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<Arc<ClassInfo>> {
-    let cleaned = related_type.trim_start_matches('\\');
+    let cleaned = Fqn::new(related_type);
 
     // Try direct load first (handles FQNs).
     if let Some(cls) = class_loader(cleaned) {
@@ -856,7 +857,7 @@ pub(crate) fn resolve_related_fqn(
     // Try prepending the declaring class's namespace.
     if let Some(ref ns) = declaring_class.file_namespace {
         let fqn = format!("{}\\{}", ns, cleaned);
-        if let Some(cls) = class_loader(&fqn) {
+        if let Some(cls) = class_loader(Fqn::new(&fqn)) {
             return Some(cls);
         }
     }

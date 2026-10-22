@@ -1,4 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend, open_php};
+use crate::common::{create_psr4_workspace, create_test_backend, open_php, references_response};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -65,20 +65,7 @@ final class LargeTestCase {
 
     // Drive workspace indexing through the public LSP path, as a real client
     // would before requesting lenses from an index reported as ready.
-    backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(3, 12),
-            },
-            context: ReferenceContext {
-                include_declaration: true,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    references_response(&backend, &uri, Position::new(3, 12), true).await;
 
     let lenses = backend
         .code_lens(CodeLensParams {
@@ -137,20 +124,7 @@ function persistUnrelated(Unrelated $value): void {
     let uri = Url::from_file_path(dir.path().join("src/Order.php")).unwrap();
     open_php(&backend, &uri, order).await;
 
-    backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(3, 20),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    references_response(&backend, &uri, Position::new(3, 20), false).await;
 
     let lenses = backend
         .code_lens(CodeLensParams {
@@ -228,20 +202,7 @@ function persist(Order $order): void {
 
     let uri = Url::from_file_path(dir.path().join("src/Order.php")).unwrap();
     open_php(&backend, &uri, content).await;
-    backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(3, 20),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    references_response(&backend, &uri, Position::new(3, 20), false).await;
 
     let params = CodeLensParams {
         text_document: TextDocumentIdentifier { uri },
@@ -309,20 +270,7 @@ makeWidget();
     );
     let uri = Url::from_file_path(dir.path().join("src/functions.php")).unwrap();
     open_php(&backend, &uri, content).await;
-    backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(2, 12),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    references_response(&backend, &uri, Position::new(2, 12), false).await;
 
     let lenses = backend
         .code_lens(CodeLensParams {
@@ -382,20 +330,7 @@ async fn resolved_reference_title(
 
 /// Drive workspace indexing the way a client does before asking for lenses.
 async fn warm_workspace_index(backend: &phpantom_lsp::Backend, uri: &Url, position: Position) {
-    backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position,
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    references_response(backend, uri, position, false).await;
 }
 
 /// The implementation lens on `line`, resolved the way a client that
@@ -781,20 +716,7 @@ class User extends Model {}
 
     let builder_uri = Url::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
     // Drive the workspace index the way a client would before asking for lenses.
-    backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier::new(builder_uri.clone()),
-                position: Position::new(5, 21),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        })
-        .await
-        .unwrap();
+    references_response(&backend, &builder_uri, Position::new(5, 21), false).await;
 
     let lenses = backend
         .code_lens(CodeLensParams {

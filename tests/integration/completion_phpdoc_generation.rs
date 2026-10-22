@@ -1,4 +1,4 @@
-use crate::common::{complete_at, create_test_backend};
+use crate::common::{complete_at, create_test_backend, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -695,6 +695,61 @@ async fn generates_docblock_with_autoclosed_block() {
     );
 }
 
+/// The return type is inferred from the body however far the parameter
+/// list pushes the opening brace down.
+#[tokio::test]
+async fn infers_return_below_long_parameter_list() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///gen_long_params.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/** */\n",
+        "function ids(\n",
+        "    int $a,\n",
+        "    int $b,\n",
+        "    int $c,\n",
+        "    int $d,\n",
+        "    int $e,\n",
+        "    int $f,\n",
+        "): array {\n",
+        "    return [1, 2];\n",
+        "}\n",
+    );
+    let items = complete_at(&backend, &uri, text, 1, 3).await;
+    let item = find_docblock_item(&items).expect("Should produce a docblock generation item");
+
+    let snippet = snippet_text(item);
+    assert!(
+        snippet.contains("array{1, 2}"),
+        "Should infer the return type from the body, got:\n{}",
+        snippet
+    );
+}
+
+/// The return type is inferred from the body before the editor has closed
+/// the `/**`, though the open comment swallows the function.
+#[tokio::test]
+async fn infers_return_under_open_docblock() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///gen_open_return.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        "function ids(): array {\n",
+        "    return [1, 2];\n",
+        "}\n",
+    );
+    let items = complete_at(&backend, &uri, text, 1, 3).await;
+    let item = find_docblock_item(&items).expect("Should produce a docblock generation item");
+
+    let snippet = snippet_text(item);
+    assert!(
+        snippet.contains("array{1, 2}"),
+        "Should infer the return type from the body, got:\n{}",
+        snippet
+    );
+}
+
 /// When `/** */` is auto-closed, the text_edit range covers the full `/** */`.
 #[tokio::test]
 async fn text_edit_covers_autoclosed_block() {
@@ -1170,7 +1225,7 @@ async fn generates_docblock_for_standalone_function() {
         "<?php\n",
         "/**\n",
         "function calculateTotal(array $items, float $taxRate = 0.0): float {\n",
-        "    return 0.0;\n",
+        "    return $taxRate;\n",
         "}\n",
     );
     let items = complete_at(&backend, &uri, text, 1, 3).await;
@@ -1351,15 +1406,7 @@ async fn format_on_enter(
     line: u32,
     character: u32,
 ) -> Vec<TextEdit> {
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(backend, uri, text).await;
 
     let params = DocumentOnTypeFormattingParams {
         text_document_position: TextDocumentPositionParams {

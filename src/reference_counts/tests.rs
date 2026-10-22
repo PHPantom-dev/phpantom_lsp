@@ -11,14 +11,13 @@ fn parse_extra(backend: &Backend, uri: &str, content: &str) {
         .insert(uri.to_string(), Arc::new(content.to_string()));
     backend.update_ast(uri, content);
     backend
-        .workspace_indexed
+        .workspace_index
+        .indexed
         .store(true, std::sync::atomic::Ordering::Release);
     // The cache exists for the warm lens a refresh-capable client is
     // shown once the background search lands, which is the path these
     // tests measure.
-    backend
-        .supports_code_lens_refresh
-        .store(true, std::sync::atomic::Ordering::Release);
+    backend.client_caps.write().code_lens_refresh = true;
 }
 
 fn parse(backend: &Backend, content: &str) {
@@ -219,7 +218,10 @@ function later(Service $service): void {
     let backend = Backend::new_test();
     parse_extra(&backend, SERVICE_URI, SERVICE);
     parse_extra(&backend, CONSUMER_URI, CONSUMER);
-    backend.workspace_indexed.store(true, Ordering::Release);
+    backend
+        .workspace_index
+        .indexed
+        .store(true, Ordering::Release);
 
     let class_fqn = crate::atom::atom("Service");
     let save_offset = SERVICE.find("save").unwrap() as u32;
@@ -238,12 +240,7 @@ function later(Service $service): void {
     backend.compute_pending_member_ref_counts();
     assert!(crate::type_engine::variable::resolution::test_scope_cache_hits() > 0);
 
-    let consumer_map = backend
-        .symbol_maps
-        .read()
-        .get(CONSUMER_URI)
-        .cloned()
-        .unwrap();
+    let consumer_map = backend.symbol_map_for(CONSUMER_URI).unwrap();
     let save_span = consumer_map.member_access_indices("save")[0];
     let cancel_span = consumer_map.member_access_indices("cancel")[0];
 
@@ -434,10 +431,7 @@ function run(Service $service): void {
     /// Whether the consumer's resolutions are still cached.
     fn is_warm(backend: &Backend) -> bool {
         let map = backend
-            .symbol_maps
-            .read()
-            .get(CONSUMER_URI)
-            .cloned()
+            .symbol_map_for(CONSUMER_URI)
             .expect("the consumer is parsed");
         backend.resolved_member_file(CONSUMER_URI, &map).is_some()
     }
@@ -517,12 +511,7 @@ function run(Factory $factory): void {
         "the chained call is a reference"
     );
 
-    let consumer_map = backend
-        .symbol_maps
-        .read()
-        .get(CONSUMER_URI)
-        .cloned()
-        .unwrap();
+    let consumer_map = backend.symbol_map_for(CONSUMER_URI).unwrap();
     assert!(
         backend
             .resolved_member_file(CONSUMER_URI, &consumer_map)
@@ -566,12 +555,7 @@ fn an_edit_to_a_function_the_receiver_came_from_drops_the_entry() {
         "the call chained off the helper is a reference"
     );
 
-    let consumer_map = backend
-        .symbol_maps
-        .read()
-        .get(CONSUMER_URI)
-        .cloned()
-        .unwrap();
+    let consumer_map = backend.symbol_map_for(CONSUMER_URI).unwrap();
     assert!(
         backend
             .resolved_member_file(CONSUMER_URI, &consumer_map)
@@ -614,12 +598,7 @@ fn an_edit_to_a_parent_drops_an_entry_that_only_named_the_child() {
         "the inherited call is a reference to the declaration on the parent"
     );
 
-    let consumer_map = backend
-        .symbol_maps
-        .read()
-        .get(CONSUMER_URI)
-        .cloned()
-        .unwrap();
+    let consumer_map = backend.symbol_map_for(CONSUMER_URI).unwrap();
     assert!(
         backend
             .resolved_member_file(CONSUMER_URI, &consumer_map)

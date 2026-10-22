@@ -29,18 +29,9 @@ pub(super) fn apply_key_domain_narrowing<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) {
     for operand in collect_and_chain_operands(condition) {
-        if let Some((_, key_expr, negated)) = array_key_exists_target(operand) {
-            if !negated
-                && let Expression::Call(Call::Function(call)) = unwrap_parens(operand)
-                && let Some(array) = call.argument_list.arguments.iter().nth(1)
-            {
-                narrow_key(
-                    narrowing::argument_value(array),
-                    key_expr,
-                    false,
-                    scope,
-                    ctx,
-                );
+        if let Some((array_expr, key_expr, negated)) = array_key_exists_target(operand) {
+            if !negated {
+                narrow_key(array_expr, key_expr, false, scope, ctx);
             }
             continue;
         }

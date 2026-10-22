@@ -1,5 +1,6 @@
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::test_fixtures::{make_class, make_constant, make_method, make_property, no_loader};
 use crate::types::{ClassLikeKind, Visibility};
@@ -44,7 +45,8 @@ fn applies_when_implemented_interface_has_tags() {
     iface.set_class_docblock(Some("/** @method void bar() */".to_string()));
     let iface = Arc::new(iface);
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         (name == "HasMagic").then(|| Arc::clone(&iface))
     };
     assert!(provider.applies_to(&class, &class_loader));
@@ -66,7 +68,8 @@ fn applies_when_extended_interface_has_tags() {
     middle.interfaces = vec![atom("Base")];
     let middle = Arc::new(middle);
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Middle" => Some(Arc::clone(&middle)),
             "Base" => Some(Arc::clone(&base)),
@@ -92,7 +95,8 @@ fn cyclic_interfaces_do_not_hang_applies_to() {
     b.interfaces = vec![atom("A")];
     let b = Arc::new(b);
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "A" => Some(Arc::clone(&a)),
             "B" => Some(Arc::clone(&b)),
@@ -108,7 +112,7 @@ fn applies_when_class_has_mixins() {
     let mut class = make_class("Foo");
     class.mixins = vec![atom("Bar")];
 
-    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+    let class_loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
     assert!(provider.applies_to(&class, &class_loader));
 }
 
@@ -121,7 +125,8 @@ fn applies_when_ancestor_has_mixins() {
     let mut parent = make_class("Parent");
     parent.mixins = vec![atom("Mixin")];
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Parent" {
             Some(Arc::new(parent.clone()))
         } else {
@@ -368,7 +373,8 @@ fn provides_public_methods_from_mixin() {
     private_method.visibility = Visibility::Private;
     bar.methods.push(Arc::new(private_method));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Bar" {
             Some(Arc::new(bar.clone()))
         } else {
@@ -394,7 +400,8 @@ fn provides_public_properties_from_mixin() {
     protected_prop.visibility = Visibility::Protected;
     bar.properties.push(Arc::new(protected_prop));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Bar" {
             Some(Arc::new(bar.clone()))
         } else {
@@ -419,7 +426,8 @@ fn provides_public_constants_from_mixin() {
     private_const.visibility = Visibility::Private;
     bar.constants.push(Arc::new(private_const));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Bar" {
             Some(Arc::new(bar.clone()))
         } else {
@@ -447,7 +455,8 @@ fn mixin_does_not_overwrite_existing_class_members() {
     bar.methods
         .push(Arc::new(make_method("barOnly", Some("void"))));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Bar" {
             Some(Arc::new(bar.clone()))
         } else {
@@ -475,7 +484,8 @@ fn mixin_leaves_this_return_type_as_is_for_consumer_resolution() {
     bar.methods
         .push(Arc::new(make_method("staticRef", Some("static"))));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Bar" {
             Some(Arc::new(bar.clone()))
         } else {
@@ -522,7 +532,8 @@ fn forwards_calls_rewrites_mixin_class_return_to_this() {
         .methods
         .push(Arc::new(make_method("count", Some("int"))));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Query\\Builder"
             || name.ends_with("\\Query\\Builder")
             || name == "Builder"
@@ -578,7 +589,8 @@ fn mixin_collects_from_ancestor_mixins() {
         .methods
         .push(Arc::new(make_method("mixinMethod", Some("void"))));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Parent" => Some(Arc::new(parent.clone())),
             "Mixin" => Some(Arc::new(mixin.clone())),
@@ -606,7 +618,8 @@ fn mixin_recurses_into_mixin_mixins() {
     baz.methods
         .push(Arc::new(make_method("bazMethod", Some("void"))));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Bar" => Some(Arc::new(bar.clone())),
             "Baz" => Some(Arc::new(baz.clone())),
@@ -634,7 +647,8 @@ fn multiple_mixins() {
     baz.methods
         .push(Arc::new(make_method("bazMethod", Some("void"))));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Bar" => Some(Arc::new(bar.clone())),
             "Baz" => Some(Arc::new(baz.clone())),
@@ -662,7 +676,8 @@ fn first_mixin_wins_on_name_collision() {
     baz.methods
         .push(Arc::new(make_method("shared", Some("int"))));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Bar" => Some(Arc::new(bar.clone())),
             "Baz" => Some(Arc::new(baz.clone())),
@@ -694,7 +709,8 @@ fn method_tag_beats_mixin_method() {
     bar.methods
         .push(Arc::new(make_method("barOnly", Some("void"))));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Bar" {
             Some(Arc::new(bar.clone()))
         } else {
@@ -729,7 +745,8 @@ fn property_tag_beats_mixin_property() {
     bar.properties
         .push(Arc::new(make_property("email", Some("string"))));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Bar" {
             Some(Arc::new(bar.clone()))
         } else {
@@ -763,7 +780,8 @@ fn mixin_only_no_docblock() {
     bar.properties
         .push(Arc::new(make_property("barProp", Some("int"))));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Bar" {
             Some(Arc::new(bar.clone()))
         } else {
@@ -805,7 +823,8 @@ fn mixin_template_param_substituted_via_ancestor_walk() {
         .methods
         .push(Arc::new(make_method("getEvents", Some("array"))));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Subclient" => Some(Arc::new(subclient.clone())),
             "EventsApi" => Some(Arc::new(events_api.clone())),
@@ -867,7 +886,8 @@ fn unresolvable_parent_trait_does_not_hide_its_siblings() {
         &[],
     ));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Base" => Some(Arc::clone(&base)),
             "Decorates" => Some(Arc::clone(&decorates)),
@@ -901,7 +921,8 @@ fn parent_trait_property_tags_are_marked_as_docblock_tags() {
         &[],
     ));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Base" => Some(Arc::clone(&base)),
             "Publishes" => Some(Arc::clone(&publishes)),
@@ -945,7 +966,8 @@ fn parent_trait_without_use_generics_keeps_its_template_param() {
         &["TItem"],
     ));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Base" => Some(Arc::clone(&base)),
             "Holds" => Some(Arc::clone(&holds)),
@@ -979,7 +1001,8 @@ fn parent_trait_use_generics_apply_without_subclass_substitutions() {
         &["TItem"],
     ));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Base" => Some(Arc::clone(&base)),
             "Holds" => Some(Arc::clone(&holds)),
@@ -1012,7 +1035,8 @@ fn a_partial_use_generic_leaves_the_remaining_trait_params_alone() {
         &["TKey", "TItem"],
     ));
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Base" => Some(Arc::clone(&base)),
             "Holds" => Some(Arc::clone(&holds)),
@@ -1050,7 +1074,8 @@ fn interface_extends_generics_substitute_into_the_parents_tags() {
     badge_bag.extends_generics = vec![(atom("Bag"), vec![PhpType::named(atom("Badge"))])];
     let badge_bag = Arc::new(badge_bag);
 
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Bag" => Some(Arc::clone(&bag)),
             "BadgeBag" => Some(Arc::clone(&badge_bag)),

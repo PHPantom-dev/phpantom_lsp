@@ -5,8 +5,7 @@
 //! calls a second macro for the password group.  A route file that calls the
 //! macro has all of those names, so none of them may be reported as unknown.
 
-use crate::common::{create_psr4_workspace, open_initialized_php};
-use tower_lsp::LanguageServer;
+use crate::common::{create_psr4_workspace, goto_definition_at, open_initialized_php};
 use tower_lsp::lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
@@ -135,20 +134,7 @@ async fn goto_definition_reaches_a_route_declared_in_a_macro_body() {
     let uri = open_initialized_php(&backend, "src/Links.php").await;
 
     // Cursor inside 'password.update' on line 6.
-    let result = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 6,
-                    character: 22,
-                },
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        })
-        .await
-        .unwrap();
+    let result = goto_definition_at(&backend, &uri, 6, 22).await;
 
     let target = match result {
         Some(GotoDefinitionResponse::Scalar(location)) => location.uri,

@@ -259,7 +259,9 @@ impl PhpType {
     /// Also returns `true` when the type is `?bool` (nullable wrapper).
     pub fn is_bool(&self) -> bool {
         match self.kind() {
-            TypeKind::Named(s) => matches!(keyword_lowercase(s).as_str(), "bool" | "boolean"),
+            TypeKind::Named(s) => {
+                with_keyword_lowercase(s, |lower| matches!(lower, "bool" | "boolean"))
+            }
             TypeKind::Nullable(inner) => inner.is_bool(),
             _ => false,
         }
@@ -292,7 +294,9 @@ impl PhpType {
     /// Also returns `true` when the type is `?int` (nullable wrapper).
     pub fn is_int(&self) -> bool {
         match self.kind() {
-            TypeKind::Named(s) => matches!(keyword_lowercase(s).as_str(), "int" | "integer"),
+            TypeKind::Named(s) => {
+                with_keyword_lowercase(s, |lower| matches!(lower, "int" | "integer"))
+            }
             TypeKind::Nullable(inner) => inner.is_int(),
             _ => false,
         }
@@ -315,7 +319,7 @@ impl PhpType {
     pub fn is_float(&self) -> bool {
         match self.kind() {
             TypeKind::Named(s) => {
-                matches!(keyword_lowercase(s).as_str(), "float" | "double" | "real")
+                with_keyword_lowercase(s, |lower| matches!(lower, "float" | "double" | "real"))
             }
             TypeKind::Nullable(inner) => inner.is_float(),
             _ => false,
@@ -365,6 +369,9 @@ impl PhpType {
             TypeKind::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_string_subtype())
             }
+            // `non-empty-lowercase-string&non-falsy-string`: each member
+            // narrows the same string.
+            TypeKind::Intersection(members) => members.iter().any(|m| m.is_string_subtype()),
             _ => false,
         }
     }
@@ -401,10 +408,9 @@ impl PhpType {
     /// and integer literals.
     pub fn is_int_subtype(&self) -> bool {
         match self.kind() {
-            TypeKind::Named(s) => matches!(
-                keyword_lowercase(s).as_str(),
-                "int" | "integer" | int_refinement!()
-            ),
+            TypeKind::Named(s) => with_keyword_lowercase(s, |lower| {
+                matches!(lower, "int" | "integer" | int_refinement!())
+            }),
             TypeKind::IntRange(_, _) => true,
             TypeKind::Literal(l) => matches!(**l, LiteralValue::Int(_)),
             TypeKind::Nullable(inner) => inner.is_int_subtype(),
@@ -608,19 +614,21 @@ impl PhpType {
         match self.kind() {
             TypeKind::Named(s) => {
                 s == "number"
-                    || matches!(
-                        keyword_lowercase(s).as_str(),
-                        "int"
-                            | "integer"
-                            | "float"
-                            | "double"
-                            | "real"
-                            | "bool"
-                            | "boolean"
-                            | "true"
-                            | "false"
-                            | int_refinement!()
-                    )
+                    || with_keyword_lowercase(s, |lower| {
+                        matches!(
+                            lower,
+                            "int"
+                                | "integer"
+                                | "float"
+                                | "double"
+                                | "real"
+                                | "bool"
+                                | "boolean"
+                                | "true"
+                                | "false"
+                                | int_refinement!()
+                        )
+                    })
             }
             TypeKind::Literal(value) => {
                 matches!(**value, LiteralValue::Int(_) | LiteralValue::Float(_))
@@ -722,10 +730,7 @@ impl PhpType {
             TypeKind::Generic(generic) => &generic.name,
             _ => return false,
         };
-        matches!(
-            crate::php_type::keywords::keyword_lowercase(name).as_str(),
-            "array" | "list" | "iterable"
-        )
+        with_keyword_lowercase(name, |lower| matches!(lower, "array" | "list" | "iterable"))
     }
 
     /// Returns `true` when this type is exactly the bare, unparameterised

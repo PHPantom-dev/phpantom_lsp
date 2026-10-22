@@ -9,7 +9,7 @@ use crate::type_engine::variable::raw_type_inference::written_array_literal_type
 /// can prove something about, so every extractor in this module reads its
 /// operands through here.
 pub(crate) fn expr_to_subject(expr: &Expression<'_>) -> Option<String> {
-    expr_to_var_name(expr).or_else(|| narrowing::expr_to_subject_key(expr))
+    expr_to_var_name(expr).or_else(|| condition_facts::expr_to_subject_key(expr))
 }
 
 /// Which side of an equality a branch is narrowing.
@@ -34,7 +34,7 @@ fn extract_sentinel_check(
     sentinel: Sentinel,
     is_sentinel: fn(&Expression<'_>) -> bool,
 ) -> Option<String> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(expr);
     let Expression::Binary(bin) = inner else {
         return None;
     };
@@ -69,7 +69,7 @@ fn extract_sentinel_check(
 /// (`$obj->prop`, `$arr["key"]`). Returns an empty vec when the expression
 /// is not an `isset()` call of the wanted polarity.
 fn extract_isset_subjects(expr: &Expression<'_>, wanted_negated: bool) -> Vec<String> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(expr);
     if negated != wanted_negated {
         return vec![];
     }
@@ -108,7 +108,7 @@ pub(crate) fn extract_null_equality_check_var(expr: &Expression<'_>) -> Option<S
 /// comparison rather than a strict one.
 pub(crate) fn is_loose_comparison(expr: &Expression<'_>) -> bool {
     matches!(
-        narrowing::unwrap_condition_negation(expr).0,
+        condition_facts::unwrap_condition_negation(expr).0,
         Expression::Binary(bin)
             if matches!(bin.operator, BinaryOperator::Equal(_) | BinaryOperator::NotEqual(_))
     )
@@ -130,7 +130,7 @@ pub(super) fn extract_class_constant_identity<'b>(
     expr: &'b Expression<'b>,
     proves_equal: bool,
 ) -> Option<(String, &'b Expression<'b>)> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(expr);
     let Expression::Binary(bin) = inner else {
         return None;
     };
@@ -228,7 +228,7 @@ pub(crate) enum EmptyValue {
 pub(crate) fn extract_empty_value_check(
     expr: &Expression<'_>,
 ) -> Option<(String, EmptyValue, bool)> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(expr);
     let Expression::Binary(bin) = inner else {
         return None;
     };
@@ -258,7 +258,7 @@ pub(crate) fn extract_empty_value_check(
 pub(crate) fn extract_literal_identity_check(
     expr: &Expression<'_>,
 ) -> Option<(String, PhpType, bool)> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(expr);
     let Expression::Binary(bin) = inner else {
         return None;
     };

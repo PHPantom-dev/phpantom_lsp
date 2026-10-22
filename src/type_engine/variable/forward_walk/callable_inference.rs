@@ -49,7 +49,7 @@ pub(crate) fn infer_callable_params_from_function_fw(
         {
             let arg_texts = super::super::raw_type_inference::extract_arg_texts_from_ast(
                 argument_list,
-                ctx.content,
+                ctx.file.content,
             );
             let walker_types =
                 super::super::rhs_resolution::walker_arg_types(argument_list, &var_ctx);
@@ -135,8 +135,10 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
     );
     // Replace `$this`/`static` tokens with the receiver's full type.
     let params = if let Some(receiver) = receiver_classes.first() {
-        let receiver_type =
-            super::super::closure_resolution::build_receiver_self_type(receiver, ctx.class_loader);
+        let receiver_type = super::super::closure_resolution::build_receiver_self_type(
+            receiver,
+            ctx.file.class_loader,
+        );
         // Late static binding only carries across a forwarding call
         // (`$this->`, or a receiver that is itself still bound); any other
         // receiver pins `static` to the class it was declared as, just as
@@ -173,7 +175,7 @@ fn handed_to_callback(params: Vec<PhpType>, ctx: &ForwardWalkCtx<'_>) -> Vec<Php
         .map(|p| {
             crate::virtual_members::laravel::replace_eloquent_collections_in_type(
                 &p,
-                ctx.class_loader,
+                ctx.file.class_loader,
             )
             .unwrap_or(p)
         })
@@ -198,7 +200,7 @@ pub(crate) fn filter_resolvable_inferred_params(
         .iter()
         .map(|ty| {
             let ty = if crate::virtual_members::laravel::has_model_type_operator(ty) {
-                crate::virtual_members::laravel::expand_model_type(ty, ctx.class_loader)
+                crate::virtual_members::laravel::expand_model_type(ty, ctx.file.class_loader)
             } else {
                 ty.clone()
             };
@@ -300,7 +302,7 @@ pub(crate) fn build_receiver_template_subs(
             _ => continue,
         };
         let reconstructed =
-            super::super::closure_resolution::build_receiver_self_type(cls, ctx.class_loader);
+            super::super::closure_resolution::build_receiver_self_type(cls, ctx.file.class_loader);
         if let TypeKind::Generic(g) = reconstructed.kind()
             && !g.args.is_empty()
         {
@@ -366,8 +368,10 @@ fn method_template_subs_for_call(
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> HashMap<String, PhpType> {
-    let arg_texts =
-        super::super::raw_type_inference::extract_arg_texts_from_ast(argument_list, ctx.content);
+    let arg_texts = super::super::raw_type_inference::extract_arg_texts_from_ast(
+        argument_list,
+        ctx.file.content,
+    );
     let arg_refs: Vec<&str> = arg_texts.iter().map(String::as_str).collect();
     crate::Backend::build_method_template_subs(owner, method_name, &arg_refs, rctx)
 }
@@ -434,7 +438,7 @@ fn callable_params_on_static_owner(
 
     let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
         owner,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
     let params =
@@ -447,7 +451,7 @@ fn callable_params_on_static_owner(
     // params like `Closure(Collection<int, TModel>)` become
     // `Closure(Collection<int, Customer>)`.
     let receiver_type =
-        super::super::closure_resolution::build_receiver_self_type(owner, ctx.class_loader);
+        super::super::closure_resolution::build_receiver_self_type(owner, ctx.file.class_loader);
     let template_subs = if let TypeKind::Generic(g) = receiver_type.kind()
         && !g.args.is_empty()
         && !owner.template_params.is_empty()
@@ -514,7 +518,7 @@ pub(crate) fn find_callable_params_on_classes_fw(
         // and try again.
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             cls,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         let result =
@@ -550,11 +554,11 @@ pub(crate) fn find_callable_params_on_method_fw(
     if let Some(params) = callable_param_hints(hint) {
         return params;
     }
-    crate::type_engine::types::aliases::expand_member_type_aliases(
+    crate::type_engine::type_ops::aliases::expand_member_type_aliases(
         hint,
         class,
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     )
     .and_then(|expanded| callable_param_hints(&expanded))
     .unwrap_or_default()
@@ -613,9 +617,9 @@ pub(crate) fn seed_this(scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
     crate::type_engine::trait_context::extend_this_with_trait_bounds(
         &mut this_types,
         current_class,
-        ctx.all_classes,
-        ctx.class_loader,
-        ctx.backend,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
+        ctx.file.backend,
     );
     scope.set("$this", this_types);
 }

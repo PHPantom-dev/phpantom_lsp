@@ -312,7 +312,7 @@ pub(crate) fn find_use_member<'a>(
             Some((n, a)) => (n.trim(), Some(a.trim())),
             None => (entry, None),
         };
-        let short_name = name.rsplit('\\').next().unwrap_or(name);
+        let short_name = crate::util::short_name(name);
 
         if joined_name_matches(prefix, name, fqn) && member_alias.unwrap_or(short_name) == alias {
             found = Some((item_start + content_start, item_start + content_end));

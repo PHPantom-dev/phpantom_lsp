@@ -252,6 +252,15 @@ pub(super) fn declaration_indent(text: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The byte offset where the declaration after a docblock starts: the
+/// first non-whitespace byte at or after `from`, the position just past
+/// the docblock.
+pub(super) fn declaration_offset(content: &str, from: Position) -> u32 {
+    let from = position_to_byte_offset(content, from).min(content.len());
+    let after = &content[from..];
+    (from + after.len() - after.trim_start().len()) as u32
+}
+
 /// Get the text after the `/**` trigger position, skipping the rest of
 /// the trigger line.
 pub(super) fn get_text_after_trigger(content: &str, position: Position) -> String {

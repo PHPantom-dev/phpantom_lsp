@@ -48,6 +48,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use super::context::DocblockContext;
+use crate::class_lookup::{ResolvedClassLoader, SourceClassLoader};
 use crate::completion::source::throws_analysis::{self, ThrowsContext};
 use crate::completion::use_edit::{analyze_use_block, build_use_edit};
 use crate::types::{ClassInfo, FunctionLoader};
@@ -72,7 +73,8 @@ pub fn try_generate_docblock(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
     uri: &str,
@@ -81,6 +83,7 @@ pub fn try_generate_docblock(
 
     // Find the declaration below and classify it.
     let remaining = trigger::get_text_after_trigger(content, position);
+    let decl_offset = trigger::declaration_offset(content, Position::new(position.line + 1, 0));
     let context = parse_decl::classify_declaration(&remaining);
 
     // Inside a function body (Inline / Unknown) we don't generate a
@@ -104,10 +107,12 @@ pub fn try_generate_docblock(
         &mut build::DocForm::snippet(),
         content,
         position,
+        decl_offset,
         use_map,
         file_namespace,
         local_classes,
         class_loader,
+        resolved_class_loader,
         backend,
         function_loader,
     );
@@ -120,6 +125,7 @@ pub fn try_generate_docblock(
     let additional_edits = if matches!(context, DocblockContext::FunctionOrMethod) {
         let throws_ctx = ThrowsContext {
             class_loader,
+            resolved_class_loader,
             function_loader,
             use_map,
             local_classes,
@@ -172,7 +178,8 @@ pub fn try_generate_docblock_on_enter(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
     uri: &str,
@@ -185,6 +192,7 @@ pub fn try_generate_docblock_on_enter(
     // wrong indent level inside constructor parameter lists.  The
     // declaration line is always at the correct level.
     let indent = trigger::declaration_indent(&after_block);
+    let decl_offset = trigger::declaration_offset(content, block_range.end);
 
     let context = parse_decl::classify_declaration(&after_block);
 
@@ -209,10 +217,12 @@ pub fn try_generate_docblock_on_enter(
         &mut build::DocForm::Plain { indent: &indent },
         content,
         position,
+        decl_offset,
         use_map,
         file_namespace,
         local_classes,
         class_loader,
+        resolved_class_loader,
         backend,
         function_loader,
     );
@@ -230,6 +240,7 @@ pub fn try_generate_docblock_on_enter(
     if matches!(context, DocblockContext::FunctionOrMethod) {
         let throws_ctx = ThrowsContext {
             class_loader,
+            resolved_class_loader,
             function_loader,
             use_map,
             local_classes,
@@ -244,6 +255,10 @@ pub fn try_generate_docblock_on_enter(
         ));
     }
 
+    let eol = crate::text_position::line_ending(content);
+    for edit in &mut edits {
+        crate::text_position::match_line_ending(&mut edit.new_text, eol);
+    }
     Some(edits)
 }
 

@@ -6,8 +6,10 @@
 //! `ends_with(')')`, etc.) with exhaustive `match` in the resolver.
 //!
 //! The parser ([`SubjectExpr::parse`]) accepts the raw subject strings
-//! produced by the symbol map or text scanner and returns the
-//! corresponding variant.
+//! produced by the symbol map or by
+//! [`subject_extraction`](super::subject_extraction) and returns the
+//! corresponding variant, which the resolver or
+//! [`subject_resolution`](super::subject_resolution) then types.
 
 use crate::text_scan::{
     CodeOffsets, ScanStep, find_matching_backward, find_matching_forward, scan_top_level_backward,

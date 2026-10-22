@@ -1371,8 +1371,7 @@ class Baz {
 
 #[tokio::test]
 async fn async_did_open_class_references_no_duplicates() {
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::{DidOpenTextDocumentParams, TextDocumentItem, Url};
+    use tower_lsp::lsp_types::Url;
 
     let backend = create_test_backend();
     let uri = Url::parse("file:///tmp/test_async_refs.php").unwrap();
@@ -1391,16 +1390,7 @@ class Baz {
 }
 "#;
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
     let uri_str = uri.to_string();
 
@@ -1449,8 +1439,7 @@ class Baz {
 
 #[tokio::test]
 async fn async_did_open_cross_file_no_duplicates() {
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::{DidOpenTextDocumentParams, TextDocumentItem, Url};
+    use tower_lsp::lsp_types::Url;
 
     let (backend, dir) = crate::common::create_psr4_workspace(
         r#"{
@@ -1498,27 +1487,9 @@ class Basket {
     let product_content = std::fs::read_to_string(&product_path).unwrap();
     let basket_content = std::fs::read_to_string(&basket_path).unwrap();
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: product_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: product_content.clone(),
-            },
-        })
-        .await;
+    open_php(&backend, &product_uri, &product_content).await;
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: basket_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: basket_content.clone(),
-            },
-        })
-        .await;
+    open_php(&backend, &basket_uri, &basket_content).await;
 
     let product_uri_str = product_uri.to_string();
 
@@ -1576,8 +1547,7 @@ class Basket {
 /// production scenario where URI format mismatches could occur.
 #[tokio::test]
 async fn async_did_open_one_file_workspace_discovers_other() {
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::{DidOpenTextDocumentParams, TextDocumentItem, Url};
+    use tower_lsp::lsp_types::Url;
 
     let (backend, dir) = crate::common::create_psr4_workspace(
         r#"{
@@ -1623,16 +1593,7 @@ class Dashboard {
     let widget_uri = Url::from_file_path(&widget_path).unwrap();
     let widget_content = std::fs::read_to_string(&widget_path).unwrap();
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: widget_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: widget_content.clone(),
-            },
-        })
-        .await;
+    open_php(&backend, &widget_uri, &widget_content).await;
 
     let widget_uri_str = widget_uri.to_string();
 
@@ -5102,5 +5063,32 @@ fn references_on_crlf_file_with_multibyte_prefix_use_utf16_columns() {
             .collect::<Vec<_>>(),
         vec![(5, expected_column, expected_column + 3)],
         "the usage range must be in UTF-16 units on its own line, got: {results:#?}"
+    );
+}
+
+// ─── Declarations in files that access nothing ───────────────────────────────
+
+/// A file is a candidate for declaring the member as much as for accessing
+/// it, and the access narrowing must not take the declaration with it.
+#[tokio::test]
+async fn find_references_still_reports_a_declaration_in_a_file_that_accesses_nothing() {
+    let backend = create_test_backend();
+    let base_uri = Url::parse("file:///Base.php").unwrap();
+    let child_uri = Url::parse("file:///Child.php").unwrap();
+    let base_text = "<?php\nclass Base {\n    public function save(): void {}\n}\n";
+    let child_text = "<?php\nclass Child extends Base {\n    public function store(): void {\n        $this->save();\n    }\n}\n";
+    open_php(&backend, &base_uri, base_text).await;
+    open_php(&backend, &child_uri, child_text).await;
+
+    let (line, character) = crate::common::line_char_of(child_text, "save();");
+    let locations = references_at(&backend, &child_uri, line, character, true).await;
+
+    assert!(
+        locations.iter().any(|loc| loc.uri == base_uri),
+        "the declaration in Base.php has to be reported: {locations:?}"
+    );
+    assert!(
+        locations.iter().any(|loc| loc.uri == child_uri),
+        "the call in Child.php has to be reported: {locations:?}"
     );
 }

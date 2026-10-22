@@ -8,12 +8,13 @@
 //! lands in the injected prologue, which has no template text behind it.
 
 use crate::Backend;
+use crate::code_actions::{FileTextEdits, visit_file_text_edits};
 
 impl Backend {
     /// Check whether a URI refers to a Blade template file.
     /// Returns true if the URI ends with `.blade.php` OR was opened with `languageId == "blade"`.
     pub(crate) fn is_blade_file(&self, uri: &str) -> bool {
-        crate::blade::is_blade_file(uri) || self.blade_uris.read().contains(uri)
+        crate::blade::is_blade_file(uri) || self.blade.uris.read().contains(uri)
     }
 
     /// Translate a position from an original Blade file to the virtual PHP file.
@@ -22,7 +23,7 @@ impl Backend {
         uri: &str,
         pos: tower_lsp::lsp_types::Position,
     ) -> tower_lsp::lsp_types::Position {
-        if let Some(map) = self.blade_source_maps.read().get(uri) {
+        if let Some(map) = self.blade_source_map(uri) {
             map.blade_to_php(pos)
         } else {
             pos
@@ -35,7 +36,7 @@ impl Backend {
         uri: &str,
         pos: tower_lsp::lsp_types::Position,
     ) -> tower_lsp::lsp_types::Position {
-        if let Some(map) = self.blade_source_maps.read().get(uri) {
+        if let Some(map) = self.blade_source_map(uri) {
             map.php_to_blade(pos)
         } else {
             pos
@@ -54,7 +55,7 @@ impl Backend {
         uri: &str,
         pos: tower_lsp::lsp_types::Position,
     ) -> Option<tower_lsp::lsp_types::Position> {
-        match self.blade_source_maps.read().get(uri) {
+        match self.blade_source_map(uri) {
             Some(map) => map.try_php_to_blade(pos),
             None => Some(pos),
         }
@@ -218,34 +219,24 @@ impl Backend {
         uri: &str,
         edits: &mut Vec<tower_lsp::lsp_types::TextEdit>,
     ) -> bool {
-        self.retain_translated(uri, edits, |edit| &mut edit.range)
+        self.retain_translated(uri, FileTextEdits::Plain(edits))
     }
 
     /// Translate the range of every edit in `edits` back into `uri`'s own
     /// coordinates, dropping the ones that land where the template has no
     /// position, and report whether any edit is left.
-    ///
-    /// `range_of` reaches the range through whichever edit shape the
-    /// caller holds.
-    fn retain_translated<T>(
-        &self,
-        uri: &str,
-        edits: &mut Vec<T>,
-        range_of: impl Fn(&mut T) -> &mut tower_lsp::lsp_types::Range,
-    ) -> bool {
-        if !self.is_blade_file(uri) {
-            return !edits.is_empty();
+    fn retain_translated(&self, uri: &str, mut edits: FileTextEdits<'_>) -> bool {
+        if self.is_blade_file(uri) {
+            edits.retain_mut(
+                |edit| match self.try_translate_blade_range(uri, edit.range) {
+                    Some(translated) => {
+                        edit.range = translated;
+                        true
+                    }
+                    None => false,
+                },
+            );
         }
-        edits.retain_mut(|edit| {
-            let range = range_of(edit);
-            match self.try_translate_blade_range(uri, *range) {
-                Some(translated) => {
-                    *range = translated;
-                    true
-                }
-                None => false,
-            }
-        });
         !edits.is_empty()
     }
 
@@ -265,49 +256,10 @@ impl Backend {
         &self,
         edit: &mut tower_lsp::lsp_types::WorkspaceEdit,
     ) -> bool {
-        use tower_lsp::lsp_types::{DocumentChangeOperation, DocumentChanges};
-
         let mut applies = false;
-        if let Some(changes) = edit.changes.as_mut() {
-            for (uri, edits) in changes.iter_mut() {
-                applies |= self.translate_template_edits(uri.as_str(), edits);
-            }
-        }
-        let Some(document_changes) = edit.document_changes.as_mut() else {
-            return applies;
-        };
-        match document_changes {
-            DocumentChanges::Edits(edits) => {
-                for document in edits {
-                    applies |= self.translate_document_edit(document);
-                }
-            }
-            DocumentChanges::Operations(operations) => {
-                for operation in operations {
-                    match operation {
-                        DocumentChangeOperation::Edit(document) => {
-                            applies |= self.translate_document_edit(document);
-                        }
-                        DocumentChangeOperation::Op(_) => applies = true,
-                    }
-                }
-            }
-        }
-        applies
-    }
-
-    /// [`Self::translate_template_edits`] for the edits of one
-    /// `TextDocumentEdit`, whichever of the two edit shapes each carries.
-    fn translate_document_edit(
-        &self,
-        document: &mut tower_lsp::lsp_types::TextDocumentEdit,
-    ) -> bool {
-        use tower_lsp::lsp_types::OneOf;
-
-        let uri = document.text_document.uri.to_string();
-        self.retain_translated(&uri, &mut document.edits, |edit| match edit {
-            OneOf::Left(edit) => &mut edit.range,
-            OneOf::Right(edit) => &mut edit.text_edit.range,
-        })
+        let has_resource_op = visit_file_text_edits(edit, |uri, edits| {
+            applies |= self.retain_translated(uri.as_str(), edits);
+        });
+        applies || has_resource_op
     }
 }

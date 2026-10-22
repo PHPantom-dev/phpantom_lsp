@@ -124,7 +124,7 @@ impl Backend {
             }
         }
 
-        if self.resolved_class_cache.read().is_laravel()
+        if self.resolved_class_cache.read().laravel().is_enabled()
             && let Some(locations) = laravel::find_json_trans_references(
                 self,
                 uri,
@@ -138,7 +138,7 @@ impl Backend {
 
         // Fallback for declaration sites in config/*.php and routes/*.php
         let start_laravel = std::time::Instant::now();
-        if self.resolved_class_cache.read().is_laravel()
+        if self.resolved_class_cache.read().laravel().is_enabled()
             && let Some(mut locations) =
                 laravel::find_config_references(self, uri, content, position, include_declaration)
                     .or_else(|| {
@@ -401,7 +401,7 @@ impl Backend {
             SymbolKind::NamespaceDeclaration { .. } => Vec::new(),
 
             SymbolKind::LaravelStringKey { kind, key, .. } => {
-                if !self.resolved_class_cache.read().is_laravel() {
+                if !self.resolved_class_cache.read().laravel().is_enabled() {
                     return Vec::new();
                 }
                 // Config resources and their generic config spelling share a

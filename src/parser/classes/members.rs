@@ -106,7 +106,7 @@ fn extract_constants(
     let constant_deprecated_replacement = depr_info.replacement;
     let const_see_refs = const_docblock_info
         .as_ref()
-        .map(docblock::extract_see_references_from_info)
+        .map(docblock::extract_see_refs_from_info)
         .unwrap_or_default();
     let const_description = const_docblock_info
         .as_ref()

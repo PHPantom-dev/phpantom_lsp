@@ -20,6 +20,7 @@ pub mod preprocessor;
 pub(crate) mod shared_vars;
 pub(crate) mod signature;
 pub mod source_map;
+pub(crate) mod state;
 pub(crate) mod translate;
 pub(crate) mod typed_receiver;
 pub(crate) mod use_block;
@@ -152,7 +153,7 @@ mod tests {
         assert!(!backend.is_blade_file(uri));
 
         // Register via language_id
-        backend.blade_uris.write().insert(uri.to_string());
+        backend.blade.uris.write().insert(uri.to_string());
         assert!(backend.is_blade_file(uri));
     }
 
