@@ -1099,17 +1099,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b661-invoking-an-array-callable-has-no-return-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B661. Invoking an array callable has no return type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b670-a-member-access-on-a-closure-invoked-in-place-resolves-nothing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1862,17 +1851,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b661-invoking-an-array-callable-has-no-return-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B661. Invoking an array callable has no return type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b670-a-member-access-on-a-closure-invoked-in-place-resolves-nothing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2130,33 +2108,15 @@ function — common in legacy code, which is where a language server is worth
 the most. Route free functions through the same body inference the method
 path uses. Conformance row <code>native_types_untyped_return_inferred.php</code>, and
 the <code>inferred-return</code> hover probe, which shows no type for the same reason.</p>
-<h3 id="b661-invoking-an-array-callable-has-no-return-type">B661. Invoking an array callable has no return type<a class="headerlink" href="#b661-invoking-an-array-callable-has-no-return-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">function f(Repo $r): void {</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    $find = [$r, 'find'];</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    $find()-&gt;name();               // type of '$find()' could not be resolved</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">}</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">function g(Repo $r): void {</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">    $f = $r-&gt;find(...);</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">    $f()-&gt;name();                  // resolves to User</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>[$object, 'method']</code> and <code>[Repo::class, 'method']</code> name their target
-exactly, so invoking one is the same call as <code>$object-&gt;method()</code>. We type
-the array as an array and the invocation as nothing, which makes the member
-access on the result a false positive. First-class callable syntax and
-closures both resolve, so the gap is the array spelling alone —
-<code>call_user_func([$r, 'find'])</code> is <code>mixed</code> for the same reason. Conformance
-row <code>callables_array_callable_invocation.php</code>.</p>
 <h3 id="b670-a-member-access-on-a-closure-invoked-in-place-resolves-nothing">B670. A member access on a closure invoked in place resolves nothing<a class="headerlink" href="#b670-a-member-access-on-a-closure-invoked-in-place-resolves-nothing" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">function f(Repo $r): void {</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    $r-&gt;find(...)()-&gt;name();                     // type of '' could not be resolved</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    (fn(): User =&gt; new User())()-&gt;name();        // type of '' could not be resolved</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    \Closure::fromCallable([$r, 'find'])()-&gt;name(); // Method 'name' not found on class 'Closure'</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">    $c = \Closure::fromCallable([$r, 'find']);</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">    $c()-&gt;name();                                // resolves to User</span>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">function f(Repo $r): void {</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    $r-&gt;find(...)()-&gt;name();                     // type of '' could not be resolved</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    (fn(): User =&gt; new User())()-&gt;name();        // type of '' could not be resolved</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    \Closure::fromCallable([$r, 'find'])()-&gt;name(); // Method 'name' not found on class 'Closure'</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">    $c = \Closure::fromCallable([$r, 'find']);</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">    $c()-&gt;name();                                // resolves to User</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">}</span>
 </code></pre></div>
 <p>Invoking an expression that makes a closure, without assigning it first,
 loses the closure's return type when a member is accessed on the result. The
