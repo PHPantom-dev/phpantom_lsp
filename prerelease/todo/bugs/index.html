@@ -945,23 +945,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Templates">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b656-a-nested-conditional-return-type-tests-its-inner-condition-against-the-unnarrowed-parameter" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B656. A nested conditional return type tests its inner condition against the unnarrowed parameter
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1636,23 +1619,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Templates">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b656-a-nested-conditional-return-type-tests-its-inner-condition-against-the-unnarrowed-parameter" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B656. A nested conditional return type tests its inner condition against the unnarrowed parameter
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1817,33 +1783,14 @@ non-green framework cell for our column.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
-<h3 id="b656-a-nested-conditional-return-type-tests-its-inner-condition-against-the-unnarrowed-parameter">B656. A nested conditional return type tests its inner condition against the unnarrowed parameter<a class="headerlink" href="#b656-a-nested-conditional-return-type-tests-its-inner-condition-against-the-unnarrowed-parameter" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/**</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> * @return ($key is Model ? TModel|null : ($key is Arrayable ? static : TModel|null))</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x"> */</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">public function find(mixed $key): mixed { /* … */ }</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">function f(Collection $collection, ?User $user): void {</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    takesUserOrNull($collection-&gt;find($user));</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    // reported: got User|Collection&lt;User&gt;|null</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>?User</code> takes the outer <code>$key is Model</code> branch for its <code>User</code> part, so the
-inner condition only ever sees what the outer one rejected — <code>null</code>, which
-is not <code>Arrayable</code>. We evaluate the inner <code>$key is Arrayable</code> against the
-whole <code>?User</code> instead, <code>User</code> matches, and <code>static</code> joins a return type it
-cannot be part of. Each nested arm has to be resolved against the subject
-the enclosing condition left for it, not against the argument as written.
-This was PHPStan's own bug until 2.2.16 (phpstan-src#6586); conformance row
-<code>regressions_nested_param_conditional.php</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b657-new-expression-is-not-resolved">B657. <code>new (&lt;expression&gt;)</code> is not resolved<a class="headerlink" href="#b657-new-expression-is-not-resolved" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$a = new (User::class)();        // unresolved</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$b = new ('App\\User')();        // unresolved</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$c = new ($factory-&gt;class)();    // unresolved, even with @var class-string&lt;User&gt;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$d = new $someClassString();     // resolves</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$a = new (User::class)();        // unresolved</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">$b = new ('App\\User')();        // unresolved</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">$c = new ($factory-&gt;class)();    // unresolved, even with @var class-string&lt;User&gt;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">$d = new $someClassString();     // resolves</span>
 </code></pre></div>
 <p>PHP 8.0 allows an arbitrary parenthesised expression as the operand of
 <code>new</code>. The resolver handles the bare-variable spelling (<code>new $c()</code>) and
@@ -1854,20 +1801,20 @@ go through the same class-string resolution the bare variable already uses.
 Conformance row <code>generics_class_string_property_new.php</code>.</p>
 <h3 id="b658-a-member-access-written-directly-on-new-var-resolves-the-variable-not-the-instance">B658. A member access written directly on <code>new $var</code> resolves the variable, not the instance<a class="headerlink" href="#b658-a-member-access-written-directly-on-new-var-resolves-the-variable-not-the-instance" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">function f(Customer $c): void {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    $class = $c::class;</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    $copy = new $class();</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    $copy-&gt;name();                 // resolves to Customer</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    echo (new $class())-&gt;name();   // Cannot verify method 'name' — type of</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">                                   // '$class' could not be resolved</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">}</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">function g(): void {</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">    $class = 'App\\Customer';</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="x">    echo (new $class())-&gt;name();   // Cannot access method 'name' on type</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="x">                                   // ''App\Customer''        [scalar_member_access]</span>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">function f(Customer $c): void {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    $class = $c::class;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    $copy = new $class();</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    $copy-&gt;name();                 // resolves to Customer</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    echo (new $class())-&gt;name();   // Cannot verify method 'name' — type of</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">                                   // '$class' could not be resolved</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">}</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">function g(): void {</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">    $class = 'App\\Customer';</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">    echo (new $class())-&gt;name();   // Cannot access method 'name' on type</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">                                   // ''App\Customer''        [scalar_member_access]</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">}</span>
 </code></pre></div>
 <p>Two resolution paths answer "what does <code>new $var</code> produce", and they
 disagree. The assignment handler gets it right for every class-string
@@ -1886,14 +1833,14 @@ whichever of the two paths is right, there should be one. Conformance row
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b660-a-return-type-is-inferred-from-an-untyped-body-only-for-methods">B660. A return type is inferred from an untyped body only for methods<a class="headerlink" href="#b660-a-return-type-is-inferred-from-an-untyped-body-only-for-methods" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">function makeUser() { return new User(); }</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">final class Repo { public function find() { return new User(); } }</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">function f(Repo $r): void {</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    makeUser()-&gt;name();        // Cannot verify method 'name' — type of</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">                               // 'makeUser()' could not be resolved</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">    $r-&gt;find()-&gt;name();        // resolves to User</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">function makeUser() { return new User(); }</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">final class Repo { public function find() { return new User(); } }</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">function f(Repo $r): void {</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    makeUser()-&gt;name();        // Cannot verify method 'name' — type of</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">                               // 'makeUser()' could not be resolved</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    $r-&gt;find()-&gt;name();        // resolves to User</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">}</span>
 </code></pre></div>
 <p>A method with neither a native return type nor <code>@return</code> gets its return
 type read off its body; a free function with the same shape gets nothing.
@@ -1906,12 +1853,12 @@ path uses. Conformance row <code>native_types_untyped_return_inferred.php</code>
 the <code>inferred-return</code> hover probe, which shows no type for the same reason.</p>
 <h3 id="b671-a-callback-passed-by-name-is-not-invoked-by-call_user_func-or-an-in-place-fromcallable">B671. A callback passed by name is not invoked by <code>call_user_func()</code> or an in-place <code>fromCallable()</code><a class="headerlink" href="#b671-a-callback-passed-by-name-is-not-invoked-by-call_user_func-or-an-in-place-fromcallable" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">function f(Repo $r): void {</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    call_user_func(callback: [$r, 'find'])-&gt;name();          // type is 'mixed'</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    \Closure::fromCallable(callback: [$r, 'find'])()-&gt;name(); // Method 'name' not found on class 'Closure'</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    $c = \Closure::fromCallable(callback: [$r, 'find']);</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    $c()-&gt;name();                                            // resolves to User</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">function f(Repo $r): void {</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    call_user_func(callback: [$r, 'find'])-&gt;name();          // type is 'mixed'</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    \Closure::fromCallable(callback: [$r, 'find'])()-&gt;name(); // Method 'name' not found on class 'Closure'</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    $c = \Closure::fromCallable(callback: [$r, 'find']);</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    $c()-&gt;name();                                            // resolves to User</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>When the callback is a named argument, the member-access subject path reads
 the whole <code>callback: …</code> text as the callable and finds no type. The

@@ -5140,6 +5140,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Nested conditional return types follow the argument through each branch.</strong> In <code>($key is Model ? TModel|null : ($key is Arrayable ? static : TModel|null))</code>, an argument typed <code>?User</code> now reaches the inner condition as just <code>null</code>, so the call returns <code>User|null</code> instead of also picking up <code>static</code>.</li>
 <li><strong><code>new</code> on a class name held in a string is checked.</strong> <code>$class = 'Countable'; new $class()</code> now reports the interface, abstract class, trait or enum it would fail to instantiate, and a constructor given the wrong number of arguments, the same as when the class is written out. A leading backslash in the string names the same class.</li>
 <li><strong>Parameter-name hints no longer double up while typing.</strong> Editing a call could leave a hint in the wrong place, such as <code>myFunc(var1: var1: $something)</code>, until the file was reopened.</li>
 <li><strong><code>response()</code> with content is a response.</strong> <code>response($content)</code> now resolves to a <code>Response</code> even when <code>$content</code> may be <code>null</code>, so returning it from a method declared to return <code>Response</code> is no longer reported. Only <code>response()</code> with no arguments is the response factory.</li>
