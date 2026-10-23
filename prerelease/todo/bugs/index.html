@@ -1099,10 +1099,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b672-invoking-a-partial-application-in-place-resolves-nothing" class="md-nav__link">
+  <a href="#b673-a-partial-application-held-in-a-variable-is-checked-against-the-wrapped-signature" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B672. Invoking a partial application in place resolves nothing
+        B673. A partial application held in a variable is checked against the wrapped signature
       </span>
     </span>
   </a>
@@ -1851,10 +1851,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b672-invoking-a-partial-application-in-place-resolves-nothing" class="md-nav__link">
+  <a href="#b673-a-partial-application-held-in-a-variable-is-checked-against-the-wrapped-signature" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B672. Invoking a partial application in place resolves nothing
+        B673. A partial application held in a variable is checked against the wrapped signature
       </span>
     </span>
   </a>
@@ -2100,19 +2100,28 @@ the whole <code>callback: …</code> text as the callable and finds no type. The
 positional spelling and the assigned <code>fromCallable()</code> form both resolve. The
 <code>fromCallable()</code> shape then falls back to the stub's <code>Closure</code> and reports a
 false <code>unknown_member</code>.</p>
-<h3 id="b672-invoking-a-partial-application-in-place-resolves-nothing">B672. Invoking a partial application in place resolves nothing<a class="headerlink" href="#b672-invoking-a-partial-application-in-place-resolves-nothing" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">function f(Repo $r): void {</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    $r-&gt;find(?, 1)(5)-&gt;name(); // type of '' could not be resolved</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    $c = $r-&gt;find(?, 1);</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    $c(5)-&gt;name();             // resolves to User</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
+<h3 id="b673-a-partial-application-held-in-a-variable-is-checked-against-the-wrapped-signature">B673. A partial application held in a variable is checked against the wrapped signature<a class="headerlink" href="#b673-a-partial-application-held-in-a-variable-is-checked-against-the-wrapped-signature" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/**</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x"> * @template T of object</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x"> * @param class-string&lt;T&gt; $class</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x"> * @return T</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x"> */</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">public function make(int $id, string $class): object { … }</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">$c = $r-&gt;make(1, ?);</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="x">$c(User::class)-&gt;name(); // Expected 2 arguments, got 1</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="x">                         // Argument 1 ($id) expects int, got class-string&lt;User&gt;</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="x">                         // type of '$c(User::class)' could not be resolved</span>
 </code></pre></div>
-<p>A partial application with bound arguments that is invoked where it is made
-lowers to an empty member-access subject. The first-class callable form
-<code>$r-&gt;find(...)()</code> resolves, and so does the assigned form. The in-place form
-needs the same treatment, with the call's arguments combined with the
-placeholders' bound values.</p>
+<p>Calling a variable that holds a partial application with bound arguments is
+checked against every parameter of the wrapped method, so the bound ones count
+as missing and the call's arguments are matched to the wrong parameters. The
+closure type inferred for <code>$c</code> carries no parameters at all, and its return
+type is the wrapped call's with no arguments, so a template the placeholder
+fills is never bound. The closure's signature should be the wrapped
+signature's remaining (placeholder) parameters, and invoking it should combine
+the call's arguments with the bound values, the way invoking it in place does.</p>
 
 
 
