@@ -5140,6 +5140,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Reading a key from an intersection of array types.</strong> For a value typed <code>array&lt;string, mixed&gt;&amp;array{at: Carbon}</code>, <code>$entry['at']</code> now resolves to <code>Carbon</code> instead of an unknown type.</li>
 <li><strong><code>Closure::fromCallable()</code> keeps the callee's return type.</strong> Calling the closure it makes, such as <code>Closure::fromCallable([$repo, 'find'])</code>, now returns what the callable does, whether it is an array callable, a callable string, an invokable object, or a closure.</li>
 <li><strong>Invoking an array callable.</strong> Calling <code>[$object, 'method']</code> or <code>[Foo::class, 'method']</code> through a variable, or passing one to <code>call_user_func()</code>, now returns what the method returns instead of an unknown type.</li>
 <li><strong>Calling a closure on the spot.</strong> Accessing a member on the result of a closure invoked where it is made, such as <code>$repo-&gt;find(...)()</code>, <code>$repo-&gt;find(?, 1)(5)</code>, <code>(fn(): User =&gt; new User())()</code> or <code>Closure::fromCallable([$repo, 'find'])()</code>, now resolves to what the closure returns.</li>
