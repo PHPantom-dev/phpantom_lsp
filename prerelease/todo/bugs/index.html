@@ -1048,17 +1048,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b674-a-partial-applications-closure-type-carries-no-parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B674. A partial application's closure type carries no parameters
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1750,17 +1739,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b674-a-partial-applications-closure-type-carries-no-parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B674. A partial application's closure type carries no parameters
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1940,22 +1918,6 @@ the whole <code>callback: …</code> text as the callable and finds no type. The
 positional spelling and the assigned <code>fromCallable()</code> form both resolve. The
 <code>fromCallable()</code> shape then falls back to the stub's <code>Closure</code> and reports a
 false <code>unknown_member</code>.</p>
-<h3 id="b674-a-partial-applications-closure-type-carries-no-parameters">B674. A partial application's closure type carries no parameters<a class="headerlink" href="#b674-a-partial-applications-closure-type-carries-no-parameters" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @param Closure(string): object $factory */</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">function useFactory(Closure $factory): void {}</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">$make = $r-&gt;make(1, ?); // typed as a Closure with no parameters</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">useFactory($make);</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">useFactory($r-&gt;find(...)); // likewise, though find() takes (int, int)</span>
-</code></pre></div>
-<p>The type inferred for a first-class callable or a partial application is a
-<code>Closure</code> with the wrapped call's return type and an empty parameter list, so
-hover shows no parameters and a check against a declared <code>Closure(…)</code>
-signature compares nothing. Calling the variable is already checked against
-the parameters the placeholders leave open; the type should carry the same
-parameters, and a partial application's return type should be resolved with
-its bound arguments.</p>
 
 
 
