@@ -32,7 +32,7 @@ use std::collections::HashSet;
 
 use crate::atom::atom;
 use crate::php_type::PhpType;
-use crate::types::{ClassInfo, MethodInfo, ParameterInfo};
+use crate::types::{ClassInfo, MethodInfo, ParameterInfo, PropertySource};
 
 use super::ELOQUENT_BUILDER_FQN;
 use super::helpers::snake_to_pascal;
@@ -50,7 +50,8 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
     let mut columns = Vec::new();
 
     let mut push = |name: &str| {
-        if seen.insert(name.to_string()) {
+        // `$guarded = ['*']` describes mass-assignment policy, not a column.
+        if name != "*" && seen.insert(name.to_string()) {
             columns.push(name.to_string());
         }
     };
@@ -104,7 +105,17 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
     }
 
     // ── Virtual properties already on the class ─────────────────────
-    for prop in class.properties.iter().filter(|p| p.is_virtual) {
+    for prop in class.properties.iter().filter(|property| {
+        property.is_virtual
+            && !matches!(
+                property.source,
+                Some(
+                    PropertySource::Relationship { .. }
+                        | PropertySource::RelationshipCount { .. }
+                        | PropertySource::Pivot
+                )
+            )
+    }) {
         push(&prop.name);
     }
 

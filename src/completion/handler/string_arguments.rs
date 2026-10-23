@@ -132,8 +132,11 @@ impl Backend {
             string_ctx,
             StringContext::InStringLiteral | StringContext::NotInString
         ) && let Some(code) = code_ctx.as_ref()
-            && let Some(response) =
-                self.try_eloquent_string_completion(content, position, ctx, code)
+            && let Some(response) = self
+                .try_eloquent_string_completion(content, position, ctx, code)
+                .or_else(|| {
+                    self.try_eloquent_model_attribute_completion(content, position, ctx, code)
+                })
         {
             return Some(response);
         }
