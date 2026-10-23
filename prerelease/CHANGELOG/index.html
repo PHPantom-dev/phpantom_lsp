@@ -5140,6 +5140,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>new</code> on a parenthesised expression resolves.</strong> <code>new (User::class)()</code>, <code>new ('App\\User')()</code> and <code>new ($factory-&gt;class)()</code> now produce the class the expression names, so members accessed on the new instance complete and are no longer reported as unknown.</li>
 <li><strong>Nested conditional return types follow the argument through each branch.</strong> In <code>($key is Model ? TModel|null : ($key is Arrayable ? static : TModel|null))</code>, an argument typed <code>?User</code> now reaches the inner condition as just <code>null</code>, so the call returns <code>User|null</code> instead of also picking up <code>static</code>.</li>
 <li><strong><code>new</code> on a class name held in a string is checked.</strong> <code>$class = 'Countable'; new $class()</code> now reports the interface, abstract class, trait or enum it would fail to instantiate, and a constructor given the wrong number of arguments, the same as when the class is written out. A leading backslash in the string names the same class.</li>
 <li><strong>Parameter-name hints no longer double up while typing.</strong> Editing a call could leave a hint in the wrong place, such as <code>myFunc(var1: var1: $something)</code>, until the file was reopened.</li>
