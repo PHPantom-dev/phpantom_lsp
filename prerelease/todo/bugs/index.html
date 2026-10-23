@@ -1099,10 +1099,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b670-a-member-access-on-a-closure-invoked-in-place-resolves-nothing" class="md-nav__link">
+  <a href="#b671-a-callback-passed-by-name-is-not-invoked-by-call_user_func-or-an-in-place-fromcallable" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B670. A member access on a closure invoked in place resolves nothing
+        B671. A callback passed by name is not invoked by <code>call_user_func()</code> or an in-place <code>fromCallable()</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b672-invoking-a-partial-application-in-place-resolves-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B672. Invoking a partial application in place resolves nothing
       </span>
     </span>
   </a>
@@ -1851,10 +1862,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b670-a-member-access-on-a-closure-invoked-in-place-resolves-nothing" class="md-nav__link">
+  <a href="#b671-a-callback-passed-by-name-is-not-invoked-by-call_user_func-or-an-in-place-fromcallable" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B670. A member access on a closure invoked in place resolves nothing
+        B671. A callback passed by name is not invoked by <code>call_user_func()</code> or an in-place <code>fromCallable()</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b672-invoking-a-partial-application-in-place-resolves-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B672. Invoking a partial application in place resolves nothing
       </span>
     </span>
   </a>
@@ -2108,23 +2130,33 @@ function — common in legacy code, which is where a language server is worth
 the most. Route free functions through the same body inference the method
 path uses. Conformance row <code>native_types_untyped_return_inferred.php</code>, and
 the <code>inferred-return</code> hover probe, which shows no type for the same reason.</p>
-<h3 id="b670-a-member-access-on-a-closure-invoked-in-place-resolves-nothing">B670. A member access on a closure invoked in place resolves nothing<a class="headerlink" href="#b670-a-member-access-on-a-closure-invoked-in-place-resolves-nothing" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<h3 id="b671-a-callback-passed-by-name-is-not-invoked-by-call_user_func-or-an-in-place-fromcallable">B671. A callback passed by name is not invoked by <code>call_user_func()</code> or an in-place <code>fromCallable()</code><a class="headerlink" href="#b671-a-callback-passed-by-name-is-not-invoked-by-call_user_func-or-an-in-place-fromcallable" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">function f(Repo $r): void {</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    $r-&gt;find(...)()-&gt;name();                     // type of '' could not be resolved</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    (fn(): User =&gt; new User())()-&gt;name();        // type of '' could not be resolved</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    \Closure::fromCallable([$r, 'find'])()-&gt;name(); // Method 'name' not found on class 'Closure'</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">    $c = \Closure::fromCallable([$r, 'find']);</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">    $c()-&gt;name();                                // resolves to User</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">}</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    call_user_func(callback: [$r, 'find'])-&gt;name();          // type is 'mixed'</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    \Closure::fromCallable(callback: [$r, 'find'])()-&gt;name(); // Method 'name' not found on class 'Closure'</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    $c = \Closure::fromCallable(callback: [$r, 'find']);</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">    $c()-&gt;name();                                            // resolves to User</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">}</span>
 </code></pre></div>
-<p>Invoking an expression that makes a closure, without assigning it first,
-loses the closure's return type when a member is accessed on the result. The
-assignment form resolves, so the value carries the signature; the gap is in
-how the member-access subject <code>&lt;closure expression&gt;()</code> is resolved. The
-<code>fromCallable()</code> shape reads the call's stub type <code>Closure</code> and reports a
-false <code>unknown_member</code>, and the other shapes name an empty subject in the
-message.</p>
+<p>When the callback is a named argument, the member-access subject path reads
+the whole <code>callback: …</code> text as the callable and finds no type. The
+positional spelling and the assigned <code>fromCallable()</code> form both resolve. The
+<code>fromCallable()</code> shape then falls back to the stub's <code>Closure</code> and reports a
+false <code>unknown_member</code>.</p>
+<h3 id="b672-invoking-a-partial-application-in-place-resolves-nothing">B672. Invoking a partial application in place resolves nothing<a class="headerlink" href="#b672-invoking-a-partial-application-in-place-resolves-nothing" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">function f(Repo $r): void {</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    $r-&gt;find(?, 1)(5)-&gt;name(); // type of '' could not be resolved</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    $c = $r-&gt;find(?, 1);</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    $c(5)-&gt;name();             // resolves to User</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>A partial application with bound arguments that is invoked where it is made
+lowers to an empty member-access subject. The first-class callable form
+<code>$r-&gt;find(...)()</code> resolves, and so does the assigned form. The in-place form
+needs the same treatment, with the call's arguments combined with the
+placeholders' bound values.</p>
 
 
 
