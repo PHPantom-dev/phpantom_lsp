@@ -1009,17 +1009,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b671-a-callback-passed-by-name-is-not-invoked-by-call_user_func-or-an-in-place-fromcallable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B671. A callback passed by name is not invoked by <code>call_user_func()</code> or an in-place <code>fromCallable()</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1672,17 +1661,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b671-a-callback-passed-by-name-is-not-invoked-by-call_user_func-or-an-in-place-fromcallable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B671. A callback passed by name is not invoked by <code>call_user_func()</code> or an in-place <code>fromCallable()</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1815,20 +1793,6 @@ function — common in legacy code, which is where a language server is worth
 the most. Route free functions through the same body inference the method
 path uses. Conformance row <code>native_types_untyped_return_inferred.php</code>, and
 the <code>inferred-return</code> hover probe, which shows no type for the same reason.</p>
-<h3 id="b671-a-callback-passed-by-name-is-not-invoked-by-call_user_func-or-an-in-place-fromcallable">B671. A callback passed by name is not invoked by <code>call_user_func()</code> or an in-place <code>fromCallable()</code><a class="headerlink" href="#b671-a-callback-passed-by-name-is-not-invoked-by-call_user_func-or-an-in-place-fromcallable" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">function f(Repo $r): void {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    call_user_func(callback: [$r, 'find'])-&gt;name();          // type is 'mixed'</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    \Closure::fromCallable(callback: [$r, 'find'])()-&gt;name(); // Method 'name' not found on class 'Closure'</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    $c = \Closure::fromCallable(callback: [$r, 'find']);</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    $c()-&gt;name();                                            // resolves to User</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>When the callback is a named argument, the member-access subject path reads
-the whole <code>callback: …</code> text as the callable and finds no type. The
-positional spelling and the assigned <code>fromCallable()</code> form both resolve. The
-<code>fromCallable()</code> shape then falls back to the stub's <code>Closure</code> and reports a
-false <code>unknown_member</code>.</p>
 
 
 
