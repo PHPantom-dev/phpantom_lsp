@@ -5138,6 +5138,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>Closure::fromCallable()</code> keeps the callee's return type.</strong> Calling the closure it makes, such as <code>Closure::fromCallable([$repo, 'find'])</code>, now returns what the callable does, whether it is an array callable, a callable string, an invokable object, or a closure.</li>
 <li><strong>Arithmetic on <code>GMP</code> and <code>BcMath\Number</code>.</strong> An operation on a <code>GMP</code> or a <code>BcMath\Number</code>, such as <code>$price * $qty</code>, now produces the same class instead of <code>int|float</code>, so passing the result on is no longer reported.</li>
 <li><strong>Property type checks on every write.</strong> Assigning a value of the wrong type to a typed property is now reported wherever the write happens, such as <code>$user-&gt;age = 'ten'</code> from outside the class, <code>Config::$timeout = '30'</code>, or a static write through a class-string, not only through <code>$this</code> inside the class.</li>
 <li><strong>Member access on a closure literal.</strong> Calling a method such as <code>call()</code> or <code>bindTo()</code> directly on a parenthesised closure or arrow function, like <code>(fn() =&gt; [])-&gt;call($obj)</code>, is now checked against <code>Closure</code> instead of being reported as an unresolved member access.</li>
