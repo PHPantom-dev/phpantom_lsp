@@ -1088,10 +1088,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b673-a-partial-application-held-in-a-variable-is-checked-against-the-wrapped-signature" class="md-nav__link">
+  <a href="#b674-a-partial-applications-closure-type-carries-no-parameters" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B673. A partial application held in a variable is checked against the wrapped signature
+        B674. A partial application's closure type carries no parameters
       </span>
     </span>
   </a>
@@ -1829,10 +1829,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b673-a-partial-application-held-in-a-variable-is-checked-against-the-wrapped-signature" class="md-nav__link">
+  <a href="#b674-a-partial-applications-closure-type-carries-no-parameters" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B673. A partial application held in a variable is checked against the wrapped signature
+        B674. A partial application's closure type carries no parameters
       </span>
     </span>
   </a>
@@ -2057,28 +2057,22 @@ the whole <code>callback: …</code> text as the callable and finds no type. The
 positional spelling and the assigned <code>fromCallable()</code> form both resolve. The
 <code>fromCallable()</code> shape then falls back to the stub's <code>Closure</code> and reports a
 false <code>unknown_member</code>.</p>
-<h3 id="b673-a-partial-application-held-in-a-variable-is-checked-against-the-wrapped-signature">B673. A partial application held in a variable is checked against the wrapped signature<a class="headerlink" href="#b673-a-partial-application-held-in-a-variable-is-checked-against-the-wrapped-signature" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">/**</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x"> * @template T of object</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x"> * @param class-string&lt;T&gt; $class</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x"> * @return T</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x"> */</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">public function make(int $id, string $class): object { … }</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">$c = $r-&gt;make(1, ?);</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="x">$c(User::class)-&gt;name(); // Expected 2 arguments, got 1</span>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="x">                         // Argument 1 ($id) expects int, got class-string&lt;User&gt;</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="x">                         // type of '$c(User::class)' could not be resolved</span>
+<h3 id="b674-a-partial-applications-closure-type-carries-no-parameters">B674. A partial application's closure type carries no parameters<a class="headerlink" href="#b674-a-partial-applications-closure-type-carries-no-parameters" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">/** @param Closure(string): object $factory */</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">function useFactory(Closure $factory): void {}</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">$make = $r-&gt;make(1, ?); // typed as a Closure with no parameters</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">useFactory($make);</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">useFactory($r-&gt;find(...)); // likewise, though find() takes (int, int)</span>
 </code></pre></div>
-<p>Calling a variable that holds a partial application with bound arguments is
-checked against every parameter of the wrapped method, so the bound ones count
-as missing and the call's arguments are matched to the wrong parameters. The
-closure type inferred for <code>$c</code> carries no parameters at all, and its return
-type is the wrapped call's with no arguments, so a template the placeholder
-fills is never bound. The closure's signature should be the wrapped
-signature's remaining (placeholder) parameters, and invoking it should combine
-the call's arguments with the bound values, the way invoking it in place does.</p>
+<p>The type inferred for a first-class callable or a partial application is a
+<code>Closure</code> with the wrapped call's return type and an empty parameter list, so
+hover shows no parameters and a check against a declared <code>Closure(…)</code>
+signature compares nothing. Calling the variable is already checked against
+the parameters the placeholders leave open; the type should carry the same
+parameters, and a partial application's return type should be resolved with
+its bound arguments.</p>
 
 
 
