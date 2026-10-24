@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792804215615,
+  "lastUpdate": 1792804570490,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5235,6 +5235,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 85.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "sidux@users.noreply.github.com",
+            "name": "sidux",
+            "username": "sidux"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e28436f4c7b094e03530cf38a34260f7d504dd0f",
+          "message": "Add a Symfony playground project\n\nThe examples/symfony/ project from #405, with its CI lint step.",
+          "timestamp": "2026-10-24T03:02:01+02:00",
+          "tree_id": "8df1e25f7026606e5f271a76d0ab23cefcdf1680",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e28436f4c7b094e03530cf38a34260f7d504dd0f"
+        },
+        "date": 1792804559755,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82.4,
             "unit": "MiB"
           }
         ]
