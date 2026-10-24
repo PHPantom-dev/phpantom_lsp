@@ -1309,10 +1309,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#f23-rename-a-class-through-its-yamlxml-occurrences" class="md-nav__link">
+  <a href="#f23-rename-a-class-through-its-xml-entity-escaped-occurrences" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        F23. Rename a class through its YAML/XML occurrences
+        F23. Rename a class through its XML entity-escaped occurrences
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f24-doctrine-lenses-miss-attribute-mappings-and-generic-repositories" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F24. Doctrine lenses miss attribute mappings and generic repositories
       </span>
     </span>
   </a>
@@ -1834,10 +1845,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#f23-rename-a-class-through-its-yamlxml-occurrences" class="md-nav__link">
+  <a href="#f23-rename-a-class-through-its-xml-entity-escaped-occurrences" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        F23. Rename a class through its YAML/XML occurrences
+        F23. Rename a class through its XML entity-escaped occurrences
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f24-doctrine-lenses-miss-attribute-mappings-and-generic-repositories" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F24. Doctrine lenses miss attribute mappings and generic repositories
       </span>
     </span>
   </a>
@@ -2245,33 +2267,50 @@ that could.</p>
 (<code>namespace_merge_conflict</code>, <code>collect_merge_move_ops</code>),
 <code>src/rename/class/mod.rs</code> (the import-adding rule to mirror).</p>
 <hr />
-<h2 id="f23-rename-a-class-through-its-yamlxml-occurrences">F23. Rename a class through its YAML/XML occurrences<a class="headerlink" href="#f23-rename-a-class-through-its-yamlxml-occurrences" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>A fully-qualified class name in a YAML or XML file is found by Find
-References and counted by the declaration CodeLens, but rename leaves
-it alone: <code>find_references_inner</code> drops resource locations in
-<code>ReferenceSearchMode::Rename</code>. Renaming the class therefore leaves the
-config pointing at a name that no longer exists, and <code>move</code> reports the
-leftover through its residual scan rather than fixing it.</p>
-<p>The blocker is that the text at such an occurrence is not always the
-PHP spelling of the name. A YAML double-quoted scalar writes
-<code>"App\\Handler\\Run"</code>, so the span covers doubled separators; an XML
-attribute may carry entity references. Rename plans a single
-replacement string per location and verifies each range spells a whole
-PHP name token before emitting anything, so an escaped occurrence both
-fails verification (dropping the <em>entire</em> rename, including its PHP
-edits, which is what the current exclusion prevents) and would be
-rewritten with single separators, corrupting the document's quoting.</p>
-<p>What is needed is a per-occurrence replacement: the scanner already
-knows the raw text it normalised, so it can record how the name was
-escaped and let the rename re-escape the replacement the same way,
-with verification asking for "a name token in this document's
-escaping" rather than a bare PHP one.</p>
+<h2 id="f23-rename-a-class-through-its-xml-entity-escaped-occurrences">F23. Rename a class through its XML entity-escaped occurrences<a class="headerlink" href="#f23-rename-a-class-through-its-xml-entity-escaped-occurrences" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Rename rewrites a class, controller action, or namespace in YAML and XML
+files in the spelling each occurrence uses, doubled YAML backslashes
+included (<code>collect_framework_name_edits</code> in <code>src/framework.rs</code>). An XML
+attribute can also spell the separator as a character reference,
+<code>App&amp;#92;Handler&amp;#92;Run</code>, and neither the resource scanner nor the
+framework index decodes those, so such an occurrence is not found by
+Find References and is left behind by a rename.</p>
+<p>The scanners would need to decode <code>&amp;#92;</code>/<code>&amp;#x5C;</code> while tokenising,
+record where each decoded character came from, and re-encode the
+replacement the same way when the rename writes it back.</p>
 <p><strong>Where to look:</strong> <code>src/resource_navigation.rs</code> (<code>scan_symbols</code>,
-<code>normalize_fqn</code>), <code>src/references/dispatch.rs</code>
-(<code>find_references_inner</code>), <code>src/rename/validate.rs</code>
-(<code>Expected</code>, <code>is_name_token</code>), <code>src/rename/class/mod.rs</code>
-(<code>build_class_move_edit</code>).</p>
+<code>normalize_fqn</code>), <code>src/framework.rs</code> (<code>scan_class_like_tokens</code>,
+<code>rewrite_framework_fqn_literal</code>).</p>
+<hr />
+<h2 id="f24-doctrine-lenses-miss-attribute-mappings-and-generic-repositories">F24. Doctrine lenses miss attribute mappings and generic repositories<a class="headerlink" href="#f24-doctrine-lenses-miss-attribute-mappings-and-generic-repositories" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">#[ORM\Entity(repositoryClass: AccountStore::class)]</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">class Account {}</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">/** @extends ServiceEntityRepository&lt;Account&gt; */</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">class AccountStore extends ServiceEntityRepository {}</span>
+</code></pre></div>
+<p>The CodeLens that links a Doctrine entity and its repository finds the
+pair through a YAML/XML mapping or the naming convention
+(<code>App\Entity\User</code> and <code>App\Repository\UserRepository</code>). The modern
+form above is not read in either direction. Doctrine ORM 3 dropped YAML
+mappings, so <code>#[ORM\Entity(repositoryClass: ...)]</code> is how most projects
+name a repository, and the repository's own
+<code>@extends ServiceEntityRepository&lt;Account&gt;</code> (or the class it passes to
+<code>parent::__construct()</code>) names its entity. A pair that breaks the naming
+convention gets no lens.</p>
+<p>The attribute needs reading at parse time, with its class name resolved
+the way the parser resolves <code>extends</code>, into <code>ClassInfo</code> (a field every
+class pays for, or a slot in an optional per-class box). The
+entity-to-repository direction can then read the entity's <code>ClassInfo</code>,
+and the repository-to-entity direction the first generic argument of
+its <code>ServiceEntityRepository</code>/<code>EntityRepository</code> ancestor in
+<code>extends_generics</code>. T45 needs the same attribute.</p>
+<p><strong>Where to look:</strong> <code>src/framework.rs</code>
+(<code>doctrine_repository_fqns_for_entity</code>,
+<code>doctrine_entity_fqns_for_repository</code>), <code>src/parser/classes/class_likes.rs</code>
+(<code>extract_class</code>), <code>src/parser/attributes.rs</code>.</p>
 
 
 

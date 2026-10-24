@@ -1270,6 +1270,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#t45-doctrine-getrepositoryentityclass-is-typed-as-the-generic-repository" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T45. Doctrine <code>getRepository(Entity::class)</code> is typed as the generic repository
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1470,6 +1481,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T43. <code>self::TypeAlias</code> inside <code>@extends</code>'s generic argument is not resolved
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t45-doctrine-getrepositoryentityclass-is-typed-as-the-generic-repository" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T45. Doctrine <code>getRepository(Entity::class)</code> is typed as the generic repository
       </span>
     </span>
   </a>
@@ -1882,6 +1904,28 @@ the <em>declaring</em> class's own <code>type_aliases</code> and resolve it thro
 <code>resolve_type_alias_typed</code> with that class as <code>owning_class_name</code>, before
 substituting it into the parent's template. Mago's <code>issue_870.php</code> can be
 ported once this lands.</p>
+<hr />
+<h2 id="t45-doctrine-getrepositoryentityclass-is-typed-as-the-generic-repository">T45. Doctrine <code>getRepository(Entity::class)</code> is typed as the generic repository<a class="headerlink" href="#t45-doctrine-getrepositoryentityclass-is-typed-as-the-generic-repository" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$repo = $entityManager-&gt;getRepository(User::class);</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$repo-&gt;findActive(); // PHPantom: EntityRepository&lt;User&gt;, so findActive() is unknown</span>
+</code></pre></div>
+<p>Doctrine's stubs type <code>getRepository()</code> as <code>EntityRepository&lt;T&gt;</code> (or
+<code>ObjectRepository&lt;T&gt;</code>), but the object it returns is the entity's own
+repository: the class named by <code>#[ORM\Entity(repositoryClass: ...)]</code> or by
+the <code>repositoryClass</code>/<code>repository-class</code> key of a YAML/XML mapping.
+PHPStan's Doctrine extension answers this with a dynamic return type
+extension. Completion, hover, diagnostics, and Find References on the
+repository's own methods all miss it today.</p>
+<p>The return type belongs in the type engine, as a return-type hook for
+<code>getRepository()</code> with a class-string argument, so every consumer sees
+the concrete repository. The Doctrine mapping index built from YAML/XML
+resources already knows those pairs; the attribute form needs the
+<code>ClassInfo</code> support F24 describes.</p>
+<p><strong>Where to look:</strong> <code>src/framework.rs</code>
+(<code>framework_doctrine_repository_fqns_for_entity</code>) for the YAML/XML
+mapping pairs, and method-call return resolution under
+<code>src/type_engine/variable/rhs_resolution/</code> for where the hook goes.</p>
 
 
 
