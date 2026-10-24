@@ -1227,17 +1227,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t44-a-single-enum-case-has-no-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T44. A single enum case has no type
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1444,17 +1433,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t44-a-single-enum-case-has-no-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T44. A single enum case has no type
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1650,7 +1628,9 @@ upstream's <code>nsrt/class-constant-types.php</code> were dropped when
 <code>tests/phpstan_nsrt/class-constant-types.php</code> was ported (only the
 <code>self::</code> cases survive); port them back. The <code>static::</code>/<code>$this::</code>
 assertions in <code>tests/phpstan_nsrt/class-constant-native-type.php</code> are
-<code>// SKIP</code> against this item.</p>
+<code>// SKIP</code> against this item, and so is the <code>$hw::C</code> read of a typed
+constant initialised to an enum case in
+<code>tests/phpstan_data/Rules/Constants/bug-10212.php</code>.</p>
 <hr />
 <h2 id="t29-definite-vs-possible-variable-existence-tracking">T29. Definite vs possible variable existence tracking<a class="headerlink" href="#t29-definite-vs-possible-variable-existence-tracking" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: High</strong></p>
@@ -1698,70 +1678,19 @@ key) the fallback can never be assigned, so <code>$string ??= 1</code> is still
 - Psalm: <code>Context::$vars_in_scope</code> and <code>Context::$vars_possibly_in_scope</code>
   (<code>Psalm\Context</code>)</p>
 <hr />
-<h2 id="t44-a-single-enum-case-has-no-type">T44. A single enum case has no type<a class="headerlink" href="#t44-a-single-enum-case-has-no-type" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">enum Suit { case Hearts; case Spades; case Clubs; }</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function f(Suit $s) {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    if ($s === Suit::Hearts) {</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    } elseif ($s === Suit::Spades) {</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    } else {</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">        $s; // PHPStan: Suit::Clubs; PHPantom: Suit</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    }</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>Suit::Hearts</code> resolves to the enum class, so narrowing by comparing
-against cases can only ever say "some <code>Suit</code>". PHPStan and Psalm give each
-case its own type, a subtype of the enum: comparing narrows to the cases
-left, a <code>match</code> over the rest is known exhaustive, a <code>readonly</code> property
-assigned one case keeps it, and <code>-&gt;value</code>/<code>-&gt;name</code> on it are the case's
-literal values. Today <code>-&gt;value</code> and <code>-&gt;name</code> on any <code>Suit</code> read as the
-union of every case's backing value and name, since nothing narrower than
-the enum is known.</p>
-<p>The type model needs an enum-case variant (or a literal kind for it) that
-is a subtype of its enum in <code>is_subtype_of</code>, prints as <code>Enum::CASE</code>, and
-joins back into the enum when every case is present. Narrowing by <code>===</code>
-and <code>instanceof</code> then subtracts cases the way it subtracts union members,
-and a branch that has compared away every case holds <code>never</code>.</p>
-<p><a href="../diagnostics/#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported">D24</a>
-depends on this: its second example only stays quiet if <code>$s-&gt;value === 'H'</code>
-removes <code>Suit::Hearts</code> from <code>$s</code>, which is exactly this case subtraction.</p>
-<p>Since <code>value-of&lt;…&gt;</code> over an enum is evaluated, the gap also produces false
-positives. A case passed to a template binds the template to the whole
-enum, so the operator gives every case's value:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/**</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x"> * @template T of Suit</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x"> * @param T $case</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x"> * @return value-of&lt;T&gt;</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x"> */</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">function backingValue(Suit $case) { return $case-&gt;value; }</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">/** @param 'hearts' $value */</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">function acceptsHearts(string $value): void {}</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="x">acceptsHearts(backingValue(Suit::Hearts)); // reported: 'spades' does not satisfy 'hearts'</span>
-</code></pre></div>
-<p>A case held in a variable loses its value the same way: after <code>$case =
-Suit::Hearts;</code>, <code>acceptsHearts($case-&gt;value)</code> is reported too. Found
-running the php-typing-conformance suite
-(<code>phpdoc_advanced_fallback_value_of_template_enum.php</code>).</p>
-<p>The ported copies of PHPStan's <code>Rules/Comparison/data/bug-8485.php</code>,
-<code>Rules/Comparison/data/bug-9499.php</code> and
-<code>Rules/Methods/data/return-type-class-constant.php</code> under
-<code>tests/phpstan_data/</code> carry <code>// SKIP</code> assertions against this item.</p>
-<hr />
 <h2 id="t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later">T46. Template arguments are not inferred from how the object is used later<a class="headerlink" href="#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @template T */</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">class Box {</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    /** @param T $item */</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    public function add($item): void {}</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    /** @return T */</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    public function first() {}</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">}</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">$box = new Box();</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">$box-&gt;add(new Foo);</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="x">$box-&gt;first()-&gt;  // PHPStan 2.3: Foo; PHPantom: mixed (`Box&lt;mixed&gt;`)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">class Box {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    /** @param T $item */</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    public function add($item): void {}</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    /** @return T */</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    public function first() {}</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">}</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">$box = new Box();</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">$box-&gt;add(new Foo);</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">$box-&gt;first()-&gt;  // PHPStan 2.3: Foo; PHPantom: mixed (`Box&lt;mixed&gt;`)</span>
 </code></pre></div>
 <p>A <code>new</code> whose constructor leaves a template open erases it to its default,
 then its bound, then <code>mixed</code> (<code>default_type_arg</code> in
@@ -1833,10 +1762,10 @@ whole-body pre-passes <code>seed_static_locals</code> and
 <hr />
 <h2 id="t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used">T47. A closure assigned to a variable gets no parameter types from where it is used<a class="headerlink" href="#t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$byName = function ($a, $b) {</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    return $a-&gt;  // PHPStan 2.3: User; PHPantom: nothing</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">};</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">usort($users, $byName);   // list&lt;User&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$byName = function ($a, $b) {</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    return $a-&gt;  // PHPStan 2.3: User; PHPantom: nothing</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">};</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">usort($users, $byName);   // list&lt;User&gt;</span>
 </code></pre></div>
 <p>A closure literal passed straight to a typed callable parameter already
 gets its parameter types, generics included (<code>try_enter_closure_expr</code> →
@@ -1895,17 +1824,17 @@ nested closures typed from an expected return type, generator escapes.</p>
 <hr />
 <h2 id="t41-a-reading-of-the-callees-body-overrides-a-declared-param-out">T41. A reading of the callee's body overrides a declared <code>@param-out</code><a class="headerlink" href="#t41-a-reading-of-the-callees-body-overrides-a-declared-param-out" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/**</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x"> * @param-out list&lt;string&gt; $lines</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x"> */</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">function readInto(string $path, ?array &amp;$lines = null): int {</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">    $lines = [];</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">    // … filled through a helper the walk cannot follow …</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">    return 0;</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="x">}</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="x">readInto($path, $lines);</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="x">$lines; // array{}, where the tag promises list&lt;string&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/**</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x"> * @param-out list&lt;string&gt; $lines</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x"> */</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">function readInto(string $path, ?array &amp;$lines = null): int {</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    $lines = [];</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    // … filled through a helper the walk cannot follow …</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">    return 0;</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">}</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">readInto($path, $lines);</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="x">$lines; // array{}, where the tag promises list&lt;string&gt;</span>
 </code></pre></div>
 <p>The tag is read: <code>ParameterInfo::param_out_type</code> holds it and
 <code>ParameterInfo::out_type()</code> prefers it over the declared type and the
@@ -1923,19 +1852,19 @@ author did not spell out for the write.</p>
 <p>Found while porting Mago's <code>issue_870.php</code>. A class can declare its own
 <code>@type</code>/<code>@phpstan-type</code> alias and hand it to its own parent's template
 parameter via <code>self::</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @template TData as array&lt;string, mixed&gt; */</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">abstract class Car {</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    /** @return TData */</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    abstract function getData(): array;</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">}</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="x">/**</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="x"> * @type DataArray = array{'Gewicht': int}</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="x"> * @extends Car&lt;self::DataArray&gt;</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="x"> */</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="x">class RedCar extends Car {</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="x">    public function getData(): array { return ['Gewicht' =&gt; 1000]; }</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @template TData as array&lt;string, mixed&gt; */</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">abstract class Car {</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    /** @return TData */</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    abstract function getData(): array;</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">/**</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x"> * @type DataArray = array{'Gewicht': int}</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="x"> * @extends Car&lt;self::DataArray&gt;</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="x"> */</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="x">class RedCar extends Car {</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="x">    public function getData(): array { return ['Gewicht' =&gt; 1000]; }</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>getData()</code>'s inherited <code>@return TData</code> should resolve to the
 <code>DataArray</code> shape (offering <code>Gewicht</code> for array-key completion), but it
