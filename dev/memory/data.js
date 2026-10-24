@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792856500657,
+  "lastUpdate": 1792857657668,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5760,6 +5760,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 87.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f0322de030e3bcd005d7521ddd1f112cd8feb7c1",
+          "message": "Writing a key into a `string[]` keeps its keys open",
+          "timestamp": "2026-10-24T17:45:09+02:00",
+          "tree_id": "9d4de93bdf71ca384c117ef200a01edabd22308c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f0322de030e3bcd005d7521ddd1f112cd8feb7c1"
+        },
+        "date": 1792857646904,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 75.5,
             "unit": "MiB"
           }
         ]
