@@ -2636,6 +2636,64 @@ components, so check what <code>blade/component_tags/</code> and <code>blade/dis
 can share before writing a second implementation.</p>
 <p><strong>Where to look:</strong> <code>src/blade/component_tags/</code>, <code>src/blade/discovery.rs</code>,
 <code>src/symfony/templates.rs</code>.</p>
+<hr />
+<h2 id="f39-report-unknown-symfony-configuration-keys">F39. Report unknown Symfony configuration keys<a class="headerlink" href="#f39-report-unknown-symfony-configuration-keys" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># config/packages/acme_demo.yaml</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nt">acme_demo</span><span class="p">:</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">    </span><span class="nt">mailer</span><span class="p">:</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">        </span><span class="nt">dns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">smtp://localhost</span><span class="w"> </span><span class="c1"># a typo of dsn</span>
+</code></pre></div>
+<p>A key the project's own <code>TreeBuilder</code> schema declares completes and
+navigates, but one it does not declare is not reported. Judging needs the
+schema's open nodes, which the walk does not record today: a
+<code>variableNode()</code> and a prototyped node take any key, <code>ignoreExtraKeys()</code>
+lets an array node take any, <code>canBeEnabled()</code> and <code>canBeDisabled()</code> add an
+<code>enabled</code> key no string names, and <code>fixXmlConfig()</code> lets the YAML spell a
+key in its plural. A key is only worth judging under a root a project
+schema declares, and only once its parent is a closed array node the schema
+fully describes. Diagnostics are not run on resource documents yet either
+(see F32).</p>
+<p><strong>Where to look:</strong> <code>src/symfony/config_tree.rs</code> (<code>tree_builder_keys</code>),
+<code>src/diagnostics/laravel_string_keys.rs</code> (<code>CheckedStringKind::of</code>).</p>
+<hr />
+<h2 id="f40-symfony-configuration-schemas-the-treebuilder-walk-misses">F40. Symfony configuration schemas the <code>TreeBuilder</code> walk misses<a class="headerlink" href="#f40-symfony-configuration-schemas-the-treebuilder-walk-misses" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Keys are declared by a chain of node builders in a
+<code>getConfigTreeBuilder()</code>, and read from YAML under <code>config/packages/</code>.
+These are missed:</p>
+<ul>
+<li>the keys under a prototyped node (a map of named entries), whose path
+  holds a name the configuration chooses;</li>
+<li>a bundle's schema in <code>AbstractBundle::configure(DefinitionConfigurator
+  $definition)</code>, whose root is the bundle's extension alias;</li>
+<li>nodes a helper method builds and <code>append()</code> adds, and node definitions
+  held in a variable between statements;</li>
+<li>installed bundles' schemas (<code>framework</code>, <code>doctrine</code>, <code>twig</code>), so their
+  keys neither complete nor navigate;</li>
+<li>configuration written in PHP (<code>config/packages/*.php</code>) or XML.</li>
+</ul>
+<p><strong>Where to look:</strong> <code>src/symfony/config_tree.rs</code>.</p>
+<hr />
+<h2 id="f41-symfony-forms-and-validation-beyond-a-form-types-own-data-class">F41. Symfony forms and validation beyond a form type's own data class<a class="headerlink" href="#f41-symfony-forms-and-validation-beyond-a-form-types-own-data-class" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>A form field navigates to the property of the <code>data_class</code> its form type's
+<code>configureOptions()</code> sets, and a validation mapping's <code>properties:</code> to the
+class's properties. These are missed:</p>
+<ul>
+<li>a <code>data_class</code> a parent form type sets, or one passed to <code>createForm()</code>
+  in its options;</li>
+<li>a field the property accessor reaches through a getter, an isser, or a
+  hasser rather than a property, which navigates nowhere;</li>
+<li>the fields of a child builder, <code>$builder-&gt;get('address')-&gt;add('street')</code>,
+  which belong to the child's data class;</li>
+<li>a validation mapping's <code>getters:</code>, which name the <code>get</code>, <code>is</code>, or <code>has</code>
+  method they read by its property-like name;</li>
+<li>in YAML, the constraints another constraint's options hold (<code>All</code>,
+  <code>Sequentially</code>, <code>AtLeastOneOf</code>), and constraints under a <code>namespaces:</code>
+  alias.</li>
+</ul>
+<p><strong>Where to look:</strong> <code>src/symfony/forms.rs</code>, <code>src/symfony/validation.rs</code>.</p>
 
 
 

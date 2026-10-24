@@ -961,6 +961,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b675-member-references-mix-up-a-property-and-a-method-of-the-same-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B675. Member references mix up a property and a method of the same name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1562,6 +1579,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b675-member-references-mix-up-a-property-and-a-method-of-the-same-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B675. Member references mix up a property and a method of the same name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1629,7 +1663,23 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b675-member-references-mix-up-a-property-and-a-method-of-the-same-name">B675. Member references mix up a property and a method of the same name<a class="headerlink" href="#b675-member-references-mix-up-a-property-and-a-method-of-the-same-name" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class User {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    public function __construct(private string $email) {}</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    public function email(): string { return $this-&gt;email; }</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
+</code></pre></div>
+<p>Find References on the <code>$email</code> property lists the <code>email()</code> method's
+declaration as well, and renaming the property renames the method too. The
+member reference search matches by name and static-ness only: a declaration
+span or an access counts whether it is a method or a property, so the
+<code>is_method_call</code> an access records and the kind of the declaration are
+never compared with what was searched for. The search has to carry the kind
+of member it is after, and every caller (references, rename, the reference
+lens) has to pass it. The same name on both is common on value objects and
+Symfony entities, whose validation mappings and form fields name the
+property.</p>
 
 
 
