@@ -2712,7 +2712,9 @@ has none of the three): renaming a translation key updates the lang
 files across every locale plus all usages; renaming a route name
 updates the <code>-&gt;name()</code> declaration and all usages; highlight and
 semantic tokens reuse the existing spans. Renaming a view name implies
-moving the Blade file — defer that one until the rest is in place.</p>
+moving the Blade file — defer that one until the rest is in place.
+Symfony service IDs and container parameters are string-key spans too,
+declarations included, so their rename comes with the same work.</p>
 <h4 id="l56-typed-laravel-connection-names">L56. Typed Laravel connection names<a class="headerlink" href="#l56-typed-laravel-connection-names" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>The method name <code>-&gt;connection()</code> does not identify one config subtree: the
@@ -2800,16 +2802,16 @@ authorization call is written that way, the whole feature is inert.</p>
 a method name to claim on the name alone, so the fix is the mechanism main
 already uses for render sites whose receiver only a type settles: emit a
 candidate site during extraction and confirm it in a later, type-aware
-pass, the way <code>ViewReceiverSite</code> /
-<code>typed_receiver_view_spans_for</code> (<code>blade/typed_receiver.rs</code>) does. A receiver that resolves to the
+pass, the way <code>TypedReceiverSite</code> /
+<code>typed_receiver_spans_for</code> (<code>blade/typed_receiver.rs</code>) does. A receiver that resolves to the
 configured auth model (or to <code>Illuminate\Contracts\Auth\Access\Authorizable</code>)
 makes the call an authorization check; anything else leaves it alone. The
 existing name heuristic stays as the cheap path that needs no type
 resolution at all.</p>
 <p><strong>Where to look:</strong> <code>receiver_is_user_like</code> in
 <code>symbol_map/extraction/laravel/gates.rs</code> and its completion-side twin (a
-local check in <code>completion/laravel_string_keys/context.rs</code>); <code>ViewReceiverSite</code> in
-<code>symbol_map/laravel_spans.rs</code> for the confirm-later shape.</p>
+local check in <code>completion/laravel_string_keys/context.rs</code>); <code>TypedReceiverSite</code> in
+<code>symbol_map/string_keys.rs</code> for the confirm-later shape.</p>
 <h4 id="l49-unguarded-eloquent-mass-assignment-diagnostic">L49. Unguarded Eloquent mass assignment diagnostic<a class="headerlink" href="#l49-unguarded-eloquent-mass-assignment-diagnostic" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>A model that declares neither <code>$fillable</code> nor <code>$guarded</code> is totally

@@ -3375,40 +3375,41 @@ sit next to.</p>
 <a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
 <a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
 <a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
-<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>├── references/, rename/, highlight/
-<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
-<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/
-<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>├── selection_range.rs, type_hierarchy.rs
-<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>│
-<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>│   # Diagnostics
-<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>├── diagnostics/
-<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>│   ├── mod.rs              # Module map, code naming rules, shared range helpers
-<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>│   ├── collect.rs          # Running the fast and slow collectors over one file
-<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>│   ├── delivery.rs         # Debounced scheduling, two-phase publish, push and pull delivery, the worker
-<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>│   ├── external/           # PHPStan / PHPCS / PHPMD / Mago subprocess pipelines
-<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>│   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
-<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>│   └── &lt;collector&gt;.rs      # One module per diagnostic (unknown_classes, unknown_functions,
-<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>│                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
-<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>│
-<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>│   # External tools &amp; CLI subcommands
-<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>├── phpstan.rs, phpcs.rs, phpmd.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
-<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a>├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
-<a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a>├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
-<a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a>├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
-<a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a>├── self_update.rs          # Binary self-update
-<a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a>│
-<a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a>│   # Blade &amp; shared utilities
-<a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a>├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
-<a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a>└── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
-<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a>
-<a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
-<a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a>stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
-<a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>tests/
-<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a>├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
-<a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a>├── unit/                   # Unit tests (composer, docblock, named args, …)
-<a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a>├── fixtures/               # Fixtures driven by fixture_runner.rs
-<a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a>├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var =&gt; 'ExpectedType'` assertion suites ported from Psalm / PHPStan
-<a id="__codelineno-0-90" name="__codelineno-0-90" href="#__codelineno-0-90"></a>└── assert_type_runner.rs, fixture_runner.rs
+<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>├── symfony/                # Symfony service IDs and container parameters: YAML/XML scanners, declaring files
+<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>├── references/, rename/, highlight/
+<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
+<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/
+<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>├── selection_range.rs, type_hierarchy.rs
+<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>│
+<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>│   # Diagnostics
+<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>├── diagnostics/
+<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>│   ├── mod.rs              # Module map, code naming rules, shared range helpers
+<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>│   ├── collect.rs          # Running the fast and slow collectors over one file
+<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>│   ├── delivery.rs         # Debounced scheduling, two-phase publish, push and pull delivery, the worker
+<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>│   ├── external/           # PHPStan / PHPCS / PHPMD / Mago subprocess pipelines
+<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>│   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
+<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>│   └── &lt;collector&gt;.rs      # One module per diagnostic (unknown_classes, unknown_functions,
+<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>│                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
+<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>│
+<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>│   # External tools &amp; CLI subcommands
+<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a>├── phpstan.rs, phpcs.rs, phpmd.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
+<a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a>├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
+<a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a>├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
+<a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a>├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
+<a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a>├── self_update.rs          # Binary self-update
+<a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a>│
+<a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a>│   # Blade &amp; shared utilities
+<a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a>├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
+<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a>└── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
+<a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>
+<a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a>build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
+<a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
+<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a>tests/
+<a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a>├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
+<a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a>├── unit/                   # Unit tests (composer, docblock, named args, …)
+<a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a>├── fixtures/               # Fixtures driven by fixture_runner.rs
+<a id="__codelineno-0-90" name="__codelineno-0-90" href="#__codelineno-0-90"></a>├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var =&gt; 'ExpectedType'` assertion suites ported from Psalm / PHPStan
+<a id="__codelineno-0-91" name="__codelineno-0-91" href="#__codelineno-0-91"></a>└── assert_type_runner.rs, fixture_runner.rs
 </code></pre></div>
 <p><strong>The shared type engine lives under <code>type_engine/</code>.</strong> <code>type_engine/resolver/</code>,
 <code>type_engine/variable/</code> (including the <code>forward_walk/</code> forward walker),
@@ -3564,7 +3565,7 @@ equivalent:</p>
 <li><strong>Variable definition sites</strong> (<code>var_defs</code>): records every assignment, parameter, foreach binding, catch variable, static/global declaration, and destructuring site with its byte offset, scope boundary, and <code>effective_from</code> offset (for assignments, this is the end of the statement so the RHS sees the previous definition). Go-to-definition for <code>$var</code> finds the most recent definition before the cursor within the enclosing scope via binary search.</li>
 <li><strong>Scope boundaries</strong> (<code>scopes</code>): function, method, closure, and arrow function body ranges. Used by <code>find_enclosing_scope</code> to determine which scope the cursor is in.</li>
 <li><strong>Template parameter definitions</strong> (<code>template_defs</code>): <code>@template</code> tag locations so that template parameter names (e.g. <code>TKey</code>, <code>TModel</code>) that appear in docblock types can be resolved to their declaration site.</li>
-<li><strong>Candidate render sites</strong> (<code>view_receiver_sites</code>): the view names a method call spells when only the receiver's <em>type</em> decides whether it renders — a constructor-injected <code>Factory $views</code> behind <code>$this-&gt;views-&gt;make('page')</code>, a mailable held in a local. Extraction runs before the file's classes are resolved and cannot type the receiver, so it records the candidates and <code>blade/typed_receiver.rs</code> confirms them lazily through the shared type engine, once per file. Consumers of view keys (the call-site diagnostics, call-site inference, <code>lookup_symbol_map</code>, find-references) read the confirmed spans alongside the map's own <code>StringKey</code> spans. The reference candidate index takes the <em>unconfirmed</em> candidates, since a file has to be findable before it can be asked.</li>
+<li><strong>Candidate typed-receiver sites</strong> (<code>typed_receiver_sites</code>): the string keys a method call spells when only the receiver's <em>type</em> decides what it names — a constructor-injected <code>Factory $views</code> behind <code>$this-&gt;views-&gt;make('page')</code>, a mailable held in a local, a Symfony <code>ContainerInterface $container</code> behind <code>$container-&gt;get('app.mailer')</code>, a configurator's <code>$services-&gt;set('app.mailer')</code>. Each site records the classes its receiver may be and the kind of key each makes it (<code>ReceiverClass::targets</code>). Extraction runs before the file's classes are resolved and cannot type the receiver, so it records the candidates and <code>blade/typed_receiver.rs</code> confirms them lazily through the shared type engine, once per file. Consumers of those keys (the call-site diagnostics, call-site inference, <code>lookup_symbol_map</code>, find-references, the Symfony declaration lookup) read the confirmed spans alongside the map's own <code>StringKey</code> spans. The reference candidate index takes the <em>unconfirmed</em> candidates, under every kind each could turn out to be, since a file has to be findable before it can be asked.</li>
 <li><strong>Config-backed Laravel resource names</strong>: one declarative table maps direct helpers, facades, contextual attributes, and middleware parameters to their config subtrees. A <code>SymbolSpan</code> whose string-key kind is <code>ConfigResource(...)</code> stores the short source name, while completion, navigation, diagnostics, and references derive the full dot key only at the config boundary. This keeps source ranges and reference identity exact without duplicating one trigger table across LSP features.</li>
 <li><strong>Candidate morph-column aliases</strong> (<code>morph_column_sites</code>): literals compared with properties or query columns are confirmed lazily by <code>virtual_members/laravel/typed_morph_columns.rs</code>. The shared type engine identifies the receiver model, and its parsed <code>morphTo()</code> metadata identifies the column. Array values in one query share a single model and column check. Confirmed literals become ordinary <code>MorphAlias</code> spans for completion, navigation, references, and diagnostics. Model metadata changes invalidate dependent confirmations, including when a relation's column changes without changing its PHP signature.</li>
 </ul>

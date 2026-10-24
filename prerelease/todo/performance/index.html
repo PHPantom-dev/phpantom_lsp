@@ -1097,6 +1097,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P86. A Symfony app's generated <code>config/reference.php</code> is slow to parse
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1395,6 +1406,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P86. A Symfony app's generated <code>config/reference.php</code> is slow to parse
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1528,6 +1550,21 @@ calls add at most one more parse on the providers tried (about 2.5% of the
 cycle), not worth a change of their own. Keeping the parsed tree alive
 between <code>didChange</code> and the diagnostic pass costs its parse memory, about
 22 MB for a 73 KB file, for as long as the file is open.</p>
+<h2 id="p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse">P86. A Symfony app's generated <code>config/reference.php</code> is slow to parse<a class="headerlink" href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Symfony 7.3 and later generate <code>config/reference.php</code> for the application:
+one 100 KB class whose docblock declares some forty <code>@psalm-type</code> array
+shapes, several hundred lines each, nested into one another. Parsing that
+single file takes about 0.5 s in a debug build, roughly ten times what a
+PHP file of its size costs, so something on the way from the docblock to
+the type aliases is superlinear in the size of a shape.</p>
+<p>Every Symfony project pays it once, when the workspace index parses the
+file. On <code>projects/symfony-demo</code> (debug <code>analyze</code>, 2026-10-24) it is the
+whole difference between 0.74 s and 1.23 s, since the workspace walk that
+reads the service configuration now runs there too. Profile a single-file
+<code>analyze</code> of the file to find where the time goes.</p>
+<p><strong>Where to look:</strong> <code>src/docblock/</code> (type-alias tags), the alias handling in
+<code>src/parser/classes/</code>.</p>
 <hr />
 <h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
 <h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>

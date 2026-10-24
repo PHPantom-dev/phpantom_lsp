@@ -1330,6 +1330,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#f25-names-a-php-configurator-spells-as-strings" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F25. Names a PHP configurator spells as strings
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1866,6 +1877,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#f25-names-a-php-configurator-spells-as-strings" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F25. Names a PHP configurator spells as strings
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2311,6 +2333,49 @@ its <code>ServiceEntityRepository</code>/<code>EntityRepository</code> ancestor 
 (<code>doctrine_repository_fqns_for_entity</code>,
 <code>doctrine_entity_fqns_for_repository</code>), <code>src/parser/classes/class_likes.rs</code>
 (<code>extract_class</code>), <code>src/parser/attributes.rs</code>.</p>
+<hr />
+<h2 id="f25-names-a-php-configurator-spells-as-strings">F25. Names a PHP configurator spells as strings<a class="headerlink" href="#f25-names-a-php-configurator-spells-as-strings" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">return static function (ContainerConfigurator $container): void {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    $container-&gt;services()-&gt;load('App\\Service\\', '../src/Service/');</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">};</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">return static function (RoutingConfigurator $routes): void {</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    $routes-&gt;add('legacy', '/legacy')</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">        -&gt;controller('App\\Controller\\DemoController::legacy');</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">};</span>
+</code></pre></div>
+<p>The same names in <code>services.yaml</code> and <code>routes.yaml</code> take part in rename and
+navigation: a namespace-prefix key follows a namespace rename, a
+<code>resource:</code> path follows its directory, and a <code>Class::method</code> controller
+string navigates and renames with the method. Written in a PHP
+configurator they are plain strings. <code>load()</code>'s namespace prefix and
+resource path, and a controller given as one <code>Class::method</code> string, need
+reading from the AST where the receiver is confirmed as a configurator
+(<code>TypedReceiverSite</code>), the way the container's service IDs are, and
+feeding to the framework index the YAML occurrences are kept in. Sidux's</p>
+<h1 id="398-did-this-by-scanning-the-php-text">398 did this by scanning the PHP text.<a class="headerlink" href="#398-did-this-by-scanning-the-php-text" title="Permanent link">&para;</a></h1>
+<p><strong>Where to look:</strong> <code>src/framework.rs</code> (<code>FrameworkReference</code>,
+<code>collect_framework_name_edits</code>), <code>src/symbol_map/extraction/symfony.rs</code>,
+<code>src/blade/typed_receiver.rs</code>.</p>
+<hr />
+<h2 id="f26-symfony-service-ids-a-bundle-or-a-definition-api-declares">F26. Symfony service IDs a bundle or a definition API declares<a class="headerlink" href="#f26-symfony-service-ids-a-bundle-or-a-definition-api-declares" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Service IDs and container parameters are read from the application's YAML,
+XML, and PHP configurators. A bundle's own declarations, and the ones a
+kernel or an extension makes through the <code>ContainerBuilder</code> API
+(<code>register('app.mailer', …)</code>, <code>setAlias()</code>, <code>setParameter()</code> on a builder,
+<code>setDefinition()</code>), are not, so those names neither complete nor navigate,
+and only names under the application's own <code>app.</code> prefix can be reported
+as undeclared. Two reading shapes are missing too: a configurator's
+<code>-&gt;parent('app.base')</code>, and the <code>%name%</code> placeholders in a string a
+configurator passes as an argument (<code>-&gt;args(['%app.sender%'])</code>).</p>
+<p>Reading the installed bundles' <code>Resources/config/</code> would also let the
+unknown-ID check judge names outside <code>app.</code>; it has to stay cheap enough
+for a project with dozens of bundles.</p>
+<p><strong>Where to look:</strong> <code>src/symbol_map/extraction/symfony.rs</code>
+(<code>symfony_receiver_method</code>), <code>src/symbol_map/string_keys.rs</code>
+(<code>ReceiverClass</code>), <code>src/symfony/</code>.</p>
 
 
 
