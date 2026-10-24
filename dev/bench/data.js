@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792803970763,
+  "lastUpdate": 1792804332981,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -36899,6 +36899,252 @@ window.BENCHMARK_DATA = {
             "name": "find_references/hierarchy_scan/150",
             "value": 0.336,
             "range": "± 0.009",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "sidux@users.noreply.github.com",
+            "name": "sidux",
+            "username": "sidux"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e28436f4c7b094e03530cf38a34260f7d504dd0f",
+          "message": "Add a Symfony playground project\n\nThe examples/symfony/ project from #405, with its CI lint step.",
+          "timestamp": "2026-10-24T03:02:01+02:00",
+          "tree_id": "8df1e25f7026606e5f271a76d0ab23cefcdf1680",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e28436f4c7b094e03530cf38a34260f7d504dd0f"
+        },
+        "date": 1792804325632,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 3.906,
+            "range": "± 0.582",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.021,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.059,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.092,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.156,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.203,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.934,
+            "range": "± 0.061",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 2.157,
+            "range": "± 0.134",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.059,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.029,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.026,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.028,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 3.122,
+            "range": "± 0.157",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.102,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.185,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.029,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.024,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.071,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.028,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.025,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.125,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 0.634,
+            "range": "± 0.036",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 3.663,
+            "range": "± 0.338",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 0.638,
+            "range": "± 0.049",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.57,
+            "range": "± 0.045",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.19,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 4.908,
+            "range": "± 0.273",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 0.469,
+            "range": "± 0.016",
+            "unit": "ms"
+          },
+          {
+            "name": "custom_builder_completion/custom_builder_deep_inheritance",
+            "value": 0.034,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_completion/model_where_prefix",
+            "value": 0.033,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_completion/model_typing_sequence",
+            "value": 0.134,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cold_confirmation/1",
+            "value": 0.034,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cached_request/1",
+            "value": 0.025,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cold_confirmation/128",
+            "value": 0.062,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cached_request/128",
+            "value": 0.039,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "find_references/hierarchy_scan/50",
+            "value": 0.194,
+            "range": "± 0.021",
+            "unit": "ms"
+          },
+          {
+            "name": "find_references/hierarchy_scan/150",
+            "value": 0.251,
+            "range": "± 0.006",
             "unit": "ms"
           }
         ]
