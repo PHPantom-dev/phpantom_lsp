@@ -3397,41 +3397,42 @@ sit next to.</p>
 <a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
 <a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
 <a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
-<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>├── symfony/                # Symfony service IDs, container parameters, routes, translations, Twig templates, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
-<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>├── references/, rename/, highlight/
-<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
-<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/
-<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>├── selection_range.rs, type_hierarchy.rs
-<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>│
-<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>│   # Diagnostics
-<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>├── diagnostics/
-<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>│   ├── mod.rs              # Module map, code naming rules, shared range helpers
-<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>│   ├── collect.rs          # Running the fast and slow collectors over one file
-<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>│   ├── delivery.rs         # Debounced scheduling, two-phase publish, push and pull delivery, the worker
-<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>│   ├── external/           # PHPStan / PHPCS / PHPMD / Mago subprocess pipelines
-<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>│   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
-<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>│   └── &lt;collector&gt;.rs      # One module per diagnostic (unknown_classes, unknown_functions,
-<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>│                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
-<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>│
-<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>│   # External tools &amp; CLI subcommands
-<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a>├── phpstan.rs, phpcs.rs, phpmd.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
-<a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a>├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
-<a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a>├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
-<a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a>├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
-<a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a>├── self_update.rs          # Binary self-update
-<a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a>│
-<a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a>│   # Blade &amp; shared utilities
-<a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a>├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
-<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a>└── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
-<a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>
-<a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a>build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
-<a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
-<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a>tests/
-<a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a>├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
-<a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a>├── unit/                   # Unit tests (composer, docblock, named args, …)
-<a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a>├── fixtures/               # Fixtures driven by fixture_runner.rs
-<a id="__codelineno-0-90" name="__codelineno-0-90" href="#__codelineno-0-90"></a>├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var =&gt; 'ExpectedType'` assertion suites ported from Psalm / PHPStan
-<a id="__codelineno-0-91" name="__codelineno-0-91" href="#__codelineno-0-91"></a>└── assert_type_runner.rs, fixture_runner.rs
+<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>├── symfony/                # Symfony service IDs, container parameters, routes, translations, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
+<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>├── twig/                   # Twig template names in any project that uses Twig: template roots discovered from the names templates reference, the template-name scanner
+<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>├── references/, rename/, highlight/
+<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
+<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/
+<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>├── selection_range.rs, type_hierarchy.rs
+<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>│
+<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>│   # Diagnostics
+<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>├── diagnostics/
+<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>│   ├── mod.rs              # Module map, code naming rules, shared range helpers
+<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>│   ├── collect.rs          # Running the fast and slow collectors over one file
+<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>│   ├── delivery.rs         # Debounced scheduling, two-phase publish, push and pull delivery, the worker
+<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>│   ├── external/           # PHPStan / PHPCS / PHPMD / Mago subprocess pipelines
+<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>│   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
+<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>│   └── &lt;collector&gt;.rs      # One module per diagnostic (unknown_classes, unknown_functions,
+<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>│                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
+<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>│
+<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a>│   # External tools &amp; CLI subcommands
+<a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a>├── phpstan.rs, phpcs.rs, phpmd.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
+<a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a>├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
+<a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a>├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
+<a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a>├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
+<a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a>├── self_update.rs          # Binary self-update
+<a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a>│
+<a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a>│   # Blade &amp; shared utilities
+<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a>├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
+<a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>└── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
+<a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a>
+<a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
+<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a>stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
+<a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a>tests/
+<a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a>├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
+<a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a>├── unit/                   # Unit tests (composer, docblock, named args, …)
+<a id="__codelineno-0-90" name="__codelineno-0-90" href="#__codelineno-0-90"></a>├── fixtures/               # Fixtures driven by fixture_runner.rs
+<a id="__codelineno-0-91" name="__codelineno-0-91" href="#__codelineno-0-91"></a>├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var =&gt; 'ExpectedType'` assertion suites ported from Psalm / PHPStan
+<a id="__codelineno-0-92" name="__codelineno-0-92" href="#__codelineno-0-92"></a>└── assert_type_runner.rs, fixture_runner.rs
 </code></pre></div>
 <p><strong>The shared type engine lives under <code>type_engine/</code>.</strong> <code>type_engine/resolver/</code>,
 <code>type_engine/variable/</code> (including the <code>forward_walk/</code> forward walker),
@@ -3625,9 +3626,13 @@ emits it.</p>
   typed-receiver site (see above) and settled by the shared type engine,
   never by guessing from the receiver's spelling.</li>
 <li><strong>YAML, XML, XLIFF, and Twig</strong> are read as text by the scanners in
-  <code>symfony/</code>, which build each resource file's symbol map
+  <code>symfony/</code> and <code>twig/</code>, which build each resource file's symbol map
   (<code>resource_navigation.rs</code>). These files have no AST we share, and their
-  shapes are small enough that a line-oriented scan reads them reliably.</li>
+  shapes are small enough that a line-oriented scan reads them reliably.
+  Whether a file is a resource document is mostly its extension, but an
+  <code>.html</code> file is a Twig template only under a root discovered from the
+  names other templates reference (<code>twig/roots.rs</code>), so the check is
+  <code>Backend::is_resource_uri</code>, not the URI alone.</li>
 </ul>
 <p>Completion asks the same questions: it judges the call under the cursor
 with the predicates extraction uses (<code>symfony_receiver_method</code>, the
@@ -4302,7 +4307,7 @@ classes the current parse produced.</p>
 <p>Before scanning, <code>ensure_workspace_indexed</code> ensures all user files have symbol maps:</p>
 <ol>
 <li><strong>Phase 1: fqn_uri_index files (user only)</strong> — files already known from <code>update_ast</code> calls. Vendor and stub URIs are skipped.</li>
-<li><strong>Phase 2: <code>.gitignore</code>-aware workspace walk</strong> — uses the <code>ignore</code> crate's <code>WalkBuilder</code> to recursively discover PHP plus YAML/XML resource files (and, in a Symfony project, Twig templates and XLIFF catalogues) under the workspace root, respecting <code>.gitignore</code> rules (including nested and global gitignore files). This automatically skips generated/cached directories like <code>storage/framework/views/</code> (Laravel blade cache), <code>var/cache/</code> (Symfony), and <code>node_modules/</code>. The vendor directory is always skipped regardless of <code>.gitignore</code> content. Hidden directories are skipped by default.</li>
+<li><strong>Phase 2: <code>.gitignore</code>-aware workspace walk</strong> — uses the <code>ignore</code> crate's <code>WalkBuilder</code> to recursively discover PHP plus YAML/XML resource files (and, in a Symfony project, XLIFF catalogues, and in a project that uses Twig, its <code>.twig</code>, <code>.html</code>, and <code>.htm</code> files, which root discovery reads before any template is indexed) under the workspace root, respecting <code>.gitignore</code> rules (including nested and global gitignore files). This automatically skips generated/cached directories like <code>storage/framework/views/</code> (Laravel blade cache), <code>var/cache/</code> (Symfony), and <code>node_modules/</code>. The vendor directory is always skipped regardless of <code>.gitignore</code> content. Hidden directories are skipped by default.</li>
 </ol>
 <p>PHP files are parsed in parallel using <code>std::thread::scope</code>. The work is split into chunks (one per CPU core) and each thread reads a file from disk and calls <code>update_ast</code>, which acquires write locks briefly to store results while the expensive parsing step runs without any locks held. Batches of 2 or fewer files skip threading overhead. YAML/XML files take the lightweight schema-free scanner and publish synthetic class/member symbol maps into the same reference index.</p>
 <p>Parsed files stay cached in <code>uri_classes_index</code>, <code>symbol_maps</code>, <code>file_imports</code>, and <code>file_namespaces</code> after the scan completes. There is no post-scan eviction; keeping the entries means subsequent operations (a second find-references call, go-to-definition on a cross-file symbol) benefit from the work already done.</p>
