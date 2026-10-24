@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792812099726,
+  "lastUpdate": 1792813485543,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5371,6 +5371,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "55f51a534852bb2e9a214aea5617cdf731c8a359",
+          "message": "Use Mago's native range formatting",
+          "timestamp": "2026-10-24T05:31:01+02:00",
+          "tree_id": "55c5a75e50361f37ef6fc5bea50cd927630aafd3",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/55f51a534852bb2e9a214aea5617cdf731c8a359"
+        },
+        "date": 1792813474435,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 84.7,
             "unit": "MiB"
           }
         ]
