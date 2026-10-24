@@ -20,11 +20,13 @@ find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l
 php -d zend.assertions=1 examples/php/scaffolding/assertions.php
 php -l examples/laravel/app/Demo.php
 find examples/symfony/src examples/symfony/config -name '*.php' -print0 | xargs -0 -n1 php -l
+php examples/laravel/assertions.php
+php examples/symfony/assertions.php
 phpantom_lsp analyze --project-root examples/laravel --no-colour
 phpantom_lsp analyze --project-root examples/symfony --no-colour
 ```
 
-Note that clippy runs twice, once for library code and once including test code. The `php -l` checks keep the PHP and framework playgrounds valid. The `php -d zend.assertions=1` run executes `assertions.php`'s `runDemoAssertions()` to verify that `scaffolding/scaffolding.php`'s stubs actually return what their docblocks claim. The `phpantom_lsp analyze` runs check the framework playgrounds for diagnostic regressions (run `composer install` in each first). `examples/symfony/` must report `[OK] No errors`. In `examples/laravel/`, `app/Demo.php` carries three deliberate mistakes: `Artisan::call('does:not-exist')` demonstrates `invalid_laravel_command`, and one `view('welcome', …)` call both leaves out a variable the template declares and passes a misspelled key, demonstrating `missing_view_variable` and `unused_view_variable`. So the analyze run must report exactly `[ERROR] Found 3 errors` on those two lines, not `[OK] No errors`; any other count, or an error on a different line, is a regression.
+Note that clippy runs twice, once for library code and once including test code. The `php -l` checks keep the PHP and framework playgrounds valid. The `php -d zend.assertions=1` run executes `assertions.php`'s `runDemoAssertions()` to verify that `scaffolding/scaffolding.php`'s stubs actually return what their docblocks claim. Each framework playground has an `assertions.php` of its own that checks the demo against the real framework: the Laravel one boots Eloquent on an in-memory database, and the Symfony one loads the routes, services, translations, templates, forms, and validation mappings with Symfony's own loaders. The framework `assertions.php` and `phpantom_lsp analyze` runs need `composer install` in each playground first; the `analyze` runs check the playgrounds for diagnostic regressions. `examples/symfony/` must report `[OK] No errors`. In `examples/laravel/`, `app/Demo.php` carries three deliberate mistakes: `Artisan::call('does:not-exist')` demonstrates `invalid_laravel_command`, and one `view('welcome', …)` call both leaves out a variable the template declares and passes a misspelled key, demonstrating `missing_view_variable` and `unused_view_variable`. So the analyze run must report exactly `[ERROR] Found 3 errors` on those two lines, not `[OK] No errors`; any other count, or an error on a different line, is a regression.
 
 ## Code Style
 
@@ -40,7 +42,7 @@ Note that clippy runs twice, once for library code and once including test code.
 - A helper (a request wrapper, a label extractor, a position finder) that three or more test files would define belongs in `tests/integration/common/mod.rs`, not copied into each file; check there before writing one
 - Inline `#[cfg(test)]` modules in `src/` are for unit tests of private helpers; a test that drives a `Backend` through a public handler goes in `tests/integration/`
 - Test the happy path, edge cases, and interactions with existing features
-- When adding a feature, update the matching demo file under `examples/php/` with working examples (and verify with `find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l`). For Laravel-specific features, also update `examples/laravel/app/Demo.php` (and verify with `php -l examples/laravel/app/Demo.php`). Put other framework-specific examples in the matching `examples/<framework>/` project and lint its PHP files.
+- When adding a feature, update the matching demo file under `examples/php/` with working examples (and verify with `find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l`). For Laravel-specific features, also update `examples/laravel/app/Demo.php` (and verify with `php -l examples/laravel/app/Demo.php`). For Symfony-specific features, update the matching file under `examples/symfony/` and add a "Try:" line to its `README.md`. In both, add a check to the playground's `assertions.php` for every new name or claim the demo makes. Put other framework-specific examples in the matching `examples/<framework>/` project and lint its PHP files.
 
 See [BUILDING.md](BUILDING.md) for more on running tests and manual LSP testing.
 

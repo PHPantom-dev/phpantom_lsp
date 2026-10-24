@@ -151,6 +151,7 @@ jobs:
           rm -rf target/criterion
           cargo bench --bench completion --bench references \
             --bench laravel_completion --bench custom_builder \
+            --bench symfony_completion \
             -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         shell: bash
@@ -206,6 +207,7 @@ jobs:
           rm -rf target/criterion
           cargo bench --bench completion --bench references \
             --bench laravel_completion --bench custom_builder \
+            --bench symfony_completion \
             -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         if: steps.check-gh-pages.outputs.exists == 'true'

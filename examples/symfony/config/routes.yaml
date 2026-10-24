@@ -1,3 +1,7 @@
+controllers:
+  resource: ../src/Controller/
+  type: attribute
+
 app_demo_legacy:
   path: /legacy
   controller: App\Controller\DemoController::legacy

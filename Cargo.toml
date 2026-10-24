@@ -132,3 +132,7 @@ harness = false
 [[bench]]
 name = "custom_builder"
 harness = false
+
+[[bench]]
+name = "symfony_completion"
+harness = false

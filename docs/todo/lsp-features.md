@@ -1276,3 +1276,66 @@ nothing for a project until someone writes its rules.
 
 **Where to look:** `src/symbol_map/extraction/symfony.rs`, and Symfony's
 `ExpressionLanguage` component (`Lexer`, `Parser`) for the grammar.
+
+---
+
+## F56. Live components
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+```php
+#[AsLiveComponent]
+final class SearchBox
+{
+    use DefaultActionTrait;
+
+    #[LiveProp(writable: true)]
+    public string $query = '';
+
+    #[LiveAction]
+    public function clear(): void { … }
+}
+```
+
+```twig
+<input data-model="query">
+<button data-action="live#action" data-live-action-param="clear">Clear</button>
+```
+
+With `symfony/ux-live-component`, a component's template names its class's
+`#[LiveProp]` properties in `data-model` (and `data-model="on(change)|query"`),
+and its `#[LiveAction]` methods in `data-live-action-param`. None of these
+complete, navigate, or show up in the property's or method's references and
+renames, and a name the class does not declare is not reported. Only a
+writable prop can be bound by `data-model`, and only a `#[LiveAction]`
+method can be called, so completion should offer just those. The template
+also sees the component's public properties and methods as `this.…` and
+bare variables, which F37's template variables would type. Builds on F38's
+link between a component class and its template.
+
+**Where to look:** `src/symfony/templates.rs`, `src/blade/component_tags/`
+(the Livewire `wire:model` handling is the closest counterpart).
+
+---
+
+## F57. "Add translation" quick fix for an undeclared Symfony key
+
+**Impact: Medium · Complexity: Medium** (depends on F29)
+
+```php
+$translator->trans('checkout.confirm'); // not in any catalogue
+```
+
+Laravel offers to add a missing translation to each locale's language file
+(`insert_translation_key.rs`). Symfony keys get no such fix. Once F29
+reports an undeclared key, offer one action per catalogue of the key's
+domain (`messages.en.yaml`, `messages.da.xlf`, …) that inserts the key with
+an empty or source-text value: nested under its dotted parents in YAML,
+or flat when the file already spells its keys flat, and as a new
+`<trans-unit>` (XLIFF 1.2) or `<unit>` (XLIFF 2) with a fresh id in XLIFF.
+When the domain has no catalogue yet, offer to create
+`translations/<domain>.<default_locale>.yaml`.
+
+**Where to look:** `src/code_actions/insert_translation_key.rs`,
+`src/symfony/translations.rs` (`catalogue_spans`, `scan_yaml`,
+`scan_xliff`).

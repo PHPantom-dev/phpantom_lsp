@@ -34,7 +34,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Closure parameter inference              | ✅       | 🚧           | 🚧         | 🚧          | 🚧          |
 | **Frameworks**                           |          |              |            |             |             |
 | Laravel & Blade                          | ✅       | ❌           | 🚧         | ❌          | 🚧🧩          |
-| Symfony & Twig                           | ✅       | ❌           | ❌         | 🚧          | 🧩         |
+| Symfony & Twig                           | 🚧       | ❌           | ❌         | 🚧          | 🧩         |
 | Drupal                                   | 🚧       | ❌           | ❌         | ❌          | ✅🧩          |
 | Other frameworks                         | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
 | **Refactoring**                          |          |              |            |             |             |

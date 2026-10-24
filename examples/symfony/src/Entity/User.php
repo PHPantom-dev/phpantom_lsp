@@ -9,13 +9,23 @@ final class User
         private string $displayName,
     ) {}
 
-    public function email(): string
+    public function getEmail(): string
     {
         return $this->email;
     }
 
-    public function displayName(): string
+    public function setEmail(string $email): void
+    {
+        $this->email = $email;
+    }
+
+    public function getDisplayName(): string
     {
         return $this->displayName;
+    }
+
+    public function setDisplayName(string $displayName): void
+    {
+        $this->displayName = $displayName;
     }
 }
