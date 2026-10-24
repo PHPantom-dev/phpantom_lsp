@@ -2957,6 +2957,53 @@ language for custom attributes was proposed and declined, since it does
 nothing for a project until someone writes its rules.</p>
 <p><strong>Where to look:</strong> <code>src/symbol_map/extraction/symfony.rs</code>, and Symfony's
 <code>ExpressionLanguage</code> component (<code>Lexer</code>, <code>Parser</code>) for the grammar.</p>
+<hr />
+<h2 id="f56-live-components">F56. Live components<a class="headerlink" href="#f56-live-components" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="x">#[AsLiveComponent]</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="x">final class SearchBox</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="x">{</span>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="x">    use DefaultActionTrait;</span>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="x">    #[LiveProp(writable: true)]</span>
+<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="x">    public string $query = '';</span>
+<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a>
+<a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a><span class="x">    #[LiveAction]</span>
+<a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a><span class="x">    public function clear(): void { … }</span>
+<a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a><span class="x">}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="x">&lt;input data-model="query"&gt;</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="x">&lt;button data-action="live#action" data-live-action-param="clear"&gt;Clear&lt;/button&gt;</span>
+</code></pre></div>
+<p>With <code>symfony/ux-live-component</code>, a component's template names its class's
+<code>#[LiveProp]</code> properties in <code>data-model</code> (and <code>data-model="on(change)|query"</code>),
+and its <code>#[LiveAction]</code> methods in <code>data-live-action-param</code>. None of these
+complete, navigate, or show up in the property's or method's references and
+renames, and a name the class does not declare is not reported. Only a
+writable prop can be bound by <code>data-model</code>, and only a <code>#[LiveAction]</code>
+method can be called, so completion should offer just those. The template
+also sees the component's public properties and methods as <code>this.…</code> and
+bare variables, which F37's template variables would type. Builds on F38's
+link between a component class and its template.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/templates.rs</code>, <code>src/blade/component_tags/</code>
+(the Livewire <code>wire:model</code> handling is the closest counterpart).</p>
+<hr />
+<h2 id="f57-add-translation-quick-fix-for-an-undeclared-symfony-key">F57. "Add translation" quick fix for an undeclared Symfony key<a class="headerlink" href="#f57-add-translation-quick-fix-for-an-undeclared-symfony-key" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong> (depends on F29)</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="x">$translator-&gt;trans('checkout.confirm'); // not in any catalogue</span>
+</code></pre></div>
+<p>Laravel offers to add a missing translation to each locale's language file
+(<code>insert_translation_key.rs</code>). Symfony keys get no such fix. Once F29
+reports an undeclared key, offer one action per catalogue of the key's
+domain (<code>messages.en.yaml</code>, <code>messages.da.xlf</code>, …) that inserts the key with
+an empty or source-text value: nested under its dotted parents in YAML,
+or flat when the file already spells its keys flat, and as a new
+<code>&lt;trans-unit&gt;</code> (XLIFF 1.2) or <code>&lt;unit&gt;</code> (XLIFF 2) with a fresh id in XLIFF.
+When the domain has no catalogue yet, offer to create
+<code>translations/&lt;domain&gt;.&lt;default_locale&gt;.yaml</code>.</p>
+<p><strong>Where to look:</strong> <code>src/code_actions/insert_translation_key.rs</code>,
+<code>src/symfony/translations.rs</code> (<code>catalogue_spans</code>, <code>scan_yaml</code>,
+<code>scan_xliff</code>).</p>
 
 
 

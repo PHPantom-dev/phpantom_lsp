@@ -1636,15 +1636,24 @@ interface, and what the wasm build leaves out.</p>
 <a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>find<span class="w"> </span>examples/php<span class="w"> </span>-name<span class="w"> </span><span class="s1">'*.php'</span><span class="w"> </span>-print0<span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span>-0<span class="w"> </span>-n1<span class="w"> </span>php<span class="w"> </span>-l
 <a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>php<span class="w"> </span>-d<span class="w"> </span>zend.assertions<span class="o">=</span><span class="m">1</span><span class="w"> </span>examples/php/scaffolding/assertions.php
 <a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>php<span class="w"> </span>-l<span class="w"> </span>examples/laravel/app/Demo.php
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>examples/laravel<span class="w"> </span>--no-colour
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>find<span class="w"> </span>examples/symfony/src<span class="w"> </span>examples/symfony/config<span class="w"> </span>-name<span class="w"> </span><span class="s1">'*.php'</span><span class="w"> </span>-print0<span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span>-0<span class="w"> </span>-n1<span class="w"> </span>php<span class="w"> </span>-l
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>php<span class="w"> </span>examples/laravel/assertions.php
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>php<span class="w"> </span>examples/symfony/assertions.php
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>examples/laravel<span class="w"> </span>--no-colour
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>examples/symfony<span class="w"> </span>--no-colour
 </code></pre></div>
 <p>CI additionally builds the WebAssembly target and runs
 <code>scripts/wasm-smoke-test.mjs</code> against it, which is worth running locally
 if your change touches dependencies, <code>Cargo.toml</code>, or anything in the
 per-file request path. See <a href="../wasm/">wasm.md</a>.</p>
-<p>All ten must pass with zero warnings and zero failures, except the
-final <code>analyze</code> run: <code>app/Demo.php</code> carries three deliberate mistakes,
-each demonstrating a diagnostic. <code>Artisan::call('does:not-exist')</code>
+<p>The framework <code>assertions.php</code> and <code>analyze</code> runs need <code>composer
+install</code> in <code>examples/laravel/</code> and <code>examples/symfony/</code> first. Each
+<code>assertions.php</code> checks its playground's demo against the real framework.</p>
+<p>All fourteen must pass with zero warnings and zero failures, and the
+Symfony <code>analyze</code> run must report <code>[OK] No errors</code>. The Laravel
+<code>analyze</code> run is the exception: <code>app/Demo.php</code> carries three
+deliberate mistakes, each demonstrating a diagnostic.
+<code>Artisan::call('does:not-exist')</code>
 demonstrates <code>invalid_laravel_command</code>, and one <code>view('welcome', …)</code>
 call both leaves out a variable the template declares and passes a
 misspelled key, demonstrating <code>missing_view_variable</code> and
