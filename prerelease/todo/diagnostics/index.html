@@ -1078,6 +1078,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d30-getting-a-private-symfony-service-from-the-container-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D30. Getting a private Symfony service from the container is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D31. Doctrine mappings that disagree with the entity are not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1686,6 +1708,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d30-getting-a-private-symfony-service-from-the-container-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D30. Getting a private Symfony service from the container is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D31. Doctrine mappings that disagree with the entity are not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2068,7 +2112,11 @@ definite-assignment tracking across the constructor and is the harder half.</p>
 (Doctrine entities, serializers, <code>#[Inject]</code>), and a diagnostic that flags
 all of them is a false positive on correct code. Consider exempting classes
 whose properties carry an attribute or an ORM mapping docblock, and put the
-check behind a <code>[diagnostics]</code> toggle if a safe default can't be found.</p>
+check behind a <code>[diagnostics]</code> toggle if a safe default can't be found.
+Symfony writes a property or calls a setter marked <code>#[Required]</code> (or
+<code>@required</code>) while autowiring, and Doctrine writes a generated identifier
+and a version field, so those count as initialised (PHPStan's Symfony and
+Doctrine extensions model both).</p>
 <p>Found running the php-typing-conformance suite
 (<code>properties_uninitialized_read.php</code>). Psalm and Qodana report it.</p>
 <h2 id="d28-remove-unreachable-code-is-wired-to-phpstan-only">D28. "Remove unreachable code" is wired to PHPStan only<a class="headerlink" href="#d28-remove-unreachable-code-is-wired-to-phpstan-only" title="Permanent link">&para;</a></h2>
@@ -2115,6 +2163,45 @@ so reachability neither flows into them nor out of them:</p>
 dimmed, but the state on either side of it has to carry through.</p>
 <p><strong>Fix:</strong> Thread the reachable/unreachable state through both wrappers
 instead of restarting the scan inside them.</p>
+<hr />
+<h2 id="d30-getting-a-private-symfony-service-from-the-container-is-not-reported">D30. Getting a private Symfony service from the container is not reported<a class="headerlink" href="#d30-getting-a-private-symfony-service-from-the-container-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$container-&gt;get('app.mailer'); // throws: the service is private</span>
+</code></pre></div>
+<p>Services are private by default since Symfony 3.4: a service is public only
+when its declaration says <code>public: true</code> (or <code>-&gt;public()</code>, or
+<code>public="true"</code> in XML), directly or through <code>_defaults</code>, or when an alias
+to it is public. Getting a private one from the container throws at
+runtime. PHPStan's Symfony extension reports it from the compiled
+container; the service declarations PHPantom already reads say the same
+for the project's own services. Only judge a service the project declares,
+leave the test container (which exposes private services) alone, and treat
+a service locator or a <code>ServiceSubscriberInterface</code> subscriber's own
+<code>get()</code> as reading its locator rather than the container.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/resources.rs</code> (the declarations),
+<code>src/diagnostics/laravel_string_keys.rs</code> (where unknown service IDs are
+judged), and PHPStan's Symfony extension (<code>ContainerInterfacePrivateServiceRule</code>).</p>
+<hr />
+<h2 id="d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported">D31. Doctrine mappings that disagree with the entity are not reported<a class="headerlink" href="#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">#[ORM\Column(type: 'string', nullable: true)]</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">private string $name; // the column can be null, the property cannot</span>
+</code></pre></div>
+<p>PHPStan's Doctrine extension checks an entity's mapping against its PHP:</p>
+<ul>
+<li>a column's type and nullability against the property's type, both ways
+  (what the database hands the property, and what the property writes);</li>
+<li>a relation against the property's type (a to-one is the target entity,
+  a to-many a <code>Collection</code> of it);</li>
+<li>a <code>final</code> entity or constructor, which Doctrine cannot proxy unless
+  native lazy objects are enabled;</li>
+<li>a Doctrine proxy class named directly.</li>
+</ul>
+<p>The column types map to PHP types through a table of Doctrine's built-in
+types, which custom types have to extend. Read the mapping from attributes
+and from XML, the same mapping the entity and repository CodeLens reads.</p>
+<p><strong>Where to look:</strong> <code>src/framework.rs</code> (the Doctrine mapping index), and
+PHPStan's Doctrine extension (<code>Rules/Doctrine/ORM/</code>, <code>Type/Doctrine/Descriptors/</code>).</p>
 
 
 

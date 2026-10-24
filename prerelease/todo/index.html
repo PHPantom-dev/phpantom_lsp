@@ -1521,8 +1521,20 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
+<td>T50</td>
+<td><a href="../todo/type-inference/#t50-port-the-phpstan-symfony-and-doctrine-extensions-type-fixtures">Port the PHPStan Symfony and Doctrine extensions' type fixtures</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
 <td>T34</td>
 <td><a href="../todo/type-inference/#t34-staticconst-over-narrows-to-the-declaring-classs-value"><code>static::CONST</code> over-narrows to the declaring class's value</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>T51</td>
+<td><a href="../todo/type-inference/#t51-symfony-return-types-the-service-container-decides">Symfony return types the service container decides</a> (depends on T50)</td>
 <td>Medium</td>
 <td>Medium-High</td>
 </tr>
@@ -1551,6 +1563,12 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
+<td>T52</td>
+<td><a href="../todo/type-inference/#t52-symfony-return-types-an-argument-decides">Symfony return types an argument decides</a> (depends on T50)</td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
 <td>T41</td>
 <td><a href="../todo/type-inference/#t41-a-reading-of-the-callees-body-overrides-a-declared-param-out">A reading of the callee's body overrides a declared <code>@param-out</code></a></td>
 <td>Low-Medium</td>
@@ -1559,6 +1577,12 @@ unlikely to move the needle for most users.</p>
 <tr>
 <td>T43</td>
 <td><a href="../todo/type-inference/#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved"><code>self::TypeAlias</code> inside <code>@extends</code>'s generic argument is not resolved</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T53</td>
+<td><a href="../todo/type-inference/#t53-doctrine-collections-narrowed-by-isempty">Doctrine collections narrowed by <code>isEmpty()</code></a></td>
 <td>Low</td>
 <td>Medium</td>
 </tr>
@@ -1633,6 +1657,18 @@ unlikely to move the needle for most users.</p>
 <td><a href="../todo/diagnostics/#d28-remove-unreachable-code-is-wired-to-phpstan-only">"Remove unreachable code" is wired to PHPStan only</a></td>
 <td>Low-Medium</td>
 <td>Medium</td>
+</tr>
+<tr>
+<td>D30</td>
+<td><a href="../todo/diagnostics/#d30-getting-a-private-symfony-service-from-the-container-is-not-reported">Getting a private Symfony service from the container is not reported</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D31</td>
+<td><a href="../todo/diagnostics/#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported">Doctrine mappings that disagree with the entity are not reported</a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
 </tr>
 <tr>
 <td>D29</td>
@@ -1869,6 +1905,12 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
+<td>F42</td>
+<td><a href="../todo/lsp-features/#f42-symfony-console-arguments-and-options">Symfony console arguments and options</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
 <td>F34</td>
 <td><a href="../todo/lsp-features/#f34-template-names-a-php-wrapper-builds">Template names a PHP wrapper builds</a> (depends on F33)</td>
 <td>Medium</td>
@@ -1885,6 +1927,18 @@ unlikely to move the needle for most users.</p>
 <td><a href="../todo/lsp-features/#f39-report-unknown-symfony-configuration-keys">Report unknown Symfony configuration keys</a></td>
 <td>Medium</td>
 <td>Medium-High</td>
+</tr>
+<tr>
+<td>F43</td>
+<td><a href="../todo/lsp-features/#f43-doctrine-entity-fields-in-repository-calls">Doctrine entity fields in repository calls</a> (depends on T45)</td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>F44</td>
+<td><a href="../todo/lsp-features/#f44-doctrine-dql-and-query-builder-strings">Doctrine DQL and query builder strings</a></td>
+<td>Medium</td>
+<td>High</td>
 </tr>
 <tr>
 <td>F7</td>

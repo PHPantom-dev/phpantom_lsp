@@ -2673,7 +2673,9 @@ These are missed:</p>
   keys neither complete nor navigate;</li>
 <li>configuration written in PHP (<code>config/packages/*.php</code>) or XML.</li>
 </ul>
-<p><strong>Where to look:</strong> <code>src/symfony/config_tree.rs</code>.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/config_tree.rs</code>, and PHPStan's Symfony
+extension (<code>Type/Symfony/Config/</code>), which tracks the same parent each
+builder's <code>end()</code> returns.</p>
 <hr />
 <h2 id="f41-symfony-forms-and-validation-beyond-a-form-types-own-data-class">F41. Symfony forms and validation beyond a form type's own data class<a class="headerlink" href="#f41-symfony-forms-and-validation-beyond-a-form-types-own-data-class" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
@@ -2694,6 +2696,79 @@ class's properties. These are missed:</p>
   alias.</li>
 </ul>
 <p><strong>Where to look:</strong> <code>src/symfony/forms.rs</code>, <code>src/symfony/validation.rs</code>.</p>
+<hr />
+<h2 id="f42-symfony-console-arguments-and-options">F42. Symfony console arguments and options<a class="headerlink" href="#f42-symfony-console-arguments-and-options" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">protected function configure(): void</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x">{</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x">    $this-&gt;addArgument('name', InputArgument::REQUIRED)</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x">        -&gt;addOption('dry-run', null, InputOption::VALUE_NONE);</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x">}</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="x">protected function execute(InputInterface $input, OutputInterface $output): int</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="x">{</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="x">    $input-&gt;getArgument('nmae');   // a typo, not reported</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="x">    $input-&gt;getOption('dry-run');  // mixed, should be bool</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="x">}</span>
+</code></pre></div>
+<p>A command declares its arguments and options in <code>configure()</code>, or as the
+<code>#[Argument]</code> and <code>#[Option]</code> parameters of an invokable command's
+<code>__invoke()</code>. The names <code>getArgument()</code>, <code>getOption()</code>, <code>hasArgument()</code>,
+and <code>hasOption()</code> take neither complete nor navigate, an undefined one is
+not reported, and the value is <code>mixed</code> where the declaration settles it:
+<code>bool</code> for <code>VALUE_NONE</code>, an array for <code>IS_ARRAY</code>, and nullable unless the
+argument is required or the option has a default. PHPStan's Symfony
+extension does all of this from a booted console application; the command's
+own source carries it. It also checks a default value against its mode.</p>
+<p>This is Laravel's Artisan signature support over again (<code>CommandOwnParam</code>
+spans), so share the span kinds and the completion with it rather than
+building a second set.</p>
+<p><strong>Where to look:</strong> <code>src/symbol_map/</code> (<code>CommandOwnParam</code>),
+<code>src/virtual_members/laravel/</code> (the Artisan signature parsing), and
+PHPStan's Symfony extension (<code>Rules/Symfony/Undefined*Rule</code>,
+<code>Rules/Symfony/Invalid*DefaultValueRule</code>,
+<code>Type/Symfony/InputInterface*Extension</code>).</p>
+<hr />
+<h2 id="f43-doctrine-entity-fields-in-repository-calls">F43. Doctrine entity fields in repository calls<a class="headerlink" href="#f43-doctrine-entity-fields-in-repository-calls" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">$users-&gt;findByEmail($email);                    // unknown method</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">$users-&gt;findBy(['emial' =&gt; $email], ['name' =&gt; 'ASC']); // a typo, not reported</span>
+</code></pre></div>
+<p>An entity's repository answers <code>findBy&lt;Field&gt;()</code>, <code>findOneBy&lt;Field&gt;()</code>, and
+<code>countBy&lt;Field&gt;()</code> for each of the entity's fields, and its <code>findBy()</code>,
+<code>findOneBy()</code>, <code>count()</code>, and <code>findBy()</code>'s <code>$orderBy</code> take field names as
+array keys. None of the magic methods resolve, and the keys neither
+complete, navigate, nor get checked. The magic methods are virtual members
+of the repository, the way Eloquent's are, which needs the repository's
+entity (T45). The keys are member references to the entity's mapped
+properties, the same member spans a form field and a validation mapping
+record.</p>
+<p>The fields come from the entity's mapping: <code>#[ORM\Column]</code>,
+<code>#[ORM\Id]</code>, and the relation attributes, or the XML mapping the CodeLens
+already reads.</p>
+<p><strong>Where to look:</strong> <code>src/virtual_members/</code>, <code>src/framework.rs</code> (the
+Doctrine mapping index), and PHPStan's Doctrine extension
+(<code>Reflection/Doctrine/EntityRepositoryClassReflectionExtension</code>,
+<code>Rules/Doctrine/ORM/RepositoryMethodCallRule</code>).</p>
+<hr />
+<h2 id="f44-doctrine-dql-and-query-builder-strings">F44. Doctrine DQL and query builder strings<a class="headerlink" href="#f44-doctrine-dql-and-query-builder-strings" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">$em-&gt;createQuery('SELECT u FROM App\Entity\User u WHERE u.emial = :e');</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x">$qb-&gt;select('u')-&gt;from(User::class, 'u')-&gt;where('u.email = :e')-&gt;getQuery()-&gt;getResult();</span>
+</code></pre></div>
+<p>DQL names entity classes and their fields in strings, directly or through
+a query builder's <code>select()</code>, <code>from()</code>, <code>join()</code>, and <code>where()</code>. Nothing in
+them completes or navigates, an unknown entity or field is not reported,
+and <code>getResult()</code> is <code>mixed</code> where the query settles it (<code>list&lt;User&gt;</code>, or
+an array shape for a scalar select). PHPStan's Doctrine extension parses the
+DQL with Doctrine's own parser and the booted metadata; PHPantom would need
+a DQL reader of its own over the static mapping, with the query builder's
+chain followed the way T45's repository is.</p>
+<p>Navigation and completion of the entity and field names are the cheaper
+half and the one an editor user notices; result types follow.</p>
+<p><strong>Where to look:</strong> <code>src/framework.rs</code> (the Doctrine mapping index), and
+PHPStan's Doctrine extension (<code>Rules/Doctrine/ORM/DqlRule</code>,
+<code>QueryBuilderDqlRule</code>, <code>Type/Doctrine/Query/</code>, <code>Type/Doctrine/QueryBuilder/</code>).</p>
 
 
 

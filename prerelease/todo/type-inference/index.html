@@ -1281,6 +1281,50 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#t50-port-the-phpstan-symfony-and-doctrine-extensions-type-fixtures" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T50. Port the PHPStan Symfony and Doctrine extensions' type fixtures
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t51-symfony-return-types-the-service-container-decides" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T51. Symfony return types the service container decides
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t52-symfony-return-types-an-argument-decides" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T52. Symfony return types an argument decides
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t53-doctrine-collections-narrowed-by-isempty" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T53. Doctrine collections narrowed by <code>isEmpty()</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1492,6 +1536,50 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T45. Doctrine <code>getRepository(Entity::class)</code> is typed as the generic repository
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t50-port-the-phpstan-symfony-and-doctrine-extensions-type-fixtures" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T50. Port the PHPStan Symfony and Doctrine extensions' type fixtures
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t51-symfony-return-types-the-service-container-decides" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T51. Symfony return types the service container decides
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t52-symfony-return-types-an-argument-decides" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T52. Symfony return types an argument decides
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t53-doctrine-collections-narrowed-by-isempty" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T53. Doctrine collections narrowed by <code>isEmpty()</code>
       </span>
     </span>
   </a>
@@ -1926,6 +2014,106 @@ resources already knows those pairs; the attribute form needs the
 (<code>framework_doctrine_repository_fqns_for_entity</code>) for the YAML/XML
 mapping pairs, and method-call return resolution under
 <code>src/type_engine/variable/rhs_resolution/</code> for where the hook goes.</p>
+<hr />
+<h2 id="t50-port-the-phpstan-symfony-and-doctrine-extensions-type-fixtures">T50. Port the PHPStan Symfony and Doctrine extensions' type fixtures<a class="headerlink" href="#t50-port-the-phpstan-symfony-and-doctrine-extensions-type-fixtures" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>PHPStan's framework extensions, <code>phpstan/phpstan-symfony</code> and
+<code>phpstan/phpstan-doctrine</code>, are the reference for what a Symfony or
+Doctrine project expects its types to be. Their <code>tests/Type/**/data/*.php</code>
+files are <code>assertType()</code> fixtures, the format <code>tests/assert_type_runner.rs</code>
+already runs for PHPStan's and Psalm's own corpora. Porting them is the
+measuring stick for T51 to T53, F42 to F44, and D30 to D31: each item there
+lands when its fixtures pass, and the ones that cannot yet carry a <code>// SKIP</code>
+naming the item.</p>
+<p>Two things have to be settled first:</p>
+<ul>
+<li><strong>Where the framework classes come from.</strong> The runner's backend has the
+  embedded stubs only, and these fixtures call into <code>symfony/*</code> and
+  <code>doctrine/*</code> classes. Either the fixtures get a project of their own with
+  a committed <code>composer.lock</code>, installed in CI the way <code>examples/symfony/</code>
+  is, or each fixture gets the slice of the framework it touches as stubs.</li>
+<li><strong>What stands in for a booted application.</strong> The extensions read the
+  compiled container XML (<code>containerXmlPath</code>), an object manager
+  (<code>objectManagerLoader</code>), and a console application
+  (<code>consoleApplicationLoader</code>). PHPantom reads the same facts statically,
+  from the service declarations, the entity mappings, and each command's
+  <code>configure()</code>, so a fixture that depends on the loader gets that setup
+  written as source next to it rather than being dropped.</li>
+</ul>
+<p>The extensions' rule tests (<code>tests/Rules/**</code>, expected messages per line)
+port the same way onto the diagnostic fixtures <code>tests/fixture_runner.rs</code>
+runs. Keep the upstream expectation and mark a gap <code>// SKIP</code> rather than
+loosening the comparison, as for the other corpora.</p>
+<p><strong>Where to look:</strong> <code>tests/assert_type_runner.rs</code> (the <code>datatest_stable</code>
+roots), <code>tests/fixture_runner.rs</code>, and the extensions' <code>tests/Type/</code> and
+<code>tests/Rules/</code>.</p>
+<hr />
+<h2 id="t51-symfony-return-types-the-service-container-decides">T51. Symfony return types the service container decides<a class="headerlink" href="#t51-symfony-return-types-the-service-container-decides" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$mailer = $container-&gt;get('app.mailer');      // mixed, should be App\Service\Mailer</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">$sender = $this-&gt;getParameter('app.sender');  // mixed, should be string</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">$result = $this-&gt;handle(new GetOrder($id));   // mixed, should be the handler's return type</span>
+</code></pre></div>
+<p>A container lookup by class name is typed already. One by service ID is
+not, though the service declaration says what it builds: a <code>class:</code> key or
+<code>class</code> attribute, an ID spelled as the class, or a PHP configurator's
+<code>set('app.mailer', Mailer::class)</code>. A parameter's type is its declared
+value's. A query bus's <code>HandleTrait::handle()</code> returns what the message's
+handler returns, the handler being the <code>#[AsMessageHandler]</code> class (or
+<code>messenger.message_handler</code> service) whose <code>__invoke()</code> takes that message.
+PHPStan's Symfony extension answers all three from the compiled container;
+the static service and parameter declarations PHPantom already indexes
+carry the same facts for the project's own services.</p>
+<p>This is a return-type hook in the type engine, so completion, hover,
+diagnostics, and references all see it, fed by <code>symfony_declaration_locations</code>
+and its index rather than a second reading of the configuration. Services
+installed bundles declare stay <code>mixed</code> until F26.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/mod.rs</code>, <code>src/symfony/resources.rs</code>,
+method-call return resolution under <code>src/type_engine/variable/rhs_resolution/</code>,
+and PHPStan's Symfony extension (<code>ServiceDynamicReturnTypeExtension</code>,
+<code>ParameterDynamicReturnTypeExtension</code>, <code>MessengerHandleTraitReturnTypeExtension</code>).</p>
+<hr />
+<h2 id="t52-symfony-return-types-an-argument-decides">T52. Symfony return types an argument decides<a class="headerlink" href="#t52-symfony-return-types-an-argument-decides" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>PHPStan's Symfony extension narrows a list of framework methods by their
+arguments. Each is checked against T50's fixtures, since a recent Symfony
+may already declare some of them with a conditional return type:</p>
+<ul>
+<li><code>Request::getContent($asResource)</code>, <code>HeaderBag::get($key, $default)</code>,
+  <code>InputBag::get($key, $default)</code> and <code>InputBag::all($key)</code>,
+  <code>ResponseHeaderBag::getCookies($format)</code>;</li>
+<li><code>Envelope::all($stampFqcn)</code>, <code>SerializerInterface::deserialize()</code> and
+  <code>DenormalizerInterface::denormalize()</code> by their <code>$type</code>;</li>
+<li><code>FormInterface::getErrors($deep, $flatten)</code>, <code>CacheInterface::get()</code> by
+  the callback's return type, <code>KernelInterface::locateResource()</code>,
+  <code>Extension::getConfiguration()</code>, <code>Command::getHelper()</code>, and
+  BrowserKit's <code>getClient()</code>;</li>
+<li><code>TreeBuilder::getRootNode()</code> and the node definitions' <code>end()</code> returning
+  their parent, for the Symfony versions before 8 that do not declare them
+  as generics.</li>
+</ul>
+<p>Where a rule fits a conditional return type, write it as a declarative
+patch on the vendor class (the way <code>virtual_members/laravel/patches.rs</code>
+patches Laravel's) rather than as code. The extension's <code>stubs/</code> directory
+shows which declarations it overrides wholesale.</p>
+<p><strong>Where to look:</strong> <code>src/virtual_members/laravel/patches.rs</code>, and PHPStan's
+Symfony extension (<code>src/Type/Symfony/</code>, <code>stubs/</code>).</p>
+<hr />
+<h2 id="t53-doctrine-collections-narrowed-by-isempty">T53. Doctrine collections narrowed by <code>isEmpty()</code><a class="headerlink" href="#t53-doctrine-collections-narrowed-by-isempty" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">if (!$order-&gt;lines-&gt;isEmpty()) {</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    $first = $order-&gt;lines-&gt;first(); // OrderLine|false, should be OrderLine</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>Collection::first()</code> and <code>last()</code> return <code>T|false</code>; once <code>isEmpty()</code> has
+been ruled out they cannot return <code>false</code>. This is a narrowing of the
+receiver's state rather than of a variable's type, which the narrowing
+pass does not model for method calls yet. PHPStan's Doctrine extension
+also adds <code>matching()</code> to every <code>Collection</code>, which only <code>Selectable</code> ones
+declare.</p>
+<p><strong>Where to look:</strong> the narrowing under <code>src/type_engine/</code>, and PHPStan's
+Doctrine extension (<code>Type/Doctrine/Collection/IsEmptyTypeSpecifyingExtension</code>,
+<code>DoctrineSelectableClassReflectionExtension</code>).</p>
 
 
 
