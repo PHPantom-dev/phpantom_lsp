@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792804570490,
+  "lastUpdate": 1792806949082,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5269,6 +5269,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 82.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "791f37201e2bbd4fdaec06f2dfed10b340e6d646",
+          "message": "Rename reaches Symfony and Doctrine configuration\n\nThe resource side of #397, on the shared resource lifecycle from #394.\nA class, controller action, or namespace rename rewrites its YAML and XML\noccurrences in the spelling each file uses, and can be started from the\nconfiguration file. Namespace-prefix service keys and resource paths\nfollow a namespace rename when the directory moves with it. A CodeLens\nlinks a Doctrine entity and its repository, from the YAML/XML mapping or\nthe naming convention, in projects that use Doctrine.\n\nLeft out of #397: the second class/member lookup index and its \"config\nrefs\" lenses, which repeated the resource symbol map, and the route and\ngetRepository() lenses that searched the PHP text. Attribute mappings are\nfiled as F24 and getRepository() typing as T45.\n\nFrom #408, autoload preload now counts a file after parsing it. The rest\nof #408 belonged to the separate workspace walk, which is gone.\n\nCloses #397\nCloses #408\n\nCo-authored-by: sidux <sidux@users.noreply.github.com>\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+          "timestamp": "2026-10-24T03:37:51+02:00",
+          "tree_id": "2550c88624646252db5910d3f254dc546e2335d6",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/791f37201e2bbd4fdaec06f2dfed10b340e6d646"
+        },
+        "date": 1792806938244,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80.5,
             "unit": "MiB"
           }
         ]
