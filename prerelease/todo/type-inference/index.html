@@ -1293,17 +1293,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t51-symfony-return-types-the-service-container-decides" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T51. Symfony return types the service container decides
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#t52-symfony-return-types-an-argument-decides" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1319,6 +1308,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T53. Doctrine collections narrowed by <code>isEmpty()</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t54-messenger-handlers-a-service-tag-registers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T54. Messenger handlers a service tag registers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t55-symfony-array-parameters-are-typed-as-plain-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T55. Symfony array parameters are typed as plain <code>array</code>
       </span>
     </span>
   </a>
@@ -1554,17 +1565,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t51-symfony-return-types-the-service-container-decides" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T51. Symfony return types the service container decides
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#t52-symfony-return-types-an-argument-decides" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1580,6 +1580,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T53. Doctrine collections narrowed by <code>isEmpty()</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t54-messenger-handlers-a-service-tag-registers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T54. Messenger handlers a service tag registers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t55-symfony-array-parameters-are-typed-as-plain-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T55. Symfony array parameters are typed as plain <code>array</code>
       </span>
     </span>
   </a>
@@ -2022,7 +2044,7 @@ mapping pairs, and method-call return resolution under
 Doctrine project expects its types to be. Their <code>tests/Type/**/data/*.php</code>
 files are <code>assertType()</code> fixtures, the format <code>tests/assert_type_runner.rs</code>
 already runs for PHPStan's and Psalm's own corpora. Porting them is the
-measuring stick for T51 to T53, F42 to F44, and D30 to D31: each item there
+measuring stick for T52 to T55, F42 to F44, and D30 to D31: each item there
 lands when its fixtures pass, and the ones that cannot yet carry a <code>// SKIP</code>
 naming the item.</p>
 <p>Two things have to be settled first:</p>
@@ -2047,34 +2069,6 @@ loosening the comparison, as for the other corpora.</p>
 <p><strong>Where to look:</strong> <code>tests/assert_type_runner.rs</code> (the <code>datatest_stable</code>
 roots), <code>tests/fixture_runner.rs</code>, and the extensions' <code>tests/Type/</code> and
 <code>tests/Rules/</code>.</p>
-<hr />
-<h2 id="t51-symfony-return-types-the-service-container-decides">T51. Symfony return types the service container decides<a class="headerlink" href="#t51-symfony-return-types-the-service-container-decides" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$mailer = $container-&gt;get('app.mailer');      // mixed, should be App\Service\Mailer</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">$sender = $this-&gt;getParameter('app.sender');  // mixed, should be string</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">$result = $this-&gt;handle(new GetOrder($id));   // mixed, should be the handler's return type</span>
-</code></pre></div>
-<p>A container lookup by class name is typed already. One by service ID is
-not, though the service declaration says what it builds: a <code>class:</code> key or
-<code>class</code> attribute, an ID spelled as the class, or a PHP configurator's
-<code>set('app.mailer', Mailer::class)</code>. A parameter's type is its declared
-value's. A query bus's <code>HandleTrait::handle()</code> returns what the message's
-handler returns, the handler being the <code>#[AsMessageHandler]</code> class (or
-<code>messenger.message_handler</code> service) whose <code>__invoke()</code> takes that message.
-The attribute half of that lookup exists:
-<code>Backend::symfony_message_handlers</code> answers a message's handlers, with the
-method that handles it, from the side table extraction records.
-PHPStan's Symfony extension answers all three from the compiled container;
-the static service and parameter declarations PHPantom already indexes
-carry the same facts for the project's own services.</p>
-<p>This is a return-type hook in the type engine, so completion, hover,
-diagnostics, and references all see it, fed by <code>symfony_declaration_locations</code>
-and its index rather than a second reading of the configuration. Services
-installed bundles declare stay <code>mixed</code> until F26.</p>
-<p><strong>Where to look:</strong> <code>src/symfony/mod.rs</code>, <code>src/symfony/resources.rs</code>,
-<code>src/symfony/messenger.rs</code>, method-call return resolution under <code>src/type_engine/variable/rhs_resolution/</code>,
-and PHPStan's Symfony extension (<code>ServiceDynamicReturnTypeExtension</code>,
-<code>ParameterDynamicReturnTypeExtension</code>, <code>MessengerHandleTraitReturnTypeExtension</code>).</p>
 <hr />
 <h2 id="t52-symfony-return-types-an-argument-decides">T52. Symfony return types an argument decides<a class="headerlink" href="#t52-symfony-return-types-an-argument-decides" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
@@ -2104,9 +2098,9 @@ Symfony extension (<code>src/Type/Symfony/</code>, <code>stubs/</code>).</p>
 <hr />
 <h2 id="t53-doctrine-collections-narrowed-by-isempty">T53. Doctrine collections narrowed by <code>isEmpty()</code><a class="headerlink" href="#t53-doctrine-collections-narrowed-by-isempty" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">if (!$order-&gt;lines-&gt;isEmpty()) {</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    $first = $order-&gt;lines-&gt;first(); // OrderLine|false, should be OrderLine</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">if (!$order-&gt;lines-&gt;isEmpty()) {</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    $first = $order-&gt;lines-&gt;first(); // OrderLine|false, should be OrderLine</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>Collection::first()</code> and <code>last()</code> return <code>T|false</code>; once <code>isEmpty()</code> has
 been ruled out they cannot return <code>false</code>. This is a narrowing of the
@@ -2117,6 +2111,45 @@ declare.</p>
 <p><strong>Where to look:</strong> the narrowing under <code>src/type_engine/</code>, and PHPStan's
 Doctrine extension (<code>Type/Doctrine/Collection/IsEmptyTypeSpecifyingExtension</code>,
 <code>DoctrineSelectableClassReflectionExtension</code>).</p>
+<hr />
+<h2 id="t54-messenger-handlers-a-service-tag-registers">T54. Messenger handlers a service tag registers<a class="headerlink" href="#t54-messenger-handlers-a-service-tag-registers" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">services</span><span class="p">:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span><span class="nt">App\Handler\GetOrderHandler</span><span class="p">:</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">        </span><span class="nt">tags</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">messenger.message_handler</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>A query bus's <code>HandleTrait::handle()</code> returns what the message's one
+handler returns, but only a handler <code>#[AsMessageHandler]</code> registers is
+found. One registered by a <code>messenger.message_handler</code> tag in YAML or
+XML, or autoconfigured because it implements the old
+<code>MessageHandlerInterface</code> or <code>MessageSubscriberInterface</code>, is not, so
+<code>handle()</code> stays <code>mixed</code> for its message, and the message's CodeLens
+does not list it. A tag can name the message (<code>handles</code>) and the method
+(<code>method</code>); without them the message is the type of the method's first
+parameter, which only the class says, so a tag-registered handler has to
+be recorded with its message still to be read from the class.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/tags.rs</code> (which already reads the tag's
+<code>bus</code>), <code>MessengerHandlerSite</code> and <code>Backend::symfony_message_handlers</code> in
+<code>src/symfony/messenger.rs</code>, and PHPStan's Symfony extension
+(<code>MessageMapFactory</code>).</p>
+<hr />
+<h2 id="t55-symfony-array-parameters-are-typed-as-plain-array">T55. Symfony array parameters are typed as plain <code>array</code><a class="headerlink" href="#t55-symfony-array-parameters-are-typed-as-plain-array" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">parameters</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">    </span><span class="nt">app.locales</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">en</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">da</span><span class="p p-Indicator">]</span><span class="w">        </span><span class="c1"># array, PHPStan says array&lt;int, string&gt;</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">app.mailer</span><span class="p">:</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">        </span><span class="nt">dsn</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">smtp://localhost</span><span class="w">    </span><span class="c1"># array, PHPStan says array{dsn: string}</span>
+</code></pre></div>
+<p><code>getParameter()</code> is typed by the parameter's declared value, but an
+array value is typed as <code>array</code> whatever it holds. PHPStan's Symfony
+extension gives a map with string keys its shape and a list its element
+type, each scalar generalized. The YAML scan reads values line by line
+and records only the type of the whole value; reading the entries needs
+the nested lines (and the flow sequences and mappings) read as values
+too.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/resources.rs</code> (<code>scan_yaml</code>) and
+<code>src/symfony/container.rs</code>, and PHPStan's Symfony extension
+(<code>ParameterDynamicReturnTypeExtension::generalizeTypeFromValue</code>).</p>
 
 
 

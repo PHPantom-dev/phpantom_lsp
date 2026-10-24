@@ -2379,6 +2379,7 @@ for a project with dozens of bundles.</p>
 <hr />
 <h2 id="f27-symfony-route-parameters">F27. Symfony route parameters<a class="headerlink" href="#f27-symfony-route-parameters" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Blocks full Symfony support: the README keeps Symfony marked as partial until this lands.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">#[Route('/post/{slug}', name: 'blog_post')]</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">public function show(string $slug): Response { … }</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
@@ -2425,6 +2426,7 @@ missed:</p>
 <hr />
 <h2 id="f29-report-symfony-translation-keys-nothing-declares">F29. Report Symfony translation keys nothing declares<a class="headerlink" href="#f29-report-symfony-translation-keys-nothing-declares" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Blocks full Symfony support: the README keeps Symfony marked as partial until this lands.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$translator-&gt;trans('demo.titel'); // a typo of demo.title</span>
 </code></pre></div>
 <p>Translation keys complete and navigate within their domain, but one that no
@@ -2490,6 +2492,7 @@ extra directory <code>paths:</code> adds without a namespace is, so reading
 <hr />
 <h2 id="f32-report-unknown-symfony-names-in-twig-templates">F32. Report unknown Symfony names in Twig templates<a class="headerlink" href="#f32-report-unknown-symfony-names-in-twig-templates" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Blocks full Twig support: the README keeps Twig marked as partial until this lands.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="cp">{%</span> <span class="k">include</span> <span class="s1">'partials/crad.html.twig'</span> <span class="cp">%}</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">&lt;a href="../</span><span class="cp">{{</span> <span class="nv">path</span><span class="o">(</span><span class="s1">'app_hme'</span><span class="o">)</span> <span class="cp">}}</span><span class="x">"&gt;Home&lt;/a&gt;</span>
 </code></pre></div>
@@ -2592,6 +2595,7 @@ kinds already go through one collector, so one change serves both.</p>
 <hr />
 <h2 id="f36-twig-block-navigation">F36. Twig block navigation<a class="headerlink" href="#f36-twig-block-navigation" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Blocks full Twig support: the README keeps Twig marked as partial until this lands.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="cp">{%</span> <span class="k">extends</span> <span class="s1">'base.html.twig'</span> <span class="cp">%}</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="cp">{%</span> <span class="k">block</span> <span class="nv">body</span> <span class="cp">%}</span><span class="x">…</span><span class="cp">{%</span> <span class="k">endblock</span> <span class="cp">%}</span>
 </code></pre></div>
@@ -2608,6 +2612,7 @@ block, and complete the block names a child can override.</p>
 <hr />
 <h2 id="f37-twig-template-variables">F37. Twig template variables<a class="headerlink" href="#f37-twig-template-variables" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>Blocks full Twig support: the README keeps Twig marked as partial until this lands.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">return $this-&gt;render('post/show.html.twig', ['post' =&gt; $post]);</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="cp">{{</span> <span class="nv">post.title</span> <span class="cp">}}</span>
@@ -2875,6 +2880,7 @@ them.</p>
 <hr />
 <h2 id="f50-twig-filters-and-functions">F50. Twig filters and functions<a class="headerlink" href="#f50-twig-filters-and-functions" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Blocks full Twig support: the README keeps Twig marked as partial until this lands.</p>
 <p>A project's Twig extensions declare filters and functions with <code>new
 TwigFilter('price', …)</code> and <code>new TwigFunction('icon', …)</code> in
 <code>getFilters()</code> and <code>getFunctions()</code>, or with <code>#[AsTwigFilter]</code> and
