@@ -817,6 +817,24 @@ class Demo
         // of bakeries.ovens singularized into bakeries/{bakery}/ovens/{oven}.
         route('bakeries.ovens.show', ['bakery' => 1, 'oven' => 2]);
 
+        // Plural resource registrations in routes/web.php keep group prefixes.
+        // Try: complete the route names and their parameter keys.
+        route('catalog.collections.show', ['collection' => 1]);
+        route('catalog.menus.create');
+        route('catalog.deliveries.show', ['delivery' => 1]);
+        route('catalog.orders.destroy', ['order' => 1]);
+
+        // A nested singleton keeps {bakery}, with no {profile} parameter.
+        // creatable() adds create, store, and destroy to show/edit/update.
+        route('catalog.bakeries.profile.show', ['bakery' => 1]);
+        route('catalog.bakeries.profile.create', ['bakery' => 1]);
+        route('catalog.bakeries.profile.store', ['bakery' => 1]);
+        route('catalog.bakeries.profile.destroy', ['bakery' => 1]);
+
+        // An API singleton omits form routes; destroyable() adds deletion.
+        route('catalog.status.update');
+        route('catalog.status.destroy');
+
         // routes/web.php registers these from a nested foreach over a literal
         // array and names each one by interpolation.  The loop is unrolled
         // statically, so they resolve like any written-out name.

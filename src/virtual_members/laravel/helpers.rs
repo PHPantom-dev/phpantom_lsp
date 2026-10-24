@@ -215,15 +215,21 @@ pub(crate) fn extract_string_literal<'c>(
     expr: &Expression<'_>,
     content: &'c str,
 ) -> Option<(&'c str, usize, usize)> {
+    extract_string_literal_including_empty(expr, content).filter(|(value, _, _)| !value.is_empty())
+}
+
+/// Extract a literal and its inner offsets when an empty string is meaningful,
+/// such as a resource name or an explicit override of a route-name prefix.
+pub(crate) fn extract_string_literal_including_empty<'c>(
+    expr: &Expression<'_>,
+    content: &'c str,
+) -> Option<(&'c str, usize, usize)> {
     let Expression::Literal(literal::Literal::String(s)) = expr else {
         return None;
     };
     let start = s.span.start.offset as usize + 1;
     let end = s.span.end.offset as usize - 1;
-    if start >= end || end > content.len() {
-        return None;
-    }
-    Some((&content[start..end], start, end))
+    Some((content.get(start..end)?, start, end))
 }
 
 /// [`extract_string_literal`], but the text returned is the literal's

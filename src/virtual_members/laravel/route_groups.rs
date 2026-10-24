@@ -5,7 +5,9 @@
 use mago_syntax::cst::*;
 
 use super::const_eval::{Scope, const_string_prefix};
-use super::helpers::{extract_string_literal, first_string_arg};
+use super::helpers::{
+    extract_string_literal, extract_string_literal_including_empty, first_string_arg,
+};
 
 /// The value a string-keyed option (e.g. `'as' => 'admin.'`) is set to in a
 /// `Route::group([…], fn(){})` argument list.
@@ -192,6 +194,10 @@ pub(crate) fn chain_uri_modifier<'a>(expr: &Expression<'a>, content: &str) -> St
 pub(crate) fn chain_as_prefix<'a>(expr: &Expression<'a>, content: &str) -> Option<String> {
     let is_as =
         |ident: &[u8]| ident.eq_ignore_ascii_case(b"as") || ident.eq_ignore_ascii_case(b"name");
+    let prefix = |args: &ArgumentList<'_>| {
+        extract_string_literal_including_empty(args.arguments.first()?.value(), content)
+            .map(|(value, _, _)| value.to_string())
+    };
     match expr {
         Expression::Call(Call::Method(mc)) => {
             let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
@@ -200,7 +206,7 @@ pub(crate) fn chain_as_prefix<'a>(expr: &Expression<'a>, content: &str) -> Optio
             // The outermost link is applied last, so it wins over anything
             // the rest of the chain set.
             if is_as(ident.value) {
-                return Some(first_string_arg(&mc.argument_list, content)?.to_string());
+                return prefix(&mc.argument_list);
             }
             chain_as_prefix(mc.object, content)
         }
@@ -209,7 +215,7 @@ pub(crate) fn chain_as_prefix<'a>(expr: &Expression<'a>, content: &str) -> Optio
                 return None;
             };
             is_as(ident.value)
-                .then(|| first_string_arg(&sc.argument_list, content).map(str::to_string))
+                .then(|| prefix(&sc.argument_list))
                 .flatten()
         }
         _ => None,

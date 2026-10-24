@@ -1,4 +1,5 @@
 use super::*;
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -13,7 +14,9 @@ use crate::text_position::LineIndex;
 use crate::virtual_members::laravel::const_eval::{
     Scope, bind_assignment, const_string, for_each_iteration,
 };
-use crate::virtual_members::laravel::helpers::extract_string_literal;
+use crate::virtual_members::laravel::helpers::{
+    extract_string_literal, extract_string_literal_including_empty as resource_string_literal,
+};
 use crate::virtual_members::laravel::route_groups::{
     chain_dynamic_name_prefix, chain_uri_prefix, dynamic_as_prefix_from_args,
     extract_uri_prefix_from_args, join_uri_segments,
@@ -792,12 +795,26 @@ fn walk_expr(
     if let Some(registration) = resource_registration(expr, content)
         && group.chain_reaches_router(expr, content)
     {
-        push_resource_routes(
-            &registration,
-            group,
-            paths.declaration(registration.name_offset, None),
-            sink,
-        );
+        let mut push_name = |name_expr| {
+            if let Some((name, offset, _)) = resource_string_literal(name_expr, content) {
+                push_resource_routes(
+                    &registration,
+                    name,
+                    group,
+                    paths.declaration(offset, None),
+                    sink,
+                );
+            }
+        };
+        if registration.multiple {
+            for element in resource_array_elements(registration.names) {
+                if let ArrayElement::KeyValue(pair) = element {
+                    push_name(pair.key);
+                }
+            }
+        } else {
+            push_name(registration.names);
+        }
         // A `->group()` sharing the chain registers routes of its own, which
         // the resource shortcut must not swallow.
         if let Some(preceding) = registration.preceding {
@@ -1080,51 +1097,58 @@ fn walk_macro(
 /// `ResourceRegistrar` does.
 fn push_resource_routes(
     registration: &ResourceRegistration<'_>,
+    name: &str,
     group: GroupPrefix<'_>,
     declaration: RouteDeclaration,
     sink: &mut RouteCollector,
 ) {
-    let (path_prefix, resource) = split_resource_prefix(registration.name);
-    let segments: Vec<&str> = resource.split('.').filter(|s| !s.is_empty()).collect();
-    let Some(last) = segments.last().copied() else {
-        return;
-    };
+    let (path_prefix, resource) = split_resource_prefix(name);
+    let segments: Vec<&str> = resource.split('.').collect();
+    // `split` keeps even an empty last segment, just as Laravel's explode().
+    let last = segments[segments.len() - 1];
 
     // Every URI prefix in scope — the enclosing groups' and the one a slash in
     // the resource name implies — is applied once here rather than per
     // generated route.  A `->prefix()` on the registration's own chain is not
     // among them: `ResourceRegistrar` never reads it.
     let uri_prefix = join_uri_segments(group.uri, path_prefix);
-    let collection_name = segments.join(".");
-    let collection_uri = join_uri_segments(
-        &uri_prefix,
-        &nested_resource_uri(&segments, &registration.parameters),
-    );
+    let collection_uri = nested_resource_uri(&segments, &registration.parameters);
     // `->shallow()` reduces a nested resource to its last segment on the
     // routes that already identify the child by its own id — the name loses
     // the parent segments along with the URI.
-    let shallow_uri = registration
-        .shallow
-        .then(|| join_uri_segments(&uri_prefix, last));
-    let (member_uri, member_name): (&str, &str) = match shallow_uri.as_deref() {
-        Some(uri) => (uri, last),
-        None => (&collection_uri, &collection_name),
+    let (member_uri, member_name): (&str, &str) = if registration.shallow {
+        (last, last)
+    } else {
+        (&collection_uri, resource)
     };
-    let wildcard = resource_wildcard(last, &registration.parameters);
+    let member_uri = if registration.kind.is_singleton() {
+        Cow::Borrowed(member_uri)
+    } else {
+        Cow::Owned(format!(
+            "{member_uri}/{{{}}}",
+            resource_wildcard(last, &registration.parameters)
+        ))
+    };
 
-    let suffixes = filtered_resource_suffixes(
-        registration.is_api,
-        registration.only.as_deref(),
-        registration.except.as_deref(),
-    );
-    for suffix in suffixes {
+    for suffix in filtered_resource_suffixes(registration) {
         let (name_base, uri) = match suffix {
-            "create" => (collection_name.as_str(), format!("{collection_uri}/create")),
-            "show" | "update" | "destroy" => (member_name, format!("{member_uri}/{{{wildcard}}}")),
-            "edit" => (member_name, format!("{member_uri}/{{{wildcard}}}/edit")),
+            "create" => (resource, Cow::Owned(format!("{collection_uri}/create"))),
+            // Unlike its edit/update/destroy routes, a singleton's show route
+            // retains its parents even when shallow routing is requested.
+            "show" if registration.kind.is_singleton() => {
+                (resource, Cow::Borrowed(collection_uri.as_str()))
+            }
+            "show" | "update" | "destroy" => (member_name, Cow::Borrowed(member_uri.as_ref())),
+            "edit" => (member_name, Cow::Owned(format!("{member_uri}/edit"))),
             // index and store.
-            _ => (collection_name.as_str(), collection_uri.clone()),
+            _ => (resource, Cow::Borrowed(collection_uri.as_str())),
         };
+        // Trim only after appending the action path: an empty nested segment
+        // may leave a meaningful slash immediately before its wildcard.
+        let mut uri = join_uri_segments(&uri_prefix, &uri);
+        if uri.is_empty() {
+            uri.push('/');
+        }
         let name = resource_route_name(registration, name_base, suffix, group.name);
         // As with a plain `->name()` leaf, an ancestor group whose own name
         // is unknowable means `name` is missing whatever unrecoverable text
