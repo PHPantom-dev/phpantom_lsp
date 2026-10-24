@@ -2376,6 +2376,52 @@ for a project with dozens of bundles.</p>
 <p><strong>Where to look:</strong> <code>src/symbol_map/extraction/symfony.rs</code>
 (<code>symfony_receiver_method</code>), <code>src/symbol_map/string_keys.rs</code>
 (<code>ReceiverClass</code>), <code>src/symfony/</code>.</p>
+<hr />
+<h2 id="f27-symfony-route-parameters">F27. Symfony route parameters<a class="headerlink" href="#f27-symfony-route-parameters" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">#[Route('/post/{slug}', name: 'blog_post')]</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">public function show(string $slug): Response { … }</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$this-&gt;generateUrl('blog_post', ['slug' =&gt; $post-&gt;getSlug()]);</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="cp">{{</span> <span class="nv">path</span><span class="o">(</span><span class="s1">'blog_post'</span><span class="o">,</span> <span class="o">{</span><span class="nv">slug</span><span class="o">:</span> <span class="nv">post.slug</span><span class="o">})</span> <span class="cp">}}</span>
+</code></pre></div>
+<p>Route names complete and navigate, but the parameters a route's path
+declares do not: the <code>slug</code> key above neither completes from <code>{slug}</code> nor
+navigates to it. Laravel completes the keys of <code>route('name', [...])</code> from
+the URI it keeps with each route name (<code>completion/laravel_route_params.rs</code>).
+A parameter only means something under its route, so it does not fit a
+<code>StringKey</code> span on its own: a key spelled as one global name would merge
+every route's <code>id</code>. It needs the path kept beside each route declaration
+(the attribute's path, the YAML <code>path:</code>, the XML <code>path</code> attribute, the
+configurator's second argument, and the class-level prefix in front of a
+method's path), and the parameter array of each <code>generateUrl()</code>,
+<code>redirectToRoute()</code>, <code>generate()</code>, <code>path()</code>, and <code>url()</code> call read against
+it.</p>
+<p><strong>Where to look:</strong> <code>src/symbol_map/extraction/symfony.rs</code>
+(<code>emit_symfony_route_spans</code>), <code>src/symfony/routes.rs</code>,
+<code>src/completion/laravel_route_params.rs</code>.</p>
+<hr />
+<h2 id="f28-symfony-route-names-a-loader-composes">F28. Symfony route names a loader composes<a class="headerlink" href="#f28-symfony-route-names-a-loader-composes" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>A route's name is read where it is declared: a <code>#[Route]</code> attribute, with
+its class's name prefix, a routing YAML or XML entry, or a routing
+configurator's <code>add()</code>. A few names are put together elsewhere, and are
+missed:</p>
+<ul>
+<li>an import's <code>name_prefix:</code> in the routing YAML (or <code>-&gt;namePrefix()</code> in a
+  configurator), which prefixes every route it loads, attribute routes
+  included;</li>
+<li>the routes a collection's <code>add()</code> declares under its
+  <code>$routes-&gt;collection('blog_')</code> prefix;</li>
+<li>the <code>@Route</code> docblock annotations older applications still use;</li>
+<li>the routes bundles declare in their own routing files, which is also why
+  only names under the application's own <code>app_</code> prefix are reported as
+  undeclared.</li>
+</ul>
+<p><strong>Where to look:</strong> <code>src/symfony/routes.rs</code>,
+<code>src/symbol_map/extraction/symfony.rs</code>, <code>src/symbol_map/string_keys.rs</code>
+(<code>ReceiverClass::RoutingConfigurator</code>).</p>
 
 
 
