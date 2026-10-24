@@ -906,23 +906,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b655-an-unknown-config-key-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B655. An unknown config key is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1524,23 +1507,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b655-an-unknown-config-key-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B655. An unknown config key is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1653,21 +1619,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h3 id="b655-an-unknown-config-key-is-not-reported">B655. An unknown config key is not reported<a class="headerlink" href="#b655-an-unknown-config-key-is-not-reported" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">config('app.name');       // fine</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">config('gate.missing');   // not reported</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">view('missing.page');     // reported: Unknown view</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">route('gate.missing');    // reported: Unknown route</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">__('boards.missing');     // reported: Unknown translation key</span>
-</code></pre></div>
-<p>Views, routes and translation keys all have a string-key diagnostic, and
-<code>config()</code> already resolves far enough to hover a key and name the file it
-came from, so the index that would answer this is built. The diagnostic
-itself is simply absent. Add it alongside the other three, with the same
-conservative stance they take when the index is incomplete. Conformance row
-<code>framework.config-diagnostic</code> in the language-server probes, the only
-non-green framework cell for our column.</p>
+<p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
