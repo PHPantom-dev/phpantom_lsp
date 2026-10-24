@@ -2466,6 +2466,42 @@ catalogue for, and only keys spelled like dotted identifiers.</p>
 </ul>
 <p><strong>Where to look:</strong> <code>src/symfony/translations.rs</code>,
 <code>src/symbol_map/extraction/symfony.rs</code> (<code>push_translatable_spans</code>).</p>
+<hr />
+<h2 id="f31-symfony-twig-templates-outside-templates">F31. Symfony Twig templates outside <code>templates/</code><a class="headerlink" href="#f31-symfony-twig-templates-outside-templates" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>A template is known by its path under the project's <code>templates/</code>
+directory, and a bundle override under <code>templates/bundles/AcmeBundle/</code> by
+its <code>@Acme/</code> name as well. These are missed:</p>
+<ul>
+<li>the directories <code>config/packages/twig.yaml</code> adds or moves the default
+  one to (<code>default_path:</code>, and <code>paths:</code> with or without a namespace);</li>
+<li>a project's own bundle's templates (<code>src/Resources/views/</code>, or a
+  bundle's <code>templates/</code>);</li>
+<li>the templates installed bundles ship, both under their <code>@Twig</code>-style
+  namespace and the ones registered without one, such as the form themes
+  <code>twig-bridge</code> provides (<code>bootstrap_5_layout.html.twig</code>), so their names
+  neither complete nor navigate.</li>
+</ul>
+<p>A name under a namespace is never reported as unknown, but one in an
+extra directory <code>paths:</code> adds without a namespace is, so reading
+<code>twig.yaml</code> matters most.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/templates.rs</code> (<code>template_names</code>),
+<code>src/symfony/mod.rs</code> (<code>symfony_template_names</code>).</p>
+<hr />
+<h2 id="f32-report-unknown-symfony-names-in-twig-templates">F32. Report unknown Symfony names in Twig templates<a class="headerlink" href="#f32-report-unknown-symfony-names-in-twig-templates" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="cp">{%</span> <span class="k">include</span> <span class="s1">'partials/crad.html.twig'</span> <span class="cp">%}</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">&lt;a href="../</span><span class="cp">{{</span> <span class="nv">path</span><span class="o">(</span><span class="s1">'app_hme'</span><span class="o">)</span> <span class="cp">}}</span><span class="x">"&gt;Home&lt;/a&gt;</span>
+</code></pre></div>
+<p>An unknown template or <code>app_</code> route is reported where PHP names it, but not
+in a Twig template: diagnostics are not run on resource documents at all.
+They need scheduling for a Twig file the way a PHP file's are, the
+string-key check reading the template's resource symbol map, and the
+"Create missing template" quick fix offered there too. A template being
+created or deleted should also refresh the open files that name it.</p>
+<p><strong>Where to look:</strong> <code>src/backend/documents.rs</code> (<code>did_open</code>, <code>did_change</code>
+for resource documents), <code>src/diagnostics/laravel_string_keys.rs</code>,
+<code>src/code_actions/create_missing_view.rs</code>.</p>
 
 
 
