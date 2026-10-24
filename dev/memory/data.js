@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792822897257,
+  "lastUpdate": 1792853207776,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5604,6 +5604,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 41.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c2c29a2346ced69662cc55cb48876543fc83136e",
+          "message": "Symfony events and Messenger",
+          "timestamp": "2026-10-24T16:30:04+02:00",
+          "tree_id": "480278547817a11e00f81e7fb68cd7410be8887a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c2c29a2346ced69662cc55cb48876543fc83136e"
+        },
+        "date": 1792853194185,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 44.2,
             "unit": "MiB"
           },
           {
