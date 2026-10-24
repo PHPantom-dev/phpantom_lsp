@@ -2769,6 +2769,194 @@ half and the one an editor user notices; result types follow.</p>
 <p><strong>Where to look:</strong> <code>src/framework.rs</code> (the Doctrine mapping index), and
 PHPStan's Doctrine extension (<code>Rules/Doctrine/ORM/DqlRule</code>,
 <code>QueryBuilderDqlRule</code>, <code>Type/Doctrine/Query/</code>, <code>Type/Doctrine/QueryBuilder/</code>).</p>
+<hr />
+<h2 id="f45-symfony-events-named-by-their-class-or-a-constant">F45. Symfony events named by their class or a constant<a class="headerlink" href="#f45-symfony-events-named-by-their-class-or-a-constant" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">$dispatcher-&gt;dispatch(new OrderPlaced($order));   // which listeners?</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="x">#[AsEventListener]</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">public function onOrderPlaced(OrderPlaced $event): void {}</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="x">public static function getSubscribedEvents(): array</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="x">{</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="x">    return [KernelEvents::REQUEST =&gt; 'onRequest'];</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="x">}</span>
+</code></pre></div>
+<p>An event name written as a string navigates between its dispatchers and
+its listeners. Most events are not: an event dispatched without a name is
+named by its class, an <code>#[AsEventListener]</code> without an <code>event:</code> subscribes
+to the class its method's first parameter is typed with, and a
+subscriber's map is usually keyed by <code>OrderPlaced::class</code> or a constant
+such as <code>KernelEvents::REQUEST</code>. None of these link a dispatch to its
+listeners. Symfony's own language server shows a CodeLens over an event
+class listing its listeners, and one over a listener listing its events,
+the way the Messenger lenses link a message and its handlers.</p>
+<p>A constant key resolves to the string it holds, which also gives
+completion the framework's own events (<code>kernel.request</code>,
+<code>console.command</code>, <code>security.interactive_login</code>): only the names a
+project's listeners subscribe to are offered today, since nothing the
+installed bundles declare is read.</p>
+<p><strong>Where to look:</strong> <code>src/symbol_map/extraction/symfony.rs</code>
+(<code>emit_symfony_listener_spans</code>), <code>src/symfony/messenger.rs</code> (the handler
+side table to mirror), and <code>references/symfony-language-tools</code>
+(<code>docs/features/events.rst</code>).</p>
+<hr />
+<h2 id="f46-symfony-listener-methods-a-tag-or-a-default-names">F46. Symfony listener methods a tag or a default names<a class="headerlink" href="#f46-symfony-listener-methods-a-tag-or-a-default-names" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<p>The method an <code>#[AsEventListener(method: …)]</code> or a subscriber's map names
+navigates to the listener's method, and one that does not exist is
+reported. Two other ways of naming it do not: the <code>method</code> of a
+<code>kernel.event_listener</code> tag in YAML or XML, which names a method of the
+tagged service's class, and no method at all, where Symfony calls
+<code>on</code> followed by the event name in camel case, else <code>__invoke()</code>. The
+second also leaves a listener whose method name is never written
+anywhere looking unused.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/tags.rs</code> (the tag scan, which already
+reads the <code>event</code> beside the <code>method</code>), <code>src/resource_navigation.rs</code> (the
+<code>Class::member</code> spans a resource map already holds).</p>
+<hr />
+<h2 id="f47-symfony-messenger-transports">F47. Symfony Messenger transports<a class="headerlink" href="#f47-symfony-messenger-transports" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="nt">framework</span><span class="p">:</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">    </span><span class="nt">messenger</span><span class="p">:</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">        </span><span class="nt">failure_transport</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">failed</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">        </span><span class="nt">transports</span><span class="p">:</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="w">            </span><span class="nt">async</span><span class="p">:</span><span class="w"> </span><span class="s">'%env(MESSENGER_TRANSPORT_DSN)%'</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="w">            </span><span class="nt">failed</span><span class="p">:</span><span class="w"> </span><span class="s">'doctrine://default?queue_name=failed'</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="w">        </span><span class="nt">routing</span><span class="p">:</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="w">            </span><span class="nt">App\Message\SendWelcomeEmail</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">async</span>
+</code></pre></div>
+<p>A bus name navigates, completes, and is reported when nothing declares
+it. A transport name does none of this, in <code>routing</code>, <code>failure_transport</code>,
+a transport's own <code>failure_transport</code>, <code>#[AsMessageHandler(fromTransport:
+…)]</code>, and <code>#[AsMessage(transport: …)]</code>. A transport, like a bus, is only
+ever declared by the application's Messenger configuration, so an unknown
+one can be reported the same way.</p>
+<p>Two smaller gaps sit beside it. A bus declared in a PHP configuration file
+(<code>$framework-&gt;messenger()-&gt;bus('command.bus')</code>) is not read, so a project
+that configures Messenger in PHP gets no bus names at all. And a handler
+whose <code>handles:</code> names a message its method's parameter cannot accept is
+not reported.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/messenger.rs</code>, and
+<code>references/symfony-language-tools</code> (<code>docs/features/messenger.rst</code>).</p>
+<hr />
+<h2 id="f48-symfony-environment-variables">F48. Symfony environment variables<a class="headerlink" href="#f48-symfony-environment-variables" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="nt">parameters</span><span class="p">:</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">    </span><span class="nt">app.secret</span><span class="p">:</span><span class="w"> </span><span class="s">'%env(APP_SECRET)%'</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">    </span><span class="nt">app.port</span><span class="p">:</span><span class="w"> </span><span class="s">'%env(int:DATABASE_PORT)%'</span>
+</code></pre></div>
+<p>A Laravel <code>env('APP_NAME')</code> completes, jumps to the line of <code>.env</code> that
+declares it, and lists its references. The <code>%env(…)%</code> placeholders a
+Symfony project reads its environment through, in YAML, XML, PHP, and
+Twig configuration, do none of this: the <code>ContainerParameter</code> scan skips
+them. The name is the last segment after the processors (<code>int:</code>,
+<code>json:</code>, <code>default:fallback:</code>), and Symfony also reads <code>.env.local</code>,
+<code>.env.&lt;environment&gt;</code>, and <code>.env.&lt;environment&gt;.local</code>.</p>
+<p>Reuse the <code>Env</code> string-key kind and its <code>.env</code> reader rather than adding
+a second one.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/resources.rs</code>
+(<code>scan_parameter_placeholders</code>), <code>src/virtual_members/laravel/</code> (the
+<code>.env</code> reader), and <code>references/symfony-language-tools</code>
+(<code>docs/features/environment.rst</code>).</p>
+<hr />
+<h2 id="f49-symfony-security-names">F49. Symfony security names<a class="headerlink" href="#f49-symfony-security-names" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>The firewalls and user providers <code>security.yaml</code> declares, the provider a
+firewall names, and the roles <code>#[IsGranted]</code>, <code>denyAccessUnlessGranted()</code>,
+<code>isGranted()</code>, and Twig's <code>is_granted()</code> check neither complete nor
+navigate. Firewalls and providers are declared only by the application's
+security configuration, so an unknown one can be reported. Roles cannot
+be: an application can grant any role from code. They can still complete
+and navigate from the <code>role_hierarchy</code> and <code>access_control</code> that name
+them.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/</code>, and <code>references/symfony-language-tools</code>
+(<code>docs/features/security.rst</code>).</p>
+<hr />
+<h2 id="f50-twig-filters-and-functions">F50. Twig filters and functions<a class="headerlink" href="#f50-twig-filters-and-functions" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>A project's Twig extensions declare filters and functions with <code>new
+TwigFilter('price', …)</code> and <code>new TwigFunction('icon', …)</code> in
+<code>getFilters()</code> and <code>getFunctions()</code>, or with <code>#[AsTwigFilter]</code> and
+<code>#[AsTwigFunction]</code> on a method. A template's <code>{{ amount|price }}</code> and
+<code>{{ icon('x') }}</code> neither complete, navigate to the PHP method behind
+them, nor show its signature on hover, and an unknown one is not
+reported. Twig's own filters and functions come from its core extension,
+which is read the same way.</p>
+<p>This applies to Twig outside Symfony too (F33).</p>
+<p><strong>Where to look:</strong> <code>src/symfony/templates.rs</code> (the Twig scan), and
+<code>references/symfony-language-tools</code> (<code>docs/features/twig-callables.rst</code>)
+and <code>references/twigstan</code>.</p>
+<hr />
+<h2 id="f51-class-names-in-twigs-constant-and-enum">F51. Class names in Twig's <code>constant()</code> and <code>enum()</code><a class="headerlink" href="#f51-class-names-in-twigs-constant-and-enum" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="cp">{%</span> <span class="k">if</span> <span class="nv">user.status</span> <span class="o">==</span> <span class="nv">constant</span><span class="o">(</span><span class="s1">'App\\Entity\\User::ACTIVE'</span><span class="o">)</span> <span class="cp">%}</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="cp">{%</span> <span class="k">for</span> <span class="nv">case</span> <span class="k">in</span> <span class="nv">enum_cases</span><span class="o">(</span><span class="s1">'App\\Enum\\Status'</span><span class="o">)</span> <span class="cp">%}</span>
+</code></pre></div>
+<p>The class, constant, and enum case Twig's <code>constant()</code>, <code>enum()</code>, and
+<code>enum_cases()</code> name as strings neither complete nor navigate. They are
+ordinary class and member references once read, the same spans the
+resource maps record for a <code>Class::member</code> in YAML.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/templates.rs</code>, <code>src/resource_navigation.rs</code>
+(<code>scan_symbols</code>), and <code>references/symfony-language-tools</code>
+(<code>docs/features/twig-constants-enums.rst</code>).</p>
+<hr />
+<h2 id="f52-asset-paths-in-twig">F52. Asset paths in Twig<a class="headerlink" href="#f52-asset-paths-in-twig" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p>The path a Twig <code>asset('images/logo.png')</code> names, and the entrypoint an
+<code>importmap('app')</code> names, neither complete nor navigate to the file under
+<code>public/</code> (or the AssetMapper's <code>assets/</code>), and a missing file is not
+reported. Laravel's <code>asset()</code> has the same gap (see <code>laravel.md</code>), so the
+two should share the path completion.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/templates.rs</code>, and
+<code>references/symfony-language-tools</code> (<code>docs/features/assets.rst</code>).</p>
+<hr />
+<h2 id="f53-stimulus-controllers-in-twig">F53. Stimulus controllers in Twig<a class="headerlink" href="#f53-stimulus-controllers-in-twig" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>A Twig template names a Stimulus controller in <code>data-controller</code>, its
+actions in <code>data-action</code>, and its targets in <code>data-*-target</code>, or through
+<code>stimulus_controller()</code>, <code>stimulus_action()</code>, and <code>stimulus_target()</code>. The
+controller is a JavaScript file under <code>assets/controllers/</code>
+(<code>hello_controller.js</code> for <code>hello</code>). None of these navigate or complete.
+It is the one Symfony integration whose declarations are not PHP, YAML,
+or XML, so it needs a scan of the controller files' class members.</p>
+<p><strong>Where to look:</strong> <code>references/symfony-language-tools</code>
+(<code>docs/features/stimulus.rst</code>).</p>
+<hr />
+<h2 id="f54-symfony-form-options-constraint-options-and-serializer-groups">F54. Symfony form options, constraint options, and serializer groups<a class="headerlink" href="#f54-symfony-form-options-constraint-options-and-serializer-groups" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">$builder-&gt;add('email', EmailType::class, ['requird' =&gt; true]);  // a typo, not reported</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x">#[Assert\Length(mni: 3)]                                        // likewise</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="x">#[Groups(['user:read'])]                                         // used where?</span>
+</code></pre></div>
+<p>A form type's options are the ones its <code>configureOptions()</code> and its
+parents' define, and a constraint's are its constructor's parameters. The
+keys of a <code>createForm()</code> or <code>$builder-&gt;add()</code> options array neither
+complete nor get checked against them. Serializer groups, named by
+<code>#[Groups]</code>, <code>#[Context]</code>, the <code>groups</code> a serializer or a controller's
+<code>json()</code> is given, and the <code>groups</code> keys of a YAML serializer mapping,
+neither navigate between their uses nor complete.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/forms.rs</code>, <code>src/symfony/validation.rs</code>,
+and <code>references/symfony-language-tools</code> (<code>docs/features/metadata.rst</code>).</p>
+<hr />
+<h2 id="f55-symfony-expressionlanguage-strings">F55. Symfony ExpressionLanguage strings<a class="headerlink" href="#f55-symfony-expressionlanguage-strings" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="x">#[IsGranted(new Expression('is_granted("ROLE_ADMIN") or user.isOwner(subject)'))]</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="x">#[Route('/admin', condition: "request.headers.get('X-Admin') == '1'")]</span>
+</code></pre></div>
+<p>An ExpressionLanguage string is a small language of its own, with
+variables Symfony binds per site: <code>user</code>, <code>subject</code>, <code>token</code>, and
+<code>request</code> in a security expression, <code>context</code> and <code>request</code> in a route
+condition, the service container's functions in <code>@=</code> service
+arguments. The member chains in it (<code>user.isOwner(subject)</code>) neither
+navigate nor get checked.</p>
+<p>The built-in sites bind fixed variables, so they can work without
+configuration: parse the expression, give each variable its class, and
+hand the member chains to the shared type engine. A per-project rule
+language for custom attributes was proposed and declined, since it does
+nothing for a project until someone writes its rules.</p>
+<p><strong>Where to look:</strong> <code>src/symbol_map/extraction/symfony.rs</code>, and Symfony's
+<code>ExpressionLanguage</code> component (<code>Lexer</code>, <code>Parser</code>) for the grammar.</p>
 
 
 

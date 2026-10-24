@@ -2061,6 +2061,9 @@ not, though the service declaration says what it builds: a <code>class:</code> k
 value's. A query bus's <code>HandleTrait::handle()</code> returns what the message's
 handler returns, the handler being the <code>#[AsMessageHandler]</code> class (or
 <code>messenger.message_handler</code> service) whose <code>__invoke()</code> takes that message.
+The attribute half of that lookup exists:
+<code>Backend::symfony_message_handlers</code> answers a message's handlers, with the
+method that handles it, from the side table extraction records.
 PHPStan's Symfony extension answers all three from the compiled container;
 the static service and parameter declarations PHPantom already indexes
 carry the same facts for the project's own services.</p>
@@ -2069,7 +2072,7 @@ diagnostics, and references all see it, fed by <code>symfony_declaration_locatio
 and its index rather than a second reading of the configuration. Services
 installed bundles declare stay <code>mixed</code> until F26.</p>
 <p><strong>Where to look:</strong> <code>src/symfony/mod.rs</code>, <code>src/symfony/resources.rs</code>,
-method-call return resolution under <code>src/type_engine/variable/rhs_resolution/</code>,
+<code>src/symfony/messenger.rs</code>, method-call return resolution under <code>src/type_engine/variable/rhs_resolution/</code>,
 and PHPStan's Symfony extension (<code>ServiceDynamicReturnTypeExtension</code>,
 <code>ParameterDynamicReturnTypeExtension</code>, <code>MessengerHandleTraitReturnTypeExtension</code>).</p>
 <hr />
