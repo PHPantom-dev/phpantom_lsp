@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792820463265,
+  "lastUpdate": 1792822649854,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5541,6 +5541,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2f61d7116ac7eef98da8e4b13c4b7aa839610881",
+          "message": "Symfony forms, validation, and bundle configuration\n\nCloses #404\n\nCo-authored-by: sidux <sidux@users.noreply.github.com>",
+          "timestamp": "2026-10-24T08:03:24+02:00",
+          "tree_id": "d7b8a1efc267bfe78473fed8209dec56b03f29cf",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2f61d7116ac7eef98da8e4b13c4b7aa839610881"
+        },
+        "date": 1792822642842,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.9,
             "unit": "MiB"
           }
         ]
