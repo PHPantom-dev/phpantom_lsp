@@ -2578,7 +2578,7 @@ that is hard to reason about anyway.</p>
 keys</strong>, <strong>env vars</strong>, <strong>translation keys</strong>, and <strong>view names</strong> via the
 declaration scanners in <code>virtual_members/laravel/{route_names, config_keys,
 env_vars, trans_keys, view_names}.rs</code>. These walk the relevant source files
-and resolve a string key to its declaration site. <code>LaravelStringKey</code> also
+and resolve a string key to its declaration site. <code>StringKey</code> also
 flows through find-references (rename, highlight, and semantic tokens
 are L31). <strong>Eloquent
 relation and column name strings</strong> have completion (<code>completion/eloquent_string.rs</code>).</p>
