@@ -2422,6 +2422,50 @@ missed:</p>
 <p><strong>Where to look:</strong> <code>src/symfony/routes.rs</code>,
 <code>src/symbol_map/extraction/symfony.rs</code>, <code>src/symbol_map/string_keys.rs</code>
 (<code>ReceiverClass::RoutingConfigurator</code>).</p>
+<hr />
+<h2 id="f29-report-symfony-translation-keys-nothing-declares">F29. Report Symfony translation keys nothing declares<a class="headerlink" href="#f29-report-symfony-translation-keys-nothing-declares" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$translator-&gt;trans('demo.titel'); // a typo of demo.title</span>
+</code></pre></div>
+<p>Translation keys complete and navigate within their domain, but one that no
+catalogue declares is not reported. Service IDs and routes are only judged
+under the application's own <code>app.</code> and <code>app_</code> prefixes; translation keys
+have no such convention, so judging needs a fuller picture of what is
+declared:</p>
+<ul>
+<li>the catalogues installed bundles ship (<code>validators</code>, <code>security</code>, and any
+  bundle's own domain), which a key in the same domain may come from;</li>
+<li>the project's messages that are their own translation (<code>trans('Save')</code>
+  with no catalogue entry translates to <code>Save</code>), which only a domain the
+  project declares keys in, and keys that look like keys, can tell apart.</li>
+</ul>
+<p>A starting point is to judge only domains no installed package ships a
+catalogue for, and only keys spelled like dotted identifiers.</p>
+<p><strong>Where to look:</strong> <code>src/diagnostics/laravel_string_keys.rs</code>
+(<code>CheckedStringKind::of</code>), <code>src/symfony/translations.rs</code>.</p>
+<hr />
+<h2 id="f30-symfony-translations-outside-yaml-xliff-and-the-trans-filter">F30. Symfony translations outside YAML, XLIFF, and the <code>trans</code> filter<a class="headerlink" href="#f30-symfony-translations-outside-yaml-xliff-and-the-trans-filter" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Catalogues are read when they are YAML or XLIFF files under a
+<code>translations/</code> directory, and keys are read from a translator's <code>trans()</code>,
+<code>TranslatableMessage</code>, <code>t()</code>, and Twig's <code>trans</code> filter. These are missed:</p>
+<ul>
+<li>PHP catalogues (<code>translations/messages.en.php</code> returning an array). They
+  are PHP, so they have to be read from the AST during symbol-map
+  extraction, which does not know the file's path today. The array walk
+  can share <code>virtual_members/laravel/array_file.rs</code> (<code>for_each_entry</code>,
+  <code>dotted_key</code>) with Laravel's <code>trans_keys.rs</code>.</li>
+<li>JSON, CSV, INI, and the other formats Symfony loads, and catalogue
+  directories configured under <code>framework.translator.paths</code>.</li>
+<li>The catalogues installed bundles ship, so their keys neither complete
+  nor navigate.</li>
+<li>Twig's <code>{% trans %}…{% endtrans %}</code> block and its <code>from 'domain'</code>
+  clause.</li>
+<li>Keys in other domains by convention: validation constraint messages
+  (<code>validators</code>) and form labels under a form's <code>translation_domain</code>.</li>
+</ul>
+<p><strong>Where to look:</strong> <code>src/symfony/translations.rs</code>,
+<code>src/symbol_map/extraction/symfony.rs</code> (<code>push_translatable_spans</code>).</p>
 
 
 
