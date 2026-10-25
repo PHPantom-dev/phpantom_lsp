@@ -1075,17 +1075,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p84-class-lookups-re-apply-the-laravel-patches-on-every-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P84. Class lookups re-apply the Laravel patches on every call
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1373,17 +1362,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p84-class-lookups-re-apply-the-laravel-patches-on-every-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P84. Class lookups re-apply the Laravel patches on every call
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1499,19 +1477,6 @@ against that bar.</p>
 </tbody>
 </table>
 <hr />
-<h2 id="p84-class-lookups-re-apply-the-laravel-patches-on-every-call">P84. Class lookups re-apply the Laravel patches on every call<a class="headerlink" href="#p84-class-lookups-re-apply-the-laravel-patches-on-every-call" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
-<p><code>find_or_load_class_typed</code> (<code>resolution/classes.rs</code>) memoises the indexed
-class but runs the auth, storage, macro and pivot refinements after the
-memo, on every lookup. When one applies, it copies the whole <code>ClassInfo</code>
-into a new <code>Arc</code>, which also defeats the pointer-identity shortcut in
-<code>forward_walk/scope_state/merge.rs</code>.</p>
-<p>Measured on the large Laravel app (debug <code>analyze</code>, 2026-10-19): 8.4M
-lookups, 400k of them copying, spend 47.7 s of the run's 371 CPU-seconds
-in the refinements (12.9%), 32.7 s of it in the copies alone. Memoise the
-refined class keyed on the indexed class and a generation that moves with
-the auth model, storage driver, macro and pivot registries, so a repeat
-lookup hands back the same <code>Arc</code>.</p>
 <h2 id="p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse">P86. A Symfony app's generated <code>config/reference.php</code> is slow to parse<a class="headerlink" href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Symfony 7.3 and later generate <code>config/reference.php</code> for the application:
