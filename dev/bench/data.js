@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792938016542,
+  "lastUpdate": 1792948615694,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -45647,6 +45647,282 @@ window.BENCHMARK_DATA = {
             "name": "symfony_completion/route_name_twig",
             "value": 0.162,
             "range": "± 0.009",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7834cfb9f7e9950ef9cba97ada971f76cd8c489a",
+          "message": "Typed properties nothing initializes",
+          "timestamp": "2026-10-25T18:06:01+01:00",
+          "tree_id": "83b848bdac56acb41a24878692bfb7ebd6daaf9e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7834cfb9f7e9950ef9cba97ada971f76cd8c489a"
+        },
+        "date": 1792948607911,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 2.878,
+            "range": "± 0.067",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.022,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.057,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.087,
+            "range": "± 0.014",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.153,
+            "range": "± 0.017",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.194,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.899,
+            "range": "± 0.047",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.765,
+            "range": "± 0.099",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.056,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.028,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.025,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.027,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 3.025,
+            "range": "± 0.061",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.099,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.191,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.029,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.023,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.071,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.026,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.024,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.122,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 0.633,
+            "range": "± 0.024",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 3.337,
+            "range": "± 0.163",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 0.646,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.555,
+            "range": "± 0.027",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.196,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 4.865,
+            "range": "± 0.332",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 0.504,
+            "range": "± 0.05",
+            "unit": "ms"
+          },
+          {
+            "name": "custom_builder_completion/custom_builder_deep_inheritance",
+            "value": 0.034,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_completion/model_where_prefix",
+            "value": 0.034,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_completion/model_typing_sequence",
+            "value": 0.134,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cold_confirmation/1",
+            "value": 0.031,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cached_request/1",
+            "value": 0.023,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cold_confirmation/128",
+            "value": 0.065,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cached_request/128",
+            "value": 0.038,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "find_references/hierarchy_scan/50",
+            "value": 0.19,
+            "range": "± 0.019",
+            "unit": "ms"
+          },
+          {
+            "name": "find_references/hierarchy_scan/150",
+            "value": 0.261,
+            "range": "± 0.017",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/service_id_php",
+            "value": 0.148,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/translation_key_php",
+            "value": 0.343,
+            "range": "± 0.019",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/route_name_php",
+            "value": 0.162,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/template_name_php",
+            "value": 0.144,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/route_name_twig",
+            "value": 0.124,
+            "range": "± 0.004",
             "unit": "ms"
           }
         ]
