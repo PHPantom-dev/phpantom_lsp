@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792862311441,
+  "lastUpdate": 1792887485456,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5838,6 +5838,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 73.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d9dafe9a0aa78fc626c02fe8db9f354ba2ebdfa8",
+          "message": "The other folders of a multi-root workspace resolve",
+          "timestamp": "2026-10-25T02:00:38+02:00",
+          "tree_id": "24ba2af5c74a5fd8397fc4a7ce33a518a70171f3",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d9dafe9a0aa78fc626c02fe8db9f354ba2ebdfa8"
+        },
+        "date": 1792887473886,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 75,
             "unit": "MiB"
           }
         ]
