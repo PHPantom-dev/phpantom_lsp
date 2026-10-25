@@ -4671,6 +4671,11 @@ streams for one source of truth, which clients may merge, replace, or
 deduplicate differently. The server therefore treats push as a compatibility
 fallback for older clients rather than mixing both transports for the same
 native diagnostic set.</p>
+<p>The <code>diagnosticProvider</code> capability itself is advertised to every client,
+so a tool that inspects the server's capabilities without declaring pull
+support sees it. Push delivery still caches each published set with a
+<code>resultId</code>, so a pull from a push client answers with what was last
+published instead of an empty set.</p>
 <p>Each worker is created during <code>initialized</code> via <code>clone_for_blocking</code>, which hands it a <code>Backend</code> sharing the main one's <code>BackendState</code>, so every worker sees all mutations the main <code>Backend</code> makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.</p>
 <p>Non-<code>Arc</code> fields are snapshotted at spawn time: <code>php_version</code>, <code>vendor_uri_prefixes</code>, and <code>vendor_dir_paths</code>. These fields are only written during <code>initialized</code> (before the workers are spawned) and never change afterwards. If a future feature adds runtime PHP version changes, the workers would need to be notified or re-cloned. This invariant ("init-time fields are write-once") should be verified before adding any post-init mutation to these fields.</p>
 <p><code>config</code> is the one exception: it is wrapped in <code>Arc&lt;Mutex&lt;Config&gt;&gt;</code> rather than snapshotted, because it <em>is</em> hot-reloaded. <code>src/indexing/watch.rs</code> reloads it on a project's own <code>.phpantom.toml</code> change (via <code>apply_watched_file_changes</code>) and on a global config change (via <code>global_config_watcher</code>, a background task polling the global config file's mtime since it lives outside the workspace and no client file watcher glob can reach it). Both reloads run on a cloned <code>Backend</code>, so <code>config</code> has to be <code>Arc</code>-shared for the write to reach every other clone, including the long-lived one that answers LSP requests.</p>
