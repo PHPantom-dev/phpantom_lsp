@@ -1139,17 +1139,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#e8-removed-filtering-for-phpstorm-stubs-on-a-stub-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        E8. <code>@removed</code> filtering for phpstorm-stubs on a stub path
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1765,17 +1754,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#e8-removed-filtering-for-phpstorm-stubs-on-a-stub-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        E8. <code>@removed</code> filtering for phpstorm-stubs on a stub path
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -2047,9 +2025,7 @@ reliable combinations:</p>
   (once E2 lands).</li>
 </ul>
 <p>Any of these is sufficient. Without any external stubs and without
-embedded stubs, built-in symbols would be invisible. E8 closes the one
-remaining difference between the embedded stubs and a checkout on a
-stub path.</p>
+embedded stubs, built-in symbols would be invisible.</p>
 <hr />
 <h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
 <table>
@@ -2072,12 +2048,6 @@ stub path.</p>
 <td>E7</td>
 <td>Stub-based framework patches (replace Rust patch system)</td>
 <td>Medium-High</td>
-<td>None</td>
-</tr>
-<tr>
-<td>E8</td>
-<td><code>@removed</code> filtering for phpstorm-stubs on a stub path</td>
-<td>Low</td>
 <td>None</td>
 </tr>
 </tbody>
@@ -2190,19 +2160,6 @@ good candidate for the same treatment once the mechanism exists.</p>
 and is well-tested. It stays in place until the partial-class merge
 above is ready. New patches can still be added
 in Rust in the interim.</p>
-<hr />
-<h2 id="e8-removed-filtering-for-phpstorm-stubs-on-a-stub-path">E8. <code>@removed</code> filtering for phpstorm-stubs on a stub path<a class="headerlink" href="#e8-removed-filtering-for-phpstorm-stubs-on-a-stub-path" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p><code>Backend::set_php_version</code> drops every embedded declaration whose
-docblock marks it <code>@removed</code> at or before the project's PHP version
-(<code>stubs::removed_stub_names</code>), so <code>each()</code> is unknown on PHP 8. A
-phpstorm-stubs checkout on a stub path (an editor extension shipping it
-in place of the embedded stubs) gets no such filtering: its
-<code>#[PhpStormStubsElementAvailable]</code> variants are filtered at parse time,
-but a <code>@removed</code> function or class still resolves. Filter the stub
-index the same way when it is built, or when a lookup first parses the
-file, so a binary built without embedded stubs behaves the same as one
-built with them.</p>
 
 
 

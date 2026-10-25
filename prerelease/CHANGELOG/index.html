@@ -5166,6 +5166,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Constants PHP has removed stay unknown.</strong> A built-in constant removed before the project's PHP version, such as <code>ASSERT_QUIET_EVAL</code> on PHP 8, no longer resolves once another constant from the same extension has been used.</li>
 <li><strong>Twig, YAML, and XML files keep their own extensions' features.</strong> An editor that sends these files to PHPantom no longer gets its formatting, highlighting, outline, or folding in them in place of the ones the file's own extension provides. PHPantom answers there only for the PHP and framework names it reads.</li>
 <li><strong>Type hierarchy in editors without dynamic registration.</strong> Type hierarchy is now announced at startup to editors that cannot register it later, so they offer it too.</li>
 <li><strong><code>self</code> in a scope called on a query.</strong> A scope parameter typed <code>self</code> now accepts the model when the scope is called through a query, such as <code>Post::query()-&gt;relatedTo($post)</code>, instead of reporting that it expects a <code>Builder</code>.</li>
