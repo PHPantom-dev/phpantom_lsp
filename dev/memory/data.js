@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792949862571,
+  "lastUpdate": 1792951178201,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6423,6 +6423,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 76.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "aafa43229bb5cb1d8a483c57c70b95c3efdcec82",
+          "message": "Twig, YAML, and XML files keep their own extensions' features",
+          "timestamp": "2026-10-25T18:35:23+01:00",
+          "tree_id": "fb342da61d9b596c13ff135b7869f42e6a94baae",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/aafa43229bb5cb1d8a483c57c70b95c3efdcec82"
+        },
+        "date": 1792951166490,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 73.1,
             "unit": "MiB"
           }
         ]
