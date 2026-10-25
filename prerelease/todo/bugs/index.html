@@ -978,23 +978,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b678-an-inline-see-classprop-in-a-docblocks-prose-is-not-a-reference" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B678. An inline <code>{@see Class::$prop}</code> in a docblock's prose is not a reference
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1613,23 +1596,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b678-an-inline-see-classprop-in-a-docblocks-prose-is-not-a-reference" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B678. An inline <code>{@see Class::$prop}</code> in a docblock's prose is not a reference
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1718,39 +1684,7 @@ and Qodana all pass it.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b678-an-inline-see-classprop-in-a-docblocks-prose-is-not-a-reference">B678. An inline <code>{@see Class::$prop}</code> in a docblock's prose is not a reference<a class="headerlink" href="#b678-an-inline-see-classprop-in-a-docblocks-prose-is-not-a-reference" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Docblock {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    public static $vectors = [];</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    /**</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">     * The tags defined in the docblock.</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">     *</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">     * The array has keys which are the tag names (excluding the @) and values</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">     * that are arrays, each of which is an entry for the tag.</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">     *</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">     * In the case where the tag name is defined in {@see DocBlock::$vectors} the</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">     * value within the tag-value array is an array in itself with keys as</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">     * described by {@see DocBlock::$vectors}.</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">     *</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">     * @var array</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="x">     */</span>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="x">    public $tags;</span>
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="x">}</span>
-</code></pre></div>
-<p>Find References on <code>$vectors</code> returns a standalone <code>@see DocBlock::$vectors</code>
-tag in another file, but neither inline <code>{@see DocBlock::$vectors}</code> above,
-so renaming the property leaves both behind. <code>scan_text_for_inline_see</code> in
-<code>src/symbol_map/docblock.rs</code> is meant to cover free text ahead of the first
-tag and the description of any tag. Not yet confirmed: the bare <code>@</code> in
-"(excluding the @)" may start a tag as far as the PHPDoc grammar is
-concerned, so the following prose would land in a tag value that is never
-scanned. A reproduction with and without that <code>@</code> will tell.</p>
-<p>Found re-measuring the php-typing-conformance LSP probes (psysh navigation
-corpus, <code>Psy\Util\Docblock::$vectors</code>). That table counts code references
-only, so it scores the <code>@see</code> tag we do return as an extra. Docblock
-references are deliberate (rename has to update them), so the fix here is
-to find the inline ones too, not to drop the tag.</p>
+<p>No outstanding items.</p>
 
 
 
