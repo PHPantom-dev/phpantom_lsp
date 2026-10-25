@@ -945,6 +945,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Templates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b679-a-class-template-in-return-gives-way-to-a-scalar-or-nullable-native-return-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B679. A class template in <code>@return</code> gives way to a scalar or nullable native return type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1003,6 +1020,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B678. An inline <code>{@see Class::$prop}</code> in a docblock's prose is not a reference
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b680-a-param-out-wider-than-the-argument-keeps-the-arguments-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B680. A <code>@param-out</code> wider than the argument keeps the argument's type
       </span>
     </span>
   </a>
@@ -1608,6 +1636,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Templates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b679-a-class-template-in-return-gives-way-to-a-scalar-or-nullable-native-return-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B679. A class template in <code>@return</code> gives way to a scalar or nullable native return type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1666,6 +1711,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B678. An inline <code>{@see Class::$prop}</code> in a docblock's prose is not a reference
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b680-a-param-out-wider-than-the-argument-keeps-the-arguments-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B680. A <code>@param-out</code> wider than the argument keeps the argument's type
       </span>
     </span>
   </a>
@@ -1781,14 +1837,43 @@ them.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b679-a-class-template-in-return-gives-way-to-a-scalar-or-nullable-native-return-type">B679. A class template in <code>@return</code> gives way to a scalar or nullable native return type<a class="headerlink" href="#b679-a-class-template-in-return-gives-way-to-a-scalar-or-nullable-native-return-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @template TInput of string|int|null */</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">final class InputBag</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">{</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    /** @return TInput */</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    public function first(): string|int|null {}</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">/** @var InputBag&lt;string&gt; $query */</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">$query-&gt;first(); // string|int|null, should be string</span>
+</code></pre></div>
+<p>A method's <code>@return</code> naming a template of its class is judged against the
+native return type as if the template were a class name: a native type
+made of scalars rejects it, so the method returns its native type whatever
+the class is instantiated with. A nullable native type lets it through but
+adds its <code>null</code>, so <code>@return TParent</code> on <code>end(): ?NodeParentInterface</code>
+returns <code>?TreeBuilder&lt;'array'&gt;</code> where the binding is a <code>TreeBuilder&lt;'array'&gt;</code>.
+A template of the method itself is compared by its bound
+(<code>resolve_effective_type_with_template_bounds</code>), but the method's return
+type is resolved in <code>parser/signature.rs</code> before any bounds are known, and
+the class's bounds never reach it. The bound comparison has its own slip:
+it strips <code>null</code> from the docblock type before substituting the bound, so a
+bound that includes <code>null</code> (<code>TInput of string|int|null</code>) is never a subtype
+of the native type stripped the same way.</p>
+<p>Symfony 7.4 declares <code>InputBag</code>, <code>Request::$query</code>, and the whole config
+tree builder this way, so <code>$request-&gt;query-&gt;get('page')</code> and every
+<code>-&gt;end()</code> of a tree builder come out wrong. The fixtures marked
+<code>// SKIP: a class template in @return gives way to a scalar or nullable
+native return type</code> in <code>tests/phpstan_symfony/data/</code> show each case.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b677-unset-in-a-var-union-is-resolved-as-a-class-name">B677. <code>unset</code> in a <code>@var</code> union is resolved as a class name<a class="headerlink" href="#b677-unset-in-a-var-union-is-resolved-as-a-class-name" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @var \DateTime|unset $guarded */          // reported: Class 'App\unset' not found</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">if (isset($guarded)) {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    echo date_format($guarded, 'Y-m-d');      // reported: App\unset does not satisfy DateTimeInterface</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @var \DateTime|unset $guarded */          // reported: Class 'App\unset' not found</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">if (isset($guarded)) {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    echo date_format($guarded, 'Y-m-d');      // reported: App\unset does not satisfy DateTimeInterface</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>unset</code> in a docblock union is the Blade-view idiom for "this variable
 may not be defined at all" (issue #366). We resolve the spelling against
@@ -1810,23 +1895,23 @@ and Qodana all pass it.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b678-an-inline-see-classprop-in-a-docblocks-prose-is-not-a-reference">B678. An inline <code>{@see Class::$prop}</code> in a docblock's prose is not a reference<a class="headerlink" href="#b678-an-inline-see-classprop-in-a-docblocks-prose-is-not-a-reference" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Docblock {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    public static $vectors = [];</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    /**</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">     * The tags defined in the docblock.</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">     *</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">     * The array has keys which are the tag names (excluding the @) and values</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">     * that are arrays, each of which is an entry for the tag.</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">     *</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">     * In the case where the tag name is defined in {@see DocBlock::$vectors} the</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">     * value within the tag-value array is an array in itself with keys as</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">     * described by {@see DocBlock::$vectors}.</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">     *</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">     * @var array</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="x">     */</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="x">    public $tags;</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Docblock {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    public static $vectors = [];</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    /**</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">     * The tags defined in the docblock.</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">     *</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">     * The array has keys which are the tag names (excluding the @) and values</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">     * that are arrays, each of which is an entry for the tag.</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">     *</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">     * In the case where the tag name is defined in {@see DocBlock::$vectors} the</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">     * value within the tag-value array is an array in itself with keys as</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="x">     * described by {@see DocBlock::$vectors}.</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="x">     *</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="x">     * @var array</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="x">     */</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="x">    public $tags;</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="x">}</span>
 </code></pre></div>
 <p>Find References on <code>$vectors</code> returns a standalone <code>@see DocBlock::$vectors</code>
 tag in another file, but neither inline <code>{@see DocBlock::$vectors}</code> above,
@@ -1841,12 +1926,32 @@ corpus, <code>Psy\Util\Docblock::$vectors</code>). That table counts code refere
 only, so it scores the <code>@see</code> tag we do return as an extra. Docblock
 references are deliberate (rename has to update them), so the fix here is
 to find the inline ones too, not to drop the tag.</p>
+<h3 id="b680-a-param-out-wider-than-the-argument-keeps-the-arguments-type">B680. A <code>@param-out</code> wider than the argument keeps the argument's type<a class="headerlink" href="#b680-a-param-out-wider-than-the-argument-keeps-the-arguments-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @param-out array $x */</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function fill(array &amp;$x): void {}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">$values = [1 =&gt; 'a'];</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">fill($values);</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">$values; // array{1: 'a'}, should be array</span>
+</code></pre></div>
+<p>After a by-reference call, the argument holds whatever the callee wrote,
+which <code>@param-out</code> declares. The by-reference seeding in
+<code>type_engine/variable/forward_walk/by_ref_builtins.rs</code> keeps the argument's
+type from before the call when the parameter's type covers it, which is
+right for a native hint that says nothing about what the callee writes
+(<code>array_shift(array &amp;$array)</code> keeps a <code>Node[]</code> a <code>Node[]</code>). It does the
+same for an explicit <code>@param-out</code>, the author's statement of what is
+written, so the argument keeps its old shape, literals included. Symfony's
+<code>PropertyAccessor::setValue()</code> declares <code>@param-out</code> this way
+(<code>tests/phpstan_symfony/data/property_accessor.php</code>). An explicit
+<code>@param-out</code> should replace the argument's type.</p>
 <h3 id="b675-member-references-mix-up-a-property-and-a-method-of-the-same-name">B675. Member references mix up a property and a method of the same name<a class="headerlink" href="#b675-member-references-mix-up-a-property-and-a-method-of-the-same-name" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class User {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    public function __construct(private string $email) {}</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    public function email(): string { return $this-&gt;email; }</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class User {</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    public function __construct(private string $email) {}</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    public function email(): string { return $this-&gt;email; }</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>Find References on the <code>$email</code> property lists the <code>email()</code> method's
 declaration as well, and renaming the property renames the method too. The

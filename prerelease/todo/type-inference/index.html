@@ -1282,17 +1282,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t50-port-the-phpstan-symfony-and-doctrine-extensions-type-fixtures" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T50. Port the PHPStan Symfony and Doctrine extensions' type fixtures
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#t52-symfony-return-types-an-argument-decides" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1330,6 +1319,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T55. Symfony array parameters are typed as plain <code>array</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t56-a-dbal-results-row-count-ignores-the-connections-driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T56. A DBAL result's row count ignores the connection's driver
       </span>
     </span>
   </a>
@@ -1554,17 +1554,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t50-port-the-phpstan-symfony-and-doctrine-extensions-type-fixtures" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T50. Port the PHPStan Symfony and Doctrine extensions' type fixtures
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#t52-symfony-return-types-an-argument-decides" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1602,6 +1591,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T55. Symfony array parameters are typed as plain <code>array</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t56-a-dbal-results-row-count-ignores-the-connections-driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T56. A DBAL result's row count ignores the connection's driver
       </span>
     </span>
   </a>
@@ -2035,59 +2035,40 @@ resources already knows those pairs; the attribute form needs the
 <p><strong>Where to look:</strong> <code>src/framework.rs</code>
 (<code>framework_doctrine_repository_fqns_for_entity</code>) for the YAML/XML
 mapping pairs, and method-call return resolution under
-<code>src/type_engine/variable/rhs_resolution/</code> for where the hook goes.</p>
-<hr />
-<h2 id="t50-port-the-phpstan-symfony-and-doctrine-extensions-type-fixtures">T50. Port the PHPStan Symfony and Doctrine extensions' type fixtures<a class="headerlink" href="#t50-port-the-phpstan-symfony-and-doctrine-extensions-type-fixtures" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>PHPStan's framework extensions, <code>phpstan/phpstan-symfony</code> and
-<code>phpstan/phpstan-doctrine</code>, are the reference for what a Symfony or
-Doctrine project expects its types to be. Their <code>tests/Type/**/data/*.php</code>
-files are <code>assertType()</code> fixtures, the format <code>tests/assert_type_runner.rs</code>
-already runs for PHPStan's and Psalm's own corpora. Porting them is the
-measuring stick for T52 to T55, F42 to F44, and D30 to D31: each item there
-lands when its fixtures pass, and the ones that cannot yet carry a <code>// SKIP</code>
-naming the item.</p>
-<p>Two things have to be settled first:</p>
-<ul>
-<li><strong>Where the framework classes come from.</strong> The runner's backend has the
-  embedded stubs only, and these fixtures call into <code>symfony/*</code> and
-  <code>doctrine/*</code> classes. Either the fixtures get a project of their own with
-  a committed <code>composer.lock</code>, installed in CI the way <code>examples/symfony/</code>
-  is, or each fixture gets the slice of the framework it touches as stubs.</li>
-<li><strong>What stands in for a booted application.</strong> The extensions read the
-  compiled container XML (<code>containerXmlPath</code>), an object manager
-  (<code>objectManagerLoader</code>), and a console application
-  (<code>consoleApplicationLoader</code>). PHPantom reads the same facts statically,
-  from the service declarations, the entity mappings, and each command's
-  <code>configure()</code>, so a fixture that depends on the loader gets that setup
-  written as source next to it rather than being dropped.</li>
-</ul>
-<p>The extensions' rule tests (<code>tests/Rules/**</code>, expected messages per line)
-port the same way onto the diagnostic fixtures <code>tests/fixture_runner.rs</code>
-runs. Keep the upstream expectation and mark a gap <code>// SKIP</code> rather than
-loosening the comparison, as for the other corpora.</p>
-<p><strong>Where to look:</strong> <code>tests/assert_type_runner.rs</code> (the <code>datatest_stable</code>
-roots), <code>tests/fixture_runner.rs</code>, and the extensions' <code>tests/Type/</code> and
-<code>tests/Rules/</code>.</p>
+<code>src/type_engine/variable/rhs_resolution/</code> for where the hook goes. The
+extension's fixture, <code>tests/phpstan_doctrine/data/namedManagerRepository.php</code>,
+has an entity whose repository depends on the entity manager; its
+<code>named-manager-registry.php</code> is the registry that says which.</p>
 <hr />
 <h2 id="t52-symfony-return-types-an-argument-decides">T52. Symfony return types an argument decides<a class="headerlink" href="#t52-symfony-return-types-an-argument-decides" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>PHPStan's Symfony extension narrows a list of framework methods by their
-arguments. Each is checked against T50's fixtures, since a recent Symfony
-may already declare some of them with a conditional return type:</p>
+arguments, and its stubs declare a few framework classes more precisely
+than Symfony does. The extension's fixtures run against Symfony 7.4 in
+<code>tests/phpstan_symfony/data/</code>, where each case this lacks is marked
+<code>// SKIP: Symfony return types an argument decides</code>:</p>
 <ul>
 <li><code>Request::getContent($asResource)</code>, <code>HeaderBag::get($key, $default)</code>,
-  <code>InputBag::get($key, $default)</code> and <code>InputBag::all($key)</code>,
-  <code>ResponseHeaderBag::getCookies($format)</code>;</li>
+  <code>InputBag::get($key, $default)</code> (<code>null</code> once <code>has($key)</code> is false) and
+  <code>InputBag::all($key)</code>, <code>ResponseHeaderBag::getCookies($format)</code>;</li>
 <li><code>Envelope::all($stampFqcn)</code>, <code>SerializerInterface::deserialize()</code> and
   <code>DenormalizerInterface::denormalize()</code> by their <code>$type</code>;</li>
 <li><code>FormInterface::getErrors($deep, $flatten)</code>, <code>CacheInterface::get()</code> by
-  the callback's return type, <code>KernelInterface::locateResource()</code>,
-  <code>Extension::getConfiguration()</code>, <code>Command::getHelper()</code>, and
-  BrowserKit's <code>getClient()</code>;</li>
+  the callback's return type, <code>Extension::getConfiguration()</code>,
+  <code>Command::getHelper()</code>, and BrowserKit's <code>getClient()</code>;</li>
+<li><code>ContainerInterface::has()</code> and <code>hasParameter()</code>, and
+  <code>ParameterBagInterface::has()</code>, as <code>true</code> or <code>false</code> by whether the
+  project declares the name;</li>
+<li>the form's data class through <code>AbstractType&lt;TData&gt;</code>,
+  <code>FormFactoryInterface::create()</code>, <code>createForm()</code>, and
+  <code>FormInterface::getData()</code>, and the shape of
+  <code>TraceableMessageBus::getDispatchedMessages()</code>, which the extension's
+  stubs declare;</li>
 <li><code>TreeBuilder::getRootNode()</code> and the node definitions' <code>end()</code> returning
-  their parent, for the Symfony versions before 8 that do not declare them
-  as generics.</li>
+  their parent, for the Symfony versions that do not declare them as
+  generics yet. Symfony 7.4 does, and its fixtures follow those
+  declarations; where they fail, the cause is
+  <a href="../bugs/#b679-a-class-template-in-return-gives-way-to-a-scalar-or-nullable-native-return-type">B679</a>.</li>
 </ul>
 <p>Where a rule fits a conditional return type, write it as a declarative
 patch on the vendor class (the way <code>virtual_members/laravel/patches.rs</code>
@@ -2107,7 +2088,8 @@ been ruled out they cannot return <code>false</code>. This is a narrowing of the
 receiver's state rather than of a variable's type, which the narrowing
 pass does not model for method calls yet. PHPStan's Doctrine extension
 also adds <code>matching()</code> to every <code>Collection</code>, which only <code>Selectable</code> ones
-declare.</p>
+declare. The extension's fixture is
+<code>tests/phpstan_doctrine/data/Collection/collection.php</code>.</p>
 <p><strong>Where to look:</strong> the narrowing under <code>src/type_engine/</code>, and PHPStan's
 Doctrine extension (<code>Type/Doctrine/Collection/IsEmptyTypeSpecifyingExtension</code>,
 <code>DoctrineSelectableClassReflectionExtension</code>).</p>
@@ -2128,6 +2110,13 @@ does not list it. A tag can name the message (<code>handles</code>) and the meth
 (<code>method</code>); without them the message is the type of the method's first
 parameter, which only the class says, so a tag-registered handler has to
 be recorded with its message still to be read from the class.</p>
+<p>PHPStan's extension also follows a bus method that wraps <code>handle()</code> (its
+<code>handleTraitWrappers</code> setting): <code>QueryBus::dispatch($query)</code> returning
+<code>$this-&gt;handle($query)</code> returns what the handler returns. PHPantom reads
+the wrapper's body, so the wrapper's result can follow from the call's
+argument without a setting. The fixtures are
+<code>tests/phpstan_symfony/data/messenger_handle_trait.php</code>, with the handlers
+tagged in <code>tests/phpstan_symfony/config/services.xml</code>.</p>
 <p><strong>Where to look:</strong> <code>src/symfony/tags.rs</code> (which already reads the tag's
 <code>bus</code>), <code>MessengerHandlerSite</code> and <code>Backend::symfony_message_handlers</code> in
 <code>src/symfony/messenger.rs</code>, and PHPStan's Symfony extension
@@ -2146,10 +2135,31 @@ extension gives a map with string keys its shape and a list its element
 type, each scalar generalized. The YAML scan reads values line by line
 and records only the type of the whole value; reading the entries needs
 the nested lines (and the flow sequences and mappings) read as values
-too.</p>
+too. An XML <code>type="collection"</code> parameter has the same gap; the
+extension's fixtures declare theirs that way, in
+<code>tests/phpstan_symfony/config/services.xml</code>, and assert them in
+<code>tests/phpstan_symfony/data/ExampleAbstractController.php</code>.</p>
 <p><strong>Where to look:</strong> <code>src/symfony/resources.rs</code> (<code>scan_yaml</code>) and
 <code>src/symfony/container.rs</code>, and PHPStan's Symfony extension
 (<code>ParameterDynamicReturnTypeExtension::generalizeTypeFromValue</code>).</p>
+<hr />
+<h2 id="t56-a-dbal-results-row-count-ignores-the-connections-driver">T56. A DBAL result's row count ignores the connection's driver<a class="headerlink" href="#t56-a-dbal-results-row-count-ignores-the-connections-driver" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$rows = $result-&gt;rowCount(); // int|numeric-string, though only mysqli returns a string</span>
+</code></pre></div>
+<p>DBAL 4 declares <code>Result::rowCount()</code> as <code>int|numeric-string</code>, because the
+<code>mysqli</code> driver can return a row count too large for an <code>int</code> as a string.
+Every other driver returns an <code>int</code>, and PHPStan's Doctrine extension
+narrows the return type by the driver the project's connection uses. The
+driver is in the connection's configuration: the <code>driver</code> or <code>url</code> of
+<code>DriverManager::getConnection()</code>, or the <code>dbal</code> section of a Symfony
+project's <code>doctrine.yaml</code>.</p>
+<p>The fixtures are <code>tests/phpstan_doctrine/data/DBAL/pdo/</code> and
+<code>tests/phpstan_doctrine/data/DBAL/mysqli/</code>, each a project whose
+<code>entity-manager.php</code> builds the connection.</p>
+<p><strong>Where to look:</strong> PHPStan's Doctrine extension
+(<code>Type/Doctrine/DBAL/*RowCountReturnTypeExtension</code>,
+<code>Doctrine/Driver/DriverDetector</code>).</p>
 
 
 

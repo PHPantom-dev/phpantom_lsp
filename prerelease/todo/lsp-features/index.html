@@ -2705,6 +2705,9 @@ own source carries it. It also checks a default value against its mode.</p>
 <p>This is Laravel's Artisan signature support over again (<code>CommandOwnParam</code>
 spans), so share the span kinds and the completion with it rather than
 building a second set.</p>
+<p>The extension's fixtures are <code>tests/phpstan_symfony/data/Example*Command.php</code>
+for the types and the <code>tests/fixtures/phpstan_symfony/</code> fixtures on
+<code>rules/Symfony/ExampleCommand.php</code> for the checks.</p>
 <p><strong>Where to look:</strong> <code>src/symbol_map/</code> (<code>CommandOwnParam</code>),
 <code>src/virtual_members/laravel/</code> (the Artisan signature parsing), and
 PHPStan's Symfony extension (<code>Rules/Symfony/Undefined*Rule</code>,
@@ -2728,6 +2731,8 @@ record.</p>
 <p>The fields come from the entity's mapping: <code>#[ORM\Column]</code>,
 <code>#[ORM\Id]</code>, and the relation attributes, or the XML mapping the CodeLens
 already reads.</p>
+<p>The extension's fixtures are <code>magic_repository_method_call.fixture</code> and
+<code>repository_method_call.fixture</code> in <code>tests/fixtures/phpstan_doctrine/</code>.</p>
 <p><strong>Where to look:</strong> <code>src/virtual_members/</code>, <code>src/framework.rs</code> (the
 Doctrine mapping index), and PHPStan's Doctrine extension
 (<code>Reflection/Doctrine/EntityRepositoryClassReflectionExtension</code>,
@@ -2747,7 +2752,14 @@ DQL with Doctrine's own parser and the booted metadata; PHPantom would need
 a DQL reader of its own over the static mapping, with the query builder's
 chain followed the way T45's repository is.</p>
 <p>Navigation and completion of the entity and field names are the cheaper
-half and the one an editor user notices; result types follow.</p>
+half and the one an editor user notices; result types follow. The extension
+also types a query as <code>Query&lt;TKey, TResult&gt;</code>, so <code>getResult()</code> and its
+siblings follow from a <code>Query</code> passed in with its result type, and reads
+the expression builder's methods (<code>expr()-&gt;isNull('u.email')</code>) as the DQL
+fragment they build.</p>
+<p>The extension's fixtures are <code>tests/phpstan_doctrine/data/QueryResult/</code>
+for the types and the <code>dql*.fixture</code> and <code>query_builder_dql*.fixture</code>
+fixtures in <code>tests/fixtures/phpstan_doctrine/</code> for the checks.</p>
 <p><strong>Where to look:</strong> <code>src/framework.rs</code> (the Doctrine mapping index), and
 PHPStan's Doctrine extension (<code>Rules/Doctrine/ORM/DqlRule</code>,
 <code>QueryBuilderDqlRule</code>, <code>Type/Doctrine/Query/</code>, <code>Type/Doctrine/QueryBuilder/</code>).</p>

@@ -1111,6 +1111,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d33-private-properties-nothing-reads-or-writes-are-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D33. Private properties nothing reads or writes are not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1752,6 +1763,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d33-private-properties-nothing-reads-or-writes-are-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D33. Private properties nothing reads or writes are not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2138,7 +2160,10 @@ check behind a <code>[diagnostics]</code> toggle if a safe default can't be foun
 Symfony writes a property or calls a setter marked <code>#[Required]</code> (or
 <code>@required</code>) while autowiring, and Doctrine writes a generated identifier
 and a version field, so those count as initialised (PHPStan's Symfony and
-Doctrine extensions model both).</p>
+Doctrine extensions model both). A readonly property has the declaration
+check too, along with being assigned twice; the Doctrine extension's
+fixtures for both are <code>missing_readonly_property_assign*.fixture</code> in
+<code>tests/fixtures/phpstan_doctrine/</code>.</p>
 <p>Found running the php-typing-conformance suite
 (<code>properties_uninitialized_read.php</code>). Psalm and Qodana report it.</p>
 <h2 id="d28-remove-unreachable-code-is-wired-to-phpstan-only">D28. "Remove unreachable code" is wired to PHPStan only<a class="headerlink" href="#d28-remove-unreachable-code-is-wired-to-phpstan-only" title="Permanent link">&para;</a></h2>
@@ -2202,7 +2227,9 @@ a service locator or a <code>ServiceSubscriberInterface</code> subscriber's own
 <code>get()</code> as reading its locator rather than the container.</p>
 <p><strong>Where to look:</strong> <code>src/symfony/resources.rs</code> (the declarations),
 <code>src/diagnostics/laravel_string_keys.rs</code> (where unknown service IDs are
-judged), and PHPStan's Symfony extension (<code>ContainerInterfacePrivateServiceRule</code>).</p>
+judged), and PHPStan's Symfony extension (<code>ContainerInterfacePrivateServiceRule</code>).
+The extension's fixture, <code>tests/fixtures/phpstan_symfony/private_service_in_test.fixture</code>,
+guards the test container.</p>
 <hr />
 <h2 id="d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported">D31. Doctrine mappings that disagree with the entity are not reported<a class="headerlink" href="#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
@@ -2217,13 +2244,19 @@ judged), and PHPStan's Symfony extension (<code>ContainerInterfacePrivateService
   a to-many a <code>Collection</code> of it);</li>
 <li>a <code>final</code> entity or constructor, which Doctrine cannot proxy unless
   native lazy objects are enabled;</li>
+<li>a mapping Doctrine itself rejects, such as an entity without an
+  identifier;</li>
 <li>a Doctrine proxy class named directly.</li>
 </ul>
 <p>The column types map to PHP types through a table of Doctrine's built-in
 types, which custom types have to extend. Read the mapping from attributes
 and from XML, the same mapping the entity and repository CodeLens reads.</p>
 <p><strong>Where to look:</strong> <code>src/framework.rs</code> (the Doctrine mapping index), and
-PHPStan's Doctrine extension (<code>Rules/Doctrine/ORM/</code>, <code>Type/Doctrine/Descriptors/</code>).</p>
+PHPStan's Doctrine extension (<code>Rules/Doctrine/ORM/</code>, <code>Type/Doctrine/Descriptors/</code>).
+The extension's fixtures are the <code>entity_*.fixture</code> fixtures in
+<code>tests/fixtures/phpstan_doctrine/</code>, on the entities under
+<code>tests/phpstan_doctrine/rules/Doctrine/ORM/</code>, whose custom column types
+<code>entity-manager.php</code> registers.</p>
 <hr />
 <h2 id="d32-discarding-the-result-of-a-nodiscard-call-is-not-reported">D32. Discarding the result of a <code>#[\NoDiscard]</code> call is not reported<a class="headerlink" href="#d32-discarding-the-result-of-a-nodiscard-call-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
@@ -2243,6 +2276,31 @@ is not a generic unused-result lint.</p>
 <p>Found running the php-typing-conformance suite
 (<code>directives_nodiscard_return.php</code>). Intelephense, PHPStan, Psalm, Phan
 and mago report it.</p>
+<hr />
+<h2 id="d33-private-properties-nothing-reads-or-writes-are-not-reported">D33. Private properties nothing reads or writes are not reported<a class="headerlink" href="#d33-private-properties-nothing-reads-or-writes-are-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">final class Invoice</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">{</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">    private string $legacyNumber; // never read</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">    private int $total;           // read, never written</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>A private property nothing outside the class can reach is dead when the
+class never reads it, and holds only its default when the class never
+writes it. Both are a bug or leftover code more often than not, and PHPStan
+reports them (<code>property.unused</code>, <code>property.onlyRead</code>, <code>property.onlyWritten</code>).</p>
+<p>Frameworks read and write properties PHP code does not: Doctrine writes an
+entity's generated identifier and every mapped field when it hydrates, and
+reads them when it flushes; Gedmo writes the fields its attributes mark;
+Symfony writes a <code>#[Required]</code> property while autowiring. Those count as
+read and written (PHPStan's Doctrine extension models Doctrine's and
+Gedmo's), or the check flags correct entities.</p>
+<p>The Doctrine extension's fixtures are <code>unused_private_property*.fixture</code>
+and <code>gedmo_property_assign*.fixture</code> in <code>tests/fixtures/phpstan_doctrine/</code>.</p>
+<p><strong>Where to look:</strong> the unused-variable check (<code>src/diagnostics/unused_variables.rs</code>)
+for the read/write bookkeeping, the Doctrine mapping index in
+<code>src/framework.rs</code>, and PHPStan's <code>UnusedPrivatePropertyRule</code> with the
+Doctrine extension's <code>PropertiesExtension</code>s.</p>
 
 
 

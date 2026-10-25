@@ -3432,7 +3432,9 @@ sit next to.</p>
 <a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a>├── unit/                   # Unit tests (composer, docblock, named args, …)
 <a id="__codelineno-0-90" name="__codelineno-0-90" href="#__codelineno-0-90"></a>├── fixtures/               # Fixtures driven by fixture_runner.rs
 <a id="__codelineno-0-91" name="__codelineno-0-91" href="#__codelineno-0-91"></a>├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var =&gt; 'ExpectedType'` assertion suites ported from Psalm / PHPStan
-<a id="__codelineno-0-92" name="__codelineno-0-92" href="#__codelineno-0-92"></a>└── assert_type_runner.rs, fixture_runner.rs
+<a id="__codelineno-0-92" name="__codelineno-0-92" href="#__codelineno-0-92"></a>├── phpstan_symfony/, phpstan_doctrine/   # Projects the PHPStan Symfony and Doctrine extensions' type and rule tests run in
+<a id="__codelineno-0-93" name="__codelineno-0-93" href="#__codelineno-0-93"></a>├── support/                # Code both runners share (the fixture projects' backend)
+<a id="__codelineno-0-94" name="__codelineno-0-94" href="#__codelineno-0-94"></a>└── assert_type_runner.rs, fixture_runner.rs
 </code></pre></div>
 <p><strong>The shared type engine lives under <code>type_engine/</code>.</strong> <code>type_engine/resolver/</code>,
 <code>type_engine/variable/</code> (including the <code>forward_walk/</code> forward walker),
