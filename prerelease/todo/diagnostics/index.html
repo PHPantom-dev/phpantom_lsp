@@ -1035,10 +1035,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" class="md-nav__link">
+  <a href="#d38-reading-a-typed-property-before-anything-writes-it-is-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        D26. Reading a typed property that nothing initialises is not reported
+        D38. Reading a typed property before anything writes it is not reported
       </span>
     </span>
   </a>
@@ -1094,6 +1094,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         D33. Private properties nothing reads or writes are not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d39-writes-to-a-readonly-property-are-not-checked" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D39. Writes to a <code>@readonly</code> property are not checked
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D40. A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties
       </span>
     </span>
   </a>
@@ -1665,10 +1687,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" class="md-nav__link">
+  <a href="#d38-reading-a-typed-property-before-anything-writes-it-is-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        D26. Reading a typed property that nothing initialises is not reported
+        D38. Reading a typed property before anything writes it is not reported
       </span>
     </span>
   </a>
@@ -1724,6 +1746,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         D33. Private properties nothing reads or writes are not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d39-writes-to-a-readonly-property-are-not-checked" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D39. Writes to a <code>@readonly</code> property are not checked
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D40. A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties
       </span>
     </span>
   </a>
@@ -2061,31 +2105,27 @@ reported, because <code>self</code> itself resolves to the bound class.)</p>
 it, and let it replace the enclosing class rather than joining it.
 Inferring a binding from the spelling of the subject is guessing at
 something the type engine has already decided.</p>
-<h2 id="d26-reading-a-typed-property-that-nothing-initialises-is-not-reported">D26. Reading a typed property that nothing initialises is not reported<a class="headerlink" href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" title="Permanent link">&para;</a></h2>
+<h2 id="d38-reading-a-typed-property-before-anything-writes-it-is-not-reported">D38. Reading a typed property before anything writes it is not reported<a class="headerlink" href="#d38-reading-a-typed-property-before-anything-writes-it-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">final class User { public string $name; }</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$user = new User();</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">echo $user-&gt;name; // Error: must not be accessed before initialization</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">final class Options { public string $host; }</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">$options = new Options();</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">echo $options-&gt;host; // Error: must not be accessed before initialization</span>
 </code></pre></div>
-<p>A typed property without a default starts <em>uninitialized</em>, and reading it
-throws. The declaration-side check is the tractable half: flag a typed,
-non-promoted property with no default that no constructor path assigns.
-Psalm's <code>MissingConstructor</code> works this way. The read-side check needs
-definite-assignment tracking across the constructor and is the harder half.</p>
-<p>Keep it conservative. Frameworks and ORMs hydrate properties by reflection
-(Doctrine entities, serializers, <code>#[Inject]</code>), and a diagnostic that flags
-all of them is a false positive on correct code. Consider exempting classes
-whose properties carry an attribute or an ORM mapping docblock, and put the
-check behind a <code>[diagnostics]</code> toggle if a safe default can't be found.
-Symfony writes a property or calls a setter marked <code>#[Required]</code> (or
-<code>@required</code>) while autowiring, and Doctrine writes a generated identifier
-and a version field, so those count as initialised (PHPStan's Symfony and
-Doctrine extensions model both). A readonly property has the declaration
-check too, along with being assigned twice; the Doctrine extension's
-fixtures for both are <code>missing_readonly_property_assign*.fixture</code> in
-<code>tests/fixtures/phpstan_doctrine/</code>.</p>
-<p>Found running the php-typing-conformance suite
-(<code>properties_uninitialized_read.php</code>). Psalm and Qodana report it.</p>
+<p><code>uninitialized_property</code> reports a property nothing in its class ever
+writes, but only when no code outside the class can write it either. A
+public property is left alone, because whoever creates the object
+routinely fills it (<code>$options-&gt;host = 'localhost'</code>), so the class body
+alone cannot tell a bug from a struct. The read is where the bug shows:
+an object created with <code>new</code> in the same function, whose property is read
+before anything writes it and before the object escapes (passed to a call,
+returned, stored). Qodana reports it this way
+(<code>PhpTypedPropertyMightBeUninitializedInspection</code>), and it is what the
+php-typing-conformance suite's <code>properties_uninitialized_read.php</code> checks.</p>
+<p>The facts about which properties the class itself never initializes are
+already collected in <code>src/diagnostics/uninitialized_properties.rs</code>; the
+read side needs the forward walker to follow the fresh object from the
+<code>new</code> to the read.</p>
 <h2 id="d28-remove-unreachable-code-is-wired-to-phpstan-only">D28. "Remove unreachable code" is wired to PHPStan only<a class="headerlink" href="#d28-remove-unreachable-code-is-wired-to-phpstan-only" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>The action reads <code>phpstan_tool.last_diags</code> and nothing else
@@ -2188,7 +2228,10 @@ The extension's fixtures are the <code>entity_*.fixture</code> fixtures in
 </code></pre></div>
 <p>A private property nothing outside the class can reach is dead when the
 class never reads it, and holds only its default when the class never
-writes it. Both are a bug or leftover code more often than not, and PHPStan
+writes it. A typed one without a default is already reported by
+<code>uninitialized_property</code> when the class never writes it; its write
+bookkeeping in <code>src/diagnostics/uninitialized_properties.rs</code> is a starting
+point for the rest. Both are a bug or leftover code more often than not, and PHPStan
 reports them (<code>property.unused</code>, <code>property.onlyRead</code>, <code>property.onlyWritten</code>).</p>
 <p>Frameworks read and write properties PHP code does not: Doctrine writes an
 entity's generated identifier and every mapped field when it hydrates, and
@@ -2202,6 +2245,38 @@ and <code>gedmo_property_assign*.fixture</code> in <code>tests/fixtures/phpstan_
 for the read/write bookkeeping, the Doctrine mapping index in
 <code>src/framework.rs</code>, and PHPStan's <code>UnusedPrivatePropertyRule</code> with the
 Doctrine extension's <code>PropertiesExtension</code>s.</p>
+<hr />
+<h2 id="d39-writes-to-a-readonly-property-are-not-checked">D39. Writes to a <code>@readonly</code> property are not checked<a class="headerlink" href="#d39-writes-to-a-readonly-property-are-not-checked" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">final class Invoice</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">{</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    /** @readonly */</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    public int $total;</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">}</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="x">$invoice-&gt;total = 0; // nothing reported</span>
+</code></pre></div>
+<p><code>@readonly</code> (and <code>@psalm-readonly</code>, <code>@phpstan-readonly</code>) marks a property
+that may only be initialized once, from inside its class, the way native
+<code>readonly</code> does, for code that predates PHP 8.1. <code>invalid_readonly_write</code>
+only knows the native keyword, so a write from outside the class or a
+second assignment in the constructor goes unreported. The check applies
+unchanged once the property counts as readonly. PHPStan's Doctrine
+extension fixture <code>missing_readonly_property_assign_phpdoc.fixture</code> in
+<code>tests/fixtures/phpstan_doctrine/</code> has the constructor case.</p>
+<hr />
+<h2 id="d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties">D40. A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties<a class="headerlink" href="#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p><code>uninitialized_property</code> reads a Doctrine entity's mapping attributes to
+tell the fields Doctrine generates (an identifier, a version field) from
+the ones the class has to initialize. An entity mapped in XML or YAML
+carries none, so the check skips the entities the Doctrine mapping index
+pairs with a repository, and still reports the generated identifier of
+one mapped without a repository class. Reading each mapped entity's
+generated fields into the index would let the check treat both kinds the
+same.</p>
+<p><strong>Where to look:</strong> <code>src/framework.rs</code> (the Doctrine mapping index, which
+D31 also needs) and <code>src/diagnostics/uninitialized_properties.rs</code>.</p>
 
 
 

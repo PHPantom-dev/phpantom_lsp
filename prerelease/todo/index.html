@@ -1324,8 +1324,8 @@ contributor even though it's short.</p>
 </thead>
 <tbody>
 <tr>
-<td>D26</td>
-<td><a href="../todo/diagnostics/#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported">Reading a typed property that nothing initialises is not reported</a></td>
+<td>D38</td>
+<td><a href="../todo/diagnostics/#d38-reading-a-typed-property-before-anything-writes-it-is-not-reported">Reading a typed property before anything writes it is not reported</a></td>
 <td>Low-Medium</td>
 <td>Medium-High</td>
 </tr>
@@ -1634,6 +1634,12 @@ ships, remove every row that names it.</p>
 <td><a href="../todo/diagnostics/#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported">Doctrine mappings that disagree with the entity are not reported</a></td>
 <td>Low-Medium</td>
 <td>Medium-High</td>
+</tr>
+<tr>
+<td>D40</td>
+<td><a href="../todo/diagnostics/#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties">A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties</a></td>
+<td>Low</td>
+<td>Medium</td>
 </tr>
 <tr>
 <td>T56</td>
@@ -2179,6 +2185,12 @@ ships, remove every row that names it.</p>
 <td>D33</td>
 <td><a href="../todo/diagnostics/#d33-private-properties-nothing-reads-or-writes-are-not-reported">Private properties nothing reads or writes are not reported</a></td>
 <td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D39</td>
+<td><a href="../todo/diagnostics/#d39-writes-to-a-readonly-property-are-not-checked">Writes to a <code>@readonly</code> property are not checked</a></td>
+<td>Low</td>
 <td>Medium</td>
 </tr>
 <tr>
