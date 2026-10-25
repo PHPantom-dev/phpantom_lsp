@@ -1009,17 +1009,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b680-a-param-out-wider-than-the-argument-keeps-the-arguments-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B680. A <code>@param-out</code> wider than the argument keeps the argument's type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1672,17 +1661,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b680-a-param-out-wider-than-the-argument-keeps-the-arguments-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B680. A <code>@param-out</code> wider than the argument keeps the argument's type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1839,26 +1817,6 @@ corpus, <code>Psy\Util\Docblock::$vectors</code>). That table counts code refere
 only, so it scores the <code>@see</code> tag we do return as an extra. Docblock
 references are deliberate (rename has to update them), so the fix here is
 to find the inline ones too, not to drop the tag.</p>
-<h3 id="b680-a-param-out-wider-than-the-argument-keeps-the-arguments-type">B680. A <code>@param-out</code> wider than the argument keeps the argument's type<a class="headerlink" href="#b680-a-param-out-wider-than-the-argument-keeps-the-arguments-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @param-out array $x */</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function fill(array &amp;$x): void {}</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$values = [1 =&gt; 'a'];</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">fill($values);</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">$values; // array{1: 'a'}, should be array</span>
-</code></pre></div>
-<p>After a by-reference call, the argument holds whatever the callee wrote,
-which <code>@param-out</code> declares. The by-reference seeding in
-<code>type_engine/variable/forward_walk/by_ref_builtins.rs</code> keeps the argument's
-type from before the call when the parameter's type covers it, which is
-right for a native hint that says nothing about what the callee writes
-(<code>array_shift(array &amp;$array)</code> keeps a <code>Node[]</code> a <code>Node[]</code>). It does the
-same for an explicit <code>@param-out</code>, the author's statement of what is
-written, so the argument keeps its old shape, literals included. Symfony's
-<code>PropertyAccessor::setValue()</code> declares <code>@param-out</code> this way
-(<code>tests/phpstan_symfony/data/property_accessor.php</code>). An explicit
-<code>@param-out</code> should replace the argument's type.</p>
 
 
 
