@@ -1287,6 +1287,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#f60-advertise-pull-diagnostics-to-every-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F60. Advertise pull diagnostics to every client
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#f22-merge-a-namespace-onto-one-that-shares-a-class-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1823,6 +1834,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#f60-advertise-pull-diagnostics-to-every-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F60. Advertise pull diagnostics to every client
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#f22-merge-a-namespace-onto-one-that-shares-a-class-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2164,6 +2186,32 @@ capability or the dynamic registration, not both, per the client's
 declared support).</p>
 <p><strong>Where to look:</strong> <code>src/backend/startup.rs</code> (<code>initialize</code>, <code>initialized</code>),
 <code>src/server.rs</code> (<code>type_hierarchy_registration</code>), <code>src/type_hierarchy.rs</code>.</p>
+<hr />
+<h2 id="f60-advertise-pull-diagnostics-to-every-client">F60. Advertise pull diagnostics to every client<a class="headerlink" href="#f60-advertise-pull-diagnostics-to-every-client" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<p><code>diagnosticProvider</code> is only sent in the <code>initialize</code> response when the
+client declares <code>textDocument.diagnostic</code> (<code>ClientCaps::pull_diagnostics</code>
+in <code>src/backend/client_caps.rs</code>, read in <code>src/backend/startup.rs</code>). A
+client or tool that checks the server's capabilities without declaring
+pull support of its own, such as a feature-conformance probe, concludes
+we have no pull diagnostics at all. The php-typing-conformance LSP table
+records <code>pull-diagnostics</code> as not advertised for us, and because the
+probe only sends requests a server advertises, the handler is never even
+exercised.</p>
+<p>Advertising the capability unconditionally is allowed by the protocol (a
+client that cannot pull ignores it), but it is not enough on its own:
+the delivery mode is chosen from the same flag, and push mode caches
+nothing (<code>assemble_and_push</code> in <code>src/diagnostics/delivery.rs</code>), so a
+<code>textDocument/diagnostic</code> from a push client would find no <code>last_full</code>
+entry, queue a recompute, and answer with an empty set every time. Keep
+choosing push or pull delivery from the client's declaration, so a push
+client still gets exactly one copy, but also record the pushed set and
+its <code>resultId</code> in <code>last_full</code>, so a pull from that client answers with
+what was last published. The cache only holds open files, so the memory
+cost is small.</p>
+<p><strong>Where to look:</strong> <code>src/backend/startup.rs</code> (<code>initialize</code>),
+<code>src/backend/client_caps.rs</code>, <code>src/diagnostics/delivery.rs</code>
+(<code>assemble_and_push</code>), <code>src/diagnostics/pull.rs</code>.</p>
 <hr />
 <h2 id="f22-merge-a-namespace-onto-one-that-shares-a-class-name">F22. Merge a namespace onto one that shares a class name<a class="headerlink" href="#f22-merge-a-namespace-onto-one-that-shares-a-class-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
