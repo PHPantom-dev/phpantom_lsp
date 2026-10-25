@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792910842401,
+  "lastUpdate": 1792912850185,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5994,6 +5994,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 78.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3fef1a3036cdf3d4f2b53478a3dce640422dbb25",
+          "message": "Class templates in `@return` beat scalar and nullable return types",
+          "timestamp": "2026-10-25T07:54:00+01:00",
+          "tree_id": "14c8b3ec6e00253876917f0e8a536e08b18ebd2e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3fef1a3036cdf3d4f2b53478a3dce640422dbb25"
+        },
+        "date": 1792912839094,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 86.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 77.8,
             "unit": "MiB"
           }
         ]
