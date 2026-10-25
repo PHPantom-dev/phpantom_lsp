@@ -932,10 +932,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b679-a-class-template-in-return-gives-way-to-a-scalar-or-nullable-native-return-type" class="md-nav__link">
+  <a href="#b681-static-as-a-type-argument-of-a-return-type-loses-the-receivers-own-type-arguments" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B679. A class template in <code>@return</code> gives way to a scalar or nullable native return type
+        B681. <code>static</code> as a type argument of a return type loses the receiver's own type arguments
       </span>
     </span>
   </a>
@@ -1595,10 +1595,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b679-a-class-template-in-return-gives-way-to-a-scalar-or-nullable-native-return-type" class="md-nav__link">
+  <a href="#b681-static-as-a-type-argument-of-a-return-type-loses-the-receivers-own-type-arguments" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B679. A class template in <code>@return</code> gives way to a scalar or nullable native return type
+        B681. <code>static</code> as a type argument of a return type loses the receiver's own type arguments
       </span>
     </span>
   </a>
@@ -1747,36 +1747,39 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
-<h3 id="b679-a-class-template-in-return-gives-way-to-a-scalar-or-nullable-native-return-type">B679. A class template in <code>@return</code> gives way to a scalar or nullable native return type<a class="headerlink" href="#b679-a-class-template-in-return-gives-way-to-a-scalar-or-nullable-native-return-type" title="Permanent link">&para;</a></h3>
+<h3 id="b681-static-as-a-type-argument-of-a-return-type-loses-the-receivers-own-type-arguments">B681. <code>static</code> as a type argument of a return type loses the receiver's own type arguments<a class="headerlink" href="#b681-static-as-a-type-argument-of-a-return-type-loses-the-receivers-own-type-arguments" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @template TInput of string|int|null */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">final class InputBag</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @template TParent */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class NodeBuilder</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">{</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    /** @return TInput */</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    public function first(): string|int|null {}</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    /** @return TParent */</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    public function end() {}</span>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">/** @var InputBag&lt;string&gt; $query */</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">$query-&gt;first(); // string|int|null, should be string</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">/** @template TParent */</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">class ArrayNodeDefinition</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">{</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    /** @return NodeBuilder&lt;static&gt; */</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">    public function children(): NodeBuilder {}</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">}</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">/** @var ArrayNodeDefinition&lt;TreeBuilder&gt; $root */</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">$builder = $root-&gt;children(); // NodeBuilder&lt;ArrayNodeDefinition&lt;TreeBuilder&gt;&gt;, correct</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="x">$builder-&gt;end();              // ArrayNodeDefinition, should be ArrayNodeDefinition&lt;TreeBuilder&gt;</span>
 </code></pre></div>
-<p>A method's <code>@return</code> naming a template of its class is judged against the
-native return type as if the template were a class name: a native type
-made of scalars rejects it, so the method returns its native type whatever
-the class is instantiated with. A nullable native type lets it through but
-adds its <code>null</code>, so <code>@return TParent</code> on <code>end(): ?NodeParentInterface</code>
-returns <code>?TreeBuilder&lt;'array'&gt;</code> where the binding is a <code>TreeBuilder&lt;'array'&gt;</code>.
-A template of the method itself is compared by its bound
-(<code>resolve_effective_type_with_template_bounds</code>), but the method's return
-type is resolved in <code>parser/signature.rs</code> before any bounds are known, and
-the class's bounds never reach it. The bound comparison has its own slip:
-it strips <code>null</code> from the docblock type before substituting the bound, so a
-bound that includes <code>null</code> (<code>TInput of string|int|null</code>) is never a subtype
-of the native type stripped the same way.</p>
-<p>Symfony 7.4 declares <code>InputBag</code>, <code>Request::$query</code>, and the whole config
-tree builder this way, so <code>$request-&gt;query-&gt;get('page')</code> and every
-<code>-&gt;end()</code> of a tree builder come out wrong. The fixtures marked
-<code>// SKIP: a class template in @return gives way to a scalar or nullable
-native return type</code> in <code>tests/phpstan_symfony/data/</code> show each case.</p>
+<p>The call's type is right, but the class it carries for the next call in the
+chain is built by <code>resolve_method_return_types_with_args</code>, which hands
+<code>type_hint_to_classes_typed_returned</code> the owner's bare FQN for <code>static</code>. So
+the <code>NodeBuilder</code> the chain continues on is specialised with
+<code>TParent = ArrayNodeDefinition</code>, and its members no longer name <code>TParent</code>
+for the receiver's arguments to substitute. The receiver's full type (the
+one <code>self_replace</code> uses for the type string in <code>owner_method_call.rs</code>)
+should stand in for <code>static</code> here too.</p>
+<p>Symfony 7.4's config tree builder declares <code>children()</code> this way, so every
+<code>-&gt;children()-&gt;…-&gt;end()</code> chain loses the parent's type arguments. The
+fixtures marked <code>// SKIP: `static` as a type argument of a return type
+loses the receiver's own type arguments</code> in
+<code>tests/phpstan_symfony/data/tree_builder.php</code> show each case.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b677-unset-in-a-var-union-is-resolved-as-a-class-name">B677. <code>unset</code> in a <code>@var</code> union is resolved as a class name<a class="headerlink" href="#b677-unset-in-a-var-union-is-resolved-as-a-class-name" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
