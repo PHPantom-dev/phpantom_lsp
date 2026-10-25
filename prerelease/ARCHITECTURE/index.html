@@ -974,7 +974,18 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Runtime Lookup — Functions (find_or_load_function)">
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stub-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Stub Paths
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stub Paths">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2627,7 +2638,18 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Runtime Lookup — Functions (find_or_load_function)">
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stub-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Stub Paths
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stub Paths">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3912,35 +3934,46 @@ imported, and written with a leading <code>\</code>; inside a namespace and in t
 global namespace; and read from a caller in a different namespace than the
 file that declares it.</p>
 <h2 id="symbol-resolution-find_or_load_class">Symbol Resolution: <code>find_or_load_class</code><a class="headerlink" href="#symbol-resolution-find_or_load_class" title="Permanent link">&para;</a></h2>
-<p>When the LSP needs to resolve a class name (e.g. during completion on <code>Iterator::</code> or when following a type hint), it calls <code>find_or_load_class</code>. This method tries four phases in order, returning as soon as one succeeds:</p>
+<p>When the LSP needs to resolve a class name (e.g. during completion on <code>Iterator::</code> or when following a type hint), it calls <code>find_or_load_class</code>. This method tries these phases in order, returning as soon as one succeeds:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>find_or_load_class("Iterator")
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>│
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├── Phase 0: fqn_class_index (O(1) hash hit)
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>│   Direct lookup by FQN. This is where cached results from
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│   previous phases are found on subsequent lookups.
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│   ↓ miss
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>├── Phase 1: fqn_uri_index (FQN → file URI)
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>│   Direct hash lookup in the unified FQN-to-URI index, populated
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>│   at init time from Composer's classmap, the self-scanner, and
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>│   phar archives. Covers all classes (including vendor) that don't
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>│   need PSR-4 path computation.
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>│   ↓ miss
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>│
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>├── Phase 2: PSR-4 resolution
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>│   Uses PSR-4 mappings from composer.json to locate the file on disk.
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>│   These mappings only cover user code (vendor PSR-4 is not loaded).
-<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>│   Example: "App\Models\User" → workspace/src/Models/User.php
-<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>│   Reads, parses, resolves names, caches in uri_classes_index.
-<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>│   ↓ miss
-<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>│
-<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>├── Phase 3: Embedded PHP stubs
-<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>│   Looks up the class name in the compiled-in stub index
-<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>│   (from phpstorm-stubs). Parses the stub PHP source, caches
-<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>│   in uri_classes_index under a phpantom-stub:// URI.
-<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>│   ↓ miss
-<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>│
-<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>└── None
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├── Stub paths: ExternalStubIndex (FQN → stub file)
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>│   The `[stubs]` paths and the editor's stub directory. A name
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│   one of them declares means that declaration, over every other
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│   (see "Stub Paths" below).
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│   ↓ miss
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>├── Phase 0: fqn_class_index (O(1) hash hit)
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>│   Direct lookup by FQN. This is where cached results from
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>│   previous phases are found on subsequent lookups.
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>│   ↓ miss
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>│
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>├── Phase 0.5: built-in global names → embedded stubs
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>│   A global name the embedded stubs know is a PHP built-in, so a
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>│   conditional polyfill in vendor cannot shadow it.
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>│   ↓ miss
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>│
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>├── Phase 1: fqn_uri_index (FQN → file URI)
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>│   Direct hash lookup in the unified FQN-to-URI index, populated
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>│   at init time from Composer's classmap, the self-scanner, and
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>│   phar archives. Covers all classes (including vendor) that don't
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>│   need PSR-4 path computation.
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>│   ↓ miss
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>│
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>├── Phase 2: PSR-4 resolution
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>│   Uses PSR-4 mappings from composer.json to locate the file on disk.
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>│   These mappings only cover user code (vendor PSR-4 is not loaded).
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>│   Example: "App\Models\User" → workspace/src/Models/User.php
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>│   Reads, parses, resolves names, caches in uri_classes_index.
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>│   ↓ miss
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>│
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>├── Phase 3: Embedded PHP stubs
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>│   Looks up the class name in the compiled-in stub index
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>│   (from phpstorm-stubs). Parses the stub PHP source, caches
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>│   in uri_classes_index under a phpantom-stub:// URI.
+<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a>│   ↓ miss
+<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a>│
+<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a>└── None
 </code></pre></div>
 <h3 id="caching">Caching<a class="headerlink" href="#caching" title="Permanent link">&para;</a></h3>
 <p>Every phase that successfully parses a file caches the result in <code>uri_classes_index</code>, <code>fqn_class_index</code>, and <code>fqn_uri_index</code>. This means:</p>
@@ -4028,48 +4061,55 @@ classes the current parse produced.</p>
 <p>Built-in PHP functions (e.g. <code>array_map</code>, <code>date_create</code>, <code>str_contains</code>) are resolved through <code>find_or_load_function</code>, which mirrors the multi-phase pattern used for classes:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>find_or_load_function(["str_contains", "App\\str_contains"])
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>│
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>├── Phase 1: global_functions (user code + cached stubs)
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>│   Checks all candidate names against the global_functions map.
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>│   Keys are always FQNs: "array_map" for global functions,
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>│   "Illuminate\Support\enum_value" for namespaced ones.
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>│   No short-name fallback entries are stored.
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>├── Stub paths: ExternalStubIndex (FQN → stub file)
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>│   Parses the stub file with update_ast the first time, then
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>│   returns the declaration that file makes, even where another
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>│   file's declaration of the name is the one global_functions
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>│   resolves to.
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>│   ↓ miss
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>│
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>├── Phase 1.5: autoload_function_index (byte-level scan)
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>│   Checks candidate names against autoload_function_index
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>│   (function FQN → file path on disk).  Populated by the
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>│   find_symbols byte-level scan for both Composer projects
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>│   (autoload_files.php) and non-Composer projects (workspace
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>│   full-scan).
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>│   When found:
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>│     1. Reads the file from disk.
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>│     2. Calls update_ast to get full FunctionInfo + ClassInfo.
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>│     3. Results are cached in global_functions (so future
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>│        lookups hit Phase 1).
-<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>│     4. Returns the matching FunctionInfo.
-<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>│   ↓ miss
-<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>│
-<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>├── Phase 1.75: Last-resort autoload file parse
-<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>│   The byte-level scanner misses functions inside conditional
-<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>│   blocks (e.g. `if (! function_exists(...))` guards).  As a
-<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>│   safety net, lazily parses each known autoload file path
-<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>│   (stored in autoload_file_paths) via update_ast until the
-<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>│   function is found.  Skips files already in uri_classes_index.  Each
-<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>│   file is parsed at most once; subsequent lookups hit Phase 1.
-<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>│   ↓ miss
-<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>│
-<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>├── Phase 2: Embedded PHP stubs
-<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a>│   Looks up each candidate name in stub_function_index.
-<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a>│   When found:
-<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a>│     1. Parses the entire stub file (extracting all FunctionInfo).
-<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a>│     2. Caches ALL functions from that file into global_functions
-<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a>│        under phpantom-stub-fn:// URIs (FQN keys only).
-<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a>│     3. Also caches any classes defined in the same stub file into
-<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a>│        uri_classes_index (so return type references can be resolved).
-<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a>│     4. Returns the matching FunctionInfo.
-<a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a>│   ↓ miss
-<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a>│
-<a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a>└── None
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>├── Phase 1: global_functions (user code + cached stubs)
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>│   Checks all candidate names against the global_functions map.
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>│   Keys are always FQNs: "array_map" for global functions,
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>│   "Illuminate\Support\enum_value" for namespaced ones.
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>│   No short-name fallback entries are stored.
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>│   ↓ miss
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>│
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>├── Phase 1.5: autoload_function_index (byte-level scan)
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>│   Checks candidate names against autoload_function_index
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>│   (function FQN → file path on disk).  Populated by the
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>│   find_symbols byte-level scan for both Composer projects
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>│   (autoload_files.php) and non-Composer projects (workspace
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>│   full-scan).
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>│   When found:
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>│     1. Reads the file from disk.
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>│     2. Calls update_ast to get full FunctionInfo + ClassInfo.
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>│     3. Results are cached in global_functions (so future
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>│        lookups hit Phase 1).
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>│     4. Returns the matching FunctionInfo.
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>│   ↓ miss
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>│
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>├── Phase 1.75: Last-resort autoload file parse
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>│   The byte-level scanner misses functions inside conditional
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>│   blocks (e.g. `if (! function_exists(...))` guards).  As a
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a>│   safety net, lazily parses each known autoload file path
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a>│   (stored in autoload_file_paths) via update_ast until the
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a>│   function is found.  Skips files already in uri_classes_index.  Each
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a>│   file is parsed at most once; subsequent lookups hit Phase 1.
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a>│   ↓ miss
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a>│
+<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a>├── Phase 2: Embedded PHP stubs
+<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a>│   Looks up each candidate name in stub_function_index.
+<a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a>│   When found:
+<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a>│     1. Parses the entire stub file (extracting all FunctionInfo).
+<a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a>│     2. Caches ALL functions from that file into global_functions
+<a id="__codelineno-2-45" name="__codelineno-2-45" href="#__codelineno-2-45"></a>│        under phpantom-stub-fn:// URIs (FQN keys only).
+<a id="__codelineno-2-46" name="__codelineno-2-46" href="#__codelineno-2-46"></a>│     3. Also caches any classes defined in the same stub file into
+<a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a>│        uri_classes_index (so return type references can be resolved).
+<a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a>│     4. Returns the matching FunctionInfo.
+<a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a>│   ↓ miss
+<a id="__codelineno-2-50" name="__codelineno-2-50" href="#__codelineno-2-50"></a>│
+<a id="__codelineno-2-51" name="__codelineno-2-51" href="#__codelineno-2-51"></a>└── None
 </code></pre></div>
 <p>The <code>function_loader</code> closures in both <code>server.rs</code> (completion) and <code>definition/resolve.rs</code> (go-to-definition) build a list of candidate names — the bare name, the use-map resolved name, and the namespace-qualified name — then delegate to <code>find_or_load_function</code>. Because <code>global_functions</code> is keyed by FQN only, bare calls like <code>enum_value()</code> in namespace <code>App</code> succeed via the namespace-qualified candidate <code>App\enum_value</code>. This means built-in function return types are available for:</p>
 <ul>
@@ -4078,6 +4118,10 @@ classes the current parse produced.</p>
 <li><strong>Nested call resolution</strong>: <code>simplexml_load_string(...)-&gt;xpath(...)</code> works</li>
 </ul>
 <p>User-defined functions in <code>global_functions</code> always take precedence over stubs because Phase 1 is checked first — stubs use <code>entry().or_insert()</code> to avoid overwriting existing entries.</p>
+<h3 id="stub-paths">Stub Paths<a class="headerlink" href="#stub-paths" title="Permanent link">&para;</a></h3>
+<p>The <code>[stubs] paths</code> of <code>.phpantom.toml</code> and the directory an editor extension passes as <code>initializationOptions.stubs.path</code> (<code>indexing/stub_paths.rs</code>) are the one place a declaration is meant to win over every other: project code, vendor code, and the embedded stubs. Discovery scans them into an <code>ExternalStubIndex</code> (the <code>[stubs]</code> paths in order, then the editor's directory, first declaration wins; a phpstorm-stubs checkout is read from its <code>PhpStormStubsMap.php</code>), and the class, function and constant lookups each consult it before any other phase (<code>resolution/external_stubs.rs</code>). Embedded-stub loading checks it too, so the embedded copy of an overridden built-in is never read.</p>
+<p>A stub file is an ordinary <code>file://</code> file in every other respect: it is parsed and cached like any other, so go-to-definition lands in it and the watcher's re-parse covers it, and its scanned names are merged into the discovery indexes so they complete before anything loads them. What keeps it out of analysis, rename and find-references is its registration as library code, inside the workspace or not. The parse-time skip of a redeclared built-in function, the constant publisher's last-writer-wins, and the third-party class patches all exempt a stub file.</p>
+<p>The index is rebuilt whole by <code>refresh_stub_paths</code> at the end of discovery, when the paths change (<code>DiscoveryInputs</code>), and when a watched file under one changes. A rebuild first drops everything parsed from a file under the old or new paths, so a removed path stops overriding at once and an added one is re-parsed in its new role.</p>
 <h4 id="function-completion-namespace-awareness">Function Completion: Namespace Awareness<a class="headerlink" href="#function-completion-namespace-awareness" title="Permanent link">&para;</a></h4>
 <p><code>build_function_completions</code> handles two modes:</p>
 <ul>

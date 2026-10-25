@@ -1353,9 +1353,10 @@ WordPress gets only the generic engine: there is no WordPress-specific
 code, and core's functions and classes resolve only when the project
 indexes WordPress itself or a stub package for it.</p>
 <p>Most WordPress typing lives in <code>php-stubs/wordpress-stubs</code>, so the
-external-stub work (<a href="../external-stubs/#e2-project-level-stubs-as-resolution-source">E2</a>
-and <a href="../external-stubs/#e3-ide-provided-and-phpantomtoml-stub-paths">E3</a>)
-is the foundation for everything here. <code>global $wpdb;</code> being untyped is
+external stubs are the foundation for everything here. A project can
+already list the package under <code>[stubs] paths</code>; picking it up from
+Composer without configuration is
+<a href="../external-stubs/#e2-project-level-stubs-as-resolution-source">E2</a>. <code>global $wpdb;</code> being untyped is
 a gap in the generic engine, tracked as
 <a href="../type-inference/#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it">T57</a>.
 PHPStan's WordPress extension
@@ -1406,7 +1407,7 @@ untested and could regress silently.</p>
 </ul>
 <hr />
 <h2 id="wp2-audit-what-the-wordpress-stubs-declare-against-the-engine">WP2. Audit what the WordPress stubs declare against the engine<a class="headerlink" href="#wp2-audit-what-the-wordpress-stubs-declare-against-the-engine" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Complexity: Low</strong> (depends on E2 or a configured stub path)</p>
+<p><strong>Impact: High · Complexity: Low</strong></p>
 <p><code>php-stubs/wordpress-stubs</code> carries more than signatures. Recent
 versions declare argument-dependent return types, <code>@phpstan-assert</code>
 narrowing and never-returning functions for a large part of core,

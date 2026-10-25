@@ -1144,10 +1144,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x18-watch-indexing-include-paths-outside-the-workspace" class="md-nav__link">
+  <a href="#x18-watch-indexing-include-and-stub-paths-outside-the-workspace" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        X18. Watch <code>[indexing] include</code> paths outside the workspace
+        X18. Watch <code>[indexing] include</code> and stub paths outside the workspace
       </span>
     </span>
   </a>
@@ -1677,10 +1677,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x18-watch-indexing-include-paths-outside-the-workspace" class="md-nav__link">
+  <a href="#x18-watch-indexing-include-and-stub-paths-outside-the-workspace" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        X18. Watch <code>[indexing] include</code> paths outside the workspace
+        X18. Watch <code>[indexing] include</code> and stub paths outside the workspace
       </span>
     </span>
   </a>
@@ -2048,7 +2048,7 @@ What follows it:</p>
 <li><strong>Drop the manual step</strong> from the Zed section of <code>editor-setup.md</code>
   once that extension release is out.</li>
 </ul>
-<h2 id="x18-watch-indexing-include-paths-outside-the-workspace">X18. Watch <code>[indexing] include</code> paths outside the workspace<a class="headerlink" href="#x18-watch-indexing-include-paths-outside-the-workspace" title="Permanent link">&para;</a></h2>
+<h2 id="x18-watch-indexing-include-and-stub-paths-outside-the-workspace">X18. Watch <code>[indexing] include</code> and stub paths outside the workspace<a class="headerlink" href="#x18-watch-indexing-include-and-stub-paths-outside-the-workspace" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>An include path outside the workspace is indexed at startup and then
 never refreshed. The client only watches its workspace folders, so an
@@ -2066,6 +2066,10 @@ outside the workspace actually delivers events
 (<a href="https://github.com/microsoft/vscode-languageserver-node/issues/1783">vscode-languageserver-node#1783</a>
 reports that it does not). If it does not, fall back to a server-side
 <code>notify</code> watcher for these few named paths.</p>
+<p>Stub paths outside the workspace (<code>[stubs] paths</code> and the editor's stub
+directory) have the same gap and take the same watchers. An event under
+one already sets <code>stubs_changed</code> in <code>classify_watched_changes</code>, which
+rebuilds the stub index, so only the registration is missing.</p>
 <h2 id="x13-decide-how-workspace-wide-edits-treat-excluded-files">X13. Decide how workspace-wide edits treat excluded files<a class="headerlink" href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Find-references walks via <code>collect_workspace_index_files_gitignore</code> and
