@@ -1086,17 +1086,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p85-one-keystroke-parses-the-open-file-three-times" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P85. One keystroke parses the open file three times
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1395,17 +1384,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p85-one-keystroke-parses-the-open-file-three-times" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P85. One keystroke parses the open file three times
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1534,22 +1512,6 @@ in the refinements (12.9%), 32.7 s of it in the copies alone. Memoise the
 refined class keyed on the indexed class and a generation that moves with
 the auth model, storage driver, macro and pivot registries, so a repeat
 lookup hands back the same <code>Arc</code>.</p>
-<h2 id="p85-one-keystroke-parses-the-open-file-three-times">P85. One keystroke parses the open file three times<a class="headerlink" href="#p85-one-keystroke-parses-the-open-file-three-times" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<p><code>update_ast</code> (<code>parser/ast_update.rs</code>) parses the buffer and discards the
-tree, then the fast diagnostics (<code>diagnostics/collect.rs</code>) and the slow
-pass (<code>diagnostics/incremental/mod.rs</code>) each parse it again under their
-own parse cache. A probe counted three parses per edit in every file it
-tried.</p>
-<p>Measured on the large Laravel app (debug, an edit inside one method, the
-slow pass running partial): a parse costs 3.5 to 5 ms on 1,300 to
-1,900-line services, where the whole edit cycle takes 95 to 185 ms, and
-0.2 to 0.6 ms on service providers whose cycle takes 7 to 22 ms. Parsing
-once would save 4 to 11% of the cycle. The Laravel refreshers <code>update_ast</code>
-calls add at most one more parse on the providers tried (about 2.5% of the
-cycle), not worth a change of their own. Keeping the parsed tree alive
-between <code>didChange</code> and the diagnostic pass costs its parse memory, about
-22 MB for a 73 KB file, for as long as the file is open.</p>
 <h2 id="p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse">P86. A Symfony app's generated <code>config/reference.php</code> is slow to parse<a class="headerlink" href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Symfony 7.3 and later generate <code>config/reference.php</code> for the application:

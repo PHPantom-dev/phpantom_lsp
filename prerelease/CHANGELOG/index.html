@@ -5140,6 +5140,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Faster diagnostics after each edit.</strong> The diagnostics for an edited file reuse the parse the edit already made, instead of parsing the file twice more.</li>
 <li><strong>Faster diagnostics in Blade templates.</strong> A template is parsed once per diagnostic pass instead of once per check.</li>
 <li><strong>Faster diagnostics while editing.</strong> After an edit inside a function or method, only that function is type-checked again, and the rest of the file keeps its diagnostics, moved along with the text. In a 1,500-line class the type checking after such an edit is around 70 times cheaper. Saving still checks the whole file.</li>
 <li><strong>Faster analysis of methods that check many properties.</strong> Narrowing a property or a call's result no longer walks the method again from its first line.</li>
