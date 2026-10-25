@@ -1007,78 +1007,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#e1-project-level-phpstorm-stubs-for-gtd" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        E1. Project-level phpstorm-stubs for GTD
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="E1. Project-level phpstorm-stubs for GTD">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#detection" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Detection
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#gtd-changes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        GTD changes
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#keeping-the-map-current" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Keeping the map current
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#what-this-does-not-change" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        What this does NOT change
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#complexity" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Complexity
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#e2-project-level-stubs-as-resolution-source" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1168,7 +1096,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#complexity_1" class="md-nav__link">
+  <a href="#complexity" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Complexity
@@ -1262,7 +1190,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#complexity_2" class="md-nav__link">
+  <a href="#complexity_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Complexity
@@ -1915,78 +1843,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#e1-project-level-phpstorm-stubs-for-gtd" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        E1. Project-level phpstorm-stubs for GTD
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="E1. Project-level phpstorm-stubs for GTD">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#detection" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Detection
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#gtd-changes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        GTD changes
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#keeping-the-map-current" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Keeping the map current
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#what-this-does-not-change" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        What this does NOT change
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#complexity" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Complexity
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#e2-project-level-stubs-as-resolution-source" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2076,7 +1932,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#complexity_1" class="md-nav__link">
+  <a href="#complexity" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Complexity
@@ -2170,7 +2026,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#complexity_2" class="md-nav__link">
+  <a href="#complexity_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Complexity
@@ -2412,6 +2268,14 @@ redeclarations in ordinary project and vendor code (polyfills,
 signature packages pulled in as dependencies). A deliberate stub source
 (E2, E3) is different: it is how a user overrides internals, so it
 wins over the embedded stubs.</p>
+<p>Go-to-definition on a built-in lands in the project's installed
+<code>jetbrains/phpstorm-stubs</code> when Composer installed it
+(<code>src/definition/installed_stubs.rs</code>): its <code>PhpStormStubsMap.php</code> is
+read on the first such jump, and the declaration is found by parsing
+the file it names, without caching that parse as a source of
+declarations. The map is dropped whenever the Composer package roots
+are rebuilt, so a <code>composer update</code> or <code>remove</code> is seen on the next
+jump.</p>
 <p>This works well for the PHP standard library but has limitations:</p>
 <ul>
 <li><strong>Version lag.</strong> The embedded stubs are pinned to whatever version
@@ -2426,11 +2290,6 @@ wins over the embedded stubs.</p>
   <code>phpstan/phpstan-extensions</code>, <code>php-stubs/wordpress-stubs</code>,
   <code>wimg/php-compatibility-stubs</code>, or hand-written project stubs
   cannot augment or override the built-in definitions.</li>
-<li><strong>No GTD for built-in symbols.</strong> Embedded stubs use synthetic
-  <code>phpantom-stub://</code> URIs with no on-disk file. Go-to-definition
-  returns nothing for <code>array_map</code>, <code>Iterator</code>, <code>PDO</code>, etc. If the
-  user has phpstorm-stubs (or another stub package) installed locally,
-  GTD could navigate to those real files.</li>
 </ul>
 <hr />
 <h2 id="where-stubs-fit-among-the-indexing-settings">Where stubs fit among the indexing settings<a class="headerlink" href="#where-stubs-fit-among-the-indexing-settings" title="Permanent link">&para;</a></h2>
@@ -2587,8 +2446,9 @@ and effectively skipped.</p>
 <p><code>jetbrains/phpstorm-stubs</code> gets special treatment regardless of which
 source provides it. The package ships <code>PhpStormStubsMap.php</code>, a
 generated index that maps every class, function, and constant name to
-its file path. PHPantom's <code>build.rs</code> already parses this file at
-compile time. The same parsing logic can run at runtime.</p>
+its file path. PHPantom's <code>build.rs</code> parses this file at compile time,
+and go-to-definition parses the installed copy at runtime with the
+same <code>src/stub_map.rs</code>.</p>
 <p>When phpstorm-stubs is found (in any source: <code>.phpantom.toml</code>,
 Composer vendor, IDE-provided path), PHPantom checks for the presence
 of <code>PhpStormStubsMap.php</code>. If found, it parses the map file to build
@@ -2612,56 +2472,6 @@ classmap scanner.</p>
 <p>This means phpstorm-stubs always provides the fast baseline, and
 other packages layer additional or overriding definitions on top
 according to their source priority.</p>
-<hr />
-<h2 id="e1-project-level-phpstorm-stubs-for-gtd">E1. Project-level phpstorm-stubs for GTD<a class="headerlink" href="#e1-project-level-phpstorm-stubs-for-gtd" title="Permanent link">&para;</a></h2>
-<p><strong>Goal:</strong> When <code>jetbrains/phpstorm-stubs</code> is installed in the
-project's vendor directory, use those on-disk files for
-go-to-definition on built-in symbols. All other resolution (type
-information, completion, hover) continues to use the embedded stubs.</p>
-<p>This is the smallest useful increment: no new config, no new scanning,
-no priority changes. It solves the most frequent user complaint ("I
-can't Ctrl+Click on <code>array_map</code>").</p>
-<h3 id="detection">Detection<a class="headerlink" href="#detection" title="Permanent link">&para;</a></h3>
-<p>During <code>initialized</code>, after parsing <code>installed.json</code>, check whether
-the <code>jetbrains/phpstorm-stubs</code> package is present. If so, record the
-path to its install directory (e.g.
-<code>vendor/jetbrains/phpstorm-stubs/</code>).</p>
-<p>The stubs ship with <code>PhpStormStubsMap.php</code>, the same file PHPantom's
-<code>build.rs</code> reads at compile time. Parse it at runtime using the same
-<code>parse_section</code> logic to build class/function/constant name-to-path
-maps pointing at the on-disk files.</p>
-<h3 id="gtd-changes">GTD changes<a class="headerlink" href="#gtd-changes" title="Permanent link">&para;</a></h3>
-<p>When go-to-definition resolves a symbol to a <code>phpantom-stub://</code> or
-<code>phpantom-stub-fn://</code> URI (which currently returns <code>None</code> because
-there is no real file), check whether the project-level phpstorm-stubs
-path is available. If so, map the symbol name back to the on-disk
-stub file and return a <code>Location</code> pointing at the declaration.</p>
-<p>Finding the exact line within the stub file can reuse the existing
-member-lookup logic in <code>definition/member/file_lookup.rs</code> (read the
-file, parse it, find the symbol by name/offset).</p>
-<h3 id="keeping-the-map-current">Keeping the map current<a class="headerlink" href="#keeping-the-map-current" title="Permanent link">&para;</a></h3>
-<p><code>composer update</code> can upgrade <code>jetbrains/phpstorm-stubs</code> or <code>composer
-remove</code> can drop it mid-session, and a map read once at startup would
-keep go-to-definition pointing at the old files, or at files that no
-longer exist. <code>rescan_composer_indexes</code> (<code>src/indexing/scan.rs</code>) runs on
-a <code>composer.lock</code> change; detect the package again there, from the same
-<code>installed.json</code> read, and rebuild the map from its current
-<code>PhpStormStubsMap.php</code>, or drop it when the package is gone, the way E2's
-"Keeping the indices current" does for its indices.</p>
-<h3 id="what-this-does-not-change">What this does NOT change<a class="headerlink" href="#what-this-does-not-change" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Type resolution still uses the embedded stubs. The on-disk stubs
-  are only consulted for navigation.</li>
-<li>No new config options.</li>
-<li>No scanning of stub files at init (just parsing the map file, which
-  is a single fast text scan).</li>
-</ul>
-<h3 id="complexity">Complexity<a class="headerlink" href="#complexity" title="Permanent link">&para;</a></h3>
-<p>Low. The map-parsing logic already exists in <code>build.rs</code> and can be
-extracted into a shared helper. The GTD fallback is a small addition
-to <code>class_declaration_location</code> / <code>resolve_function_definition</code> in
-<code>src/definition/resolve.rs</code> (the latter currently returns <code>None</code> for
-<code>phpantom-stub-fn://</code> URIs).</p>
 <hr />
 <h2 id="e2-project-level-stubs-as-resolution-source">E2. Project-level stubs as resolution source<a class="headerlink" href="#e2-project-level-stubs-as-resolution-source" title="Permanent link">&para;</a></h2>
 <p><strong>Goal:</strong> Let project-level stub packages override or augment the
@@ -2785,9 +2595,10 @@ embedded stub constants.</p>
 <h3 id="gtd-improvement">GTD improvement<a class="headerlink" href="#gtd-improvement" title="Permanent link">&para;</a></h3>
 <p>Since external stubs point at real on-disk files, go-to-definition
 works naturally. The <code>phpantom-ext-stub://</code> URI scheme carries the
-real file path, so GTD resolves to a navigable <code>Location</code>. This
-supersedes E1's GTD-only approach for any symbol that has
-an external stub (from any source).</p>
+real file path, so GTD resolves to a navigable <code>Location</code>. For a
+symbol that has an external stub (from any source), this replaces the
+installed-phpstorm-stubs lookup go-to-definition does for the embedded
+declarations today.</p>
 <h3 id="interaction-with-embedded-phpstorm-stubs">Interaction with embedded phpstorm-stubs<a class="headerlink" href="#interaction-with-embedded-phpstorm-stubs" title="Permanent link">&para;</a></h3>
 <p>When <code>jetbrains/phpstorm-stubs</code> is installed at the project level:</p>
 <ul>
@@ -2826,7 +2637,7 @@ under a stub directory back to the <code>phpantom-ext-stub://</code> key and evi
 that. The scheme is also what keeps a stub file inside the workspace out
 of analysis and edits (see E3), so the first option needs another way to
 say that.</p>
-<h3 id="complexity_1">Complexity<a class="headerlink" href="#complexity_1" title="Permanent link">&para;</a></h3>
+<h3 id="complexity">Complexity<a class="headerlink" href="#complexity" title="Permanent link">&para;</a></h3>
 <p>High. This inserts a new phase directly into <code>find_or_load_class</code>,
 <code>find_or_load_function</code>, and the constant lookup chain — the shared
 resolution paths every consumer (diagnostics, completion, hover, GTD)
@@ -2929,7 +2740,7 @@ restart.</p>
   annotation can place a corrected stub in their <code>.phpantom.toml</code>
   paths and it wins over everything.</li>
 </ul>
-<h3 id="complexity_2">Complexity<a class="headerlink" href="#complexity_2" title="Permanent link">&para;</a></h3>
+<h3 id="complexity_1">Complexity<a class="headerlink" href="#complexity_1" title="Permanent link">&para;</a></h3>
 <p>Low (once E2 is done). The scanning is identical. The new work
 is reading <code>initializationOptions</code> during <code>initialize</code>, reading
 <code>.phpantom.toml</code> <code>[stubs]</code> paths, resolving them, and feeding them
@@ -3002,12 +2813,6 @@ embedded stubs, built-in symbols would be invisible.</p>
 </thead>
 <tbody>
 <tr>
-<td>E1</td>
-<td>GTD for built-in symbols via project-level phpstorm-stubs</td>
-<td>Low</td>
-<td>None</td>
-</tr>
-<tr>
 <td>E2</td>
 <td>Project-level stubs as a type resolution source</td>
 <td>High</td>
@@ -3027,9 +2832,7 @@ embedded stubs, built-in symbols would be invisible.</p>
 </tr>
 </tbody>
 </table>
-<p>E1 can be done immediately and independently. It provides
-immediate value (GTD on <code>array_map</code>, <code>PDO</code>, <code>Iterator</code>, etc.) with
-minimal code. E2 and E3 build on the byte-level scanning infrastructure
+<p>E2 and E3 build on the byte-level scanning infrastructure
 already shipped for the project's own symbol discovery (see
 indexing.md's Current State) and on each other.</p>
 <p>The priority order (<code>.phpantom.toml</code> &gt; Composer &gt; IDE &gt; embedded)

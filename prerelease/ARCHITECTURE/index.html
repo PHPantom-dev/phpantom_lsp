@@ -1044,6 +1044,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#go-to-definition-on-built-ins" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Go-to-Definition on Built-ins
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#version-aware-filtering" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2686,6 +2697,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#go-to-definition-on-built-ins" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Go-to-Definition on Built-ins
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#version-aware-filtering" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4081,6 +4103,8 @@ classes the current parse produced.</p>
 <p>Class stub patches work the same way but are applied by <code>apply_class_stub_patches(class)</code> in <code>parse_and_cache_content_versioned</code> for URIs starting with <code>phpantom-stub://</code> or <code>phpantom-stub-fn://</code>. Current class patches add <code>@template</code> parameters, <code>@extends</code>/<code>@implements</code> generics, and constructor bindings to the SPL iterator wrappers (<code>IteratorIterator</code> and its subclasses), which phpstorm-stubs leave ungeneric. This lets generic types flow through the wrapper (e.g. <code>new LimitIterator($rules)</code> over an <code>ArrayIterator&lt;int, Rule&gt;</code> yields <code>Rule</code> from <code>current()</code>). Other class patches tighten individual method return types on <code>ReflectionClass</code>, <code>SimpleXMLElement</code>, and the DOM classes. The full inventory is in the <code>stub_patches</code> module documentation.</p>
 <h3 id="runtime-lookup-constants">Runtime Lookup — Constants<a class="headerlink" href="#runtime-lookup-constants" title="Permanent link">&para;</a></h3>
 <p>The <code>stub_constant_index</code> (<code>HashMap&lt;&amp;'static str, &amp;'static str&gt;</code>) is built at construction time from <code>STUB_CONSTANT_MAP</code>, mapping constant names like <code>PHP_EOL</code>, <code>PHP_INT_MAX</code>, <code>SORT_ASC</code> to their stub file source. It is consulted by the constant-value loader (<code>Backend::constant_loader</code>) during variable type resolution: when a variable is assigned from a global constant (e.g. <code>$eol = PHP_EOL</code>), the loader extracts the constant's initializer value from the stub source and the type is inferred from the literal (<code>string</code>, <code>int</code>, <code>float</code>, <code>bool</code>, <code>null</code>, or <code>array</code>). The same lookup chain also serves hover, completion of standalone constant names, and go-to-definition.</p>
+<h3 id="go-to-definition-on-built-ins">Go-to-Definition on Built-ins<a class="headerlink" href="#go-to-definition-on-built-ins" title="Permanent link">&para;</a></h3>
+<p>An embedded stub has no file to open, so a jump to a built-in class, member, function, or constant goes to the project's own copy of <code>jetbrains/phpstorm-stubs</code> when Composer installed one (<code>definition/installed_stubs.rs</code>). The package root comes from the Composer package roots indexing already records; its <code>PhpStormStubsMap.php</code> is parsed with the same <code>stub_map.rs</code> that <code>build.rs</code> uses, on the first such jump, and cached until the package roots are next rebuilt (a <code>composer.lock</code> change). The file the map names is parsed only to find the declaration's offset, version-filtered like the embedded stubs, and never cached: types still come from the embedded stubs. Without the package, the jump finds nothing.</p>
 <h3 id="version-aware-filtering">Version-Aware Filtering<a class="headerlink" href="#version-aware-filtering" title="Permanent link">&para;</a></h3>
 <p>phpstorm-stubs annotate functions, methods, and parameters with <code>#[PhpStormStubsElementAvailable]</code> attributes to indicate which PHP versions they apply to. For example, <code>array_map</code> has two variants of its second parameter: <code>array $array</code> (from PHP 8.0) and an untyped <code>$arrays</code> (PHP 5.3 to 7.4). Without filtering, both appear in signatures.</p>
 <p>PHPantom detects the target PHP version during <code>initialized</code>:</p>
