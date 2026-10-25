@@ -1322,6 +1322,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#wp8-sage-view-composers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        WP8. Sage view composers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1353,10 +1364,10 @@ WordPress gets only the generic engine: there is no WordPress-specific
 code, and core's functions and classes resolve only when the project
 indexes WordPress itself or a stub package for it.</p>
 <p>Most WordPress typing lives in <code>php-stubs/wordpress-stubs</code>, so the
-external stubs are the foundation for everything here. A project can
-already list the package under <code>[stubs] paths</code>; picking it up from
-Composer without configuration is
-<a href="../external-stubs/#e2-project-level-stubs-as-resolution-source">E2</a>. <code>global $wpdb;</code> being untyped is
+external stubs are the foundation for everything here. Installed with
+Composer, the package is a stub source with no configuration, as is
+<code>php-stubs/woocommerce-stubs</code>; a project without Composer can list
+either under <code>[stubs] paths</code>. <code>global $wpdb;</code> being untyped is
 a gap in the generic engine, tracked as
 <a href="../type-inference/#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it">T57</a>.
 PHPStan's WordPress extension
@@ -1521,10 +1532,33 @@ and the Twig template-name support.</p>
 stubs do not, typically a return type an argument decides:
 <code>get_posts(['fields' =&gt; 'ids'])</code> returning <code>int[]</code>,
 <code>get_post_meta($id, $key, true)</code> returning a single value rather than an
-array, <code>wp_parse_url($url, PHP_URL_HOST)</code>. Write each as a conditional
+array, <code>wp_parse_url($url, PHP_URL_HOST)</code>. Roots' Sage theme shows more:
+<code>wp_list_comments([..., 'echo' =&gt; false])</code> is declared <code>void|string</code>
+whatever <code>echo</code> says, and <code>get_post_time('c')</code> keeps the <code>int</code> only the
+<code>'U'</code> and <code>'G'</code> formats return. Write each as a conditional
 <code>@return</code> in an override stub
 (<a href="../external-stubs/#e7-stub-based-framework-patches">E7</a>) rather than in
 Rust, and offer the ones that hold upstream to <code>php-stubs/wordpress-stubs</code>.</p>
+<hr />
+<h2 id="wp8-sage-view-composers">WP8. Sage view composers<a class="headerlink" href="#wp8-sage-view-composers" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Roots' Sage theme, through its Acorn framework, hands data to Blade views
+with composer classes under <code>app/View/Composers</code> that extend
+<code>Roots\Acorn\View\Composer</code>. Acorn registers every one itself, for the
+views its <code>protected static $views</code> lists (<code>'*'</code> for all of them), or a
+view named after the class when it lists none. A view gets the
+composer's public methods and properties as variables, each method
+called, or the keys of <code>with()</code> and <code>override()</code> when the class returns
+any from them. Nothing registers them through <code>View::composer()</code>, so
+in a stock Sage theme <code>$title</code>, <code>$pagination</code> and <code>$siteName</code> are
+reported as undefined in every partial that reads them.</p>
+<p>Feed these into the provider-registered variables the Blade declaration
+chain already reads for <code>View::composer()</code>, typed from each method's
+return type.</p>
+<p><strong>Where to look:</strong> <code>src/blade/shared_vars.rs</code> and
+<code>src/virtual_members/laravel/view_data.rs</code>; Acorn's
+<code>Roots\Acorn\View\Composer</code> and its <code>Composers\Concerns\Extractable</code>
+for exactly which members count.</p>
 
 
 

@@ -946,56 +946,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#e2-project-level-stubs-as-resolution-source" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        E2. Project-level stubs as resolution source
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="E2. Project-level stubs as resolution source">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#discovery-known-stub-packages" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Discovery: known stub packages
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#keeping-the-paths-current" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Keeping the paths current
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#complexity" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Complexity
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#open-questions" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1561,56 +1511,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#e2-project-level-stubs-as-resolution-source" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        E2. Project-level stubs as resolution source
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="E2. Project-level stubs as resolution source">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#discovery-known-stub-packages" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Discovery: known stub packages
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#keeping-the-paths-current" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Keeping the paths current
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#complexity" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Complexity
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#open-questions" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1825,12 +1725,14 @@ embedded stubs plus patches. Those guards are about incidental
 redeclarations in ordinary project and vendor code (polyfills,
 signature packages pulled in as dependencies).</p>
 <p>A deliberate stub source is different: it is how a user overrides
-internals, so it wins. Two exist today, the <code>[stubs] paths</code> of
-<code>.phpantom.toml</code> and the stub directory an editor extension passes as
-<code>initializationOptions.stubs.path</code> (<code>src/indexing/stub_paths.rs</code>). Both
-are scanned into one <code>ExternalStubIndex</code>, the <code>[stubs]</code> paths first and
-the editor's directory last, first declaration wins, with a directory
-holding <code>PhpStormStubsMap.php</code> read from the map instead of scanned. The
+internals, so it wins. Three exist today, the <code>[stubs] paths</code> of
+<code>.phpantom.toml</code>, the stub packages Composer installed, and the stub
+directory an editor extension passes as
+<code>initializationOptions.stubs.path</code> (<code>src/indexing/stub_paths.rs</code>). All
+are scanned into one <code>ExternalStubIndex</code>, the <code>[stubs]</code> paths first,
+then the Composer packages, and the editor's directory last, first
+declaration wins, with a directory holding <code>PhpStormStubsMap.php</code> read
+from the map instead of scanned. The
 class, function and constant lookups consult that index before anything
 else (<code>src/resolution/external_stubs.rs</code>), so a stub declaration wins
 over project code, vendor code, and the embedded stubs alike, and the
@@ -1838,23 +1740,22 @@ embedded copy of an overridden built-in is never read. A stub file is
 parsed under its own <code>file://</code> URI (so go-to-definition lands in it and
 the watcher's re-parse covers it), is registered as library code (so it
 is never analysed, renamed into, or searched for references), and gets
-no <code>src/stub_patches/</code> corrections. The index is rebuilt whole, dropping
-everything parsed from the old and new stub files, whenever the paths
-change or a file under one changes.</p>
-<p>Go-to-definition on a built-in no stub path declares lands in the
-project's installed <code>jetbrains/phpstorm-stubs</code> when Composer installed
-it (<code>src/definition/installed_stubs.rs</code>): its <code>PhpStormStubsMap.php</code> is
-read on the first such jump, and the declaration is found by parsing
-the file it names, without caching that parse as a source of
-declarations. The map is dropped whenever the Composer package roots
-are rebuilt, so a <code>composer update</code> or <code>remove</code> is seen on the next
-jump.</p>
+no <code>src/stub_patches/</code> corrections unless it is a phpstorm-stubs
+checkout, which has the embedded copy's gaps. The index is rebuilt
+whole, dropping everything parsed from the old and new stub files,
+whenever the paths change, a file under one changes, or <code>composer.lock</code>
+changes.</p>
+<p>A Composer package is a stub package when its name is
+<code>jetbrains/phpstorm-stubs</code>, matches <code>php-stubs/*</code> or <code>*-stubs</code>, or its
+<code>type</code> is <code>phpstorm-stubs</code> or <code>php-stubs</code> (<code>src/composer/installed.rs</code>),
+except <code>phpstan/php-8-stubs</code> (signature-only declarations of every
+built-in function, less precise than the embedded stubs) and
+<code>php-stubs/generator</code> (a tool). Each Composer project of the workspace,
+monorepo subprojects included, contributes its own. An installed
+<code>jetbrains/phpstorm-stubs</code> is therefore what go-to-definition on a
+built-in lands in.</p>
 <p>What is still missing:</p>
 <ul>
-<li><strong>Composer stub packages are ordinary vendor code.</strong> Packages like
-  <code>php-stubs/wordpress-stubs</code> or a newer <code>jetbrains/phpstorm-stubs</code>
-  installed in the project resolve only where they declare a Composer
-  autoload, and never override a built-in (E2).</li>
 <li><strong>Version lag</strong> for anyone not pointing a stub path at newer stubs:
   the embedded stubs are pinned to whatever version of phpstorm-stubs
   was installed when the binary was built.</li>
@@ -1917,7 +1818,7 @@ everything else on its own:</p>
   fill gaps and never win over a declaration found elsewhere.</li>
 <li><strong><code>[stubs] paths</code></strong> is the only way to make a declaration win.</li>
 </ul>
-<p>Composer stub packages (E2), the editor's stub directory, sibling editor
+<p>Composer stub packages, the editor's stub directory, sibling editor
 folders, and Drupal's web root are detected or forwarded, never typed by
 the user. Keep it that way: every new source of PHP should map onto one
 of the three roles rather than add a fourth key with its own semantics.</p>
@@ -1928,8 +1829,8 @@ wins:</p>
 <ol>
 <li><strong><code>.phpantom.toml</code> <code>[stubs] paths</code></strong>, in the order written. An
    explicit choice for this project, so it wins over everything.</li>
-<li><strong>Composer project-level stubs</strong> (E2, not built yet). Packages from
-   the vendor directory.</li>
+<li><strong>Composer stub packages</strong>, from the vendor directory of each
+   Composer project, in <code>installed.json</code> order.</li>
 <li><strong>The editor's stub directory</strong> (<code>initializationOptions.stubs.path</code>).
    An extension's bundled stubs, below the project's own choices.</li>
 <li><strong>Embedded stubs.</strong> The final fallback, not in the stub index; every
@@ -1940,50 +1841,6 @@ wins:</p>
 replaces the whole declaration of its name: a stub class does not merge
 its members into the real class (E7 needs that merge and does not have
 it).</p>
-<hr />
-<h2 id="e2-project-level-stubs-as-resolution-source">E2. Project-level stubs as resolution source<a class="headerlink" href="#e2-project-level-stubs-as-resolution-source" title="Permanent link">&para;</a></h2>
-<p><strong>Goal:</strong> Let project-level stub packages installed through Composer
-override or augment the embedded stubs, the way a <code>[stubs]</code> path does,
-without the user configuring anything.</p>
-<p>The stub index, the lookups that consult it first, the eviction on
-change, the library registration, and the phpstorm-stubs map fast path
-all exist already (see Current state). What is left is discovering the
-packages and keeping them current.</p>
-<h3 id="discovery-known-stub-packages">Discovery: known stub packages<a class="headerlink" href="#discovery-known-stub-packages" title="Permanent link">&para;</a></h3>
-<p><strong>Detection heuristic:</strong> A Composer package is treated as a stub
-package when any of these conditions are true:</p>
-<ul>
-<li>Its package name is <code>jetbrains/phpstorm-stubs</code>.</li>
-<li>Its package name matches <code>php-stubs/*</code> or <code>*-stubs</code>.</li>
-<li>Its <code>composer.json</code> <code>type</code> field is <code>phpstorm-stubs</code> or
-  <code>php-stubs</code> (a convention some packages follow).</li>
-</ul>
-<p>Read <code>vendor/composer/installed.json</code> during discovery and add each
-matched package's install path to <code>Backend::stub_paths</code> between the
-<code>[stubs]</code> paths and the editor's directory. <code>scan_stub_paths</code> already
-reads a <code>PhpStormStubsMap.php</code> checkout from its map and scans any
-other directory with the byte-level scanner.</p>
-<p>When <code>jetbrains/phpstorm-stubs</code> is installed at the project level, its
-declarations win over the embedded ones, and symbols only the embedded
-version has (because the installed one is older) still resolve through
-the embedded fallback. Once it is a stub source, go-to-definition on a
-built-in lands in it through the normal path, and
-<code>src/definition/installed_stubs.rs</code> becomes redundant for it.</p>
-<h3 id="keeping-the-paths-current">Keeping the paths current<a class="headerlink" href="#keeping-the-paths-current" title="Permanent link">&para;</a></h3>
-<p>A stub package changes mid-session when the user runs <code>composer update</code>
-or <code>composer remove</code>. <code>rescan_composer_indexes</code> (<code>src/indexing/scan.rs</code>)
-runs on a <code>composer.lock</code> change; have it re-read the matched packages
-and call <code>refresh_stub_paths</code>, which rebuilds the index and drops what
-was parsed from the old and new stub files. Add the package paths to
-<code>DiscoveryInputs</code> the way the configured paths are, so the comparison
-stays in one place.</p>
-<p>Watch the interaction with <code>rescan_composer_project</code>'s <code>replace_tree</code>
-over the vendor directory: it refills the discovery indexes from the
-vendor scan, so the stub refresh has to run after it.</p>
-<h3 id="complexity">Complexity<a class="headerlink" href="#complexity" title="Permanent link">&para;</a></h3>
-<p>Medium. The resolution side is done; this is the package heuristic, one
-more source in <code>stub_paths</code>, and the refresh hook in the Composer
-rescan.</p>
 <hr />
 <h2 id="open-questions">Open questions<a class="headerlink" href="#open-questions" title="Permanent link">&para;</a></h2>
 <h3 id="how-does-this-interact-with-the-classmap">How does this interact with the classmap?<a class="headerlink" href="#how-does-this-interact-with-the-classmap" title="Permanent link">&para;</a></h3>
@@ -2021,8 +1878,7 @@ reliable combinations:</p>
 <li>The editor extension passes its bundled stubs as
   <code>initializationOptions.stubs.path</code>.</li>
 <li>The user points at stubs via <code>.phpantom.toml</code> <code>[stubs] paths</code>.</li>
-<li>The user's project has <code>jetbrains/phpstorm-stubs</code> in Composer
-  (once E2 lands).</li>
+<li>The user's project has <code>jetbrains/phpstorm-stubs</code> in Composer.</li>
 </ul>
 <p>Any of these is sufficient. Without any external stubs and without
 embedded stubs, built-in symbols would be invisible.</p>
@@ -2038,12 +1894,6 @@ embedded stubs, built-in symbols would be invisible.</p>
 </tr>
 </thead>
 <tbody>
-<tr>
-<td>E2</td>
-<td>Project-level stubs as a type resolution source</td>
-<td>Medium</td>
-<td>None</td>
-</tr>
 <tr>
 <td>E7</td>
 <td>Stub-based framework patches (replace Rust patch system)</td>

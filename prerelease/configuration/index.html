@@ -2176,6 +2176,14 @@ not exist are ignored. Where two stub paths declare the same name, the
 one listed first wins. A directory holding a checkout of
 <a href="https://github.com/JetBrains/phpstorm-stubs">phpstorm-stubs</a> is read
 from its <code>PhpStormStubsMap.php</code>, so only the files the map names count.</p>
+<p>Stub packages installed with Composer need no entry here. A package
+named <code>jetbrains/phpstorm-stubs</code>, <code>php-stubs/*</code>, or <code>*-stubs</code> (such as
+<code>php-stubs/wordpress-stubs</code> or <code>php-stubs/woocommerce-stubs</code>), or one
+whose <code>type</code> is <code>php-stubs</code> or <code>phpstorm-stubs</code>, is used as a stub path
+automatically, ranked below the paths listed here. Installing,
+updating, or removing one takes effect straight away.
+<code>phpstan/php-8-stubs</code> is the exception: PHPantom's own stubs of PHP's
+functions are more precise, so it stays ordinary vendor code.</p>
 <p>A stub file is never analysed, renamed into, or searched for references,
 whether it sits inside the workspace or not, and go-to-definition lands
 in it. Editing, adding, or removing a stub path takes effect straight
