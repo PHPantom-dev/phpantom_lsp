@@ -1100,17 +1100,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#d35-cloneobject-does-not-check-the-properties-it-writes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D35. <code>clone($object, [...])</code> does not check the properties it writes
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1741,17 +1730,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#d35-cloneobject-does-not-check-the-properties-it-writes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D35. <code>clone($object, [...])</code> does not check the properties it writes
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -2224,25 +2202,6 @@ and <code>gedmo_property_assign*.fixture</code> in <code>tests/fixtures/phpstan_
 for the read/write bookkeeping, the Doctrine mapping index in
 <code>src/framework.rs</code>, and PHPStan's <code>UnusedPrivatePropertyRule</code> with the
 Doctrine extension's <code>PropertiesExtension</code>s.</p>
-<hr />
-<h2 id="d35-cloneobject-does-not-check-the-properties-it-writes">D35. <code>clone($object, [...])</code> does not check the properties it writes<a class="headerlink" href="#d35-cloneobject-does-not-check-the-properties-it-writes" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">final class Point { public function __construct(public int $x) {} }</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">$p = new Point(1);</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">$copy = clone($p, ['x' =&gt; 2]);        // fine</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">clone($p, ['nope' =&gt; 1]);             // Error: Point has no $nope</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">clone($p, ['x' =&gt; 'str']);            // TypeError: $x is int</span>
-</code></pre></div>
-<p>PHP 8.5's two-argument <code>clone</code> writes each entry of the array onto the
-copy, with the same rules as a property assignment: the property has to
-exist and be writable from the calling scope, and the value has to match
-its type. The result type is already right. Treat each literal key of the
-second argument as a write to that property of the cloned class, and run
-it through the checks an <code>$copy-&gt;x = ...</code> assignment gets (unknown member,
-visibility, readonly, property type).</p>
-<p>Found running the php-typing-conformance suite
-(<code>objects_clone_with_properties.php</code>). PHPStan and Psalm report it.</p>
 
 
 

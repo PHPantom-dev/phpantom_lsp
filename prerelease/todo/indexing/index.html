@@ -1133,10 +1133,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x14-ask-zed-to-expose-file_scan_exclusions-and-file_types-to-extensions" class="md-nav__link">
+  <a href="#x14-forward-zeds-file_scan_exclusions-and-file_types" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        X14. Ask Zed to expose <code>file_scan_exclusions</code> and <code>file_types</code> to extensions
+        X14. Forward Zed's <code>file_scan_exclusions</code> and <code>file_types</code>
       </span>
     </span>
   </a>
@@ -1666,10 +1666,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x14-ask-zed-to-expose-file_scan_exclusions-and-file_types-to-extensions" class="md-nav__link">
+  <a href="#x14-forward-zeds-file_scan_exclusions-and-file_types" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        X14. Ask Zed to expose <code>file_scan_exclusions</code> and <code>file_types</code> to extensions
+        X14. Forward Zed's <code>file_scan_exclusions</code> and <code>file_types</code>
       </span>
     </span>
   </a>
@@ -2019,21 +2019,35 @@ path mid-session evicts it, while a restart would index it again.
 Filtering the three where they merge into the index makes one rule out
 of two and removes the asymmetry; the cost is one already-compiled glob
 match per entry, skipped outright when no exclude is configured.</p>
-<h2 id="x14-ask-zed-to-expose-file_scan_exclusions-and-file_types-to-extensions">X14. Ask Zed to expose <code>file_scan_exclusions</code> and <code>file_types</code> to extensions<a class="headerlink" href="#x14-ask-zed-to-expose-file_scan_exclusions-and-file_types-to-extensions" title="Permanent link">&para;</a></h2>
+<h2 id="x14-forward-zeds-file_scan_exclusions-and-file_types">X14. Forward Zed's <code>file_scan_exclusions</code> and <code>file_types</code><a class="headerlink" href="#x14-forward-zeds-file_scan_exclusions-and-file_types" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>An upstream request, not a code change here. Zed's extension API serves
-extensions only the <code>language</code>, <code>lsp</code>, and <code>context_servers</code> settings
-categories (the <code>category</code> match in <code>get_settings</code>, <code>extension_host</code>
-crate), so the PHP extension cannot read the editor's own
-<code>file_scan_exclusions</code> or <code>file_types</code> and forward them the way the VS
-Code extension forwards <code>files.exclude</code> and <code>files.associations</code>. Zed
-users therefore have to restate those two lists under
-<code>lsp.phpantom.initialization_options</code>, which
-<a href="../../editor-setup/"><code>editor-setup.md</code></a> documents as the workaround.</p>
-<p>File the request against <code>zed-industries/zed</code> for read access to those
-two settings, then link the issue from that section so users can track
-it. When it lands, the forwarding itself is a small change in Zed's
-official PHP extension, and the manual step in the docs goes away.</p>
+<p>Waiting on upstream review. Zed's extension API serves extensions only
+the <code>language</code>, <code>lsp</code>, and <code>context_servers</code> settings categories, so the
+PHP extension cannot read the editor's own <code>file_scan_exclusions</code> or
+<code>file_types</code> and forward them the way the VS Code extension forwards
+<code>files.exclude</code> and <code>files.associations</code>. Zed users therefore have to
+restate those two lists under <code>lsp.phpantom.initialization_options</code>,
+which <a href="../../editor-setup/"><code>editor-setup.md</code></a> documents as the
+workaround.</p>
+<p><a href="https://github.com/zed-industries/zed/pull/66121">zed-industries/zed#66121</a>
+adds <code>WorktreeSettings::for_worktree</code> (<code>file_scan_exclusions</code> and
+<code>file_scan_inclusions</code> as their source globs) and
+<code>FileTypeSettings::for_worktree</code> (the effective <code>file_types</code> map) to
+extension API 0.8.0, and the Zed section of <code>editor-setup.md</code> links it.
+Zed is slow to review, so nothing here is scheduled until it merges.
+What follows it:</p>
+<ul>
+<li><strong>A pull request to <code>zed-extensions/php</code></strong>, once a Zed release ships
+  the API. Bump <code>zed_extension_api</code>, read both settings in
+  <code>language_server_initialization_options</code>, and merge them into
+  <code>indexing.exclude</code> and <code>indexing.extensions</code> without overwriting what
+  the user set there. An exclusion that an inclusion overrides must not
+  be forwarded. A <code>file_types</code> entry for <code>PHP</code> contributes only when it
+  is a bare <code>*.ext</code> glob, the same rule the VS Code extension applies to
+  <code>files.associations</code>.</li>
+<li><strong>Drop the manual step</strong> from the Zed section of <code>editor-setup.md</code>
+  once that extension release is out.</li>
+</ul>
 <h2 id="x18-watch-indexing-include-paths-outside-the-workspace">X18. Watch <code>[indexing] include</code> paths outside the workspace<a class="headerlink" href="#x18-watch-indexing-include-paths-outside-the-workspace" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>An include path outside the workspace is indexed at startup and then
