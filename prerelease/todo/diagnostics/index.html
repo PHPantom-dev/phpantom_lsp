@@ -1035,17 +1035,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d38-reading-a-typed-property-before-anything-writes-it-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D38. Reading a typed property before anything writes it is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d28-remove-unreachable-code-is-wired-to-phpstan-only" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1687,17 +1676,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d38-reading-a-typed-property-before-anything-writes-it-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D38. Reading a typed property before anything writes it is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d28-remove-unreachable-code-is-wired-to-phpstan-only" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2105,27 +2083,6 @@ reported, because <code>self</code> itself resolves to the bound class.)</p>
 it, and let it replace the enclosing class rather than joining it.
 Inferring a binding from the spelling of the subject is guessing at
 something the type engine has already decided.</p>
-<h2 id="d38-reading-a-typed-property-before-anything-writes-it-is-not-reported">D38. Reading a typed property before anything writes it is not reported<a class="headerlink" href="#d38-reading-a-typed-property-before-anything-writes-it-is-not-reported" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">final class Options { public string $host; }</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">$options = new Options();</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">echo $options-&gt;host; // Error: must not be accessed before initialization</span>
-</code></pre></div>
-<p><code>uninitialized_property</code> reports a property nothing in its class ever
-writes, but only when no code outside the class can write it either. A
-public property is left alone, because whoever creates the object
-routinely fills it (<code>$options-&gt;host = 'localhost'</code>), so the class body
-alone cannot tell a bug from a struct. The read is where the bug shows:
-an object created with <code>new</code> in the same function, whose property is read
-before anything writes it and before the object escapes (passed to a call,
-returned, stored). Qodana reports it this way
-(<code>PhpTypedPropertyMightBeUninitializedInspection</code>), and it is what the
-php-typing-conformance suite's <code>properties_uninitialized_read.php</code> checks.</p>
-<p>The facts about which properties the class itself never initializes are
-already collected in <code>src/diagnostics/uninitialized_properties.rs</code>; the
-read side needs the forward walker to follow the fresh object from the
-<code>new</code> to the read.</p>
 <h2 id="d28-remove-unreachable-code-is-wired-to-phpstan-only">D28. "Remove unreachable code" is wired to PHPStan only<a class="headerlink" href="#d28-remove-unreachable-code-is-wired-to-phpstan-only" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>The action reads <code>phpstan_tool.last_diags</code> and nothing else
@@ -2150,21 +2107,21 @@ smallest part of it.</p>
 <p><code>unreachable_code</code> treats a braced <code>namespace</code> and a <code>declare</code> body as
 fresh statement lists rather than as the transparent wrappers they are,
 so reachability neither flows into them nor out of them:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">namespace</span> <span class="nx">First</span> <span class="p">{</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="k">return</span><span class="p">;</span>          <span class="c1">// ends the whole file</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="p">}</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="k">namespace</span> <span class="nx">Second</span> <span class="p">{</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="k">echo</span> <span class="s1">'never'</span><span class="p">;</span>    <span class="c1">// not reported</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">namespace</span> <span class="nx">First</span> <span class="p">{</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="k">return</span><span class="p">;</span>          <span class="c1">// ends the whole file</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="p">}</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="k">namespace</span> <span class="nx">Second</span> <span class="p">{</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="k">echo</span> <span class="s1">'never'</span><span class="p">;</span>    <span class="c1">// not reported</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="p">}</span>
 </code></pre></div>
 <p>and, inside a function:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">return;</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">declare(ticks=1) {</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    echo 'never';    // not reported</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">return;</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">declare(ticks=1) {</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    echo 'never';    // not reported</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>Neither wrapper is itself a runtime statement, so neither should be
 dimmed, but the state on either side of it has to carry through.</p>
@@ -2173,7 +2130,7 @@ instead of restarting the scan inside them.</p>
 <hr />
 <h2 id="d30-getting-a-private-symfony-service-from-the-container-is-not-reported">D30. Getting a private Symfony service from the container is not reported<a class="headerlink" href="#d30-getting-a-private-symfony-service-from-the-container-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$container-&gt;get('app.mailer'); // throws: the service is private</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$container-&gt;get('app.mailer'); // throws: the service is private</span>
 </code></pre></div>
 <p>Services are private by default since Symfony 3.4: a service is public only
 when its declaration says <code>public: true</code> (or <code>-&gt;public()</code>, or
@@ -2193,8 +2150,8 @@ guards the test container.</p>
 <hr />
 <h2 id="d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported">D31. Doctrine mappings that disagree with the entity are not reported<a class="headerlink" href="#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">#[ORM\Column(type: 'string', nullable: true)]</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">private string $name; // the column can be null, the property cannot</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">#[ORM\Column(type: 'string', nullable: true)]</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">private string $name; // the column can be null, the property cannot</span>
 </code></pre></div>
 <p>PHPStan's Doctrine extension checks an entity's mapping against its PHP:</p>
 <ul>
@@ -2220,11 +2177,11 @@ The extension's fixtures are the <code>entity_*.fixture</code> fixtures in
 <hr />
 <h2 id="d33-private-properties-nothing-reads-or-writes-are-not-reported">D33. Private properties nothing reads or writes are not reported<a class="headerlink" href="#d33-private-properties-nothing-reads-or-writes-are-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">final class Invoice</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">{</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    private string $legacyNumber; // never read</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    private int $total;           // read, never written</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">final class Invoice</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">{</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    private string $legacyNumber; // never read</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">    private int $total;           // read, never written</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>A private property nothing outside the class can reach is dead when the
 class never reads it, and holds only its default when the class never
@@ -2248,13 +2205,13 @@ Doctrine extension's <code>PropertiesExtension</code>s.</p>
 <hr />
 <h2 id="d39-writes-to-a-readonly-property-are-not-checked">D39. Writes to a <code>@readonly</code> property are not checked<a class="headerlink" href="#d39-writes-to-a-readonly-property-are-not-checked" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">final class Invoice</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">{</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    /** @readonly */</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    public int $total;</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">}</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="x">$invoice-&gt;total = 0; // nothing reported</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">final class Invoice</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">{</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    /** @readonly */</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    public int $total;</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">$invoice-&gt;total = 0; // nothing reported</span>
 </code></pre></div>
 <p><code>@readonly</code> (and <code>@psalm-readonly</code>, <code>@phpstan-readonly</code>) marks a property
 that may only be initialized once, from inside its class, the way native
