@@ -1278,16 +1278,14 @@
 <h1 id="phpantom-roadmap">PHPantom — Roadmap<a class="headerlink" href="#phpantom-roadmap" title="Permanent link">&para;</a></h1>
 <p>This document tracks planned work for PHPantom. Each item links to a
 domain document with full context. Items are grouped into time-boxed
-sprints (roughly 1-2 weeks each) and a backlog of ideas not yet
-scheduled.</p>
+sprints (roughly 1-2 weeks each) and feature sets: one per framework,
+and one per area of the language server for everything else.</p>
 <p><strong>Guiding priorities:</strong> Completion accuracy → Type intelligence →
 Cross-file navigation → Diagnostics → Code actions → Performance.</p>
-<p>Items inside each sprint are ordered by priority (top = do first):
-low-complexity items (easiest to assign, least implementation risk)
-before heavy lifts, dependencies before their dependents, and within
-the same complexity tier by impact descending. The backlog is ordered
-by impact (descending), then complexity (ascending) within the same
-impact tier.</p>
+<p>Items inside each sprint and feature set are ordered by priority (top =
+do first): low-complexity items (easiest to assign, least
+implementation risk) before heavy lifts, dependencies before their
+dependents, and within the same complexity tier by impact descending.</p>
 <p><strong>Complexity measures how hard the task is to implement correctly,
 not how long it takes</strong> (time estimates are consistently wrong; skill
 required is not). Use it to decide who to assign: a <strong>Low</strong>-complexity
@@ -1417,7 +1415,18 @@ contributor even though it's short.</p>
 </tr>
 </tbody>
 </table>
-<h2 id="sprint-9-symfony-twig">Sprint 9 — Symfony &amp; Twig<a class="headerlink" href="#sprint-9-symfony-twig" title="Permanent link">&para;</a></h2>
+<h1 id="feature-sets">Feature Sets<a class="headerlink" href="#feature-sets" title="Permanent link">&para;</a></h1>
+<p>A feature set is the work toward one goal: making PHPantom fully usable
+for a framework, or improving one area of the language server. Feature
+sets are not time-boxed and not ordered against each other or the
+sprints; one is taken up when its users ask for it, and items move from
+a set into a sprint when they are scheduled. A framework's set opens
+with a demo project and a baseline from real code, so the support is
+tested against what its users write rather than built on spec.</p>
+<p>An item may appear in more than one sprint or feature set when several
+depend on it (F59 serves Symfony, Drupal, and the 1.0 sprint). When it
+ships, remove every row that names it.</p>
+<h2 id="symfony-twig">Symfony &amp; Twig<a class="headerlink" href="#symfony-twig" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
@@ -1428,6 +1437,12 @@ contributor even though it's short.</p>
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>F59</td>
+<td><a href="../todo/lsp-features/#f59-send-twig-yaml-and-xml-documents-to-the-server">Send Twig, YAML, and XML documents to the server</a> (server, VS Code extension, Zed PR)</td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
 <tr>
 <td>P86</td>
 <td><a href="../todo/performance/#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse">A Symfony app's generated <code>config/reference.php</code> is slow to parse</a></td>
@@ -1542,464 +1557,11 @@ contributor even though it's short.</p>
 <td>Medium</td>
 <td>High</td>
 </tr>
-</tbody>
-</table>
-<h1 id="backlog">Backlog<a class="headerlink" href="#backlog" title="Permanent link">&para;</a></h1>
-<p>Items not yet assigned to a sprint. Worth doing eventually but
-unlikely to move the needle for most users.</p>
-<table>
-<thead>
-<tr>
-<th>#</th>
-<th>Item</th>
-<th>Impact</th>
-<th>Complexity</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td></td>
-<td><strong><a href="../todo/completion/">Completion</a></strong></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td>C1</td>
-<td>Array functions needing new code paths</td>
-<td>Medium</td>
-<td>High</td>
-</tr>
-<tr>
-<td>C11</td>
-<td><a href="../todo/completion/#c11-smarter-member-ordering-after-">Smarter member ordering after <code>-&gt;</code> / <code>::</code></a></td>
-<td>Medium</td>
-<td>High</td>
-</tr>
-<tr>
-<td>C8</td>
-<td><a href="../todo/completion/#c8-filesystem-proximity-as-an-affinity-tiebreaker">Filesystem proximity as an affinity tiebreaker</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>C3</td>
-<td>Go-to-definition for array shape keys via bracket access</td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>C7</td>
-<td><code>class_alias()</code> support</td>
-<td>Low-Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>C5</td>
-<td><code>#[ReturnTypeContract]</code> parameter-dependent return types</td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>C6</td>
-<td><code>#[ExpectedValues]</code> parameter value suggestions</td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>C10</td>
-<td><a href="../todo/completion/#c10-deprecation-markers-on-class-name-completions-from-all-sources">Deprecation markers on class-name completions from all sources</a></td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>C12</td>
-<td><a href="../todo/completion/#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion">The implicit <code>$value</code> of a <code>set</code> hook is not offered by variable completion</a></td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>C13</td>
-<td><a href="../todo/completion/#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members"><code>self::</code>/<code>static::</code> inside a <code>@require-extends</code> trait does not see the required class's static members</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>C4</td>
-<td>Non-array functions with dynamic return types</td>
-<td>Low</td>
-<td>High</td>
-</tr>
-<tr>
-<td></td>
-<td><strong><a href="../todo/type-inference/">Type Inference</a></strong></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td>T26</td>
-<td><a href="../todo/type-inference/#t26-class-constants-named-as-docblock-types-foobar-foobar_">Class constants named as docblock types (<code>Foo::BAR</code>, <code>Foo::BAR_*</code>)</a></td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>T49</td>
-<td><a href="../todo/type-inference/#t49-a-closure-passed-to-a-constructor-gets-no-parameter-types-from-it">A closure passed to a constructor gets no parameter types from it</a></td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>T34</td>
-<td><a href="../todo/type-inference/#t34-staticconst-over-narrows-to-the-declaring-classs-value"><code>static::CONST</code> over-narrows to the declaring class's value</a></td>
-<td>Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>T29</td>
-<td><a href="../todo/type-inference/#t29-definite-vs-possible-variable-existence-tracking">Definite vs possible variable existence tracking</a></td>
-<td>Medium</td>
-<td>High</td>
-</tr>
-<tr>
-<td>T46</td>
-<td><a href="../todo/type-inference/#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later">Template arguments are not inferred from how the object is used later</a></td>
-<td>Medium</td>
-<td>High</td>
-</tr>
-<tr>
-<td>T47</td>
-<td><a href="../todo/type-inference/#t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used">A closure assigned to a variable gets no parameter types from where it is used</a></td>
-<td>Medium</td>
-<td>High</td>
-</tr>
-<tr>
-<td>T45</td>
-<td><a href="../todo/type-inference/#t45-doctrine-getrepositoryentityclass-is-typed-as-the-generic-repository">Doctrine <code>getRepository(Entity::class)</code> is typed as the generic repository</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>T52</td>
-<td><a href="../todo/type-inference/#t52-symfony-return-types-an-argument-decides">Symfony return types an argument decides</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>T41</td>
-<td><a href="../todo/type-inference/#t41-a-reading-of-the-callees-body-overrides-a-declared-param-out">A reading of the callee's body overrides a declared <code>@param-out</code></a></td>
-<td>Low-Medium</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>T56</td>
-<td><a href="../todo/type-inference/#t56-a-dbal-results-row-count-ignores-the-connections-driver">A DBAL result's row count ignores the connection's driver</a></td>
-<td>Low</td>
-<td>Low-Medium</td>
-</tr>
-<tr>
-<td>T43</td>
-<td><a href="../todo/type-inference/#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved"><code>self::TypeAlias</code> inside <code>@extends</code>'s generic argument is not resolved</a></td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>T53</td>
-<td><a href="../todo/type-inference/#t53-doctrine-collections-narrowed-by-isempty">Doctrine collections narrowed by <code>isEmpty()</code></a></td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td></td>
-<td><strong><a href="../todo/diagnostics/">Diagnostics</a></strong></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td>D16</td>
-<td><a href="../todo/diagnostics/#d16-unreachable_match_arm-ignores-literal-subject-types"><code>unreachable_match_arm</code> ignores literal subject types</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>D5</td>
-<td><a href="../todo/diagnostics/#d5-external-tool-diagnostic-suppression-actions">External tool diagnostic suppression actions</a></td>
-<td>Low</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>D15</td>
-<td><a href="../todo/diagnostics/#d15-unused-parameter-diagnostic">Unused parameter diagnostic</a></td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>D17</td>
-<td><a href="../todo/diagnostics/#d17-docblock_native_mismatch-only-judges-nullability"><code>docblock_native_mismatch</code> only judges nullability</a></td>
-<td>Low</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>D18</td>
-<td><a href="../todo/diagnostics/#d18-arrayint-t-is-accepted-wherever-a-listt-is-declared"><code>array&lt;int, T&gt;</code> is accepted wherever a <code>list&lt;T&gt;</code> is declared</a></td>
-<td>Low</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>D19</td>
-<td><a href="../todo/diagnostics/#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write"><code>invalid_member_access</code> cannot tell a property read from a write</a> (includes PHP 8.4 <code>private(set)</code>)</td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>D20</td>
-<td><a href="../todo/diagnostics/#d20-foobar-and-foobar-are-the-same-span"><code>Foo::$bar</code> and <code>Foo::bar</code> are the same span</a></td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>D21</td>
-<td><a href="../todo/diagnostics/#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check">A union of an unreachable and a missing member is reported by neither check</a></td>
-<td>Low</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>D22</td>
-<td><a href="../todo/diagnostics/#d22-member-provenance-is-recomputed-instead-of-recorded">Member provenance is recomputed instead of recorded</a></td>
-<td>Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>D23</td>
-<td><a href="../todo/diagnostics/#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it">A rebound closure's scope is added to the lexical one rather than replacing it</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>D28</td>
-<td><a href="../todo/diagnostics/#d28-remove-unreachable-code-is-wired-to-phpstan-only">"Remove unreachable code" is wired to PHPStan only</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>D30</td>
-<td><a href="../todo/diagnostics/#d30-getting-a-private-symfony-service-from-the-container-is-not-reported">Getting a private Symfony service from the container is not reported</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>D33</td>
-<td><a href="../todo/diagnostics/#d33-private-properties-nothing-reads-or-writes-are-not-reported">Private properties nothing reads or writes are not reported</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>D31</td>
-<td><a href="../todo/diagnostics/#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported">Doctrine mappings that disagree with the entity are not reported</a></td>
-<td>Low-Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>D29</td>
-<td><a href="../todo/diagnostics/#d29-namespace-and-declare-bodies-break-the-reachability-flow"><code>namespace</code> and <code>declare</code> bodies break the reachability flow</a></td>
-<td>Low</td>
-<td>Low-Medium</td>
-</tr>
-<tr>
-<td></td>
-<td><strong><a href="../todo/actions/">Code Actions</a></strong></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td>A40</td>
-<td><a href="../todo/actions/#a40-generate-method-from-call">Generate method from call</a></td>
-<td>High</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>A41</td>
-<td><a href="../todo/actions/#a41-create-class-from-non-existing-name">Create class from non-existing name</a></td>
-<td>High</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>A28</td>
-<td><a href="../todo/actions/#a28-explicit-nullable-parameter-type-php-84-deprecation">Explicit nullable parameter type</a> (PHP 8.4 deprecation)</td>
-<td>Medium</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>A16</td>
-<td><a href="../todo/actions/#a16-snippet-placeholder-for-extracted-method-name">Snippet placeholder for extracted method name</a> (lets the user type over the generated name immediately)</td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>A46</td>
-<td><a href="../todo/actions/#a46-honor-contextonly-in-code-action-responses">Honor <code>context.only</code> in code action responses</a></td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>A25</td>
-<td><a href="../todo/actions/#a25-strpos-str_contains-php-80"><code>strpos</code> → <code>str_contains</code></a> (PHP 8.0+)</td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>A43</td>
-<td><a href="../todo/actions/#a43-update-docblock-generics">Update docblock generics</a></td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>A34</td>
-<td><a href="../todo/actions/#a34-unified-code-action-handler-architecture">Unified code action handler architecture</a> (closure-based resolve, unified fix type)</td>
-<td>Medium</td>
-<td>Very High</td>
-</tr>
-<tr>
-<td>A29</td>
-<td><a href="../todo/actions/#a29-simplify-boolean-return">Simplify boolean return</a> (<code>if (cond) return true; return false;</code> → <code>return cond;</code>)</td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>A45</td>
-<td><a href="../todo/actions/#a45-simplify-with-elvis-operator">Simplify with <code>?:</code></a> (replace <code>$x ? $x : $y</code> with <code>$x ?: $y</code>)</td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>A31</td>
-<td><a href="../todo/actions/#a31-remove-always-else-extract-guard-clause">Remove always-else</a> (extract guard clause)</td>
-<td>Low-Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>A37</td>
-<td><a href="../todo/actions/#a37-simplify-with-nullsafe-operator">Simplify with <code>?-&gt;</code></a> (replace null-checked chains with the nullsafe operator)</td>
-<td>Low-Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>A38</td>
-<td><a href="../todo/actions/#a38-convert-ifelseif-chain-to-match">Convert if/elseif chain to <code>match</code></a></td>
-<td>Low-Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td></td>
-<td><strong><a href="../todo/phpstan-actions/">PHPStan Code Actions</a></strong></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td>H4</td>
-<td><code>assign.byRefForeachExpr</code> — unset by-reference foreach variable</td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>H13</td>
-<td>Declare missing property (native unknown-member diagnostic and PHPStan <code>property.notFound</code>)</td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>H15</td>
-<td>Template bound from tip — add <code>@template T of X</code></td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>H16</td>
-<td><code>match.unhandled</code> — add missing match arms</td>
-<td>Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>H19</td>
-<td><code>property.unused</code> / <code>method.unused</code> — remove unused member</td>
-<td>Low</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>H23</td>
-<td><code>instanceof.alwaysTrue</code> — remove redundant instanceof check</td>
-<td>Low</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>H24</td>
-<td><code>catch.neverThrown</code> — remove unnecessary catch clause</td>
-<td>Low</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>H20</td>
-<td><code>generics.callSiteVarianceRedundant</code> — remove redundant variance annotation</td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td></td>
-<td><strong><a href="../todo/fix-cli/">CLI Fix Rules</a></strong></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td>FX7</td>
-<td><a href="../todo/fix-cli/#fx7-add_return_type-generate-return-docblocks-from-function-bodies"><code>add_return_type</code> — generate <code>@return</code> docblocks from function bodies</a></td>
-<td>Medium-High</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>FX1</td>
-<td><a href="../todo/fix-cli/#fx1-deprecated-replace-deprecated-symbol-usage"><code>deprecated</code> — replace deprecated symbol usage</a></td>
-<td>Medium</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>FX3</td>
-<td><a href="../todo/fix-cli/#fx3-phpstanreturnunusedtype-remove-unused-type-from-return-union"><code>phpstan.return.unusedType</code> — remove unused type from return union</a></td>
-<td>Medium</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>FX2</td>
-<td><a href="../todo/fix-cli/#fx2-unused_variable-remove-unused-variables"><code>unused_variable</code> — remove unused variables</a></td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td></td>
-<td><strong><a href="../todo/lsp-features/">LSP Features</a></strong></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td>F12</td>
-<td><a href="../todo/lsp-features/#f12-intellij-phpstorm-plugin">IntelliJ / PHPStorm plugin</a></td>
-<td>High</td>
-<td>Medium-High</td>
-</tr>
 <tr>
 <td>F48</td>
 <td><a href="../todo/lsp-features/#f48-symfony-environment-variables">Symfony environment variables</a></td>
 <td>Medium</td>
 <td>Low-Medium</td>
-</tr>
-<tr>
-<td>F11</td>
-<td><a href="../todo/lsp-features/#f11-windows-code-signing">Windows code signing</a></td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>F17</td>
-<td><a href="../todo/lsp-features/#f17-wire-class-move-to-workspacewillrenamefiles">Wire class move to <code>workspace/willRenameFiles</code></a></td>
-<td>Medium</td>
-<td>Medium</td>
 </tr>
 <tr>
 <td>F24</td>
@@ -2038,28 +1600,28 @@ unlikely to move the needle for most users.</p>
 <td>Medium-High</td>
 </tr>
 <tr>
-<td>F7</td>
-<td><a href="../todo/lsp-features/#f7-evaluatable-expression-support-dap-integration">Evaluatable expression support (DAP integration)</a></td>
-<td>Low-Medium</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>F15</td>
-<td><a href="../todo/lsp-features/#f15-go-to-declaration">Go-to-declaration</a></td>
-<td>Low-Medium</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>F14</td>
-<td><a href="../todo/lsp-features/#f14-helix-upstream-pr">Helix upstream PR</a></td>
-<td>Low-Medium</td>
-<td>Low</td>
-</tr>
-<tr>
 <td>F46</td>
 <td><a href="../todo/lsp-features/#f46-symfony-listener-methods-a-tag-or-a-default-names">Symfony listener methods a tag or a default names</a></td>
 <td>Low-Medium</td>
 <td>Low-Medium</td>
+</tr>
+<tr>
+<td>T45</td>
+<td><a href="../todo/type-inference/#t45-doctrine-getrepositoryentityclass-is-typed-as-the-generic-repository">Doctrine <code>getRepository(Entity::class)</code> is typed as the generic repository</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T52</td>
+<td><a href="../todo/type-inference/#t52-symfony-return-types-an-argument-decides">Symfony return types an argument decides</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D30</td>
+<td><a href="../todo/diagnostics/#d30-getting-a-private-symfony-service-from-the-container-is-not-reported">Getting a private Symfony service from the container is not reported</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
 </tr>
 <tr>
 <td>F26</td>
@@ -2098,16 +1660,16 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td>F22</td>
-<td><a href="../todo/lsp-features/#f22-merge-a-namespace-onto-one-that-shares-a-class-name">Merge a namespace onto one that shares a class name</a></td>
+<td>D31</td>
+<td><a href="../todo/diagnostics/#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported">Doctrine mappings that disagree with the entity are not reported</a></td>
 <td>Low-Medium</td>
 <td>Medium-High</td>
 </tr>
 <tr>
-<td>F23</td>
-<td><a href="../todo/lsp-features/#f23-rename-a-class-through-its-xml-entity-escaped-occurrences">Rename a class through its XML entity-escaped occurrences</a></td>
+<td>T56</td>
+<td><a href="../todo/type-inference/#t56-a-dbal-results-row-count-ignores-the-connections-driver">A DBAL result's row count ignores the connection's driver</a></td>
 <td>Low</td>
-<td>Medium</td>
+<td>Low-Medium</td>
 </tr>
 <tr>
 <td>F51</td>
@@ -2122,6 +1684,18 @@ unlikely to move the needle for most users.</p>
 <td>Low-Medium</td>
 </tr>
 <tr>
+<td>T53</td>
+<td><a href="../todo/type-inference/#t53-doctrine-collections-narrowed-by-isempty">Doctrine collections narrowed by <code>isEmpty()</code></a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F23</td>
+<td><a href="../todo/lsp-features/#f23-rename-a-class-through-its-xml-entity-escaped-occurrences">Rename a class through its XML entity-escaped occurrences</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
 <td>F53</td>
 <td><a href="../todo/lsp-features/#f53-stimulus-controllers-in-twig">Stimulus controllers in Twig</a></td>
 <td>Low</td>
@@ -2133,53 +1707,249 @@ unlikely to move the needle for most users.</p>
 <td>Low</td>
 <td>Medium-High</td>
 </tr>
+</tbody>
+</table>
+<h2 id="wordpress">WordPress<a class="headerlink" href="#wordpress" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
 <tr>
-<td>F16</td>
-<td><a href="../todo/lsp-features/#f16-on-type-brace-de-indent">On-type <code>}</code> brace de-indent</a></td>
-<td>Low</td>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WP1</td>
+<td><a href="../todo/wordpress/#wp1-wordpress-demo-project-and-a-real-world-baseline">WordPress demo project and a real-world baseline</a></td>
+<td>High</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>E1</td>
+<td><a href="../todo/external-stubs/#e1-project-level-phpstorm-stubs-for-gtd">Project-level phpstorm-stubs for go-to-definition</a></td>
+<td>Medium-High</td>
 <td>Low</td>
 </tr>
 <tr>
-<td></td>
-<td><strong><a href="../todo/signature-help/">Signature Help</a></strong></td>
-<td></td>
-<td></td>
+<td>E2</td>
+<td><a href="../todo/external-stubs/#e2-project-level-stubs-as-resolution-source">Project-level stubs as type resolution source</a> (depends on E1)</td>
+<td>Medium</td>
+<td>High</td>
 </tr>
 <tr>
-<td>S2</td>
-<td><a href="../todo/signature-help/#s2-closure-arrow-function-parameter-signature-help">Closure / arrow function parameter signature help</a></td>
+<td>E3</td>
+<td><a href="../todo/external-stubs/#e3-ide-provided-and-phpantomtoml-stub-paths">IDE-provided and <code>.phpantom.toml</code> stub paths</a> (depends on E2)</td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>WP2</td>
+<td><a href="../todo/wordpress/#wp2-audit-what-the-wordpress-stubs-declare-against-the-engine">Audit what the WordPress stubs declare against the engine</a> (depends on E2 or E3)</td>
+<td>High</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>WP4</td>
+<td><a href="../todo/wordpress/#wp4-hook-names">Hook names</a></td>
+<td>High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>WP3</td>
+<td><a href="../todo/wordpress/#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own">WordPress core for a plugin or theme opened on its own</a></td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T57</td>
+<td><a href="../todo/type-inference/#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it">A <code>global</code> variable is untyped unless a <code>@var</code> sits above it</a></td>
 <td>Medium</td>
 <td>Medium</td>
 </tr>
 <tr>
-<td>S4</td>
-<td>Named argument awareness in active parameter</td>
-<td>Low</td>
+<td>WP6</td>
+<td><a href="../todo/wordpress/#wp6-template-parts">Template parts</a></td>
+<td>Medium</td>
 <td>Medium</td>
 </tr>
 <tr>
-<td>S5</td>
-<td>Language construct signature help and hover</td>
-<td>Low</td>
+<td>E7</td>
+<td><a href="../todo/external-stubs/#e7-stub-based-framework-patches">Stub-based framework patches</a></td>
 <td>Medium</td>
-</tr>
-<tr>
-<td>S3</td>
-<td>Multiple overloaded signatures</td>
-<td>Low</td>
 <td>Medium-High</td>
 </tr>
 <tr>
-<td></td>
-<td><strong><a href="../todo/laravel/">Laravel</a></strong></td>
-<td></td>
-<td></td>
+<td>WP7</td>
+<td><a href="../todo/wordpress/#wp7-return-types-the-wordpress-stubs-do-not-declare">Return types the WordPress stubs do not declare</a> (depends on WP2)</td>
+<td>Medium</td>
+<td>Medium</td>
 </tr>
 <tr>
-<td>L46</td>
-<td><a href="../todo/laravel/#l46-can-on-a-user-model-the-receiver-does-not-name"><code>-&gt;can()</code> on a user model the receiver does not name</a></td>
+<td>WP5</td>
+<td><a href="../todo/wordpress/#wp5-hook-callback-parameter-and-return-types">Hook callback parameter and return types</a> (depends on WP4)</td>
 <td>Medium-High</td>
 <td>Medium-High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="drupal">Drupal<a class="headerlink" href="#drupal" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DR1</td>
+<td><a href="../todo/drupal/#dr1-drupal-demo-project-and-a-real-world-baseline">Drupal demo project and a real-world baseline</a></td>
+<td>High</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>F59</td>
+<td><a href="../todo/lsp-features/#f59-send-twig-yaml-and-xml-documents-to-the-server">Send Twig, YAML, and XML documents to the server</a> (server, VS Code extension, Zed PR)</td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>DR2</td>
+<td><a href="../todo/drupal/#dr2-service-ids-from-servicesyml">Service IDs from <code>*.services.yml</code></a></td>
+<td>High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>DR5</td>
+<td><a href="../todo/drupal/#dr5-route-names">Route names</a></td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>DR6</td>
+<td><a href="../todo/drupal/#dr6-hooks">Hooks</a></td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>DR8</td>
+<td><a href="../todo/drupal/#dr8-permission-and-configuration-names">Permission and configuration names</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>DR3</td>
+<td><a href="../todo/drupal/#dr3-entity-storage-and-entity-type-ids">Entity storage and entity type IDs</a></td>
+<td>High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>DR7</td>
+<td><a href="../todo/drupal/#dr7-render-arrays-theme-hooks-and-libraries">Render arrays, theme hooks, and libraries</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>DR4</td>
+<td><a href="../todo/drupal/#dr4-entity-field-access">Entity field access</a> (depends on DR3)</td>
+<td>Medium-High</td>
+<td>High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="phpunit-pest">PHPUnit &amp; Pest<a class="headerlink" href="#phpunit-pest" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TS4</td>
+<td><a href="../todo/testing/#ts4-data-provider-declaration-checks">Data provider declaration checks</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>TS5</td>
+<td><a href="../todo/testing/#ts5-assertion-libraries">Assertion libraries</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>TS6</td>
+<td><a href="../todo/testing/#ts6-setup-and-teardown-that-skip-the-parent"><code>setUp()</code> and <code>tearDown()</code> that skip the parent</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>TS7</td>
+<td><a href="../todo/testing/#ts7-prophecy">Prophecy</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>TS1</td>
+<td><a href="../todo/testing/#ts1-mock-method-names">Mock method names</a></td>
+<td>High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>TS2</td>
+<td><a href="../todo/testing/#ts2-go-to-the-test-and-back">Go to the test, and back</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>TS3</td>
+<td><a href="../todo/testing/#ts3-create-a-test-for-a-class">Create a test for a class</a> (depends on TS2)</td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="laravel-blade">Laravel &amp; Blade<a class="headerlink" href="#laravel-blade" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L27</td>
+<td><a href="../todo/laravel/#l27-legacy-controllermethod-action-strings">Legacy <code>Controller@method</code> action strings</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>L60</td>
+<td><a href="../todo/laravel/#l60-read-relation-callback-overrides-and-fallbacks-from-the-declared-signature">Read relation callback overrides and fallbacks from the declared signature</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>L29</td>
+<td><a href="../todo/laravel/#l29-livewire-and-volt-component-names">Livewire and Volt component names</a> (Livewire projects only)</td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>P84</td>
+<td><a href="../todo/performance/#p84-class-lookups-re-apply-the-laravel-patches-on-every-call">Class lookups re-apply the Laravel patches on every call</a></td>
+<td>Medium-High</td>
+<td>Medium</td>
 </tr>
 <tr>
 <td>L30</td>
@@ -2200,18 +1970,6 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td>L57</td>
-<td><a href="../todo/laravel/#l57-laravel-queue-names">Laravel queue names</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>L59</td>
-<td><a href="../todo/laravel/#l59-typed-controller-middleware-names">Typed controller middleware names</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
 <td>L53</td>
 <td><a href="../todo/laravel/#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck">Collection key types from the column for <code>keyBy</code> / <code>groupBy</code> / <code>pluck</code></a></td>
 <td>Medium</td>
@@ -2224,10 +1982,16 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td>L17</td>
-<td><a href="../todo/laravel/#l17-additional-string-contexts-without-booting">Additional string contexts without booting</a> (middleware, assets, validation, Inertia)</td>
+<td>L57</td>
+<td><a href="../todo/laravel/#l57-laravel-queue-names">Laravel queue names</a></td>
+<td>Low-Medium</td>
 <td>Medium</td>
-<td>Medium-High</td>
+</tr>
+<tr>
+<td>L59</td>
+<td><a href="../todo/laravel/#l59-typed-controller-middleware-names">Typed controller middleware names</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
 </tr>
 <tr>
 <td>L31</td>
@@ -2254,36 +2018,6 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td>L8</td>
-<td><a href="../todo/laravel/#l8-withsum-withavg-withmin-withmax-aggregate-properties"><code>withSum</code>/<code>withAvg</code>/<code>withMin</code>/<code>withMax</code> aggregate properties</a></td>
-<td>Low-Medium</td>
-<td>High</td>
-</tr>
-<tr>
-<td>L45</td>
-<td><a href="../todo/laravel/#l45-_count-properties-are-offered-on-every-relationship"><code>*_count</code> properties are offered on every relationship</a></td>
-<td>Low-Medium</td>
-<td>High</td>
-</tr>
-<tr>
-<td>L60</td>
-<td><a href="../todo/laravel/#l60-read-relation-callback-overrides-and-fallbacks-from-the-declared-signature">Read relation callback overrides and fallbacks from the declared signature</a></td>
-<td>Low</td>
-<td>Low-Medium</td>
-</tr>
-<tr>
-<td>L29</td>
-<td><a href="../todo/laravel/#l29-livewire-and-volt-component-names">Livewire and Volt component names</a> (Livewire projects only)</td>
-<td>Low</td>
-<td>Low-Medium</td>
-</tr>
-<tr>
-<td>L27</td>
-<td><a href="../todo/laravel/#l27-legacy-controllermethod-action-strings">Legacy <code>Controller@method</code> action strings</a></td>
-<td>Low</td>
-<td>Low</td>
-</tr>
-<tr>
 <td>L10</td>
 <td><a href="../todo/laravel/#l10-redirectresponsewithx-dynamic-methods"><code>RedirectResponse::withX()</code> dynamic methods</a></td>
 <td>Low</td>
@@ -2296,10 +2030,16 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td></td>
-<td><strong><a href="../todo/external-stubs/">External Stubs</a></strong></td>
-<td></td>
-<td></td>
+<td>L46</td>
+<td><a href="../todo/laravel/#l46-can-on-a-user-model-the-receiver-does-not-name"><code>-&gt;can()</code> on a user model the receiver does not name</a></td>
+<td>Medium-High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>L17</td>
+<td><a href="../todo/laravel/#l17-additional-string-contexts-without-booting">Additional string contexts without booting</a> (middleware, assets, validation, Inertia)</td>
+<td>Medium</td>
+<td>Medium-High</td>
 </tr>
 <tr>
 <td>E7</td>
@@ -2308,10 +2048,483 @@ unlikely to move the needle for most users.</p>
 <td>Medium-High</td>
 </tr>
 <tr>
-<td></td>
-<td><strong><a href="../todo/indexing/">Indexing</a></strong></td>
-<td></td>
-<td></td>
+<td>BL1</td>
+<td><a href="../todo/blade/#bl1-blade-aware-code-actions">Blade-aware code actions</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>L1</td>
+<td><a href="../todo/laravel/#l1-facade-completion-upstream-method-generator-improvement">Facade completion</a> (upstream <code>facade-documenter</code> PRs)</td>
+<td>High</td>
+<td>High</td>
+</tr>
+<tr>
+<td>L8</td>
+<td><a href="../todo/laravel/#l8-withsum-withavg-withmin-withmax-aggregate-properties"><code>withSum</code>/<code>withAvg</code>/<code>withMin</code>/<code>withMax</code> aggregate properties</a></td>
+<td>Low-Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>L45</td>
+<td><a href="../todo/laravel/#l45-_count-properties-are-offered-on-every-relationship"><code>*_count</code> properties are offered on every relationship</a></td>
+<td>Low-Medium</td>
+<td>High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="type-inference">Type Inference<a class="headerlink" href="#type-inference" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T41</td>
+<td><a href="../todo/type-inference/#t41-a-reading-of-the-callees-body-overrides-a-declared-param-out">A reading of the callee's body overrides a declared <code>@param-out</code></a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>T26</td>
+<td><a href="../todo/type-inference/#t26-class-constants-named-as-docblock-types-foobar-foobar_">Class constants named as docblock types (<code>Foo::BAR</code>, <code>Foo::BAR_*</code>)</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T49</td>
+<td><a href="../todo/type-inference/#t49-a-closure-passed-to-a-constructor-gets-no-parameter-types-from-it">A closure passed to a constructor gets no parameter types from it</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>C13</td>
+<td><a href="../todo/completion/#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members"><code>self::</code>/<code>static::</code> inside a <code>@require-extends</code> trait does not see the required class's static members</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D23</td>
+<td><a href="../todo/diagnostics/#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it">A rebound closure's scope is added to the lexical one rather than replacing it</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T43</td>
+<td><a href="../todo/type-inference/#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved"><code>self::TypeAlias</code> inside <code>@extends</code>'s generic argument is not resolved</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>C5</td>
+<td><code>#[ReturnTypeContract]</code> parameter-dependent return types</td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T34</td>
+<td><a href="../todo/type-inference/#t34-staticconst-over-narrows-to-the-declaring-classs-value"><code>static::CONST</code> over-narrows to the declaring class's value</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>C7</td>
+<td><code>class_alias()</code> support</td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>D18</td>
+<td><a href="../todo/diagnostics/#d18-arrayint-t-is-accepted-wherever-a-listt-is-declared"><code>array&lt;int, T&gt;</code> is accepted wherever a <code>list&lt;T&gt;</code> is declared</a></td>
+<td>Low</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>T29</td>
+<td><a href="../todo/type-inference/#t29-definite-vs-possible-variable-existence-tracking">Definite vs possible variable existence tracking</a></td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>T46</td>
+<td><a href="../todo/type-inference/#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later">Template arguments are not inferred from how the object is used later</a></td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>T47</td>
+<td><a href="../todo/type-inference/#t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used">A closure assigned to a variable gets no parameter types from where it is used</a></td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>C1</td>
+<td>Array functions needing new code paths</td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>C4</td>
+<td>Non-array functions with dynamic return types</td>
+<td>Low</td>
+<td>High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="diagnostics">Diagnostics<a class="headerlink" href="#diagnostics" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D29</td>
+<td><a href="../todo/diagnostics/#d29-namespace-and-declare-bodies-break-the-reachability-flow"><code>namespace</code> and <code>declare</code> bodies break the reachability flow</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>D19</td>
+<td><a href="../todo/diagnostics/#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write"><code>invalid_member_access</code> cannot tell a property read from a write</a> (includes PHP 8.4 <code>private(set)</code>)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D16</td>
+<td><a href="../todo/diagnostics/#d16-unreachable_match_arm-ignores-literal-subject-types"><code>unreachable_match_arm</code> ignores literal subject types</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D33</td>
+<td><a href="../todo/diagnostics/#d33-private-properties-nothing-reads-or-writes-are-not-reported">Private properties nothing reads or writes are not reported</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D20</td>
+<td><a href="../todo/diagnostics/#d20-foobar-and-foobar-are-the-same-span"><code>Foo::$bar</code> and <code>Foo::bar</code> are the same span</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D15</td>
+<td><a href="../todo/diagnostics/#d15-unused-parameter-diagnostic">Unused parameter diagnostic</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D22</td>
+<td><a href="../todo/diagnostics/#d22-member-provenance-is-recomputed-instead-of-recorded">Member provenance is recomputed instead of recorded</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>D17</td>
+<td><a href="../todo/diagnostics/#d17-docblock_native_mismatch-only-judges-nullability"><code>docblock_native_mismatch</code> only judges nullability</a></td>
+<td>Low</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>D21</td>
+<td><a href="../todo/diagnostics/#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check">A union of an unreachable and a missing member is reported by neither check</a></td>
+<td>Low</td>
+<td>Medium-High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="code-generation-refactoring">Code Generation &amp; Refactoring<a class="headerlink" href="#code-generation-refactoring" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A16</td>
+<td><a href="../todo/actions/#a16-snippet-placeholder-for-extracted-method-name">Snippet placeholder for extracted method name</a> (lets the user type over the generated name immediately)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A43</td>
+<td><a href="../todo/actions/#a43-update-docblock-generics">Update docblock generics</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>H13</td>
+<td>Declare missing property (native unknown-member diagnostic and PHPStan <code>property.notFound</code>)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>H15</td>
+<td>Template bound from tip — add <code>@template T of X</code></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F17</td>
+<td><a href="../todo/lsp-features/#f17-wire-class-move-to-workspacewillrenamefiles">Wire class move to <code>workspace/willRenameFiles</code></a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A40</td>
+<td><a href="../todo/actions/#a40-generate-method-from-call">Generate method from call</a></td>
+<td>High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>A41</td>
+<td><a href="../todo/actions/#a41-create-class-from-non-existing-name">Create class from non-existing name</a></td>
+<td>High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>FX7</td>
+<td><a href="../todo/fix-cli/#fx7-add_return_type-generate-return-docblocks-from-function-bodies"><code>add_return_type</code> — generate <code>@return</code> docblocks from function bodies</a></td>
+<td>Medium-High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>H16</td>
+<td><code>match.unhandled</code> — add missing match arms</td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>F22</td>
+<td><a href="../todo/lsp-features/#f22-merge-a-namespace-onto-one-that-shares-a-class-name">Merge a namespace onto one that shares a class name</a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>A34</td>
+<td><a href="../todo/actions/#a34-unified-code-action-handler-architecture">Unified code action handler architecture</a> (closure-based resolve, unified fix type)</td>
+<td>Medium</td>
+<td>Very High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cleanup-modernize">Cleanup &amp; Modernize<a class="headerlink" href="#cleanup-modernize" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A28</td>
+<td><a href="../todo/actions/#a28-explicit-nullable-parameter-type-php-84-deprecation">Explicit nullable parameter type</a> (PHP 8.4 deprecation)</td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>FX1</td>
+<td><a href="../todo/fix-cli/#fx1-deprecated-replace-deprecated-symbol-usage"><code>deprecated</code> — replace deprecated symbol usage</a></td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>FX3</td>
+<td><a href="../todo/fix-cli/#fx3-phpstanreturnunusedtype-remove-unused-type-from-return-union"><code>phpstan.return.unusedType</code> — remove unused type from return union</a></td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>H19</td>
+<td><code>property.unused</code> / <code>method.unused</code> — remove unused member</td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>H23</td>
+<td><code>instanceof.alwaysTrue</code> — remove redundant instanceof check</td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>H24</td>
+<td><code>catch.neverThrown</code> — remove unnecessary catch clause</td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>D5</td>
+<td><a href="../todo/diagnostics/#d5-external-tool-diagnostic-suppression-actions">External tool diagnostic suppression actions</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>A25</td>
+<td><a href="../todo/actions/#a25-strpos-str_contains-php-80"><code>strpos</code> → <code>str_contains</code></a> (PHP 8.0+)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>H4</td>
+<td><code>assign.byRefForeachExpr</code> — unset by-reference foreach variable</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>FX2</td>
+<td><a href="../todo/fix-cli/#fx2-unused_variable-remove-unused-variables"><code>unused_variable</code> — remove unused variables</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A29</td>
+<td><a href="../todo/actions/#a29-simplify-boolean-return">Simplify boolean return</a> (<code>if (cond) return true; return false;</code> → <code>return cond;</code>)</td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A45</td>
+<td><a href="../todo/actions/#a45-simplify-with-elvis-operator">Simplify with <code>?:</code></a> (replace <code>$x ? $x : $y</code> with <code>$x ?: $y</code>)</td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D28</td>
+<td><a href="../todo/diagnostics/#d28-remove-unreachable-code-is-wired-to-phpstan-only">"Remove unreachable code" is wired to PHPStan only</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>H20</td>
+<td><code>generics.callSiteVarianceRedundant</code> — remove redundant variance annotation</td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A31</td>
+<td><a href="../todo/actions/#a31-remove-always-else-extract-guard-clause">Remove always-else</a> (extract guard clause)</td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>A37</td>
+<td><a href="../todo/actions/#a37-simplify-with-nullsafe-operator">Simplify with <code>?-&gt;</code></a> (replace null-checked chains with the nullsafe operator)</td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>A38</td>
+<td><a href="../todo/actions/#a38-convert-ifelseif-chain-to-match">Convert if/elseif chain to <code>match</code></a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="editing-experience">Editing Experience<a class="headerlink" href="#editing-experience" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>F15</td>
+<td><a href="../todo/lsp-features/#f15-go-to-declaration">Go-to-declaration</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>F7</td>
+<td><a href="../todo/lsp-features/#f7-evaluatable-expression-support-dap-integration">Evaluatable expression support (DAP integration)</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>F16</td>
+<td><a href="../todo/lsp-features/#f16-on-type-brace-de-indent">On-type <code>}</code> brace de-indent</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>S2</td>
+<td><a href="../todo/signature-help/#s2-closure-arrow-function-parameter-signature-help">Closure / arrow function parameter signature help</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A46</td>
+<td><a href="../todo/actions/#a46-honor-contextonly-in-code-action-responses">Honor <code>context.only</code> in code action responses</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>N1</td>
+<td>Template engine (type-aware snippets)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>C8</td>
+<td><a href="../todo/completion/#c8-filesystem-proximity-as-an-affinity-tiebreaker">Filesystem proximity as an affinity tiebreaker</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>C3</td>
+<td>Go-to-definition for array shape keys via bracket access</td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>C6</td>
+<td><code>#[ExpectedValues]</code> parameter value suggestions</td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>C10</td>
+<td><a href="../todo/completion/#c10-deprecation-markers-on-class-name-completions-from-all-sources">Deprecation markers on class-name completions from all sources</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>C12</td>
+<td><a href="../todo/completion/#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion">The implicit <code>$value</code> of a <code>set</code> hook is not offered by variable completion</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>S4</td>
+<td>Named argument awareness in active parameter</td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>S5</td>
+<td>Language construct signature help and hover</td>
+<td>Low</td>
+<td>Medium</td>
 </tr>
 <tr>
 <td>X7</td>
@@ -2319,6 +2532,74 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 <td>Medium-High</td>
 </tr>
+<tr>
+<td>S3</td>
+<td>Multiple overloaded signatures</td>
+<td>Low</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>C11</td>
+<td><a href="../todo/completion/#c11-smarter-member-ordering-after-">Smarter member ordering after <code>-&gt;</code> / <code>::</code></a></td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>N2</td>
+<td>N-gram prediction from PHP corpus</td>
+<td>Medium</td>
+<td>Very High</td>
+</tr>
+<tr>
+<td>N3</td>
+<td>Fine-tuned GGUF sidecar model</td>
+<td>Medium</td>
+<td>Very High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="editors-distribution">Editors &amp; Distribution<a class="headerlink" href="#editors-distribution" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>F14</td>
+<td><a href="../todo/lsp-features/#f14-helix-upstream-pr">Helix upstream PR</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>F11</td>
+<td><a href="../todo/lsp-features/#f11-windows-code-signing">Windows code signing</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F12</td>
+<td><a href="../todo/lsp-features/#f12-intellij-phpstorm-plugin">IntelliJ / PHPStorm plugin</a></td>
+<td>High</td>
+<td>Medium-High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="indexing-configuration">Indexing &amp; Configuration<a class="headerlink" href="#indexing-configuration" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
 <tr>
 <td>X16</td>
 <td><a href="../todo/indexing/#x16-composers-own-class-lists-bypass-indexing-exclude">Composer's own class lists bypass <code>[indexing] exclude</code></a></td>
@@ -2348,30 +2629,6 @@ unlikely to move the needle for most users.</p>
 <td><a href="../todo/indexing/#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names">Say when an exclude hid the class a diagnostic names</a></td>
 <td>Low-Medium</td>
 <td>Medium-High</td>
-</tr>
-<tr>
-<td></td>
-<td><strong><a href="../todo/inline-completion/">Inline Completion</a></strong></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td>N1</td>
-<td>Template engine (type-aware snippets)</td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>N2</td>
-<td>N-gram prediction from PHP corpus</td>
-<td>Medium</td>
-<td>Very High</td>
-</tr>
-<tr>
-<td>N3</td>
-<td>Fine-tuned GGUF sidecar model</td>
-<td>Medium</td>
-<td>Very High</td>
 </tr>
 </tbody>
 </table>

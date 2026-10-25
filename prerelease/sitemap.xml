@@ -52,6 +52,9 @@
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/diagnostics/</loc>
       </url>
       <url>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/drupal/</loc>
+      </url>
+      <url>
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/external-stubs/</loc>
       </url>
       <url>
@@ -82,7 +85,13 @@
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/signature-help/</loc>
       </url>
       <url>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/testing/</loc>
+      </url>
+      <url>
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/type-inference/</loc>
+      </url>
+      <url>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/wordpress/</loc>
       </url>
       <url>
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/wasm/</loc>

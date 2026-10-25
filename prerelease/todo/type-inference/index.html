@@ -1336,6 +1336,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T57. A <code>global</code> variable is untyped unless a <code>@var</code> sits above it
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1602,6 +1613,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T56. A DBAL result's row count ignores the connection's driver
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T57. A <code>global</code> variable is untyped unless a <code>@var</code> sits above it
       </span>
     </span>
   </a>
@@ -2160,6 +2182,36 @@ project's <code>doctrine.yaml</code>.</p>
 <p><strong>Where to look:</strong> PHPStan's Doctrine extension
 (<code>Type/Doctrine/DBAL/*RowCountReturnTypeExtension</code>,
 <code>Doctrine/Driver/DriverDetector</code>).</p>
+<hr />
+<h2 id="t57-a-global-variable-is-untyped-unless-a-var-sits-above-it">T57. A <code>global</code> variable is untyped unless a <code>@var</code> sits above it<a class="headerlink" href="#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">/**</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x"> * @global wpdb $wpdb WordPress database abstraction object.</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x"> */</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">function acme_count_orders(): int {</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">    global $wpdb;</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">    return (int) $wpdb-&gt;get_var("SELECT COUNT(*) FROM {$wpdb-&gt;prefix}acme_orders");</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>global $x</code> takes its type from the same file's top-level scope, or from
+a <code>@var</code> docblock directly above the statement. Two more sources are
+ignored:</p>
+<ul>
+<li><strong><code>@global Type $name</code></strong> on the enclosing function's docblock, the
+  phpDocumentor tag WordPress core and most plugins use for exactly
+  this. Reading it is the cheap half.</li>
+<li><strong>An assignment in another file</strong>, such as the ones WordPress core
+  makes to <code>$wp_query</code> and <code>$wpdb</code> (directly or through <code>$GLOBALS</code>)
+  during bootstrap, or a globals stub file that declares them with <code>@var</code>. PhpStorm types
+  globals this way. It needs an index of global variable assignments,
+  which must stay cheap: decide which files may feed it (stubs, and
+  files the project includes at top level) before building it.</li>
+</ul>
+<p>WordPress is the biggest user (<code>$wpdb</code>, <code>$post</code>, <code>$wp_query</code>), but the
+gap is in the generic engine.</p>
+<p><strong>Where to look:</strong> <code>src/type_engine/variable/forward_walk/statements.rs</code>
+(<code>Statement::Global</code>), <code>apply_global_var_docblocks</code> in
+<code>src/type_engine/variable/forward_walk/var_docblocks.rs</code>.</p>
 
 
 
