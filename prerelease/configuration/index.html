@@ -1936,6 +1936,12 @@ those still need a restart to fully apply.</p>
 <td>Report unknown property access on classes with <code>__get</code> when virtual properties are defined. Matches PHPStan's <code>reportMagicProperties</code>.</td>
 </tr>
 <tr>
+<td><code>partial-union-members</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Report a member access on a union when only some of its classes declare the member. Matches PHPStan's <code>checkUnionTypes</code>.</td>
+</tr>
+<tr>
 <td><code>downgrade-nullable-argument-mismatch</code></td>
 <td>bool</td>
 <td><code>false</code></td>
