@@ -1122,6 +1122,39 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d35-cloneobject-does-not-check-the-properties-it-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D35. <code>clone($object, [...])</code> does not check the properties it writes
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d36-a-dynamic-member-name-that-cannot-be-a-name-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D36. A dynamic member name that cannot be a name is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d37-a-method-only-some-members-of-a-union-declare-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D37. A method only some members of a union declare is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1774,6 +1807,39 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d35-cloneobject-does-not-check-the-properties-it-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D35. <code>clone($object, [...])</code> does not check the properties it writes
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d36-a-dynamic-member-name-that-cannot-be-a-name-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D36. A dynamic member name that cannot be a name is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d37-a-method-only-some-members-of-a-union-declare-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D37. A method only some members of a union declare is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2114,31 +2180,21 @@ something the type engine has already decided.</p>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">        Suit::Spades =&gt; 'spades',</span>
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    };</span>
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">}</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">function describe(Suit $s): string {</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">    if ($s-&gt;value === 'H') {</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="x">        return 'hearts';</span>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="x">    }</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="x">    return match ($s) {          // must stay silent: only Spades reaches here</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="x">        Suit::Spades =&gt; 'spades',</span>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="x">    };</span>
-<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="x">}</span>
 </code></pre></div>
 <p>A <code>match</code> with no <code>default</code> arm throws <code>UnhandledMatchError</code> for any subject
 value no arm covers. When the subject resolves to a closed set (an enum, a
 union of enum cases, a <code>bool</code>, or a union of literals), subtract each arm's
 conditions from it and report what is left. PHPStan (<code>match.unhandled</code>),
 Psalm (<code>UnhandledMatchCondition</code>), mago and Qodana all do.</p>
-<p>The second function is part of the job, not a follow-up. The check can only
-stay quiet there if a comparison on a backed enum's <code>-&gt;value</code> narrows the
-enum itself, so <code>$s-&gt;value === 'H'</code> has to remove <code>Suit::Hearts</code> from <code>$s</code>
-on the fall-through path. Without that narrowing the check would be a new
-false positive. PHPStan and Psalm report the second function too, and the
-suite counts that against them. Each case already has a type of its own,
-and <code>$s === Suit::Hearts</code> already removes it from <code>$s</code>; what is missing is
-reading the <code>-&gt;value</code> comparison as the case whose value it names.</p>
+<p>Narrowing that already removes a case from the subject (<code>$s === Suit::Hearts</code>,
+<code>instanceof</code>, an early return) has to carry into the check. A comparison on
+<code>-&gt;value</code> (<code>$s-&gt;value === 'H'</code>) does not narrow the enum in any of those
+tools, and they all report the <code>match</code> after it, so doing the same is not a
+false positive by their standard.</p>
 <p>Found running the php-typing-conformance suite
-(<code>regressions_backed_enum_value_narrowing.php</code>). A quick fix to add the
+(<code>regressions_backed_enum_value_narrowing.php</code>). That file only passes the
+other tools through per-tool exemptions on the <code>-&gt;value</code>-guarded <code>match</code>;
+once this check lands, it needs the same exemption for PHPantom. A quick fix to add the
 missing arms is <a href="../phpstan-actions/#h16-matchunhandled-add-missing-match-arms">H16</a> (<code>match.unhandled</code>), which could
 then attach to this diagnostic instead of only PHPStan's.</p>
 <h2 id="d26-reading-a-typed-property-that-nothing-initialises-is-not-reported">D26. Reading a typed property that nothing initialises is not reported<a class="headerlink" href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" title="Permanent link">&para;</a></h2>
@@ -2301,6 +2357,67 @@ and <code>gedmo_property_assign*.fixture</code> in <code>tests/fixtures/phpstan_
 for the read/write bookkeeping, the Doctrine mapping index in
 <code>src/framework.rs</code>, and PHPStan's <code>UnusedPrivatePropertyRule</code> with the
 Doctrine extension's <code>PropertiesExtension</code>s.</p>
+<hr />
+<h2 id="d35-cloneobject-does-not-check-the-properties-it-writes">D35. <code>clone($object, [...])</code> does not check the properties it writes<a class="headerlink" href="#d35-cloneobject-does-not-check-the-properties-it-writes" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">final class Point { public function __construct(public int $x) {} }</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">$p = new Point(1);</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">$copy = clone($p, ['x' =&gt; 2]);        // fine</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">clone($p, ['nope' =&gt; 1]);             // Error: Point has no $nope</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">clone($p, ['x' =&gt; 'str']);            // TypeError: $x is int</span>
+</code></pre></div>
+<p>PHP 8.5's two-argument <code>clone</code> writes each entry of the array onto the
+copy, with the same rules as a property assignment: the property has to
+exist and be writable from the calling scope, and the value has to match
+its type. The result type is already right. Treat each literal key of the
+second argument as a write to that property of the cloned class, and run
+it through the checks an <code>$copy-&gt;x = ...</code> assignment gets (unknown member,
+visibility, readonly, property type).</p>
+<p>Found running the php-typing-conformance suite
+(<code>objects_clone_with_properties.php</code>). PHPStan and Psalm report it.</p>
+<hr />
+<h2 id="d36-a-dynamic-member-name-that-cannot-be-a-name-is-not-reported">D36. A dynamic member name that cannot be a name is not reported<a class="headerlink" href="#d36-a-dynamic-member-name-that-cannot-be-a-name-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">function f(\Stringable $s, \stdClass $o, Target $t): void {</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">    $t-&gt;{$s};      // fine: property names are string-cast</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    $t-&gt;{$o};      // Error: object of class stdClass could not be converted to string</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">    $t-&gt;{$s}();    // Error: method name must be a string</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">    $t-&gt;{$o}();    // Error: method name must be a string</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>A dynamic property name goes through string conversion, so a <code>Stringable</code>
+object is a valid name and any other object is not. A dynamic method name
+must already be a string: PHP does not call <code>__toString()</code> for it. Report
+a selector expression whose resolved type cannot satisfy that rule. Stay
+silent when the selector type is unresolved or <code>mixed</code>.</p>
+<p>Found running the php-typing-conformance suite
+(<code>regressions_dynamic_name_stringable.php</code>). PHPStan (bleeding edge) and
+mago report it.</p>
+<hr />
+<h2 id="d37-a-method-only-some-members-of-a-union-declare-is-not-reported">D37. A method only some members of a union declare is not reported<a class="headerlink" href="#d37-a-method-only-some-members-of-a-union-declare-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">final class User  { public function name(): string { return 'u'; } }</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">final class Guest {}</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">function f(User|Guest $v): void {</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x">    echo $v-&gt;name();   // Error whenever a Guest arrives</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>The unknown-member check stays silent as soon as any branch of a union
+declares the member (see the module doc in
+<code>src/diagnostics/unknown_members/mod.rs</code>). That keeps it free of false
+positives while the resolver may have lost branches, but it misses a call
+that fails on every runtime path through one branch. PHPStan reports it at
+level 7 (<code>checkUnionTypes</code>).</p>
+<p>This builds on the per-branch verdicts <a href="#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check">D21</a>
+asks for: only a union whose branches all resolved can be judged, and a
+branch with <code>__call</code>/<code>__get</code> still accepts the name. Consider a separate,
+lower-severity diagnostic so projects can turn it off without losing the
+plain unknown-member check.</p>
+<p>Found running the php-typing-conformance suite
+(<code>unions_partial_member_method_call.php</code>). PHPStan, Psalm, and mago
+report it; none of the IDE tools do.</p>
 
 
 

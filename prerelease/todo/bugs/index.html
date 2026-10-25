@@ -939,23 +939,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b677-unset-in-a-var-union-is-resolved-as-a-class-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B677. <code>unset</code> in a <code>@var</code> union is resolved as a class name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1557,23 +1540,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b677-unset-in-a-var-union-is-resolved-as-a-class-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B677. <code>unset</code> in a <code>@var</code> union is resolved as a class name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1659,28 +1625,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b677-unset-in-a-var-union-is-resolved-as-a-class-name">B677. <code>unset</code> in a <code>@var</code> union is resolved as a class name<a class="headerlink" href="#b677-unset-in-a-var-union-is-resolved-as-a-class-name" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @var \DateTime|unset $guarded */          // reported: Class 'App\unset' not found</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if (isset($guarded)) {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    echo date_format($guarded, 'Y-m-d');      // reported: App\unset does not satisfy DateTimeInterface</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>unset</code> in a docblock union is the Blade-view idiom for "this variable
-may not be defined at all" (issue #366). We resolve the spelling against
-the current namespace like any class name, so every such <code>@var</code> is an
-<code>unknown_class</code>, and the phantom class then rides along in the variable's
-type: <code>isset()</code> does not remove it, so the guarded call still reports an
-argument mismatch.</p>
-<p><code>unset</code> has to be a docblock keyword (<code>php_type/keywords.rs</code>) rather than
-a class name, and the type it stands for has to be something <code>isset()</code>
-narrows away. The simplest honest reading is <code>null</code>: <code>\DateTime|unset</code>
-becomes <code>?\DateTime</code>, which the existing <code>isset()</code>/<code>!== null</code> narrowing
-already handles. A true possibly-undefined state would be more precise,
-but nothing downstream needs it to make the guarded reads correct.</p>
-<p>Found running the php-typing-conformance suite
-(<code>regressions_unset_pseudo_type.php</code>). Phpactor, Intelephense, devsense
-and Qodana all pass it.</p>
+<p>No outstanding items.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
