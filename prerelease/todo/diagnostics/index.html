@@ -1101,17 +1101,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d32-discarding-the-result-of-a-nodiscard-call-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D32. Discarding the result of a <code>#[\NoDiscard]</code> call is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d33-private-properties-nothing-reads-or-writes-are-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1786,17 +1775,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d32-discarding-the-result-of-a-nodiscard-call-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D32. Discarding the result of a <code>#[\NoDiscard]</code> call is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d33-private-properties-nothing-reads-or-writes-are-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2314,32 +2292,13 @@ The extension's fixtures are the <code>entity_*.fixture</code> fixtures in
 <code>tests/phpstan_doctrine/rules/Doctrine/ORM/</code>, whose custom column types
 <code>entity-manager.php</code> registers.</p>
 <hr />
-<h2 id="d32-discarding-the-result-of-a-nodiscard-call-is-not-reported">D32. Discarding the result of a <code>#[\NoDiscard]</code> call is not reported<a class="headerlink" href="#d32-discarding-the-result-of-a-nodiscard-call-is-not-reported" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">#[\NoDiscard]</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">function mintId(): int { return 1; }</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">mintId();          // PHP 8.5 warning: the return value is discarded</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">echo mintId();     // fine</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">(void) mintId();   // fine: the documented opt-out</span>
-</code></pre></div>
-<p>PHP 8.5 warns when a function or method marked <code>#[\NoDiscard]</code> is called
-as a bare expression statement. Report a call statement whose resolved
-callee carries the attribute, unless it is cast to <code>(void)</code>. Only the
-callee's own attribute counts: PHP does not inherit it onto an
-implementation. A call without the attribute is never reported, so this
-is not a generic unused-result lint.</p>
-<p>Found running the php-typing-conformance suite
-(<code>directives_nodiscard_return.php</code>). Intelephense, PHPStan, Psalm, Phan
-and mago report it.</p>
-<hr />
 <h2 id="d33-private-properties-nothing-reads-or-writes-are-not-reported">D33. Private properties nothing reads or writes are not reported<a class="headerlink" href="#d33-private-properties-nothing-reads-or-writes-are-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">final class Invoice</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">{</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">    private string $legacyNumber; // never read</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">    private int $total;           // read, never written</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">final class Invoice</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">{</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    private string $legacyNumber; // never read</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    private int $total;           // read, never written</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>A private property nothing outside the class can reach is dead when the
 class never reads it, and holds only its default when the class never
@@ -2360,12 +2319,12 @@ Doctrine extension's <code>PropertiesExtension</code>s.</p>
 <hr />
 <h2 id="d35-cloneobject-does-not-check-the-properties-it-writes">D35. <code>clone($object, [...])</code> does not check the properties it writes<a class="headerlink" href="#d35-cloneobject-does-not-check-the-properties-it-writes" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">final class Point { public function __construct(public int $x) {} }</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">$p = new Point(1);</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">$copy = clone($p, ['x' =&gt; 2]);        // fine</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">clone($p, ['nope' =&gt; 1]);             // Error: Point has no $nope</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">clone($p, ['x' =&gt; 'str']);            // TypeError: $x is int</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">final class Point { public function __construct(public int $x) {} }</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">$p = new Point(1);</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">$copy = clone($p, ['x' =&gt; 2]);        // fine</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">clone($p, ['nope' =&gt; 1]);             // Error: Point has no $nope</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">clone($p, ['x' =&gt; 'str']);            // TypeError: $x is int</span>
 </code></pre></div>
 <p>PHP 8.5's two-argument <code>clone</code> writes each entry of the array onto the
 copy, with the same rules as a property assignment: the property has to
@@ -2379,12 +2338,12 @@ visibility, readonly, property type).</p>
 <hr />
 <h2 id="d36-a-dynamic-member-name-that-cannot-be-a-name-is-not-reported">D36. A dynamic member name that cannot be a name is not reported<a class="headerlink" href="#d36-a-dynamic-member-name-that-cannot-be-a-name-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">function f(\Stringable $s, \stdClass $o, Target $t): void {</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">    $t-&gt;{$s};      // fine: property names are string-cast</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    $t-&gt;{$o};      // Error: object of class stdClass could not be converted to string</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">    $t-&gt;{$s}();    // Error: method name must be a string</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">    $t-&gt;{$o}();    // Error: method name must be a string</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">function f(\Stringable $s, \stdClass $o, Target $t): void {</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    $t-&gt;{$s};      // fine: property names are string-cast</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">    $t-&gt;{$o};      // Error: object of class stdClass could not be converted to string</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">    $t-&gt;{$s}();    // Error: method name must be a string</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">    $t-&gt;{$o}();    // Error: method name must be a string</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>A dynamic property name goes through string conversion, so a <code>Stringable</code>
 object is a valid name and any other object is not. A dynamic method name
@@ -2397,12 +2356,12 @@ mago report it.</p>
 <hr />
 <h2 id="d37-a-method-only-some-members-of-a-union-declare-is-not-reported">D37. A method only some members of a union declare is not reported<a class="headerlink" href="#d37-a-method-only-some-members-of-a-union-declare-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">final class User  { public function name(): string { return 'u'; } }</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">final class Guest {}</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">function f(User|Guest $v): void {</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x">    echo $v-&gt;name();   // Error whenever a Guest arrives</span>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">final class User  { public function name(): string { return 'u'; } }</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">final class Guest {}</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">function f(User|Guest $v): void {</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">    echo $v-&gt;name();   // Error whenever a Guest arrives</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>The unknown-member check stays silent as soon as any branch of a union
 declares the member (see the module doc in
