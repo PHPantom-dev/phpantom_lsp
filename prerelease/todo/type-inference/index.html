@@ -2089,8 +2089,7 @@ than Symfony does. The extension's fixtures run against Symfony 7.4 in
 <li><code>TreeBuilder::getRootNode()</code> and the node definitions' <code>end()</code> returning
   their parent, for the Symfony versions that do not declare them as
   generics yet. Symfony 7.4 does, and its fixtures follow those
-  declarations; where they fail, the cause is
-  <a href="../bugs/#b681-static-as-a-type-argument-of-a-return-type-loses-the-receivers-own-type-arguments">B681</a>.</li>
+  declarations.</li>
 </ul>
 <p>Where a rule fits a conditional return type, write it as a declarative
 patch on the vendor class (the way <code>virtual_members/laravel/patches.rs</code>

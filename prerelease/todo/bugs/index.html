@@ -928,23 +928,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Templates">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b681-static-as-a-type-argument-of-a-return-type-loses-the-receivers-own-type-arguments" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B681. <code>static</code> as a type argument of a return type loses the receiver's own type arguments
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1580,23 +1563,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Templates">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b681-static-as-a-type-argument-of-a-return-type-loses-the-receivers-own-type-arguments" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B681. <code>static</code> as a type argument of a return type loses the receiver's own type arguments
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1725,46 +1691,14 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
-<h3 id="b681-static-as-a-type-argument-of-a-return-type-loses-the-receivers-own-type-arguments">B681. <code>static</code> as a type argument of a return type loses the receiver's own type arguments<a class="headerlink" href="#b681-static-as-a-type-argument-of-a-return-type-loses-the-receivers-own-type-arguments" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @template TParent */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class NodeBuilder</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">{</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    /** @return TParent */</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    public function end() {}</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">/** @template TParent */</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">class ArrayNodeDefinition</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">{</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    /** @return NodeBuilder&lt;static&gt; */</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">    public function children(): NodeBuilder {}</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">}</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">/** @var ArrayNodeDefinition&lt;TreeBuilder&gt; $root */</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">$builder = $root-&gt;children(); // NodeBuilder&lt;ArrayNodeDefinition&lt;TreeBuilder&gt;&gt;, correct</span>
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="x">$builder-&gt;end();              // ArrayNodeDefinition, should be ArrayNodeDefinition&lt;TreeBuilder&gt;</span>
-</code></pre></div>
-<p>The call's type is right, but the class it carries for the next call in the
-chain is built by <code>resolve_method_return_types_with_args</code>, which hands
-<code>type_hint_to_classes_typed_returned</code> the owner's bare FQN for <code>static</code>. So
-the <code>NodeBuilder</code> the chain continues on is specialised with
-<code>TParent = ArrayNodeDefinition</code>, and its members no longer name <code>TParent</code>
-for the receiver's arguments to substitute. The receiver's full type (the
-one <code>self_replace</code> uses for the type string in <code>owner_method_call.rs</code>)
-should stand in for <code>static</code> here too.</p>
-<p>Symfony 7.4's config tree builder declares <code>children()</code> this way, so every
-<code>-&gt;children()-&gt;…-&gt;end()</code> chain loses the parent's type arguments. The
-fixtures marked <code>// SKIP: `static` as a type argument of a return type
-loses the receiver's own type arguments</code> in
-<code>tests/phpstan_symfony/data/tree_builder.php</code> show each case.</p>
+<p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b677-unset-in-a-var-union-is-resolved-as-a-class-name">B677. <code>unset</code> in a <code>@var</code> union is resolved as a class name<a class="headerlink" href="#b677-unset-in-a-var-union-is-resolved-as-a-class-name" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @var \DateTime|unset $guarded */          // reported: Class 'App\unset' not found</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">if (isset($guarded)) {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    echo date_format($guarded, 'Y-m-d');      // reported: App\unset does not satisfy DateTimeInterface</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @var \DateTime|unset $guarded */          // reported: Class 'App\unset' not found</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if (isset($guarded)) {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    echo date_format($guarded, 'Y-m-d');      // reported: App\unset does not satisfy DateTimeInterface</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>unset</code> in a docblock union is the Blade-view idiom for "this variable
 may not be defined at all" (issue #366). We resolve the spelling against
@@ -1786,23 +1720,23 @@ and Qodana all pass it.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b678-an-inline-see-classprop-in-a-docblocks-prose-is-not-a-reference">B678. An inline <code>{@see Class::$prop}</code> in a docblock's prose is not a reference<a class="headerlink" href="#b678-an-inline-see-classprop-in-a-docblocks-prose-is-not-a-reference" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Docblock {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    public static $vectors = [];</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    /**</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">     * The tags defined in the docblock.</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">     *</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">     * The array has keys which are the tag names (excluding the @) and values</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">     * that are arrays, each of which is an entry for the tag.</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">     *</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">     * In the case where the tag name is defined in {@see DocBlock::$vectors} the</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">     * value within the tag-value array is an array in itself with keys as</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">     * described by {@see DocBlock::$vectors}.</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">     *</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">     * @var array</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="x">     */</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="x">    public $tags;</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Docblock {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    public static $vectors = [];</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    /**</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">     * The tags defined in the docblock.</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">     *</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">     * The array has keys which are the tag names (excluding the @) and values</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">     * that are arrays, each of which is an entry for the tag.</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">     *</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">     * In the case where the tag name is defined in {@see DocBlock::$vectors} the</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">     * value within the tag-value array is an array in itself with keys as</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">     * described by {@see DocBlock::$vectors}.</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">     *</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">     * @var array</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="x">     */</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="x">    public $tags;</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="x">}</span>
 </code></pre></div>
 <p>Find References on <code>$vectors</code> returns a standalone <code>@see DocBlock::$vectors</code>
 tag in another file, but neither inline <code>{@see DocBlock::$vectors}</code> above,
