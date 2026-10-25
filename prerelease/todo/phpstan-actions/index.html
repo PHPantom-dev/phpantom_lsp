@@ -1913,9 +1913,11 @@ if needed). Same docblock insertion pattern as <code>add_throws.rs</code>.</p>
 <h3 id="h16-matchunhandled-add-missing-match-arms">H16. <code>match.unhandled</code> — Add missing match arms<a class="headerlink" href="#h16-matchunhandled-add-missing-match-arms" title="Permanent link">&para;</a></h3>
 <p><strong>Identifier:</strong> <code>match.unhandled</code>
 <strong>Message:</strong> <code>Match expression does not handle remaining value(s): {types}</code></p>
+<p>The native <code>unhandled_match</code> diagnostic uses the same message, so the
+action can attach to both.</p>
 <p>Parse the remaining value(s) from the message:
-<code>does not handle remaining value\(s\): (.+)$</code></p>
-<p>The value list is comma-separated. Each value can be:
+<code>does not handle remaining values?: (.+)$</code></p>
+<p>The value list is separated by <code>|</code>. Each value can be:
 - An enum case: <code>Foo::Bar</code> — generate <code>Foo::Bar =&gt; TODO</code>
 - A string literal: <code>'foo'</code> — generate <code>'foo' =&gt; TODO</code>
 - An int literal: <code>42</code> — generate <code>42 =&gt; TODO</code>

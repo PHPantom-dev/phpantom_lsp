@@ -1035,17 +1035,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D24. A <code>match</code> that does not cover every enum case is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1709,17 +1698,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D24. A <code>match</code> that does not cover every enum case is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2149,37 +2127,11 @@ reported, because <code>self</code> itself resolves to the bound class.)</p>
 it, and let it replace the enclosing class rather than joining it.
 Inferring a binding from the spelling of the subject is guessing at
 something the type engine has already decided.</p>
-<h2 id="d24-a-match-that-does-not-cover-every-enum-case-is-not-reported">D24. A <code>match</code> that does not cover every enum case is not reported<a class="headerlink" href="#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">enum Suit: string { case Hearts = 'H'; case Spades = 'S'; }</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">function name(Suit $s): string {</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    return match ($s) {          // should be reported: Suit::Hearts throws UnhandledMatchError</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">        Suit::Spades =&gt; 'spades',</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    };</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">}</span>
-</code></pre></div>
-<p>A <code>match</code> with no <code>default</code> arm throws <code>UnhandledMatchError</code> for any subject
-value no arm covers. When the subject resolves to a closed set (an enum, a
-union of enum cases, a <code>bool</code>, or a union of literals), subtract each arm's
-conditions from it and report what is left. PHPStan (<code>match.unhandled</code>),
-Psalm (<code>UnhandledMatchCondition</code>), mago and Qodana all do.</p>
-<p>Narrowing that already removes a case from the subject (<code>$s === Suit::Hearts</code>,
-<code>instanceof</code>, an early return) has to carry into the check. A comparison on
-<code>-&gt;value</code> (<code>$s-&gt;value === 'H'</code>) does not narrow the enum in any of those
-tools, and they all report the <code>match</code> after it, so doing the same is not a
-false positive by their standard.</p>
-<p>Found running the php-typing-conformance suite
-(<code>regressions_backed_enum_value_narrowing.php</code>). That file only passes the
-other tools through per-tool exemptions on the <code>-&gt;value</code>-guarded <code>match</code>;
-once this check lands, it needs the same exemption for PHPantom. A quick fix to add the
-missing arms is <a href="../phpstan-actions/#h16-matchunhandled-add-missing-match-arms">H16</a> (<code>match.unhandled</code>), which could
-then attach to this diagnostic instead of only PHPStan's.</p>
 <h2 id="d26-reading-a-typed-property-that-nothing-initialises-is-not-reported">D26. Reading a typed property that nothing initialises is not reported<a class="headerlink" href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">final class User { public string $name; }</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$user = new User();</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">echo $user-&gt;name; // Error: must not be accessed before initialization</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">final class User { public string $name; }</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$user = new User();</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">echo $user-&gt;name; // Error: must not be accessed before initialization</span>
 </code></pre></div>
 <p>A typed property without a default starts <em>uninitialized</em>, and reading it
 throws. The declaration-side check is the tractable half: flag a typed,
@@ -2224,21 +2176,21 @@ smallest part of it.</p>
 <p><code>unreachable_code</code> treats a braced <code>namespace</code> and a <code>declare</code> body as
 fresh statement lists rather than as the transparent wrappers they are,
 so reachability neither flows into them nor out of them:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">namespace</span> <span class="nx">First</span> <span class="p">{</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="k">return</span><span class="p">;</span>          <span class="c1">// ends the whole file</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="p">}</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="k">namespace</span> <span class="nx">Second</span> <span class="p">{</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="k">echo</span> <span class="s1">'never'</span><span class="p">;</span>    <span class="c1">// not reported</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">namespace</span> <span class="nx">First</span> <span class="p">{</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="k">return</span><span class="p">;</span>          <span class="c1">// ends the whole file</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="p">}</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="k">namespace</span> <span class="nx">Second</span> <span class="p">{</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="k">echo</span> <span class="s1">'never'</span><span class="p">;</span>    <span class="c1">// not reported</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="p">}</span>
 </code></pre></div>
 <p>and, inside a function:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">return;</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">declare(ticks=1) {</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    echo 'never';    // not reported</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">return;</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">declare(ticks=1) {</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    echo 'never';    // not reported</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>Neither wrapper is itself a runtime statement, so neither should be
 dimmed, but the state on either side of it has to carry through.</p>
@@ -2247,7 +2199,7 @@ instead of restarting the scan inside them.</p>
 <hr />
 <h2 id="d30-getting-a-private-symfony-service-from-the-container-is-not-reported">D30. Getting a private Symfony service from the container is not reported<a class="headerlink" href="#d30-getting-a-private-symfony-service-from-the-container-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$container-&gt;get('app.mailer'); // throws: the service is private</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$container-&gt;get('app.mailer'); // throws: the service is private</span>
 </code></pre></div>
 <p>Services are private by default since Symfony 3.4: a service is public only
 when its declaration says <code>public: true</code> (or <code>-&gt;public()</code>, or
@@ -2267,8 +2219,8 @@ guards the test container.</p>
 <hr />
 <h2 id="d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported">D31. Doctrine mappings that disagree with the entity are not reported<a class="headerlink" href="#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">#[ORM\Column(type: 'string', nullable: true)]</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">private string $name; // the column can be null, the property cannot</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">#[ORM\Column(type: 'string', nullable: true)]</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">private string $name; // the column can be null, the property cannot</span>
 </code></pre></div>
 <p>PHPStan's Doctrine extension checks an entity's mapping against its PHP:</p>
 <ul>
@@ -2294,11 +2246,11 @@ The extension's fixtures are the <code>entity_*.fixture</code> fixtures in
 <hr />
 <h2 id="d33-private-properties-nothing-reads-or-writes-are-not-reported">D33. Private properties nothing reads or writes are not reported<a class="headerlink" href="#d33-private-properties-nothing-reads-or-writes-are-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">final class Invoice</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">{</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    private string $legacyNumber; // never read</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    private int $total;           // read, never written</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">final class Invoice</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">{</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    private string $legacyNumber; // never read</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    private int $total;           // read, never written</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>A private property nothing outside the class can reach is dead when the
 class never reads it, and holds only its default when the class never
@@ -2319,12 +2271,12 @@ Doctrine extension's <code>PropertiesExtension</code>s.</p>
 <hr />
 <h2 id="d35-cloneobject-does-not-check-the-properties-it-writes">D35. <code>clone($object, [...])</code> does not check the properties it writes<a class="headerlink" href="#d35-cloneobject-does-not-check-the-properties-it-writes" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">final class Point { public function __construct(public int $x) {} }</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">$p = new Point(1);</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">$copy = clone($p, ['x' =&gt; 2]);        // fine</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">clone($p, ['nope' =&gt; 1]);             // Error: Point has no $nope</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">clone($p, ['x' =&gt; 'str']);            // TypeError: $x is int</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">final class Point { public function __construct(public int $x) {} }</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">$p = new Point(1);</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">$copy = clone($p, ['x' =&gt; 2]);        // fine</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">clone($p, ['nope' =&gt; 1]);             // Error: Point has no $nope</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">clone($p, ['x' =&gt; 'str']);            // TypeError: $x is int</span>
 </code></pre></div>
 <p>PHP 8.5's two-argument <code>clone</code> writes each entry of the array onto the
 copy, with the same rules as a property assignment: the property has to
@@ -2338,12 +2290,12 @@ visibility, readonly, property type).</p>
 <hr />
 <h2 id="d36-a-dynamic-member-name-that-cannot-be-a-name-is-not-reported">D36. A dynamic member name that cannot be a name is not reported<a class="headerlink" href="#d36-a-dynamic-member-name-that-cannot-be-a-name-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">function f(\Stringable $s, \stdClass $o, Target $t): void {</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    $t-&gt;{$s};      // fine: property names are string-cast</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">    $t-&gt;{$o};      // Error: object of class stdClass could not be converted to string</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">    $t-&gt;{$s}();    // Error: method name must be a string</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">    $t-&gt;{$o}();    // Error: method name must be a string</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">function f(\Stringable $s, \stdClass $o, Target $t): void {</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">    $t-&gt;{$s};      // fine: property names are string-cast</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">    $t-&gt;{$o};      // Error: object of class stdClass could not be converted to string</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">    $t-&gt;{$s}();    // Error: method name must be a string</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">    $t-&gt;{$o}();    // Error: method name must be a string</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>A dynamic property name goes through string conversion, so a <code>Stringable</code>
 object is a valid name and any other object is not. A dynamic method name
@@ -2356,12 +2308,12 @@ mago report it.</p>
 <hr />
 <h2 id="d37-a-method-only-some-members-of-a-union-declare-is-not-reported">D37. A method only some members of a union declare is not reported<a class="headerlink" href="#d37-a-method-only-some-members-of-a-union-declare-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">final class User  { public function name(): string { return 'u'; } }</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">final class Guest {}</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">function f(User|Guest $v): void {</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">    echo $v-&gt;name();   // Error whenever a Guest arrives</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">final class User  { public function name(): string { return 'u'; } }</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">final class Guest {}</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">function f(User|Guest $v): void {</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">    echo $v-&gt;name();   // Error whenever a Guest arrives</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>The unknown-member check stays silent as soon as any branch of a union
 declares the member (see the module doc in
