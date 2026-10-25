@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792937080313,
+  "lastUpdate": 1792938231949,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6306,6 +6306,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 74.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7aff909eefd22640a18aa337ee5d0bd4d1de8c28",
+          "message": "Typed properties nothing initializes",
+          "timestamp": "2026-10-25T15:08:25+01:00",
+          "tree_id": "3a3e4b56be3a4b1e7d3a18a29418121fbbc7ca10",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7aff909eefd22640a18aa337ee5d0bd4d1de8c28"
+        },
+        "date": 1792938222255,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 74.4,
             "unit": "MiB"
           }
         ]
