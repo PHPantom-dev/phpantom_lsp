@@ -5154,6 +5154,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A property and a method of the same name are told apart.</strong> Find References, rename, document highlight, and the reference count lens on a property like <code>$email</code> no longer pick up an <code>email()</code> method on the same class, and the method's no longer pick up the property.</li>
 <li><strong><code>enum-string</code> and <code>trait-string</code> accept enum and trait names.</strong> <code>SomeEnum::class</code> passed or returned where an <code>enum-string</code> is declared, or <code>SomeTrait::class</code> where a <code>trait-string</code> is, is no longer reported. The name of a class of another kind is still reported.</li>
 <li><strong>Deprecated classes are marked in type hierarchy.</strong> The deprecation tag on a type hierarchy item is now sent as the list the protocol specifies, so editors that strike through deprecated entries do so.</li>
 <li><strong>Writing a key into a <code>string[]</code> keeps its keys open.</strong> <code>$args['--admin'] = 1</code> on an array declared as <code>string[]</code> or <code>array&lt;string&gt;</code> no longer pins its keys to <code>int|string</code>, so passing it on to an <code>array&lt;string, …&gt;</code> parameter is no longer reported.</li>
