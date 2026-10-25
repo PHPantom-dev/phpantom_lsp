@@ -2107,17 +2107,6 @@ bolted onto the current call list.</p>
 <hr />
 <h2 id="a16-snippet-placeholder-for-extracted-method-name">A16. Snippet Placeholder for Extracted Method Name<a class="headerlink" href="#a16-snippet-placeholder-for-extracted-method-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<blockquote>
-<p><strong>Blocked:</strong> Requires <code>SnippetTextEdit</code> support in <code>lsp-types</code>.
-Upstream issue: <a href="https://github.com/gluon-lang/lsp-types/issues/310">gluon-lang/lsp-types#310</a>
-(open). <code>SnippetTextEdit</code> is an LSP 3.18 <code>@proposed</code> feature — it's
-in the spec but not yet implemented in any Rust LSP-types crate,
-including the actively maintained <code>tower-lsp-server</code>/<code>ls-types</code> fork
-that F20 migrates to (checked directly against its <code>main</code> branch;
-<code>ls-types</code> removed its generic 3.18 <code>"proposed"</code> feature flag in
-0.0.4). F20 alone does not resolve this. Revisit once the upstream
-issue is resolved in whichever crate we depend on at the time.</p>
-</blockquote>
 <p>After an Extract Function/Method code action is applied, let the user
 immediately rename the generated name by placing a snippet tab-stop on
 it.  The contextual name (<code>createUsers</code>, <code>validateGuard</code>, …) serves as
@@ -2145,10 +2134,10 @@ over it without an extra rename step.</p>
 <li>
 <p><strong>Check the flag in <code>resolve_extract_function</code></strong> (extract function
    is a deferred action, so its edit is built at resolve time).  When
-   the client supports snippet edits, build the workspace edit with
-   <code>DocumentChanges::Operations</code> containing <code>SnippetTextEdit</code> entries
-   instead of plain <code>TextEdit</code>.  The new-text for the method name
-   uses <code>${1:name}</code> syntax.</p>
+   the client supports snippet edits, build the workspace edit's
+   <code>TextDocumentEdit</code>s with <code>Edit::SnippetTextEdit</code> entries instead of
+   <code>Edit::TextEdit</code>.  The new-text for the method name uses
+   <code>${1:name}</code> syntax.</p>
 </li>
 <li>
 <p><strong>Linked edit ranges (optional enhancement).</strong>  If the client
@@ -2169,10 +2158,6 @@ over it without an extra rename step.</p>
 <tr>
 <td>Client capability storage</td>
 <td>Need to know whether the client supports snippet edits</td>
-</tr>
-<tr>
-<td><code>SnippetTextEdit</code> in tower-lsp</td>
-<td>Verify tower-lsp exposes the snippet edit type</td>
 </tr>
 <tr>
 <td>Extract Function (shipped)</td>

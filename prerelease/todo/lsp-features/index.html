@@ -1276,21 +1276,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#f20-migrate-to-the-maintained-tower-lsp-fork" class="md-nav__link">
+  <a href="#f21-static-typehierarchyprovider-advertisement" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        F20. Migrate to the maintained <code>tower-lsp</code> fork
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#f21-static-typehierarchyprovider-advertisement-depends-on-f20" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        F21. Static <code>typeHierarchyProvider</code> advertisement (depends on F20)
+        F21. Static <code>typeHierarchyProvider</code> advertisement
       </span>
     </span>
   </a>
@@ -1823,21 +1812,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#f20-migrate-to-the-maintained-tower-lsp-fork" class="md-nav__link">
+  <a href="#f21-static-typehierarchyprovider-advertisement" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        F20. Migrate to the maintained <code>tower-lsp</code> fork
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#f21-static-typehierarchyprovider-advertisement-depends-on-f20" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        F21. Static <code>typeHierarchyProvider</code> advertisement (depends on F20)
+        F21. Static <code>typeHierarchyProvider</code> advertisement
       </span>
     </span>
   </a>
@@ -1946,7 +1924,7 @@ running PHP process.</p>
 <code>experimental.xevaluatableExpressionProvider</code>), which only its own
 client calls. The choice is between a custom method that our VS Code
 extension consumes, or the standard 3.17 <code>textDocument/inlineValue</code>
-request (check whether our <code>lsp-types</code> version carries it). Decide that
+request (<code>InlineValueParams</code> and <code>inline_value_provider</code> are available). Decide that
 before implementing.</p>
 <h3 id="supported-expression-kinds">Supported expression kinds<a class="headerlink" href="#supported-expression-kinds" title="Permanent link">&para;</a></h3>
 <ul>
@@ -2162,54 +2140,7 @@ machinery to produce the <code>WorkspaceEdit</code>. The companion
 <p><strong>References:</strong>
 - Phpactor: <code>MoveClass</code> refactoring in the class-mover package.</p>
 <hr />
-<h2 id="f20-migrate-to-the-maintained-tower-lsp-fork">F20. Migrate to the maintained <code>tower-lsp</code> fork<a class="headerlink" href="#f20-migrate-to-the-maintained-tower-lsp-fork" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Very High</strong></p>
-<p><code>tower-lsp</code> 0.20 (our current dependency) is the last release of the
-original crate; it's unmaintained upstream. A maintained fork exists
-as <code>tower-lsp-server</code> (types crate <code>ls-types</code>), actively developed as
-of 2026. Because it's a rename rather than a version bump of the same
-crate, <code>cargo update</code>/routine dependency audits will not surface this
-on their own — nothing shows up as "outdated" since no new <code>tower-lsp</code>
-version is being withheld. It has to be picked up as a deliberate
-migration.</p>
-<p><strong>Does not unblock A16 or F21.</strong> Checked directly against <code>ls-types</code>
-<code>main</code> and upstream <code>lsp-types</code> 0.97.0 source (not just docs): neither
-crate implements <code>SnippetTextEdit</code>/<code>StringValue</code> (tracked upstream at
-<a href="https://github.com/gluon-lang/lsp-types/issues/310">gluon-lang/lsp-types#310</a>,
-still open) or a static <code>type_hierarchy_provider</code> field on
-<code>ServerCapabilities</code> (tracked at
-<a href="https://github.com/gluon-lang/lsp-types/issues/298">gluon-lang/lsp-types#298</a>
-and <a href="https://github.com/tower-lsp-community/ls-types/issues/38">tower-lsp-community/ls-types#38</a>,
-both open). <code>ls-types</code> also removed its generic <code>"proposed"</code> 3.18
-feature flag in 0.0.4 ("only applied to a handful of v3.18 items"), so
-there is no version bump or feature flag on our side that grants either
-type today. Both are real 3.18-spec (<code>@proposed</code>) features, just not
-yet implemented in any Rust LSP-types crate. The remaining motivation
-for this migration is staying on an actively maintained crate — bug
-and security fixes, and a path to 3.18 support once upstream catches
-up — not unblocking a specific feature now. Re-check A16 and F21 for
-upstream progress before assuming this migration alone resolves them.</p>
-<p><strong>The real complexity driver:</strong> <code>ls-types</code>'s <code>Uri</code> is a newtype over
-<code>fluent_uri::Uri&lt;String&gt;</code>, not <code>url::Url</code>. Our code uses <code>Url</code>
-(re-exported from <code>lsp_types</code>) directly across nearly every module — path manipulation, <code>to_file_path</code>/
-<code>from_file_path</code>, <code>.path()</code>, <code>.join()</code>, and more — and <code>fluent_uri</code>'s
-API does not mirror <code>url::Url</code>'s. This is a project-wide port of the
-document-URI type, not a mechanical import rename (about 110 non-test
-files use <code>Url</code> today). Scope it file by
-file before committing to a single PR; it may need a preparatory
-abstraction (e.g. isolate URI construction/parsing behind a narrow
-internal helper) to keep the blast radius reviewable, and likely
-warrants breaking into more than one PR despite the "one task per PR"
-convention — raise that with the maintainer before starting.</p>
-<p><strong>What to also check:</strong> the fork's public API surface relative to
-<code>tower_lsp::LspService</code>/<code>tower_lsp::lsp_types</code> (import paths, trait
-signatures) to scope the mechanical rename across every file that does
-<code>use tower_lsp::...</code> (grep <code>tower_lsp::</code> for the full list:
-<code>src/lsp_dispatch.rs</code>, <code>src/inlay_hints.rs</code>, <code>src/document_symbols.rs</code>,
-<code>src/folding.rs</code>, <code>src/phpcs.rs</code>, <code>src/fix.rs</code>,
-<code>src/selection_range.rs</code>, <code>src/text_position.rs</code>, and others).</p>
-<p><strong>Where to look:</strong> <code>Cargo.toml</code>'s <code>tower-lsp = { version = "0.20", features = ["proposed"] }</code>.</p>
-<h2 id="f21-static-typehierarchyprovider-advertisement-depends-on-f20">F21. Static <code>typeHierarchyProvider</code> advertisement (depends on F20)<a class="headerlink" href="#f21-static-typehierarchyprovider-advertisement-depends-on-f20" title="Permanent link">&para;</a></h2>
+<h2 id="f21-static-typehierarchyprovider-advertisement">F21. Static <code>typeHierarchyProvider</code> advertisement<a class="headerlink" href="#f21-static-typehierarchyprovider-advertisement" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
 <p>Type hierarchy (<code>textDocument/prepareTypeHierarchy</code>,
 <code>typeHierarchy/supertypes</code>, <code>typeHierarchy/subtypes</code>) is fully
@@ -2218,34 +2149,19 @@ implemented (<code>src/type_hierarchy.rs</code>) and registered dynamically via
 using <code>type_hierarchy_registration()</code> from <code>server.rs</code>), gated on the client declaring
 <code>textDocument.typeHierarchy.dynamicRegistration: true</code>. This works for
 every client that supports dynamic registration, but there is no
-static fallback: <code>lsp-types</code> 0.94.1 (pinned by <code>tower-lsp</code> 0.20, see
-F20) has no <code>type_hierarchy_provider</code> field on <code>ServerCapabilities</code>, so
-a client that supports type hierarchy without dynamic registration —
-or any tool that inspects only the <code>initialize</code> response's static
-capabilities, such as a feature-conformance probe — sees no type
-hierarchy support at all, even though the feature works end-to-end for
-a real editor that does the dynamic-registration round trip.</p>
-<p>The field is still missing after F20, not just before it: neither
-upstream <code>lsp-types</code> nor the maintained <code>tower-lsp-server</code>/<code>ls-types</code>
-fork that F20 migrates to has added <code>type_hierarchy_provider</code> yet
-(tracked at
-<a href="https://github.com/gluon-lang/lsp-types/issues/298">gluon-lang/lsp-types#298</a>
-and <a href="https://github.com/tower-lsp-community/ls-types/issues/38">tower-lsp-community/ls-types#38</a>,
-both open) — so F20 landing is necessary but not sufficient here; this
-also needs the upstream crate to add the field. Once both have
-happened, add static advertisement (<code>Boolean(true)</code> or
-<code>TypeHierarchyOptions</code>) in <code>initialize</code>'s <code>ServerCapabilities</code>,
+static fallback, so a client that supports type hierarchy without
+dynamic registration, or any tool that inspects only the <code>initialize</code>
+response's static capabilities (such as a feature-conformance probe),
+sees no type hierarchy support at all, even though the feature works
+end-to-end for a real editor that does the dynamic-registration round
+trip.</p>
+<p><code>ServerCapabilities</code> has <code>type_hierarchy_provider:
+Option&lt;TypeHierarchyProvider&gt;</code>. Add static advertisement
+(<code>TypeHierarchyOptions</code> or the boolean variant) in <code>initialize</code>,
 conditional on the client <em>not</em> declaring <code>dynamicRegistration: true</code>
 for type hierarchy (avoid double-registering: send either the static
 capability or the dynamic registration, not both, per the client's
-declared support). Also
-verify whether the same version bump exposes <code>diagnostic</code> client
-capabilities more precisely — pull diagnostics (<code>diagnostic_provider</code>
-in <code>src/backend/startup.rs</code>) is unaffected by this gap (it's already advertised
-correctly whenever the client declares <code>textDocument.diagnostic</code>,
-verified by probing <code>initialize</code> directly with that capability set),
-but is worth a quick re-check after the migration in case the newer
-<code>lsp-types</code> changes the shape of that capability struct.</p>
+declared support).</p>
 <p><strong>Where to look:</strong> <code>src/backend/startup.rs</code> (<code>initialize</code>, <code>initialized</code>),
 <code>src/server.rs</code> (<code>type_hierarchy_registration</code>), <code>src/type_hierarchy.rs</code>.</p>
 <hr />

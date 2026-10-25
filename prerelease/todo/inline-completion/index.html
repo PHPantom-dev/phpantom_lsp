@@ -2389,9 +2389,8 @@ artifact, not bundled in the main LSP binary.</p>
 <h2 id="n1-template-engine">N1. Template Engine<a class="headerlink" href="#n1-template-engine" title="Permanent link">&para;</a></h2>
 <p><strong>Complexity:</strong> Medium (per pattern group)
 <strong>Dependencies:</strong> None beyond existing type resolution, but
-<code>textDocument/inlineCompletion</code> is an LSP 3.18 request. Check whether
-our <code>lsp-types</code> (0.94.1, pinned by <code>tower-lsp</code> 0.20) carries it; if
-not, this needs F20 or a custom method.</p>
+<code>textDocument/inlineCompletion</code> is an LSP 3.18 request, and
+<code>tower-lsp-server</code> exposes it as <code>LanguageServer::inline_completion</code>.</p>
 <p>Some templates overlap shipped features: getter/setter and
 constructor-assignment bodies duplicate the <code>generate_getter_setter</code>
 and <code>generate_constructor</code> code actions, and the <code>try/catch</code> template

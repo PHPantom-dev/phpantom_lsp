@@ -1144,17 +1144,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x17-index-the-workspaces-other-folders" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        X17. Index the workspace's other folders
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#x18-watch-indexing-include-paths-outside-the-workspace" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1688,17 +1677,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x17-index-the-workspaces-other-folders" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        X17. Index the workspace's other folders
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#x18-watch-indexing-include-paths-outside-the-workspace" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2056,134 +2034,6 @@ users therefore have to restate those two lists under
 two settings, then link the issue from that section so users can track
 it. When it lands, the forwarding itself is a small change in Zed's
 official PHP extension, and the manual step in the docs goes away.</p>
-<h2 id="x17-index-the-workspaces-other-folders">X17. Index the workspace's other folders<a class="headerlink" href="#x17-index-the-workspaces-other-folders" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>A multi-root workspace is the one case where the editor already knows
-about PHP source outside a server's root and can say so without the user
-configuring anything, the same way <code>files.exclude</code> and
-<code>files.associations</code> already reach the server. The VS Code extension
-starts one server per workspace folder, each scoped to that folder, so a
-project whose shared library sits in a sibling folder resolves nothing
-across the boundary: the library's classes are missing from completion,
-go-to-definition, and find-references in the project that uses them.
-Intelephense splits a multi-root workspace the same way and asks the user
-to name the sibling explicitly; the folder list is already in front of
-the extension, so nothing needs naming.</p>
-<p>Forwarded through <code>ClientIndexingOptions</code> beside <code>exclude</code> and
-<code>extensions</code>, as a list of absolute directories:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"indexing"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"extra_roots"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"/home/me/work/shared-lib"</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
-</code></pre></div>
-<p>Not <code>include</code>: that <code>.phpantom.toml</code> key already exists and means
-something else. It names paths to index <em>despite</em> the gitignore and
-hidden-entry filters, with a walk of its own that turns both off. A
-sibling folder is the opposite case. It is another project root, and
-its <code>vendor/</code>, <code>node_modules/</code>, and build output have to stay out
-exactly as they do in this one, so it is walked as a root with every
-filter in force.</p>
-<p><code>collectIndexFilters</code> fills it from <code>vscode.workspace.workspaceFolders</code>,
-dropping the client's own folder, and the extension re-sends on
-<code>onDidChangeWorkspaceFolders</code> the way it already re-sends on a
-<code>files.exclude</code> change. Because it travels inside the block the extension
-builds in one place, it cannot collide with the <code>phpantom</code> section VS
-Code's <code>synchronize</code> pushes: that blob has no <code>indexing</code> key, so
-<code>ClientIndexingOptions::from_client_settings</code> ignores it and the
-whole-value replacement in <code>set_client_indexing_options</code> stays safe.</p>
-<p>The shape stays generic, so a Zed or Neovim user can hand-write the same
-block for a directory their editor has no concept of.</p>
-<p><strong>Not in scope: a <code>phpantom.*</code> editor setting for arbitrary
-directories.</strong> A user who wants to name a path by hand already has
-<code>[indexing] include</code> in <code>.phpantom.toml</code>, which <code>analyze</code> sees too. It
-answers the questions a hand-typed path raises: relative paths resolve
-against the workspace root (no <code>~</code> or variable expansion), <code>exclude</code>
-prunes below a named directory but never the named path itself, and a
-removed entry keeps its symbols until restart. An included path outside
-the workspace gets no file watcher, which is X18 rather than part of
-this item.</p>
-<p><strong>Append to the existing roots slice.</strong> <code>walk_roots</code> already takes a
-roots slice and puts every root in a single <code>ignore</code> walk, which is what
-compiles each shared ancestor <code>.gitignore</code> once instead of once per root.
-Extra roots belong in that slice, not in a walk of their own. Its
-attribute-by-depth accounting holds for a root whose files were reached
-through a followed link, pinned by
-<code>walk_roots_attributes_a_followed_link_to_the_root_that_reached_it</code>.</p>
-<p>Putting them in that slice also gets the duplicate protection for free:
-<code>LinkClaims</code> claims every root up front, so a symlink pointing at an
-extra root loses to that root's own walk rather than
-indexing the tree a second time under the link's spelling.</p>
-<p><strong>Two folders can still overlap.</strong> The guard above only sees symlinks,
-and VS Code lets a workspace hold both a folder and its parent. An
-extra root that is a parent, child, or exact duplicate of another one
-(or of the server's own root) is walked twice, because nothing crossed a
-link to get there. Canonicalize the extra roots when they are
-registered and drop the ones contained in another, the same containment
-test <code>LinkClaims::claim</code> already does.</p>
-<p><strong>Switch every walker together.</strong> Every serial walk goes through
-<code>visit_workspace_files_gitignore</code> (<code>classmap_scanner/walk.rs</code>):
-<code>collect_php_files_gitignore</code> (namespace rename, go-to-implementation),
-<code>collect_workspace_index_files_gitignore</code> (the one find-references
-walks), and <code>analyse::collect_php_files</code>. It takes a single root, so
-only <code>walk_roots</code> is multi-root today. Leaving the serial walk behind
-would index classes from an extra root while find-references, rename,
-and go-to-implementation never see them, which is the half-wired state
-the symlink change avoided by moving all the walkers at once. (<code>[indexing] include</code> gets away with one walk of its own
-because its paths are few and named. Discovery and the full background
-index both list them, and namespace rename and go-to-implementation read
-them back out of the indexes. An extra root is a whole project tree, so
-that shortcut does not scale to it.)</p>
-<p><strong>Add the roots to the discovery snapshot.</strong> Both entry points that
-reconcile a live change, <code>reload_config</code> and <code>did_change_configuration</code>,
-take a <code>DiscoveryInputs</code> snapshot before applying it and hand it to
-<code>reconcile_index_for_input_change</code>, which already covers the compiled
-filters and <code>[indexing] include</code>. The extra roots go in as a third field
-of that snapshot, not as a comparison of their own at either site.</p>
-<p><strong>A removed root leaves the index at once.</strong> Taking a folder out of a
-multi-root workspace is routine, unlike deleting an <code>[indexing] include</code>
-entry, so a root that drops out of the snapshot is evicted immediately
-rather than kept until a restart. Compare the two snapshots' root lists
-after the containment dedup above, so a root that was hidden inside a
-removed parent counts as added. For each removed root,
-<code>reconcile_index_for_input_change</code> collects every file the indexes name
-under it, in every spelling <code>path_aliases</code> gives (<code>fqn_uri_index</code>,
-<code>uri_classes_index</code>, the autoload function and constant indexes,
-<code>symbol_maps</code>, <code>parsed_uris</code>), leaves out the files open in the editor,
-and hands the rest to <code>reindex_files_batch</code> as deletions. That is the
-route <code>evict_newly_filtered_symbols</code> already takes for a newly excluded
-tree, so no index is missed. If a remaining source still covers part of
-the removed tree (an <code>include</code> path under it, or another root), schedule
-the rediscovery walk after the eviction so that source gets its files
-back. A root that was added gets the walk the way a new <code>include</code> entry
-does, through <code>may_admit_more_than</code>.</p>
-<p>The root's library registration has to go too, or files under it would
-stay exempt from diagnostics and edits. <code>register_vendor_location</code>
-(<code>indexing/scan.rs</code>) only ever pushes onto <code>vendor_dir_paths</code> and
-<code>vendor_uri_prefixes</code>, so give it a counterpart that releases a spelling.
-One spelling can be registered for more than one reason (a folder that
-is also an <code>include</code> path outside the workspace), so record which
-sources claimed each one (Composer's vendor directories, <code>include</code>, each
-extra root) and drop a spelling only when its last claimant lets go.
-Finish by clearing the resolved-class and member-completion caches, as
-the filter eviction does.</p>
-<p><strong>Confirm the watchers before building any.</strong> VS Code limits a
-string-pattern watcher to paths inside the workspace, and a sibling
-folder is inside it, so the <code>**/*.php</code> watchers every session registers
-should already report a change written in one. Verify that and stop
-there. The relative-pattern-per-base machinery followed links need
-(<code>watchable_followed_links</code>, the per-base list in <code>WatchedFileInputs</code>)
-exists for trees that sit outside the workspace altogether, which these
-do not, and server-side registration for such a path is reported not to
-deliver events at all
-(<a href="https://github.com/microsoft/vscode-languageserver-node/issues/1783">vscode-languageserver-node#1783</a>).</p>
-<p><strong>Resolution only: no diagnostics, no edits.</strong> The sibling folder has its
-own server publishing its own diagnostics, so a second pass from this one
-would duplicate every message the user sees on those files. Index an
-extra root, resolve into it, and leave publishing and workspace-wide
-edits (rename, fix) to the server that owns the folder. That also keeps
-the extension's per-folder <code>documentSelector</code> as it is: a file opened
-from an extra root is served by its own folder's client. An
-<code>[indexing] include</code> path outside the workspace already gets exactly
-this treatment by being registered like a vendor directory
-(<code>add_library_path</code> in <code>indexing/library_paths.rs</code>), so register each extra root
-the same way rather than adding a second notion of library code.</p>
 <h2 id="x18-watch-indexing-include-paths-outside-the-workspace">X18. Watch <code>[indexing] include</code> paths outside the workspace<a class="headerlink" href="#x18-watch-indexing-include-paths-outside-the-workspace" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>An include path outside the workspace is indexed at startup and then
